@@ -731,6 +731,31 @@ describe("remote handlers", () => {
     });
   });
 
+  it("repaints the graph after a pull even when the worktree's own state held still", async () => {
+    // The refresher repaints only when this branch's counters moved. A pull
+    // that found main already current, or that moved only other branches'
+    // remote refs, moves none — and a graph drawn mid-pull stayed dashed.
+    const db = {
+      prepare: vi.fn(() => ({
+        get: vi.fn(() => ({ path: "/repos/project", repoId: "repo-1" }))
+      }))
+    } as unknown as DB;
+    const refresher = {
+      refreshWorktree: vi.fn(async () => undefined),
+      refreshRepoWorktrees: vi.fn()
+    } satisfies WorktreeRefresher;
+    vi.mocked(pullFastForward).mockResolvedValueOnce(
+      ok({ fastForwarded: false, stashed: false, reappliedWithConflicts: false })
+    );
+    const bus = new CommandBus();
+    registerRemoteHandlers(bus, db, refresher, new WorktreeOperationQueue());
+
+    await expect(
+      bus.dispatch("remote:pull", { worktreeId: "worktree-1" })
+    ).resolves.toMatchObject({ ok: true });
+    expect(emitEvent).toHaveBeenCalledWith("graph:changed", { repoId: "repo-1" });
+  });
+
   it("leaves the network phase before rebuilding the branch index", async () => {
     const db = {
       prepare: vi.fn(() => ({
@@ -1544,7 +1569,9 @@ describe("remote handlers", () => {
 
   it("refreshes remote-branch search after fetching repository refs", async () => {
     const db = {
-      prepare: vi.fn(() => ({ get: vi.fn(() => ({ path: "/repos/project" })) }))
+      prepare: vi.fn(() => ({
+        get: vi.fn(() => ({ path: "/repos/project", profile_id: "profile-1" }))
+      }))
     } as unknown as DB;
     const refresher = {
       refreshWorktree: vi.fn(async () => undefined),
@@ -1569,6 +1596,12 @@ describe("remote handlers", () => {
     expect(indexer.refreshRepoRemoteBranches).toHaveBeenCalledExactlyOnceWith(
       "repo-1"
     );
+    // A new remote branch moves no checkout's state, so this event is the
+    // only thing that reloads the sidebar's Branches and Remotes for it.
+    expect(emitEvent).toHaveBeenCalledWith("repo:changed", {
+      profileId: "profile-1",
+      repoIds: ["repo-1"]
+    });
 
     vi.mocked(indexer.refreshRepoRemoteBranches).mockClear();
     await expect(

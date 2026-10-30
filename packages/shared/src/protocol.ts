@@ -15,12 +15,16 @@ import type { ContributionIdentity, ContributionSnapshot } from "./contributions
 import type { HookRun, IgnoreDestination, IgnoreOptions, IgnorePatternChoice, IgnoredSummary, RepositorySetup, SetupIgnoreTest } from "./git-discovery";
 import type { MaintenanceScope, MaintenanceAction, MaintenanceSummary, MaintenanceProgress, BranchCleanupKeepDays } from "./maintenance";
 import { DEFAULT_BRANCH_CLEANUP_OPTIONS } from "./maintenance";
+import { STALE_AGE_DAYS, type WorktreeFinishedAfterDays } from "./prunable";
 import type {
   AgentChoice,
   AgentMessageDraft,
   AgentTidyProposal,
   AgentTidyRevision,
   BranchRef,
+  RetrackMove,
+  RetrackReview,
+  TrackingChoices,
   BulkSyncMode,
   BulkSyncProgress,
   BulkSyncSummary,
@@ -461,6 +465,14 @@ export type AppIdentity = {
   diagnosticsText: string;
 };
 
+/** What a profile window was showing, for Help → Copy Diagnostics Info. */
+export type DiagnosticsRepositoryContext = {
+  name: string;
+  path: string;
+  worktreePath: string | null;
+  branch: string | null;
+};
+
 /** Settings → Troubleshooting → Process IDs: the live Electron process table. */
 export type AppProcessIds = {
   /** `main=311 gpu=315 renderer=330,341 …` — the line `main.log` records. */
@@ -699,6 +711,13 @@ export type GeneralSettings = {
   /** Maintenance › Local branches: keep branches touched within this many
    *  days. Null switches the age guard off. */
   branchCleanupKeepDays: BranchCleanupKeepDays | null;
+  /** Maintenance › Worktrees: keep worktrees touched (a commit or a file
+   *  change) within this many days. Null switches the guard off. */
+  worktreeCleanupKeepDays: BranchCleanupKeepDays | null;
+  /** Days without commits before a branch merged into the default branch
+   *  counts as finished: the sidebar's Stale lens and the worktree sweep both
+   *  read it. 0 is "right away". */
+  worktreeFinishedAfterDays: WorktreeFinishedAfterDays;
   /**
    * Show the launch notice when Git outside PwrGit has no identity of its
    * own. On by default; switching it off is a deliberate "I only commit in
@@ -800,6 +819,8 @@ export const GENERAL_DEFAULTS: GeneralSettings = {
   branchCleanupPrProof: DEFAULT_BRANCH_CLEANUP_OPTIONS.prProof,
   maintenanceBranchMode: "review",
   branchCleanupKeepDays: DEFAULT_BRANCH_CLEANUP_OPTIONS.keepDays,
+  worktreeCleanupKeepDays: 7,
+  worktreeFinishedAfterDays: STALE_AGE_DAYS,
   gitIdentityReminder: true,
   gitIdentityByFolder: false
 };
@@ -987,7 +1008,15 @@ export interface Commands {
   };
 
   // Repos & discovery (U6)
-  "repo:list": { req: { profileId?: ProfileId }; res: Repo[] };
+  /**
+   * The profile's repositories, or only `repoIds` among them (an answer may
+   * omit one that is gone or hidden). The sidebar asks for `repoIds` when a
+   * `repo:changed` names them.
+   */
+  "repo:list": {
+    req: { profileId?: ProfileId; repoIds?: RepoId[] };
+    res: Repo[];
+  };
   /**
    * Take a repository out of one profile's view without touching disk. The
    * sidebar, lenses, counts, bulk sync, maintenance, ⌘K and the agent catalog
@@ -1555,20 +1584,32 @@ export interface Commands {
   /**
    * Move one worktree onto `branch`.
    *
-   * `carryChanges` is the caller's answer to "what did you mean by the
-   * uncommitted work in this checkout" — never a guess. Without it the switch
-   * is a plain `git switch`, which is correct for the clean tree the caller
-   * just probed. With it, the changes are saved, carried across, and restored
-   * on the destination; if they cannot be restored there, the checkout is put
-   * back exactly as it was, on the branch it started on, with the work intact.
+   * `changes` is the caller's answer to "what did you mean by the uncommitted
+   * work in this checkout" — never a guess.
    *
-   * `carried` says whether any work actually moved. A tree that went clean
-   * between the probe and the operation switches with nothing to carry, and the
-   * caller must not then claim it brought changes along.
+   * - Absent: a plain `git switch`. It brings modified and untracked files
+   *   along when nothing on `branch` touches them, and refuses atomically,
+   *   moving nothing, when one would be overwritten. That refusal is
+   *   `switch_would_overwrite`, with the files Git named in `error.paths`.
+   * - `"merge"`: the changes are saved, carried across, and restored on the
+   *   destination; if they cannot be restored there, the checkout is put back
+   *   exactly as it was, on the branch it started on, with the work intact.
+   * - `"leave"`: the changes are stashed as `pwrgitLeftOnStashMessage(<the
+   *   branch being left>)`, then the checkout switches. If the switch fails,
+   *   they are put back.
+   *
+   * `carried` says whether `"merge"` actually moved work, and `left` whether
+   * `"leave"` actually stashed any. A tree that went clean between the probe
+   * and the operation switches with nothing to move, and the caller must not
+   * then claim it moved something.
    */
   "branch:switch": {
-    req: { worktreeId: string; branch: string; carryChanges?: boolean };
-    res: { carried: boolean };
+    req: {
+      worktreeId: string;
+      branch: string;
+      changes?: "merge" | "leave";
+    };
+    res: { carried: boolean; left: boolean };
   };
   /**
    * Create a branch at an arbitrary commit and optionally check it out. The
@@ -1756,6 +1797,9 @@ export interface Commands {
       operationId: string;
       profileId: ProfileId;
       mode: BulkSyncMode;
+      /** Only these repositories of the profile (Fetch recent). Absent means
+       *  every visible repository. An id outside the profile is ignored. */
+      repoIds?: string[];
     };
     res: BulkSyncSummary;
   };
@@ -1798,6 +1842,9 @@ export interface Commands {
       profileId: ProfileId;
       /** Re-run git even where a fresh state snapshot already exists. */
       force?: boolean;
+      /** Days without commits before a merged branch counts as finished
+       *  (`WORKTREE_FINISHED_AFTER_DAYS`). Omitted: STALE_AGE_DAYS. */
+      finishedAfterDays?: WorktreeFinishedAfterDays;
     };
     res: PruneScanSummary;
   };
@@ -1968,6 +2015,44 @@ export interface Commands {
       target?: { remote: string; nameWithOwner: string };
     };
     res: null;
+  };
+  /**
+   * The remote-tracking refs a local branch could track: every remote's
+   * same-named branch, plus the one it tracks now. Local reads only.
+   */
+  "remote:trackingOptions": {
+    req: { worktreeId: string; branch: string };
+    res: TrackingChoices;
+  };
+  /** What changing `branch` to track `remote/remoteBranch` would do. */
+  "remote:inspectRetrack": {
+    req: { worktreeId: string; branch: string; remote: string; remoteBranch: string };
+    res: RetrackReview;
+  };
+  /**
+   * Make `branch` track `remote/remoteBranch`, moving its tip first when
+   * `move` asks. Every tip the review read is re-read under the repository
+   * lock; a change since is refused with nothing changed. A tip move never
+   * stashes: in the asking worktree it is `merge --ff-only` or
+   * `reset --keep`, which keep uncommitted changes and refuse when one would
+   * be overwritten.
+   */
+  "remote:retrack": {
+    req: {
+      worktreeId: string;
+      branch: string;
+      remote: string;
+      remoteBranch: string;
+      /** Full object names the review showed. */
+      head: string;
+      targetHead: string;
+      /** The upstream refname the review showed, or null. */
+      upstreamRef: string | null;
+      move: RetrackMove;
+      /** Keep the old tip on this new branch before a `reset`. */
+      copy?: string;
+    };
+    res: { moved: boolean; copied: string | null };
   };
   /** Inspection after a denied push, or from Pull or Remotes: origin may
    *  already be the fork, and other remotes may be forks you can push to. */
@@ -2438,6 +2523,13 @@ export interface Commands {
   // Desktop auto-update (Settings → Updates)
   "app:readIdentity": { req: void; res: AppIdentity };
   "app:readProcessIds": { req: void; res: AppProcessIds };
+  /** Help → Copy Diagnostics Info, re-copied with the asking window's
+   *  repository once main's `ui:copyDiagnostics` reaches it. `written` is
+   *  false when the user copied something else meanwhile, which is kept. */
+  "app:copyDiagnostics": {
+    req: { repository: DiagnosticsRepositoryContext | null };
+    res: { written: boolean };
+  };
   "app:readUpdateStatus": { req: void; res: AppUpdateStatus };
   "app:readUpdateReleases": { req: void; res: AppUpdateReleaseVersions };
   "app:checkForUpdate": { req: void; res: AppUpdateCheckResult };
@@ -2469,7 +2561,13 @@ export type Res<C extends CommandName> = Commands[C]["res"];
 /** Server → renderer push events. */
 export interface Events {
   "profile:changed": ProfileList;
-  "repo:changed": { profileId: ProfileId };
+  /**
+   * Something about the profile's repositories changed. With `repoIds`, only
+   * those repositories changed, in place: the list and its order did not, so
+   * a listener re-reads just them. Without it, re-read the whole list (a
+   * scan, clone, removal, hide, pin or reorder).
+   */
+  "repo:changed": { profileId: ProfileId; repoIds?: RepoId[] };
   /** Each step of a running `repo:remove`, as the whole step list. */
   "repo:removalProgress": RepoRemovalProgress;
   /** Live Git progress for one clone command, correlated by operation id. */
@@ -2561,11 +2659,13 @@ export interface Events {
   /** Help → Replay Onboarding. Re-opens the wizard for a look;
    *  deliberately never clears `onboardingCompleted`. */
   "ui:replayOnboarding": Record<string, never>;
-  /** Help → Copy Diagnostics Info put the app identity on the clipboard.
-   *  Main names the one profile window that confirms it with a toast: the
-   *  focused one, else the active profile's, else any open one — so the copy
-   *  is confirmed even when Settings, Logs or nothing has focus. */
-  "ui:diagnosticsCopied": { profileId: string | null };
+  /** Help → Copy Diagnostics Info tried to put the app report on the
+   *  clipboard (`copied` says whether it did). Main names the one profile
+   *  window that adds its repository (`app:copyDiagnostics`) and confirms
+   *  with a toast: the focused one, else the active profile's, else any open
+   *  one — so the copy is confirmed even when Settings, Logs or nothing has
+   *  focus. */
+  "ui:copyDiagnostics": { profileId: string | null; copied: boolean };
   /** App settings changed (any window) — payload is the fresh snapshot. */
   "settings:changed": AppSettingsSnapshot;
   /** Git identity config changed through PwrGit, or a launch notice was

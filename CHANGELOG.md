@@ -1,5 +1,38 @@
 # Changelog
 
+## v0.48.0 - 2026-10-30
+
+- Branch tracking - Added a tracking control in the branch switcher for choosing another remote's same-named branch, even when a local branch already exists. Compare ahead/behind counts, search by remote-qualified name, and review the commits leaving and arriving, push destination, and effect on uncommitted files before confirming.
+- Tracking safety - Added choices to change tracking without moving the branch, fast-forward it, or align it with the selected remote. Moves that would discard commits held by no remote require a copy branch first. Uncommitted files are not stashed up front, overwrite refusals leave them in place, stale reviews are rejected, and branches checked out in another worktree can change tracking without moving their tip.
+- Fork pulls - Added a remembered choice when a fork has moved ahead of its original: pull from the fork's own branch only, or keep syncing from the original. Choosing the fork-only path removes upstream rebase/reset suggestions from the Pull menu. A sync that brings in no commits and cannot push back now reports up to date instead of lingering as a red failure card.
+
+## v0.47.0 - 2026-10-29
+
+- Branch switching - Added a choice to bring uncommitted changes along or leave them in a named stash on the current branch. Returning to that branch offers Restore, which brings the changes back unstaged. If switching would overwrite files, PwrGit names them and offers to merge the changes or leave them behind instead of requiring a commit first.
+- Agent worktrees - Fixed linked worktrees nested inside their own repository appearing as uncommitted changes and unnecessarily triggering switch or pull safeguards. Real files beside them and independent nested repositories remain visible; removal checks still account for nested checkouts.
+- Pull requests - Improved matching when a branch's local name differs from its published name, and when a merged branch has no upstream. An exact-tip match to a merged request now shows that the work landed rather than presenting it as unpushed local commits.
+- Recent repositories - Made the Focused list and Fetch/Pull recent follow your activity: the current repository, pinned repositories, and those opened or committed to under your Git identity in the last seven days. Pulling someone else's commit or merely having dirty/ahead worktrees no longer makes a repository recent.
+- Worktree cleanup - Added a saved rule for when branches merged into the default branch count as finished, from right away to 30 days without commits. The recent-worktree protection is now remembered too, and the Stale lens follows the same rule. Existing defaults remain unchanged.
+- Sync results - Added Show last run in Sync options to reopen completed results without starting another operation, or to watch a running automatic sync. Completed failure and cancellation toasts now dismiss after 15 seconds, pausing on hover; runs stopped by an error remain visible.
+- Windows updates - Fixed in-app updates opening the full setup wizard by requesting silent installation and relaunch of the updated app. macOS and Linux update behavior is unchanged.
+
+## v0.46.0 - 2026-10-28
+
+- Sync options - Fixed the Fetch/Pull menu closing and starting a run when changing its settings. Picks now stay open and only configure the button; click the main button to run. The split button shares one outline, focus ring, and busy state.
+- Automatic sync - Fixed the timer always fetching even when the button was set to Pull. Each tick now follows the selected action and repository scope. If you already have Pull and an interval selected, timed runs will now pull: only safe fast-forwards proceed, while dirty branches needing updates, diverged branches, and in-progress operations stay untouched. Timed runs remain silent unless opened, with their result available on hover.
+- Bulk pull - Improved result counts so already-current dirty checkouts and worktrees with nothing to pull no longer inflate skipped or partial totals. Fixed stale merge/rebase markers blocking safe pulls. Progress headlines now report how many repositories completed, and the toast keeps all result counts visible.
+- Stashes - Fixed Drop and Pop failing after Git garbage collection packed the stash ref, including when a newer loose ref shadows an older packed entry. Removing the last stash no longer lets the stale packed entry reappear.
+- Commit graph - Fixed the trunk remaining dashed after a completed Pull. Cached graphs now check for changed refs, older in-flight builds cannot replace newer cached results, and successful no-op pulls also refresh the graph.
+- Diagnostics - Expanded Help → Copy Diagnostics Info into a plain-text and formatted report with build/runtime identity, profile and repository context, process IDs, local paths, and Git/LFS details. Review the copied profile names and paths before sharing it.
+
+## v0.45.0 - 2026-10-28
+
+- Bulk sync - Added a minimizable progress toast for Fetch and Pull, so a run can continue while you work elsewhere. Minimise, Escape, or clicking outside the dialog now moves progress to the toast rather than cancelling the run; click it to reopen details. PwrGit remembers your preferred view, and failures remain visible until dismissed.
+- Fetch and Pull - Combined the sidebar actions into one split button that remembers your last action. Choose all repositories or Recent, which follows the Focused list. Optional automatic fetch runs silently at your chosen interval, never pulls, and leaves its last result on the button's hover card.
+- Contributions - Fixed collection stopping at organizations requiring SAML SSO. PwrGit now continues through accessible activity, identifies blocked organizations and skipped counts where available, and clearly marks coverage as incomplete. Resume can retry the missed activity after SSO authorization without discarding collected records.
+- Troubleshooting - Renamed Settings → Memory / CPU to Troubleshooting and moved Developer Mode there from General. Added live process IDs with a Copy process IDs action that refreshes the list and includes the build identity; heap monitoring and CPU profiling remain in the same pane.
+- Minor - Updated React, electron-updater, and supporting development dependencies.
+
 ## v0.44.0 - 2026-10-26
 
 - Sidebar headings - Improved narrow layouts with headings that adapt to each repository's actual content. Labels shorten to PRs or MRs, then icons, only when needed; quieter repositories keep their words. Totals, failing-request counts, refresh controls, and the worktree sort control stay available, with accessible names and hover descriptions preserved.

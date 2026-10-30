@@ -7,10 +7,20 @@ import { WrenchGlyph } from "../../lib/WrenchGlyph";
 import { useFitLadder } from "../../lib/useFitLadder";
 import { hoverTooltip, useViewportTooltip } from "../../lib/useViewportTooltip";
 import { ContextMenu, type MenuItem } from "../shell/ContextMenu";
+import { finishedHeadline } from "./BulkSyncToast";
+import type { LastBulkSyncRun } from "./useBulkSyncRun";
+import {
+  FETCH_INTERVALS,
+  fetchIntervalLabel,
+  fetchIntervalPhrase,
+  type FetchInterval,
+  type FetchScope,
+  type SyncVerb
+} from "./bulk-sync-prefs";
 
 /**
  * Steps the row takes, in order, when it does not fit: Add's word goes first,
- * then Fetch all and Pull all drop to their glyphs together. Measured, never a
+ * then the sync button drops to its glyph. Measured, never a
  * fixed width — design/Sidebar Header Toolbar - UX Review.dc.html, 3b.
  */
 export const SIDEBAR_TOOLBAR_FIT_STEPS = [
@@ -36,46 +46,230 @@ export function addMenuReasons(input: {
   return {};
 }
 
+/** The four things the sync button's face can do, in menu order. */
+export const SYNC_ACTIONS: ReadonlyArray<{ verb: SyncVerb; scope: FetchScope }> = [
+  { verb: "fetch", scope: "all" },
+  { verb: "fetch", scope: "recent" },
+  { verb: "pull", scope: "all" },
+  { verb: "pull", scope: "recent" }
+];
+
+const repositories = (count: number): string =>
+  `${count} ${count === 1 ? "repository" : "repositories"}`;
+
+/**
+ * The sync face's accessible name, visible label and hover card.
+ *
+ * The names keep the words the old two buttons had — "Fetch all repos" and
+ * "Try pull all" — so voice control and the E2E suite still find each one,
+ * and each contains its visible label (SC 2.5.3). "Fetch all repos", not
+ * "Fetch all": the Remotes heading in every RepoRow carries a button of that
+ * name that fetches ONE repo, so the name states the wider scope.
+ */
+export function syncFace(input: {
+  verb: SyncVerb;
+  scope: FetchScope;
+  repoCount: number;
+  recentCount: number;
+  interval: FetchInterval;
+  busy: boolean;
+  /** The last timed run's result, when it is worth a line. */
+  lastAuto?: string | undefined;
+}): { name: string; label: string; tooltip: string; count: number } {
+  const recent = input.scope === "recent";
+  const count = recent ? input.recentCount : input.repoCount;
+  const where = recent
+    ? `the ${repositories(count)} in the Focused list`
+    : "every repository";
+  const lines = [
+    input.verb === "pull"
+      ? `Fetch ${where}, then fast-forward only clean, safely tracked branches.`
+      : `Fetch and prune stale remote-tracking references in ${where}; local branches are kept.`
+  ];
+  const every = fetchIntervalPhrase(input.interval);
+  if (every !== null) {
+    lines.push(
+      `${input.verb === "pull" ? "Pulling" : "Fetching"} automatically ${every}.`
+    );
+  }
+  if (input.busy) lines.push("Running now — click to watch.");
+  else if (input.lastAuto !== undefined) lines.push(input.lastAuto);
+  const word = recent ? "recent" : "all";
+  return input.verb === "pull"
+    ? {
+        name: `Try pull ${word}`,
+        label: `Pull ${word}`,
+        tooltip: lines.join(" "),
+        count
+      }
+    : {
+        name: `Fetch ${word} repos`,
+        label: `Fetch ${word}`,
+        tooltip: lines.join(" "),
+        count
+      };
+}
+
+/** Show last run's second line: what it did, when, and whether you ran it. */
+export function lastRunHint(last: LastBulkSyncRun): string {
+  const { success, partial } = last.summary.counts.repos;
+  const what = finishedHeadline(
+    last.mode,
+    last.summary.results.length,
+    success + partial
+  );
+  const time = last.at.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+  // A cancelled run's counts stop where it stopped; say so, or the rest read
+  // as skipped or failed.
+  const cancelled = last.summary.cancelled ? " · cancelled" : "";
+  return `${what}${cancelled} · ${last.auto ? "automatic, " : ""}${time}`;
+}
+
 /**
  * The one row of profile-wide actions above the lens row: Add ▾ (Add folders,
- * Clone, Fork), Fetch all, Pull all, and Repository maintenance as a wrench.
+ * Clone, Fork), the sync button, and Repository maintenance as a wrench.
  *
- * It replaced five rows in four button styles (252px with the search field,
- * which moved to the title strip). Every accessible name survived the move —
- * "Fetch all repos", "Try pull all", "Repository maintenance…" — and each
- * contains its shorter visible label (SC 2.5.3), so voice control and the E2E
- * suite find them as before.
+ * The sync button is one split button for Fetch and Try pull: Try pull
+ * already fetches every repository before it fast-forwards, so two buttons
+ * offered the same first half twice. The face runs the remembered verb and
+ * scope and wears its name. The chevron's menu sets the button up (which
+ * verb and scope the face runs, and how often the timer runs it) and stays
+ * open while you do; the face runs it. design/Fetch Toast and Scope - UX
+ * Review.dc.html, turn 5.
  */
 export function SidebarToolbar({
   hasProfile,
   rootCount,
   repoCount,
+  recentCount = repoCount,
+  syncVerb = "fetch",
+  syncScope = "all",
+  fetchInterval = 0,
+  syncBusy = false,
+  lastAutoRun,
+  lastRun = null,
   onAddFolder,
   onClone,
   onFork,
-  onFetchAll,
-  onPullAll,
+  onSync,
+  onPickSync,
+  onPickFetchInterval,
+  onShowRun,
   onMaintenance
 }: {
   hasProfile: boolean;
   rootCount: number;
   repoCount: number;
+  /** Repositories in the Focused list, which is what "recent" covers. */
+  recentCount?: number;
+  syncVerb?: SyncVerb;
+  syncScope?: FetchScope;
+  fetchInterval?: FetchInterval;
+  /** A run is in flight, possibly a timed fetch nobody is watching. */
+  syncBusy?: boolean;
+  lastAutoRun?: string | undefined;
+  /** The newest finished run, for Sync options → Show last run. */
+  lastRun?: LastBulkSyncRun | null;
+  /** Show the run going now, or the last one's results. */
+  onShowRun?: () => void;
   onAddFolder: () => void;
   onClone: () => void;
   onFork: () => void;
-  onFetchAll: () => void;
-  onPullAll: () => void;
+  /** The face: run the remembered verb and scope, or show the run in flight. */
+  onSync: () => void;
+  /** Remember a verb and scope as the face. Runs nothing: the face does. */
+  onPickSync?: (verb: SyncVerb, scope: FetchScope) => void;
+  onPickFetchInterval?: (minutes: FetchInterval) => void;
   onMaintenance: () => void;
 }): ReactElement {
   const tip = useViewportTooltip();
   const rowRef = useRef<HTMLDivElement>(null);
   const lastRef = useRef<HTMLButtonElement>(null);
   const addRef = useRef<HTMLButtonElement>(null);
+  const syncMenuRef = useRef<HTMLButtonElement>(null);
   const [menu, setMenu] = useState<{ x: number; y: number } | null>(null);
+  const [syncMenu, setSyncMenu] = useState<{ x: number; y: number } | null>(
+    null
+  );
   useFitLadder(rowRef, rowRef, lastRef, SIDEBAR_TOOLBAR_FIT_STEPS);
 
   const reasons = addMenuReasons({ hasProfile, rootCount });
   const syncDisabled = !hasProfile || repoCount === 0;
+  const face = syncFace({
+    verb: syncVerb,
+    scope: syncScope,
+    repoCount,
+    recentCount,
+    interval: fetchInterval,
+    busy: syncBusy,
+    lastAuto: lastAutoRun
+  });
+  const syncItems: MenuItem[] = [
+    ...SYNC_ACTIONS.map(({ verb, scope }): MenuItem => {
+      const recent = scope === "recent";
+      const count = recent ? recentCount : repoCount;
+      const what = recent
+        ? `The Focused list · ${repositories(count)}`
+        : repositories(count);
+      return {
+        type: "item",
+        label: `${verb === "pull" ? "Pull" : "Fetch"} ${recent ? "recent" : "all"} repositories`,
+        hint:
+          recent && count === 0
+            ? "Nothing in the Focused list yet"
+            : verb === "pull"
+              ? `${what} · then fast-forward clean branches`
+              : what,
+        checked: syncVerb === verb && syncScope === scope,
+        radio: true,
+        keepOpen: true,
+        ...(count === 0 ? { disabled: true } : {}),
+        onSelect: () => onPickSync?.(verb, scope)
+      };
+    }),
+    { type: "sep" },
+    // The timer runs the face, so the heading names its verb.
+    {
+      type: "heading",
+      label: syncVerb === "pull" ? "Pull automatically" : "Fetch automatically"
+    },
+    ...FETCH_INTERVALS.map(
+      (minutes): MenuItem => ({
+        type: "item",
+        label: fetchIntervalLabel(minutes),
+        checked: fetchInterval === minutes,
+        radio: true,
+        keepOpen: true,
+        onSelect: () => onPickFetchInterval?.(minutes)
+      })
+    ),
+    { type: "sep" },
+    // A timed run raises no toast, and a finished toast leaves: this is how
+    // either is read afterwards. It opens the dialog, so the menu closes.
+    syncBusy
+      ? {
+          type: "item",
+          label: "Show the running sync",
+          inset: true,
+          onSelect: () => onShowRun?.()
+        }
+      : lastRun === null
+        ? {
+            type: "item",
+            label: "Show last run",
+            inset: true,
+            disabled: true,
+            hint: "Nothing has run yet",
+            onSelect: () => undefined
+          }
+        : {
+            type: "item",
+            label: "Show last run",
+            inset: true,
+            hint: lastRunHint(lastRun),
+            onSelect: () => onShowRun?.()
+          }
+  ];
   const item = (
     label: string,
     reason: string | undefined,
@@ -92,8 +286,7 @@ export function SidebarToolbar({
       ref={rowRef}
       className="sidebar-toolbar"
       /* A group, not a toolbar: role="toolbar" promises one Tab stop and
-         arrow keys between the buttons, and these are four ordinary Tab
-         stops. */
+         arrow keys between the buttons, and these are ordinary Tab stops. */
       role="group"
       aria-label="Repositories"
     >
@@ -116,39 +309,56 @@ export function SidebarToolbar({
         <span className="sidebar-toolbar__label">Add</span>
         <ChevronGlyph size={10} />
       </button>
-      {/* "Fetch all repos", not "Fetch all": the Remotes heading in every
-          RepoRow carries a button of the same name that fetches all remotes
-          of ONE repo. Same words, two blast radii — so the accessible name
-          states the wider scope even where the visible label is short.
-
-          The glyphs are the worktree toolbar's own Fetch and Pull marks, so
-          each bulk action reads as the same verb as the single one. Neither
-          button animates; each opens BulkSyncDialog, which owns progress. */}
-      <button
-        type="button"
-        className="sidebar-toolbar__btn sidebar-toolbar__sync"
-        aria-label="Fetch all repos"
-        disabled={syncDisabled}
-        {...hoverTooltip(
-          tip,
-          "Fetch and prune stale remote-tracking references in every repository; local branches are kept"
-        )}
-        onClick={onFetchAll}
-      >
-        <RefreshGlyph size={12} />
-        <span className="sidebar-toolbar__label">Fetch all</span>
-      </button>
-      <button
-        type="button"
-        className="sidebar-toolbar__btn sidebar-toolbar__sync"
-        aria-label="Try pull all"
-        disabled={syncDisabled}
-        {...hoverTooltip(tip, "Fast-forward only clean, safe tracked worktrees")}
-        onClick={onPullAll}
-      >
-        <PullGlyph size={12} />
-        <span className="sidebar-toolbar__label">Pull all</span>
-      </button>
+      {/* The glyphs are the worktree toolbar's own Fetch and Pull marks, so
+          each bulk action reads as the same verb as the single one. A
+          circular arrow turns while busy (aria-busy); Pull's arrow means
+          "down", so it swaps to the ring instead (styles/AGENTS.md). */}
+      <div className="sidebar-toolbar__split">
+        <button
+          type="button"
+          className="sidebar-toolbar__btn sidebar-toolbar__sync"
+          aria-label={face.name}
+          aria-busy={syncBusy}
+          disabled={!hasProfile || face.count === 0}
+          {...hoverTooltip(tip, face.tooltip)}
+          onClick={onSync}
+        >
+          {syncVerb === "fetch" ? (
+            <RefreshGlyph size={12} />
+          ) : syncBusy ? (
+            <span className="wt-btn__spinner" aria-hidden="true" />
+          ) : (
+            <PullGlyph size={12} />
+          )}
+          <span className="sidebar-toolbar__label">{face.label}</span>
+        </button>
+        <button
+          ref={syncMenuRef}
+          type="button"
+          className="sidebar-toolbar__btn sidebar-toolbar__chevron"
+          aria-label="Sync options"
+          aria-haspopup="menu"
+          aria-expanded={syncMenu !== null}
+          disabled={syncDisabled}
+          {...hoverTooltip(
+            tip,
+            "Fetch or pull, all or recent — and run it automatically"
+          )}
+          onClick={(event) => {
+            const rect = (
+              event.currentTarget.parentElement ?? event.currentTarget
+            ).getBoundingClientRect();
+            setSyncMenu((current) =>
+              current === null ? { x: rect.left, y: rect.bottom + 4 } : null
+            );
+          }}
+        >
+          {/* Up while its menu is open, as PwrAgnt's Send caret flips: the
+              chevron says which control opened the menu. Drawn, not rotated
+              (lib/ChevronGlyph.tsx). */}
+          <ChevronGlyph size={10} up={syncMenu !== null} />
+        </button>
+      </div>
       <button
         ref={lastRef}
         type="button"
@@ -176,6 +386,16 @@ export function SidebarToolbar({
             item("Fork…", reasons.fork, onFork)
           ]}
           onClose={() => setMenu(null)}
+        />
+      )}
+      {syncMenu !== null && (
+        <ContextMenu
+          x={syncMenu.x}
+          y={syncMenu.y}
+          label="Sync options"
+          triggerRef={syncMenuRef}
+          items={syncItems}
+          onClose={() => setSyncMenu(null)}
         />
       )}
       {tip.tooltipNode}

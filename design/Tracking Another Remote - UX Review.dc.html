@@ -1,0 +1,688 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <script src="./support.js"></script>
+  </head>
+  <body>
+    <x-dc>
+      <helmet data-dc-atomics>
+        <meta name="design_doc_mode" content="canvas" />
+        <link href="https://fonts.googleapis.com/css2?family=Geist:wght@400..700&amp;family=Geist+Mono:wght@400..700&amp;display=swap" rel="stylesheet" />
+        <style>
+          :root {
+            --rv-bg: #050505; --rv-line: rgba(247, 243, 235, 0.1);
+            --rv-t1: #f7f3eb; --rv-t2: #b8b0a5; --rv-t3: #8c857a; --rv-tsub: rgba(247, 243, 235, 0.54);
+            --rv-acc: #ff8a1f; --rv-accb: #ffb35c; --rv-bad: #b94232; --rv-ok: #5fa969;
+            --font-sans: "Geist", "SF Pro Text", "Inter", system-ui, sans-serif;
+            --font-mono: "Geist Mono", "SF Mono", "JetBrains Mono", Consolas, monospace;
+          }
+          /* The app's light tokens (styles/tokens.css, data-theme="light"): both reports were shot in light. */
+          .lt {
+            --bg-app: #ffffff; --bg-shell: #f7f4ef; --bg-panel: #fdfcfa; --bg-el: #ffffff;
+            --bg-hover: #f4f0e8; --bg-hover-strong: #ebe5da; --row-active: #fff5e9; --active-strong: #ffe8cf;
+            --b-subtle: rgba(0, 0, 0, 0.08); --b-default: rgba(0, 0, 0, 0.12); --b-strong: rgba(0, 0, 0, 0.18);
+            --t1: #1a1612; --t2: #524a40; --t3: #736c64; --tsub: rgba(26, 22, 18, 0.68);
+            --acc: #b74c00; --accb: #994c00; --acc-on: #ffffff;
+            --acc-soft: color-mix(in srgb, #b74c00 12%, transparent);
+            --acc-border: color-mix(in srgb, #b74c00 42%, transparent);
+            --danger: #8a1f12; --danger-soft: rgba(138, 31, 18, 0.1); --danger-border: rgba(138, 31, 18, 0.28);
+            --ok: #2e7d3c; --okt: #1a5c2e; --ok-soft: rgba(46, 110, 64, 0.12);
+            --warn: #805200; --warn-soft: color-mix(in srgb, #805200 14%, transparent);
+            --shadow-overlay: 0 32px 80px rgba(0, 0, 0, 0.16); --shadow-popover: 0 18px 48px rgba(0, 0, 0, 0.14);
+            color: var(--t1);
+          }
+          *, *::before, *::after { box-sizing: border-box; }
+          html { background: var(--rv-bg); }
+          body { margin: 0; background: var(--rv-bg); font-family: var(--font-sans); }
+          a { color: var(--rv-accb); text-decoration: none; }
+          a:hover { color: var(--rv-t1); }
+
+          /* ---- review chrome (house convention) ---- */
+          .dv-turn { padding: 40px 44px 32px; background: var(--rv-bg); border-bottom: 1px solid var(--rv-line); }
+          .dv-thd { display: flex; align-items: baseline; gap: 10px; margin: 0 0 6px; }
+          .dv-tid { font: 600 10px var(--font-mono); padding: 3px 7px; background: var(--rv-t1); color: var(--rv-bg); border-radius: 4px; }
+          .dv-tname { font: 600 13px/1.2 var(--font-sans); color: var(--rv-t1); }
+          .dv-sub { margin: 0 0 22px; font: 400 11.5px/1.55 var(--font-sans); color: var(--rv-t3); max-width: 860px; text-wrap: pretty; }
+          .dv-sub b, .note b, .fitem b, .tbl b { color: var(--rv-t2); font-weight: 600; }
+          .dv-sub code, .note code, .fitem code, .tbl code { font: 500 10px/1.4 var(--font-mono); color: var(--rv-t2); }
+          .dv-opts { display: flex; flex-wrap: wrap; gap: 28px; align-items: flex-start; }
+          .dv-opt { flex: none; display: flex; flex-direction: column; gap: 9px; }
+          .dv-olabel { display: flex; align-items: baseline; gap: 8px; font: 400 11px/1.3 var(--font-sans); color: var(--rv-tsub); max-width: 700px; }
+          .dv-olabel b { color: var(--rv-accb); font-weight: 600; }
+          .dv-oid { font: 600 10.5px var(--font-mono); padding: 3px 7px; background: rgba(247, 243, 235, 0.08); color: var(--rv-t1); border-radius: 5px; }
+          .dv-next { margin: 26px 0 0; font: 400 11px/1.5 var(--font-sans); color: var(--rv-t3); }
+          .dv-next b { color: var(--rv-accb); font-weight: 600; }
+          .note { margin: 0; font: 400 10.5px/1.55 var(--font-sans); color: var(--rv-t3); text-wrap: pretty; max-width: 620px; }
+          .pin { display: inline-flex; align-items: center; justify-content: center; flex: none; width: 15px; height: 15px; border-radius: 999px; background: var(--rv-bad); color: #fff; font: 700 9px/1 var(--font-mono); }
+          .pin.g { background: var(--rv-ok); color: #050505; }
+          .find { width: 440px; display: flex; flex-direction: column; gap: 14px; padding: 16px; border: 1px solid var(--rv-line); border-radius: 9px; background: #0a0a0a; }
+          .fitem { display: grid; grid-template-columns: 15px minmax(0, 1fr); gap: 9px; align-items: start; }
+          .fitem h4 { margin: 0 0 3px; font: 650 11.5px/1.3 var(--font-sans); color: var(--rv-t1); }
+          .fitem p { margin: 0; font: 400 10.5px/1.5 var(--font-sans); color: var(--rv-t3); text-wrap: pretty; }
+          .tbl { border-collapse: collapse; font: 400 11px/1.45 var(--font-sans); color: var(--rv-t3); }
+          .tbl th { white-space: nowrap; text-align: left; font: 600 10px/1.3 var(--font-mono); color: var(--rv-t2); padding: 0 16px 8px 0; border-bottom: 1px solid var(--rv-line); }
+          .tbl td { padding: 8px 16px 8px 0; border-bottom: 1px solid var(--rv-line); vertical-align: top; }
+          .tbl .m { font: 500 10.5px/1.4 var(--font-mono); color: var(--rv-t1); white-space: nowrap; }
+          .tbl .y { color: var(--rv-ok); } .tbl .n { color: var(--rv-accb); }
+
+          /* ---- app specimens ---- */
+          .stage { position: relative; padding: 26px; border-radius: 10px; background: #f7f4ef; }
+          .ov { position: relative; width: 620px; background: var(--bg-el); border: 1px solid var(--b-strong); border-radius: 14px; box-shadow: var(--shadow-overlay); }
+          .ov-search { display: flex; align-items: center; gap: 11px; padding: 15px 18px; border-bottom: 1px solid var(--b-subtle); color: var(--t3); }
+          .ov-q { flex: 1; font: 500 15px/1 var(--font-sans); color: var(--t1); padding: 6px 8px; margin: -6px -8px; border-radius: 6px; }
+          .ov-q.ph { color: var(--tsub); }
+          .ov-q.ring { outline: 2px solid var(--acc); outline-offset: 0; }
+          .kbd { font: 600 10px/1 var(--font-mono); color: var(--tsub); border: 1px solid var(--b-default); border-radius: 4px; padding: 3px 5px; }
+          .ov-res { padding: 8px; display: flex; flex-direction: column; }
+          .row { display: flex; align-items: center; gap: 11px; padding: 9px 11px; border-radius: 8px; color: var(--t3); min-width: 0; }
+          .row.sel { background: var(--row-active); }
+          .dot { flex: none; width: 8px; height: 8px; border-radius: 999px; background: var(--tsub); }
+          .dot.cur { background: var(--acc); box-shadow: 0 0 0 3px var(--acc-soft); }
+          .bn { flex: 0 1 auto; min-width: 0; font: 600 13px/1.2 var(--font-mono); color: var(--t1); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+          .bn .mt { font: 500 10px/1 var(--font-mono); color: var(--tsub); }
+          .grow { flex: 1; }
+          .here { flex: none; color: var(--acc); font: 600 9.5px/1 var(--font-mono); text-transform: uppercase; letter-spacing: 0.04em; }
+          .when { flex: none; font: 500 10px/1 var(--font-mono); color: var(--tsub); }
+          .badge { flex: none; display: inline-flex; align-items: center; height: 18px; padding: 0 7px; border-radius: 999px; background: var(--bg-panel); border: 1px solid var(--b-subtle); color: var(--t3); font: 600 9px/1 var(--font-mono); }
+          .ov-foot { display: flex; align-items: center; gap: 16px; padding: 10px 18px; border-top: 1px solid var(--b-subtle); font: 500 10.5px/1 var(--font-mono); color: var(--tsub); }
+          .ghosts { display: flex; flex-direction: column; gap: 4px; padding: 10px 12px; border: 1px dashed rgba(247, 243, 235, 0.22); border-radius: 8px; width: 620px; }
+          .ghost { display: flex; align-items: center; gap: 10px; font: 500 11px/1.3 var(--font-mono); color: var(--rv-t3); }
+          .ghost s { color: var(--rv-t2); }
+
+          /* the tracking split chip: PwrAgnt's run-split, in the switcher's mono register */
+          .trk { flex: 0 1 auto; min-width: 0; display: inline-flex; align-items: stretch; height: 20px; border: 1px solid var(--b-default); border-radius: 999px; overflow: hidden; background: var(--bg-el); }
+          .trk .v { display: block; min-width: 0; height: 18px; padding: 0 8px; font: 500 10px/18px var(--font-mono); color: var(--t3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+          .trk .v b { color: var(--t2); font-weight: 600; }
+          .trk .c { flex: none; display: inline-flex; align-items: center; justify-content: center; width: 20px; border-left: 1px solid var(--b-subtle); color: var(--t3); }
+          .trk.hov { border-color: var(--acc-border); }
+          .trk.hov .c { background: var(--bg-hover-strong); color: var(--t1); border-left-color: transparent; }
+          .trk.open { border-color: var(--acc-border); }
+          .trk.open .c { background: var(--acc-soft); color: var(--accb); border-left-color: transparent; }
+          .trk.chg { border-color: var(--acc-border); background: var(--acc-soft); }
+          .trk.chg .v, .trk.chg .v b { color: var(--accb); }
+          .trk.chg .c { color: var(--accb); border-left-color: var(--acc-border); }
+          .trk.ring { outline: 2px solid var(--acc); outline-offset: 1px; }
+          .hint { flex: none; font: 600 9.5px/1 var(--font-mono); color: var(--accb); }
+
+          .rmenu { position: absolute; left: 80px; top: 94px; z-index: 3; width: 340px; padding: 5px; border: 1px solid var(--b-strong); border-radius: 10px; background: var(--bg-el); box-shadow: var(--shadow-popover); }
+          .rmh { padding: 6px 9px 5px; font: 600 9.5px/1 var(--font-mono); color: var(--tsub); text-transform: uppercase; letter-spacing: 0.04em; }
+          .rmi { display: grid; grid-template-columns: 14px minmax(0, 1fr) auto; gap: 8px; align-items: center; padding: 7px 9px; border-radius: 6px; cursor: pointer; }
+          .rmi.sel { background: var(--row-active); }
+          .rmi .ck { color: var(--acc); display: inline-flex; }
+          .rmi .rn { font: 600 11.5px/1.25 var(--font-mono); color: var(--t1); }
+          .rmi .rn small { display: block; margin-top: 2px; font: 500 10px/1.2 var(--font-sans); color: var(--t3); }
+          .rmi .rel { font: 600 10px/1 var(--font-mono); color: var(--t3); white-space: nowrap; }
+          .rmi .rel.ff { color: var(--okt); } .rmi .rel.dv { color: var(--warn); }
+          .rsep { height: 1px; margin: 4px 6px; background: var(--b-subtle); }
+          .rmx { padding: 7px 9px; border-radius: 6px; font: 500 11px/1.2 var(--font-sans); color: var(--t2); }
+
+          /* confirm step, inside the same overlay */
+          .cf-h { display: flex; align-items: center; gap: 10px; padding: 12px 16px; border-bottom: 1px solid var(--b-subtle); }
+          .ib { flex: none; display: inline-flex; align-items: center; justify-content: center; width: 26px; height: 26px; border-radius: 7px; border: 1px solid var(--b-default); color: var(--t2); background: var(--bg-el); cursor: pointer; }
+          .cf-t { flex: 1; min-width: 0; font: 650 14px/1.2 var(--font-sans); color: var(--t1); }
+          .cf-t code { font: 650 13px/1.2 var(--font-mono); }
+          .cf-b { display: flex; flex-direction: column; gap: 14px; padding: 16px 18px; }
+          .route { display: flex; align-items: center; gap: 10px; }
+          .rt { flex: 1; min-width: 0; padding: 8px 11px; border: 1px solid var(--b-default); border-radius: 9px; background: var(--bg-panel); }
+          .rt.to { border-color: var(--acc-border); background: var(--row-active); }
+          .rt .k { font: 600 9px/1 var(--font-mono); color: var(--tsub); text-transform: uppercase; letter-spacing: 0.05em; }
+          .rt .r { margin-top: 5px; font: 600 12px/1.2 var(--font-mono); color: var(--t1); }
+          .rt .s { margin-top: 3px; font: 500 10.5px/1.2 var(--font-sans); color: var(--t3); }
+          .rt.to .r { color: var(--accb); }
+          .arr { flex: none; color: var(--t3); display: inline-flex; }
+          .ledger { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+          .lg { padding: 10px 12px; border: 1px solid var(--b-subtle); border-radius: 9px; }
+          .lg .num { font: 650 18px/1 var(--font-sans); color: var(--t3); }
+          .lg .lbl { margin-top: 5px; font: 500 11px/1.35 var(--font-sans); color: var(--t3); }
+          .lg.ok .num { color: var(--ok); } .lg.ok { background: var(--ok-soft); border-color: transparent; }
+          .lg.wn .num { color: var(--warn); } .lg.wn { background: var(--warn-soft); border-color: transparent; }
+          .lg.bad .num { color: var(--danger); } .lg.bad { background: var(--danger-soft); border-color: var(--danger-border); }
+          .cl { display: flex; flex-direction: column; gap: 4px; }
+          .ci { display: flex; gap: 9px; align-items: baseline; min-width: 0; }
+          .ci .h { flex: none; font: 500 10px/1.3 var(--font-mono); color: var(--tsub); }
+          .ci .sj { min-width: 0; font: 500 11.5px/1.3 var(--font-sans); color: var(--t2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+          .ci .more { font: 500 11px/1.3 var(--font-sans); color: var(--t3); }
+          .facts { display: flex; flex-direction: column; gap: 7px; }
+          .fact { display: grid; grid-template-columns: 14px minmax(0, 1fr); gap: 8px; align-items: start; font: 500 11.5px/1.45 var(--font-sans); color: var(--t2); }
+          .fact .i { display: inline-flex; margin-top: 2px; color: var(--ok); }
+          .fact.w .i { color: var(--warn); } .fact.x .i { color: var(--danger); }
+          .fact code { font: 600 10.5px/1.3 var(--font-mono); color: var(--t1); }
+          .choices { display: flex; flex-direction: column; gap: 6px; }
+          .chc { display: grid; grid-template-columns: 14px minmax(0, 1fr); gap: 9px; padding: 9px 11px; border: 1px solid var(--b-default); border-radius: 9px; cursor: pointer; }
+          .chc.on { border-color: var(--acc-border); background: var(--row-active); }
+          .chc .rd { margin-top: 2px; width: 13px; height: 13px; border-radius: 999px; border: 1.5px solid var(--b-strong); }
+          .chc.on .rd { border: 4px solid var(--acc); }
+          .chc .tt { font: 600 12px/1.3 var(--font-sans); color: var(--t1); }
+          .chc .dd { margin-top: 2px; font: 400 11px/1.45 var(--font-sans); color: var(--t3); }
+          .cf-f { display: flex; align-items: center; gap: 10px; padding: 11px 16px; border-top: 1px solid var(--b-subtle); }
+          .cmd { flex: 1; min-width: 0; font: 500 9.5px/1.3 var(--font-mono); color: var(--tsub); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+          .btn { flex: none; display: inline-flex; align-items: center; height: 30px; padding: 0 12px; border-radius: 7px; border: 1px solid var(--b-default); background: var(--bg-el); color: var(--t2); font: 600 11.5px/1 var(--font-sans); white-space: nowrap; cursor: pointer; }
+          .btn.pri { background: var(--acc); border-color: var(--acc); color: var(--acc-on); }
+          .btn.sm { height: 24px; padding: 0 9px; font-size: 10.5px; }
+
+          /* pull card (remote-activity) */
+          .card { width: 344px; padding: 12px; border: 1px solid var(--b-strong); border-radius: 12px; background: var(--bg-el); box-shadow: var(--shadow-popover); display: flex; flex-direction: column; gap: 10px; }
+          .card-h { display: flex; align-items: center; gap: 8px; font: 650 12px/1.2 var(--font-sans); color: var(--t1); }
+          .card-h .tm { margin-left: auto; font: 500 10px/1 var(--font-mono); color: var(--t3); }
+          .card-sum { font: 500 12px/1.45 var(--font-sans); color: var(--t2); }
+          .card-sum.bad { color: var(--danger); }
+          .steps { border: 1px solid var(--b-subtle); border-radius: 8px; }
+          .stp { display: flex; align-items: center; gap: 8px; padding: 8px 10px; font: 500 11px/1.2 var(--font-sans); color: var(--t2); }
+          .stp + .stp { border-top: 1px solid var(--b-subtle); }
+          .stp .i { color: var(--ok); display: inline-flex; }
+          .bar { height: 3px; margin: 0 10px 8px; border-radius: 2px; background: var(--ok); }
+          .gout { font: 600 10px/1 var(--font-mono); color: var(--t3); }
+          .gbox { padding: 8px 10px; border: 1px solid var(--b-subtle); border-radius: 7px; font: 500 10px/1.3 var(--font-mono); color: var(--t3); }
+          .btns { display: flex; gap: 6px; flex-wrap: wrap; }
+          .ask { display: flex; flex-direction: column; gap: 8px; padding: 11px; border: 1px solid var(--acc-border); border-radius: 9px; background: var(--row-active); }
+          .ask h5 { margin: 0; font: 650 12px/1.3 var(--font-sans); color: var(--t1); }
+          .ask p { margin: 0; font: 400 11px/1.5 var(--font-sans); color: var(--t2); text-wrap: pretty; }
+          .ask p code, .card-sum code { font: 600 10.5px/1.3 var(--font-mono); color: var(--t1); }
+          .ask .cap { font: 400 10.5px/1.4 var(--font-sans); color: var(--t3); }
+          .pm { width: 344px; padding: 5px; border: 1px solid var(--b-strong); border-radius: 10px; background: var(--bg-el); box-shadow: var(--shadow-popover); }
+          .pmi { display: grid; grid-template-columns: 14px minmax(0, 1fr); gap: 8px; padding: 8px 9px; border-radius: 6px; }
+          .pmi.on { background: var(--row-active); }
+          .pmi .tt { font: 600 11.5px/1.3 var(--font-sans); color: var(--t1); }
+          .pmi .tt code { font: 600 11px/1.3 var(--font-mono); }
+          .pmi .dd { margin-top: 2px; font: 400 10.5px/1.4 var(--font-sans); color: var(--t3); }
+          .pmi .ck { color: var(--acc); display: inline-flex; margin-top: 1px; }
+          .pmn { margin: 2px 4px 4px; padding: 8px 9px; border-radius: 7px; background: var(--bg-panel); font: 400 10.5px/1.45 var(--font-sans); color: var(--t3); }
+          .pmn code { font: 600 10px/1.3 var(--font-mono); color: var(--t2); }
+
+          /* prototype controls */
+          .segs { display: flex; gap: 4px; padding: 3px; border-radius: 9px; background: rgba(247, 243, 235, 0.06); width: fit-content; }
+          .seg { padding: 6px 11px; border-radius: 6px; font: 600 11px/1 var(--font-sans); color: var(--rv-t3); cursor: pointer; }
+          .seg.on { background: var(--rv-t1); color: var(--rv-bg); }
+          .done { display: flex; flex-direction: column; gap: 8px; padding: 22px 20px; }
+          .done .t { font: 650 13px/1.3 var(--font-sans); color: var(--t1); }
+          .done .d { font: 400 11.5px/1.5 var(--font-sans); color: var(--t2); }
+        </style>
+      </helmet>
+
+      <!-- ============================== TURN 1 ============================== -->
+      <section class="dv-turn" id="t1" data-screen-label="Turn 1 Findings">
+        <div class="dv-thd"><span class="dv-tid">1</span><span class="dv-tname">Findings: two reports, one assumption</span></div>
+        <p class="dv-sub">Both reports come from <b>disktree</b>, which has three remotes and three <code>main</code>s: Harold&#8217;s old fork, the source it was forked from, and <b>pwrdrvr/PwrDisk</b>, the maintained fork that is now the project&#8217;s home. PwrGit assumes a repository has one remote that matters for a branch name, and a fork&#8217;s <code>main</code> mirrors its source. Neither holds here. Turns 1&#8211;3 use the remote names from the first report (before the rename), and turn 4 uses the names after it.</p>
+        <div class="dv-opts">
+          <div class="dv-opt">
+            <div class="dv-olabel"><span class="dv-oid">1a</span><span>Typing <b>main</b> in the branch switcher (title-bar chip). Recreated from the first report.</span></div>
+            <div class="stage lt">
+              <div class="ov">
+                <div class="ov-search">
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="6" y1="3" x2="6" y2="15"/><circle cx="18" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><path d="M18 9a9 9 0 0 1-9 9"/></svg>
+                  <span class="ov-q ring">main</span><span class="kbd">esc</span>
+                </div>
+                <div class="ov-res">
+                  <div class="row sel"><span class="dot cur"></span><span class="bn">main<span class="mt"> &#183; tracks origin/main</span></span><span class="grow"></span><span class="here">current</span><span class="when">1w</span></div>
+                  <div class="row"><span class="dot"></span><span class="bn">fix/pwrdisk-mark-performance-20261029<span class="mt"> &#183; tracks pwrdisk/main</span></span><span class="grow"></span><span class="when">2h 19m</span></div>
+                  <div class="row"><span class="dot"></span><span class="bn">fix/main-mark-performance-20261014<span class="mt"> &#183; tracks origin/fix/main-mark-performance-20261014</span></span><span class="grow"></span><span class="when">6d</span></div>
+                </div>
+                <div class="ov-foot"><span>&#8593;&#8595; navigate</span><span>&#8629; switch</span><span class="grow"></span><span>3 branches</span></div>
+              </div>
+            </div>
+            <div class="ghosts">
+              <div class="ghost"><span class="pin">1</span><span>Fetched but never listed:</span></div>
+              <div class="ghost"><s>origin/main</s><span>main tracks it, so hiding it is right</span></div>
+              <div class="ghost"><s>pwrdisk/main</s><span>pwrdrvr/PwrDisk &#183; 7 commits ahead of main &#183; hidden because a local main exists</span></div>
+              <div class="ghost"><s>upstream/main</s><span>tobi/disktree &#183; same commit as main &#183; hidden for the same reason</span></div>
+            </div>
+          </div>
+          <div class="find">
+            <div class="fitem"><span class="pin">1</span><div><h4>Same name means duplicate</h4><p><code>BranchSwitcher</code> drops a remote branch when <code>localNames.has(name without its remote)</code>. That is only true for the remote the local branch <b>tracks</b>. Every other remote&#8217;s <code>main</code> disappears with it. Branch Switching turn 2c wrote this rule for <code>origin</code>, and it never considered a second remote.</p></div></div>
+            <div class="fitem"><span class="pin">2</span><div><h4>Showing the row would not be enough</h4><p>Picking a remote row runs <code>git switch</code> with the remote prefix stripped, so <code>pwrdisk/main</code> becomes <code>git switch main</code>. That lands on the existing <code>main</code>, still tracking <code>origin</code>. Nothing in the app can move a branch to a different remote.</p></div></div>
+            <div class="fitem"><span class="pin">3</span><div><h4>Where the tracking already shows, it is plain text</h4><p>&#8220;&#183; tracks origin/main&#8221; is the one place the switcher says where <code>main</code> comes from, and it is the natural place to change it. The fix in turn 2 turns that text into a control.</p></div></div>
+          </div>
+        </div>
+        <div class="dv-opts" style="margin-top: 28px;">
+          <div class="dv-opt">
+            <div class="dv-olabel"><span class="dv-oid">1b</span><span>The three <b>main</b>s, read from the checkout (<code>git rev-list --left-right --count</code>)</span></div>
+            <table class="tbl">
+              <tr><th>Before the rename</th><th>After the rename</th><th>Repository</th><th>vs local main, at the first report</th><th>Can push</th></tr>
+              <tr><td class="m">origin/main</td><td class="m">huntharo/main</td><td>huntharo/disktree &#183; the old fork</td><td>same commit, 9b18b27</td><td class="y">yes</td></tr>
+              <tr><td class="m">pwrdisk/main</td><td class="m">origin/main</td><td>pwrdrvr/PwrDisk &#183; fork of tobi/disktree</td><td><b>7 ahead</b>, 0 behind: a fast-forward</td><td class="y">yes</td></tr>
+              <tr><td class="m">upstream/main</td><td class="m">upstream/main</td><td>tobi/disktree &#183; the original</td><td>same commit, 9b18b27</td><td class="n">no</td></tr>
+            </table>
+            <p class="note">The 7 commits are PwrDisk&#8217;s own merged pull requests, #1 to #13, including <b>&#8220;Rename the app to PwrDisk, a maintained fork of disktree (#2)&#8221;</b>. The forge still calls pwrdrvr/PwrDisk a fork of tobi/disktree. Its history says otherwise, and turn 4 depends on that difference.</p>
+          </div>
+        </div>
+        <p class="dv-next">Try next: <b>&#8220;which other surfaces hide a branch by name?&#8221;</b> &#183; <b>&#8220;draw 1a on a repo with five remotes&#8221;</b></p>
+      </section>
+
+      <!-- ============================== TURN 2 ============================== -->
+      <section class="dv-turn" id="t2" data-screen-label="Turn 2 Tracking chip">
+        <div class="dv-thd"><span class="dv-tid">2</span><span class="dv-tname">The row: &#8220;tracks origin/main&#8221; becomes a split chip</span></div>
+        <p class="dv-sub">A remote branch with the same name as a local branch <b>stops being a hidden row and becomes an option in that branch&#8217;s chip</b>. The list stays as quiet as it is today (one row per name), and every remote&#8217;s copy can be reached from it. A remote branch with no local counterpart stays a row with the <code>remote</code> badge, unchanged. The chip is the split control from <code>Sync Split Button</code>, at pill radius and the row&#8217;s mono size. The left zone shows what the branch tracks, and the caret zone opens the choice.</p>
+        <div class="dv-opts">
+          <div class="dv-opt">
+            <div class="dv-olabel"><span class="dv-oid">2a</span><span><b>At rest.</b> Same row, same height. The meta text is now bordered, so it reads as something you can click.</span></div>
+            <div class="stage lt">
+              <div class="ov">
+                <div class="ov-search">
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="6" y1="3" x2="6" y2="15"/><circle cx="18" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><path d="M18 9a9 9 0 0 1-9 9"/></svg>
+                  <span class="ov-q ring">main</span><span class="kbd">esc</span>
+                </div>
+                <div class="ov-res">
+                  <div class="row sel"><span class="dot cur"></span><span class="bn">main</span><span class="trk"><span class="v">tracks <b>origin/main</b></span><span class="c"><svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg></span></span><span class="grow"></span><span class="here">current</span><span class="when">1w</span></div>
+                  <div class="row"><span class="dot"></span><span class="bn">fix/pwrdisk-mark-performance-20261029</span><span class="trk"><span class="v">tracks <b>pwrdisk/main</b></span><span class="c"><svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg></span></span><span class="grow"></span><span class="when">2h 19m</span></div>
+                  <div class="row"><span class="dot"></span><span class="bn">fix/main-mark-performance-20261014</span><span class="trk"><span class="v">tracks <b>origin/fix/main-mark-performance-20261014</b></span><span class="c"><svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg></span></span><span class="grow"></span><span class="when">6d</span></div>
+                </div>
+                <div class="ov-foot"><span>&#8593;&#8595; navigate</span><span>&#8629; switch</span><span>&#8594; tracking</span><span class="grow"></span><span>3 branches</span></div>
+              </div>
+            </div>
+          </div>
+          <div class="dv-opt">
+            <div class="dv-olabel"><span class="dv-oid">2b</span><span><b>Caret open.</b> Every remote that has a <code>main</code>, each compared with the local branch.</span></div>
+            <div class="stage lt" style="padding-bottom: 150px;">
+              <div class="ov">
+                <div class="ov-search">
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="6" y1="3" x2="6" y2="15"/><circle cx="18" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><path d="M18 9a9 9 0 0 1-9 9"/></svg>
+                  <span class="ov-q">main</span><span class="kbd">esc</span>
+                </div>
+                <div class="ov-res">
+                  <div class="row sel"><span class="dot cur"></span><span class="bn">main</span><span class="trk open"><span class="v">tracks <b>origin/main</b></span><span class="c"><svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m18 15-6-6-6 6"/></svg></span></span><span class="grow"></span><span class="here">current</span><span class="when">1w</span></div>
+                  <div class="row"><span class="dot"></span><span class="bn">fix/pwrdisk-mark-performance-20261029</span><span class="grow"></span><span class="when">2h 19m</span></div>
+                  <div class="row"><span class="dot"></span><span class="bn">fix/main-mark-performance-20261014</span><span class="grow"></span><span class="when">6d</span></div>
+                </div>
+                <div class="ov-foot"><span>&#8593;&#8595; remote</span><span>&#8629; review</span><span>&#8592; back</span><span class="grow"></span><span>3 branches</span></div>
+                <div class="rmenu">
+                  <div class="rmh">main tracks</div>
+                  <div class="rmi"><span class="ck"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg></span><span class="rn">origin<small>huntharo/disktree</small></span><span class="rel">same commit</span></div>
+                  <div class="rmi sel"><span></span><span class="rn">pwrdisk<small>pwrdrvr/PwrDisk</small></span><span class="rel ff">&#8595;7 fast-forward</span></div>
+                  <div class="rmi"><span></span><span class="rn">upstream<small>tobi/disktree &#183; you can&#8217;t push</small></span><span class="rel">same commit</span></div>
+                  <div class="rsep"></div>
+                  <div class="rmx">Check out pwrdisk/main as a new branch&#8230;</div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="dv-opts" style="margin-top: 28px;">
+          <div class="dv-opt">
+            <div class="dv-olabel"><span class="dv-oid">2c</span><span><b>Search reaches it.</b> Typing <b>pwrdisk/main</b> matches local <code>main</code> through its chip, already set to pwrdisk.</span></div>
+            <div class="stage lt">
+              <div class="ov">
+                <div class="ov-search">
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="6" y1="3" x2="6" y2="15"/><circle cx="18" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><path d="M18 9a9 9 0 0 1-9 9"/></svg>
+                  <span class="ov-q ring">pwrdisk/main</span><span class="kbd">esc</span>
+                </div>
+                <div class="ov-res">
+                  <div class="row sel"><span class="dot cur"></span><span class="bn">main</span><span class="trk chg"><span class="v">track <b>pwrdisk/main</b></span><span class="c"><svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg></span></span><span class="hint">&#8595;7</span><span class="grow"></span><span class="here">current</span><span class="when">1w</span></div>
+                  <div class="row"><span class="dot"></span><span class="bn">fix/pwrdisk-mark-performance-20261029</span><span class="trk"><span class="v">tracks <b>pwrdisk/main</b></span><span class="c"><svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg></span></span><span class="grow"></span><span class="when">2h 19m</span></div>
+                </div>
+                <div class="ov-foot"><span>&#8593;&#8595; navigate</span><span>&#8629; review tracking change</span><span class="grow"></span><span>2 branches</span></div>
+              </div>
+            </div>
+          </div>
+          <div class="find">
+            <div class="fitem"><span class="pin g">1</span><div><h4>The rule, restated</h4><p>A remote branch is hidden only if a local branch <b>tracks exactly that ref</b>. Otherwise, a same-named remote copy becomes one of the local branch&#8217;s chip options, and a remote branch with no local namesake stays its own row. <code>origin/main</code> is still hidden, and <code>pwrdisk/main</code> and <code>upstream/main</code> are now reachable. The sidebar&#8217;s Remotes preview only <i>ranks</i> by this rule and hides nothing, so it is unaffected.</p></div></div>
+            <div class="fitem"><span class="pin g">2</span><div><h4>A changed chip is visibly changed</h4><p>Chosen but not yet confirmed, the chip goes accent, its verb changes from &#8220;tracks&#8221; to &#8220;track&#8221;, and the count beside it says what would arrive. The footer&#8217;s Enter now says <b>review tracking change</b>. Enter never moves anything. It always opens turn 3&#8217;s review.</p></div></div>
+            <div class="fitem"><span class="pin g">3</span><div><h4>Keyboard</h4><p>The search field keeps focus as it does today. <b>&#8594;</b> opens the selected row&#8217;s chip, <b>&#8593;&#8595;</b> pick a remote, <b>&#8629;</b> reviews it, and <b>&#8592;</b> or <b>esc</b> closes the menu. The shortcut lives in the chip&#8217;s tooltip (&#8220;Track another remote (&#8594;)&#8221;) and the footer, never on the chip.</p></div></div>
+            <div class="fitem"><span class="pin g">4</span><div><h4>The menu&#8217;s relation column</h4><p>The relation column uses the Reset to Remote vocabulary: <b>same commit</b>, <b>&#8595;N fast-forward</b>, <b>&#8593;N you&#8217;re ahead</b>, <b>&#8593;N &#8595;M diverged</b>. These are local reads (<code>rev-list --left-right --count</code> per same-named ref), computed when the menu opens. &#8220;you can&#8217;t push&#8221; comes from the forge identity that already draws the read-only mark.</p></div></div>
+            <div class="fitem"><span class="pin g">5</span><div><h4>Width</h4><p>The panel is <code>min(620px, 92vw)</code>. The branch name shrinks first, as today. Then the chip text steps down from <code>tracks origin/fix/&#8230;</code> to the remote&#8217;s name alone, measured, never by a fixed breakpoint. The caret zone never goes.</p></div></div>
+          </div>
+        </div>
+        <p class="dv-next">Try next: <b>&#8220;draw the chip on a detached HEAD&#8221;</b> &#183; <b>&#8220;what does the chip say for a branch with no upstream?&#8221;</b></p>
+      </section>
+
+      <!-- ============================== TURN 3 ============================== -->
+      <section class="dv-turn" id="t3" data-screen-label="Turn 3 Review step">
+        <div class="dv-thd"><span class="dv-tid">3</span><span class="dv-tname">The review: one step inside the switcher, four shapes</span></div>
+        <p class="dv-sub">Changing what a branch tracks also changes where Pull and Push go, so it always asks. The question replaces the list in the same overlay, and <b>esc</b> goes back to the list rather than out. Its content depends only on how the local branch and the chosen ref relate. Each version says three things: which commits move, where Pull and Push go afterwards, and what happens to uncommitted changes. <b>Nothing is stashed up front</b>. The tip moves with <code>merge --ff-only</code> or <code>reset --keep</code>, which keep uncommitted changes and refuse, touching nothing, when a changed file would be overwritten. Only that refusal opens the existing Bring / Leave prompt (Branch Switching turn 5, <code>src/main/git/AGENTS.md</code>).</p>
+        <div class="dv-opts">
+          <div class="dv-opt">
+            <div class="dv-olabel"><span class="dv-oid">3a</span><span><b>Fast-forward</b>: the first report, exactly. Nothing leaves main.</span></div>
+            <div class="stage lt">
+              <div class="ov">
+                <div class="cf-h"><span class="ib"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m15 18-6-6 6-6"/></svg></span><span class="cf-t">Track <code>pwrdisk/main</code> for <code>main</code></span><span class="kbd">esc</span></div>
+                <div class="cf-b">
+                  <div class="route">
+                    <div class="rt"><div class="k">tracks now</div><div class="r">origin/main</div><div class="s">huntharo/disktree</div></div>
+                    <span class="arr"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12h14"/><path d="m13 6 6 6-6 6"/></svg></span>
+                    <div class="rt to"><div class="k">will track</div><div class="r">pwrdisk/main</div><div class="s">pwrdrvr/PwrDisk</div></div>
+                  </div>
+                  <div class="ledger">
+                    <div class="lg"><div class="num">0</div><div class="lbl">commits leave main. It has none of its own.</div></div>
+                    <div class="lg ok"><div class="num">7</div><div class="lbl">commits arrive &#183; fast-forward to 40b87fb</div></div>
+                  </div>
+                  <div class="cl">
+                    <div class="ci"><span class="h">40b87fb</span><span class="sj">Move to custom window chrome (port of tobi/disktree#107) (#13)</span></div>
+                    <div class="ci"><span class="h">64e5472</span><span class="sj">Show measured macOS service-store usage without access nags (#10)</span></div>
+                    <div class="ci"><span class="h">b59e73a</span><span class="sj">Rename the app to PwrDisk, a maintained fork of disktree (#2)</span></div>
+                    <div class="ci"><span class="h"></span><span class="more">and 4 more</span></div>
+                  </div>
+                  <div class="facts">
+                    <div class="fact"><span class="i"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg></span><span>Pull and Push for <code>main</code> go to <b>pwrdrvr/PwrDisk</b> from now on. You can push there.</span></div>
+                    <div class="fact"><span class="i"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg></span><span>The worktree is clean, so nothing else moves.</span></div>
+                  </div>
+                </div>
+                <div class="cf-f"><span class="cmd">git branch --set-upstream-to=pwrdisk/main main &#183; git merge --ff-only 40b87fb</span><span class="btn">Back</span><span class="btn pri">Track and fast-forward</span></div>
+              </div>
+            </div>
+          </div>
+          <div class="dv-opt">
+            <div class="dv-olabel"><span class="dv-oid">3b</span><span><b>Same commit</b>, and a remote you can&#8217;t push to. Only the tracking changes.</span></div>
+            <div class="stage lt">
+              <div class="ov">
+                <div class="cf-h"><span class="ib"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m15 18-6-6 6-6"/></svg></span><span class="cf-t">Track <code>upstream/main</code> for <code>main</code></span><span class="kbd">esc</span></div>
+                <div class="cf-b">
+                  <div class="route">
+                    <div class="rt"><div class="k">tracks now</div><div class="r">origin/main</div><div class="s">huntharo/disktree</div></div>
+                    <span class="arr"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12h14"/><path d="m13 6 6 6-6 6"/></svg></span>
+                    <div class="rt to"><div class="k">will track</div><div class="r">upstream/main</div><div class="s">tobi/disktree</div></div>
+                  </div>
+                  <div class="ledger">
+                    <div class="lg"><div class="num">0</div><div class="lbl">commits leave main</div></div>
+                    <div class="lg"><div class="num">0</div><div class="lbl">arrive. Already at 9b18b27.</div></div>
+                  </div>
+                  <div class="facts">
+                    <div class="fact w"><span class="i"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 9v4"/><path d="M12 17h.01"/><circle cx="12" cy="12" r="9"/></svg></span><span>You can&#8217;t push to <b>tobi/disktree</b>. Pull would come from there, and Push for <code>main</code> would be refused until you track a fork.</span></div>
+                    <div class="fact"><span class="i"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg></span><span>Nothing in the worktree changes.</span></div>
+                  </div>
+                </div>
+                <div class="cf-f"><span class="cmd">git branch --set-upstream-to=upstream/main main</span><span class="btn">Back</span><span class="btn pri">Track upstream/main</span></div>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="dv-opts" style="margin-top: 28px;">
+          <div class="dv-opt">
+            <div class="dv-olabel"><span class="dv-oid">3c</span><span><b>You&#8217;re ahead</b> (contrived): main has 2 commits pwrdisk/main lacks, both already on origin/main. Keep is the default.</span></div>
+            <div class="stage lt">
+              <div class="ov">
+                <div class="cf-h"><span class="ib"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m15 18-6-6 6-6"/></svg></span><span class="cf-t">Track <code>pwrdisk/main</code> for <code>main</code></span><span class="kbd">esc</span></div>
+                <div class="cf-b">
+                  <div class="ledger">
+                    <div class="lg wn"><div class="num">2</div><div class="lbl">commits on main that pwrdisk/main doesn&#8217;t have. Both are on origin/main.</div></div>
+                    <div class="lg"><div class="num">0</div><div class="lbl">arrive. pwrdisk/main is behind main.</div></div>
+                  </div>
+                  <div class="choices">
+                    <div class="chc on"><span class="rd"></span><div><div class="tt">Keep them on main</div><div class="dd">main stays at a41c09e and is &#8593;2 against pwrdisk/main. Your next Push offers them to pwrdrvr/PwrDisk.</div></div></div>
+                    <div class="chc"><span class="rd"></span><div><div class="tt">Move main back to pwrdisk/main</div><div class="dd">The 2 commits leave main and remain on origin/main (huntharo/disktree).</div></div></div>
+                  </div>
+                  <div class="facts">
+                    <div class="fact"><span class="i"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg></span><span>Pull and Push for <code>main</code> go to <b>pwrdrvr/PwrDisk</b>.</span></div>
+                    <div class="fact"><span class="i"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg></span><span>2 uncommitted files stay where they are.</span></div>
+                  </div>
+                </div>
+                <div class="cf-f"><span class="cmd">git branch --set-upstream-to=pwrdisk/main main</span><span class="btn">Back</span><span class="btn pri">Track and keep my commits</span></div>
+              </div>
+            </div>
+          </div>
+          <div class="dv-opt">
+            <div class="dv-olabel"><span class="dv-oid">3d</span><span><b>Diverged, with work on no remote</b> (contrived). Moving main never just drops a commit.</span></div>
+            <div class="stage lt">
+              <div class="ov">
+                <div class="cf-h"><span class="ib"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m15 18-6-6 6-6"/></svg></span><span class="cf-t">Track <code>pwrdisk/main</code> for <code>main</code></span><span class="kbd">esc</span></div>
+                <div class="cf-b">
+                  <div class="ledger">
+                    <div class="lg bad"><div class="num">1</div><div class="lbl">commit exists only on this machine. It is on no remote.</div></div>
+                    <div class="lg ok"><div class="num">7</div><div class="lbl">commits on pwrdisk/main that main doesn&#8217;t have</div></div>
+                  </div>
+                  <div class="choices">
+                    <div class="chc on"><span class="rd"></span><div><div class="tt">Track it, leave main where it is</div><div class="dd">main is &#8593;1 &#8595;7 against pwrdisk/main. Rebase or merge whenever you&#8217;re ready.</div></div></div>
+                    <div class="chc"><span class="rd"></span><div><div class="tt">Move main to pwrdisk/main, keep a copy</div><div class="dd">Your commit stays on a new branch, <code>main-before-pwrdisk</code>, at c7d2e10.</div></div></div>
+                  </div>
+                </div>
+                <div class="cf-f"><span class="cmd">git branch --set-upstream-to=pwrdisk/main main</span><span class="btn">Back</span><span class="btn pri">Track pwrdisk/main</span></div>
+              </div>
+            </div>
+          </div>
+          <div class="find">
+            <div class="fitem"><span class="pin g">1</span><div><h4>The defaults never lose anything</h4><p>A fast-forward moves by default because nothing can leave. If main is ahead or diverged, the default is <b>track only</b>, and moving the tip is the second choice. 3d has no choice that drops a commit outright. The worst it does is file the commit on a named branch.</p></div></div>
+            <div class="fitem"><span class="pin g">2</span><div><h4>Where the leaving commits still are</h4><p>&#8220;Both are on origin/main&#8221; is <code>rev-list main --not pwrdisk/main</code> checked against every remote-tracking ref. Saying where they live is what makes the second choice in 3c safe to offer.</p></div></div>
+            <div class="fitem"><span class="pin g">3</span><div><h4>It is re-read before it runs</h4><p>As in Reset to Remote, both tips are re-read under the repository lock. If either moved since the review was drawn, it stops with &#8220;main or pwrdisk/main changed. Nothing was changed.&#8221; It runs one operation, not three dispatches from the renderer.</p></div></div>
+            <div class="fitem"><span class="pin g">4</span><div><h4>A branch held by another worktree</h4><p>If you pick a <i>different</i> branch&#8217;s chip and that branch is checked out elsewhere, the tracking change is still allowed. It is config only. A tip move is not, because Git refuses <code>branch -f</code> there. The Move choice then reads &#8220;Open the worktree that has it&#8221;, the same navigation <code>checked_out_elsewhere</code> already does.</p></div></div>
+            <div class="fitem"><span class="pin g">5</span><div><h4>Reused, not rebuilt</h4><p>The route boxes come from Fork Tracking Repair, the ledger from Reset to Remote, and the dirty refusal from <code>guardedSwitchBranch</code>. In main, the tracking change is <code>repairForkTracking</code> generalised to any remote.</p></div></div>
+          </div>
+        </div>
+        <p class="dv-next">Try next: <b>&#8220;draw the dirty refusal from 3a&#8221;</b> &#183; <b>&#8220;what does the receipt say afterwards?&#8221;</b></p>
+      </section>
+
+      <!-- ============================== TURN 4 ============================== -->
+      <section class="dv-turn" id="t4" data-screen-label="Turn 4 Fork that moved on">
+        <div class="dv-thd"><span class="dv-tid">4</span><span class="dv-tname">Pull on a fork that has moved on from its source</span></div>
+        <p class="dv-sub">After the rename, <code>origin</code> is pwrdrvr/PwrDisk, <code>huntharo</code> is the old fork, and <code>upstream</code> is still tobi/disktree. The forge says PwrDisk is a fork of tobi/disktree, so Pull treats <code>main</code> as a mirror. Pull&#8217;s choice on a fork defaults to <b>sync</b> (<code>PULL_CHOICE_DEFAULT</code>): fast-forward from the source, then push the same commits on to the tracked branch. The first Pull after the rename was saved by the fallback (tobi had nothing new and main was behind <code>origin/main</code>, so it pulled origin). The second found main level with <code>origin/main</code>, ran sync, and reported a problem that did not exist.</p>
+        <div class="dv-opts">
+          <div class="dv-opt">
+            <div class="dv-olabel"><span class="dv-oid">4a</span><span><b>As shipped.</b> Recreated from the second report.</span></div>
+            <div class="stage lt">
+              <div class="card">
+                <div class="card-h"><span>Pull &#183; disktree &#183; main</span><span class="tm">1s</span><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18"/></svg></div>
+                <div class="card-sum bad">Fast-forwarded main to upstream/main &#183; 0 commits &#183; origin/main has 7 commits upstream/main doesn&#8217;t, so it was not pushed</div>
+                <div class="steps"><div class="stp"><span class="i"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg></span>Fetched</div><div class="bar"></div><div class="stp"><span class="i"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg></span>Fast-forwarded</div></div>
+                <div class="gout">&#8250; Git output</div>
+                <div class="gbox">Git produced no output.</div>
+                <div class="btns"><span class="btn sm">Logs</span><span class="btn sm">Copy</span><span class="btn sm">Close</span></div>
+              </div>
+            </div>
+          </div>
+          <div class="find">
+            <div class="fitem"><span class="pin">1</span><div><h4>Nothing was wrong</h4><p><code>main</code>, <code>origin/main</code> and the worktree were all at 40b87fb. A no-op was painted in danger red, flashed &#8220;pulled &#183; not pushed&#8221; in warning, and the card stays up until dismissed (<code>forkSyncReceipt</code>&#8217;s <code>stands</code>).</p></div></div>
+            <div class="fitem"><span class="pin">2</span><div><h4>It measured the wrong pair</h4><p>The push-back compares <code>origin/main</code> with the <i>source</i>, not with main. Pushing tobi&#8217;s tip to PwrDisk would force over 7 merged PRs, so it correctly refused, then reported the refusal as if it were the user&#8217;s problem.</p></div></div>
+            <div class="fitem"><span class="pin">3</span><div><h4>The premise is false for this fork</h4><p>A mirror fork&#8217;s <code>main</code> is its source&#8217;s main, maybe a little behind. PwrDisk&#8217;s is tobi&#8217;s main <b>plus 7 merged pull requests of its own</b>. It has become its own project, and the sync model cannot do anything useful for it.</p></div></div>
+            <div class="fitem"><span class="pin">4</span><div><h4>It gets dangerous the day tobi pushes</h4><p>Then main has commits the source lacks and the source has commits main lacks (<code>hasOwnCommits</code>), so Pull &#8220;stops for a rebase review&#8221;. Both offered ends, rebase and reset, rewrite pwrdrvr/PwrDisk&#8217;s published <code>main</code>. Harold&#8217;s ask: <b>don&#8217;t pull, rebase or reset main and push it</b> here.</p></div></div>
+            <div class="fitem"><span class="pin">5</span><div><h4>&#8220;was not pushed&#8221; names no next step</h4><p>There is no button, no explanation of why, and no way to stop it happening on the next Pull.</p></div></div>
+          </div>
+        </div>
+        <div class="dv-opts" style="margin-top: 28px;">
+          <div class="dv-opt">
+            <div class="dv-olabel"><span class="dv-oid">4b</span><span><b>Detect it, from what Pull already reads.</b> No new git and no new IPC: every input is on <code>ForkStatus</code>.</span></div>
+            <table class="tbl" style="width: 900px;">
+              <tr><th style="width: 210px;">Shape of the fork&#8217;s default branch</th><th>Test (ForkStatus)</th><th>disktree now</th><th>Pull should</th></tr>
+              <tr><td><b>Mirror</b>, caught up</td><td class="m">tracked == source</td><td></td><td>sync, as today</td></tr>
+              <tr><td><b>Mirror</b>, behind its source</td><td class="m">pushBack.overwrites == 0, adds &gt; 0</td><td></td><td>sync, as today</td></tr>
+              <tr><td><b>Moved on</b>: the fork carries its own work</td><td class="m">source.behind == 0, pushBack.adds == 0, pushBack.overwrites &gt; 0</td><td class="m">0 &#183; 0 &#183; 7</td><td><b>ask once</b> (4c), then remember</td></tr>
+              <tr><td><b>Both moved</b></td><td class="m">source.ahead &gt; 0, source.behind &gt; 0</td><td></td><td>today: stop for rebase review. On a repository answered &#8220;moved on&#8221;, never offered.</td></tr>
+            </table>
+            <p class="note">The question is asked the first time the <b>moved on</b> shape is seen, and the answer is stored with the existing per-repository pull choice (<code>pull-choice.ts</code>). Pull from origin only is <code>"tracked"</code>, so no new storage is needed. The same question should close the turn 3 flow when a retarget leaves <code>main</code> tracking a fork that is ahead of its source.</p>
+          </div>
+        </div>
+        <div class="dv-opts" style="margin-top: 28px;">
+          <div class="dv-opt">
+            <div class="dv-olabel"><span class="dv-oid">4c</span><span><b>Proposed.</b> The same Pull, the same card. A true summary, then the question.</span></div>
+            <div class="stage lt">
+              <div class="card">
+                <div class="card-h"><span>Pull &#183; disktree &#183; main</span><span class="tm">1s</span><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18"/></svg></div>
+                <div class="card-sum"><code>main</code> is up to date with <code>origin/main</code>.</div>
+                <div class="ask">
+                  <h5>pwrdrvr/PwrDisk has moved on from tobi/disktree</h5>
+                  <p><code>origin/main</code> has everything in <code>upstream/main</code> plus 7 commits of its own, ending in #13. Syncing <code>main</code> from tobi/disktree can&#8217;t bring anything new, and once tobi moves it would rewrite pwrdrvr/PwrDisk&#8217;s <code>main</code>.</p>
+                  <div class="btns"><span class="btn sm pri">Pull from origin only</span><span class="btn sm">Keep syncing from upstream</span></div>
+                  <div class="cap">Remembered for disktree. Change it in the Pull menu.</div>
+                </div>
+                <div class="btns"><span class="btn sm">Logs</span><span class="btn sm">Close</span></div>
+              </div>
+            </div>
+          </div>
+          <div class="dv-opt">
+            <div class="dv-olabel"><span class="dv-oid">4d</span><span><b>The Pull menu afterwards.</b> The same three choices, with origin first because it is the answer.</span></div>
+            <div class="stage lt">
+              <div class="pm">
+                <div class="pmi on"><span class="ck"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg></span><div><div class="tt">Pull <code>origin/main</code></div><div class="dd">Fetch + fast-forward from pwrdrvr/PwrDisk. upstream is never pushed anywhere.</div></div></div>
+                <div class="pmi"><span></span><div><div class="tt">Sync from <code>upstream/main</code></div><div class="dd">Fast-forward to tobi/disktree, then push to origin. For forks that mirror their source.</div></div></div>
+                <div class="pmi"><span></span><div><div class="tt"><code>upstream/main</code> only</div><div class="dd">Fast-forward main to tobi/disktree; origin waits for Push.</div></div></div>
+                <div class="pmn">Watching <code>upstream</code> &#183; tobi/disktree has <b>0</b> commits main doesn&#8217;t. When it has some, the header&#8217;s <code>upstream +N</code> chip says so (it already does: <code>forkDrift</code>).</div>
+              </div>
+            </div>
+          </div>
+          <div class="find">
+            <div class="fitem"><span class="pin g">1</span><div><h4>A sync that finds nothing says so</h4><p>Independent of the question: if the fast-forward brought 0 and main already equals the tracked branch, the receipt is the plain &#8220;up to date&#8221; neutral flash and the card does not stand. That is a small fix to <code>forkSyncReceipt</code>, shippable first.</p></div></div>
+            <div class="fitem"><span class="pin g">2</span><div><h4>The question is about the repository, not this Pull</h4><p>That is why it lives in the card that just showed the problem, is asked once, and then lives in the Pull menu. It does not interrupt the next Pull.</p></div></div>
+            <div class="fitem"><span class="pin g">3</span><div><h4>Upstream work arrives PR by PR, not through Pull</h4><p>Harold&#8217;s plan for a maintained fork: agents evaluate each tobi/disktree pull request and port the ones worth having as PwrDisk PRs. There is no merge or rebase of upstream into <code>main</code>. So the Pull menu offers no upstream operation for a moved-on fork. PwrGit&#8217;s only job is to say that upstream moved: the header&#8217;s <code>upstream +N</code> chip and the menu&#8217;s Watching line.</p></div></div>
+          </div>
+        </div>
+        <p class="dv-next">Try next: <b>&#8220;should upstream +N open tobi&#8217;s new PRs, as the agents&#8217; work list?&#8221;</b> &#183; <b>&#8220;should the sidebar&#8217;s fork mark change for a moved-on fork?&#8221;</b></p>
+      </section>
+
+      <!-- ============================== TURN 5 ============================== -->
+      <section class="dv-turn" id="t5" data-screen-label="Turn 5 Live">
+        <div class="dv-thd"><span class="dv-tid">5</span><span class="dv-tname">Live: switch the shape of pwrdisk/main, open the chip, review</span></div>
+        <p class="dv-sub">Click the chip&#8217;s caret to open the menu, pick a remote, and Review. The scenario sets how <code>pwrdisk/main</code> relates to <code>main</code>. <code>upstream</code> is always the same commit and read-only.</p>
+        <div class="dv-opts">
+          <div class="dv-opt">
+            <div class="segs">
+              <sc-for list="{{ scenarios }}" as="s" hint-placeholder-count="4">
+                <span class="{{ s.cls }}" onClick="{{ s.on }}">{{ s.label }}</span>
+              </sc-for>
+            </div>
+            <div class="stage lt" style="padding-bottom: 150px;">
+              <div class="ov">
+                <sc-if value="{{ isList }}" hint-placeholder-val="{{ true }}">
+                  <div class="ov-search">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="6" y1="3" x2="6" y2="15"/><circle cx="18" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><path d="M18 9a9 9 0 0 1-9 9"/></svg>
+                    <span class="ov-q ph">Switch from main&#8230;</span><span class="kbd">esc</span>
+                  </div>
+                  <div class="ov-res">
+                    <div class="row sel"><span class="dot cur"></span><span class="bn">main</span><span class="{{ chipCls }}"><span class="v">{{ chipVerb }} <b>{{ chipRef }}</b></span><span class="c" onClick="{{ toggleMenu }}" style="cursor: pointer;"><svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg></span></span><span class="hint">{{ chipHint }}</span><span class="grow"></span><span class="here">current</span><span class="when">1w</span></div>
+                    <div class="row"><span class="dot"></span><span class="bn">fix/pwrdisk-mark-performance-20261029</span><span class="grow"></span><span class="when">2h 19m</span></div>
+                    <div class="row"><span class="dot"></span><span class="bn">fix/main-mark-performance-20261014</span><span class="grow"></span><span class="when">6d</span></div>
+                  </div>
+                  <div class="ov-foot"><span>&#8593;&#8595; navigate</span><span>{{ footEnter }}</span><span class="grow"></span><span class="btn sm" onClick="{{ review }}" style="{{ reviewStyle }}">Review</span></div>
+                  <sc-if value="{{ menuOpen }}" hint-placeholder-val="{{ false }}">
+                    <div class="rmenu">
+                      <div class="rmh">main tracks</div>
+                      <sc-for list="{{ remotes }}" as="r" hint-placeholder-count="3">
+                        <div class="{{ r.cls }}" onClick="{{ r.on }}"><span class="ck">{{ r.mark }}</span><span class="rn">{{ r.name }}<small>{{ r.repo }}</small></span><span class="{{ r.relCls }}">{{ r.rel }}</span></div>
+                      </sc-for>
+                    </div>
+                  </sc-if>
+                </sc-if>
+                <sc-if value="{{ isReview }}" hint-placeholder-val="{{ false }}">
+                  <div class="cf-h"><span class="ib" onClick="{{ back }}"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m15 18-6-6 6-6"/></svg></span><span class="cf-t">Track <code>{{ pickRef }}</code> for <code>main</code></span><span class="kbd">esc</span></div>
+                  <div class="cf-b">
+                    <div class="ledger">
+                      <div class="{{ leaveCls }}"><div class="num">{{ leaveNum }}</div><div class="lbl">{{ leaveLbl }}</div></div>
+                      <div class="{{ arriveCls }}"><div class="num">{{ arriveNum }}</div><div class="lbl">{{ arriveLbl }}</div></div>
+                    </div>
+                    <sc-if value="{{ hasChoice }}" hint-placeholder-val="{{ false }}">
+                      <div class="choices">
+                        <sc-for list="{{ choices }}" as="c" hint-placeholder-count="2">
+                          <div class="{{ c.cls }}" onClick="{{ c.on }}"><span class="rd"></span><div><div class="tt">{{ c.t }}</div><div class="dd">{{ c.d }}</div></div></div>
+                        </sc-for>
+                      </div>
+                    </sc-if>
+                    <div class="facts">
+                      <div class="{{ pushCls }}"><span class="i">{{ pushMark }}</span><span>{{ pushText }}</span></div>
+                    </div>
+                  </div>
+                  <div class="cf-f"><span class="cmd">{{ cmd }}</span><span class="btn" onClick="{{ back }}">Back</span><span class="btn pri" onClick="{{ confirm }}">{{ cta }}</span></div>
+                </sc-if>
+                <sc-if value="{{ isDone }}" hint-placeholder-val="{{ false }}">
+                  <div class="done"><div class="t">{{ doneTitle }}</div><div class="d">{{ doneDetail }}</div><div class="btns"><span class="btn sm" onClick="{{ reset }}">Start over</span></div></div>
+                </sc-if>
+              </div>
+            </div>
+          </div>
+        </div>
+        <p class="dv-next">Try next: <b>&#8220;add the dirty-refusal branch to the live prototype&#8221;</b> &#183; <b>&#8220;wire 4c&#8217;s question into the prototype&#8217;s receipt&#8221;</b></p>
+      </section>
+    </x-dc>
+    <script type="text/x-dc" data-dc-script data-props='{}'>
+      class Component extends DCLogic {
+        constructor(props) {
+          super(props);
+          this.state = { sc: "ff", open: false, pick: null, step: "list", keep: "a" };
+        }
+        renderVals() {
+          const st = this.state;
+          const SC = {
+            ff: { label: "Fast-forward", rel: "↓7 fast-forward", relCls: "rel ff", hint: "↓7" },
+            same: { label: "Same commit", rel: "same commit", relCls: "rel", hint: "" },
+            ahead: { label: "You're ahead", rel: "↑2 you're ahead", relCls: "rel dv", hint: "↑2" },
+            div: { label: "Diverged, unpushed", rel: "↑1 ↓7 diverged", relCls: "rel dv", hint: "↑1 ↓7" }
+          };
+          const go = (patch) => this.setState(patch);
+          const scenarios = Object.keys(SC).map((id) => ({
+            label: SC[id].label,
+            cls: id === st.sc ? "seg on" : "seg",
+            on: () => go({ sc: id, open: false, pick: null, step: "list", keep: "a" })
+          }));
+          const cur = SC[st.sc];
+          const remotes = [
+            { id: "origin", name: "origin", repo: "huntharo/disktree", rel: "same commit", relCls: "rel" },
+            { id: "pwrdisk", name: "pwrdisk", repo: "pwrdrvr/PwrDisk", rel: cur.rel, relCls: cur.relCls },
+            { id: "upstream", name: "upstream", repo: "tobi/disktree · you can't push", rel: "same commit", relCls: "rel" }
+          ].map((r) => ({
+            ...r,
+            mark: r.id === "origin" ? "✓" : "",
+            cls: r.id === (st.pick || "origin") ? "rmi sel" : "rmi",
+            on: () => go({ pick: r.id === "origin" ? null : r.id, open: false })
+          }));
+          const pick = st.pick;
+          const pickRef = pick ? pick + "/main" : "origin/main";
+          const pickRepo = pick === "upstream" ? "tobi/disktree" : "pwrdrvr/PwrDisk";
+          // what the review shows, per remote and scenario
+          let shape = pick === "upstream" ? "same" : st.sc;
+          let leaveNum = "0", leaveLbl = "commits leave main", leaveCls = "lg";
+          let arriveNum = "0", arriveLbl = "arrive. Already the same commit.", arriveCls = "lg";
+          let choices = [], cta = "Track " + pickRef, cmd = "git branch --set-upstream-to=" + pickRef + " main";
+          if (shape === "ff") {
+            leaveLbl = "commits leave main. It has none of its own.";
+            arriveNum = "7"; arriveLbl = "commits arrive · fast-forward to 40b87fb"; arriveCls = "lg ok";
+            cta = "Track and fast-forward"; cmd += " · git merge --ff-only 40b87fb";
+          } else if (shape === "ahead") {
+            leaveNum = "2"; leaveCls = "lg wn"; leaveLbl = "commits on main that pwrdisk/main doesn't have. Both are on origin/main.";
+            arriveLbl = "arrive. pwrdisk/main is behind main.";
+            choices = [
+              { id: "a", t: "Keep them on main", d: "main stays put and is ↑2 against pwrdisk/main. Your next Push offers them to pwrdrvr/PwrDisk." },
+              { id: "b", t: "Move main back to pwrdisk/main", d: "The 2 commits leave main and remain on origin/main (huntharo/disktree)." }
+            ];
+            cta = st.keep === "a" ? "Track and keep my commits" : "Track and move main";
+            if (st.keep === "b") cmd += " · git reset --keep pwrdisk/main";
+          } else if (shape === "div") {
+            leaveNum = "1"; leaveCls = "lg bad"; leaveLbl = "commit exists only on this machine. It is on no remote.";
+            arriveNum = "7"; arriveCls = "lg ok"; arriveLbl = "commits on pwrdisk/main that main doesn't have";
+            choices = [
+              { id: "a", t: "Track it, leave main where it is", d: "main is ↑1 ↓7 against pwrdisk/main. Rebase or merge whenever you're ready." },
+              { id: "b", t: "Move main to pwrdisk/main, keep a copy", d: "Your commit stays on a new branch, main-before-pwrdisk." }
+            ];
+            cta = st.keep === "a" ? "Track pwrdisk/main" : "Keep a copy and move main";
+            if (st.keep === "b") cmd = "git branch main-before-pwrdisk main · " + cmd + " · git reset --keep pwrdisk/main";
+          }
+          const readOnly = pick === "upstream";
+          const doneMap = {
+            ff: ["main tracks pwrdisk/main", "Fast-forwarded 7 commits. Pull and Push go to pwrdrvr/PwrDisk."],
+            same: ["main tracks " + pickRef, "No commits moved. Pull and Push go to " + pickRepo + "."],
+            ahead: ["main tracks pwrdisk/main", st.keep === "a" ? "main kept its 2 commits and is ↑2. Push when ready." : "main moved to pwrdisk/main. The 2 commits remain on origin/main."],
+            div: ["main tracks pwrdisk/main", st.keep === "a" ? "main is ↑1 ↓7. Nothing moved." : "Your commit is on main-before-pwrdisk. main is at pwrdisk/main."]
+          };
+          const done = doneMap[shape];
+          return {
+            scenarios,
+            remotes,
+            isList: st.step === "list",
+            isReview: st.step === "review",
+            isDone: st.step === "done",
+            menuOpen: st.open,
+            toggleMenu: () => go({ open: !st.open }),
+            chipCls: pick ? "trk chg" : st.open ? "trk open" : "trk",
+            chipVerb: pick ? "track" : "tracks",
+            chipRef: pickRef,
+            chipHint: pick === "pwrdisk" ? cur.hint : "",
+            footEnter: pick ? "↵ review tracking change" : "↵ switch",
+            reviewStyle: pick ? "" : "opacity: 0.4; pointer-events: none;",
+            review: () => { if (pick) go({ step: "review", open: false, keep: "a" }); },
+            back: () => go({ step: "list" }),
+            pickRef,
+            leaveNum, leaveLbl, leaveCls, arriveNum, arriveLbl, arriveCls,
+            hasChoice: choices.length > 0,
+            choices: choices.map((c) => ({ ...c, cls: c.id === st.keep ? "chc on" : "chc", on: () => go({ keep: c.id }) })),
+            pushCls: readOnly ? "fact w" : "fact",
+            pushMark: readOnly ? "!" : "✓",
+            pushText: readOnly
+              ? "You can't push to tobi/disktree. Push for main would be refused until you track a fork."
+              : "Pull and Push for main go to " + pickRepo + " from now on.",
+            cmd,
+            cta,
+            confirm: () => go({ step: "done" }),
+            doneTitle: done[0],
+            doneDetail: done[1],
+            reset: () => go({ open: false, pick: null, step: "list", keep: "a" })
+          };
+        }
+      }
+    </script>
+  </body>
+</html>

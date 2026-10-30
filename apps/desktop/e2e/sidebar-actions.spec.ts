@@ -57,23 +57,29 @@ test("the toolbar is one row and stays put above a long scrolling repo list", as
     )
     .toBeLessThanOrEqual(620);
 
-  // One row: Add, Fetch all, Pull all and the wrench share a top edge and a
+  // One row: Add, the sync button and the wrench share a top edge and a
   // height, and the row is no taller than one button plus its padding. This is
   // what replaced five rows in four styles (design/Sidebar Header Toolbar -
   // UX Review.dc.html, 2b).
   const geometry = await window.evaluate(() => {
     const row = document.querySelector(".sidebar-toolbar");
     if (row === null) throw new Error("missing .sidebar-toolbar");
-    const buttons = [...row.querySelectorAll("button")].map((button) =>
-      button.getBoundingClientRect()
-    );
+    // Measure what is drawn: the row's own children. The sync button is one
+    // bordered box (`.sidebar-toolbar__split`) whose two halves sit inside
+    // its border, so their boxes are 1px in from Add's and the wrench's.
+    const boxes = [...row.children]
+      .filter((child) => child instanceof HTMLElement && child.offsetParent !== null)
+      .map((child) => child.getBoundingClientRect());
     return {
-      count: buttons.length,
-      tops: [...new Set(buttons.map((box) => Math.round(box.top)))],
-      heights: [...new Set(buttons.map((box) => Math.round(box.height)))],
+      count: row.querySelectorAll("button").length,
+      tops: [...new Set(boxes.map((box) => Math.round(box.top)))],
+      heights: [...new Set(boxes.map((box) => Math.round(box.height)))],
       rowHeight: Math.round(row.getBoundingClientRect().height)
     };
   });
+  // Four buttons: Add, the sync button's face and its chevron ("Sync
+  // options", two buttons drawn as one; Pull is a choice on it), and the
+  // wrench. design/Fetch Toast and Scope - UX Review.dc.html, turn 5.
   expect(geometry.count).toBe(4);
   expect(geometry.tops).toHaveLength(1);
   expect(geometry.heights).toHaveLength(1);

@@ -5,6 +5,7 @@ import {
   HOT_CPU_HEAP_SNAPSHOT_LIMIT_MAX,
   isAppearanceTheme,
   isBranchCleanupKeepDays,
+  isWorktreeFinishedAfterDays,
   isHotCpuStartDelayMs,
   isHotCpuTriggerMode,
   isSidebarDensity,
@@ -107,6 +108,15 @@ function sanitizePatch(patch: AppSettingsPatch): {
       isBranchCleanupKeepDays(gen.branchCleanupKeepDays)
     ) {
       general.branchCleanupKeepDays = gen.branchCleanupKeepDays;
+    }
+    if (
+      gen.worktreeCleanupKeepDays === null ||
+      isBranchCleanupKeepDays(gen.worktreeCleanupKeepDays)
+    ) {
+      general.worktreeCleanupKeepDays = gen.worktreeCleanupKeepDays;
+    }
+    if (isWorktreeFinishedAfterDays(gen.worktreeFinishedAfterDays)) {
+      general.worktreeFinishedAfterDays = gen.worktreeFinishedAfterDays;
     }
     // Narrow to the known notches: these cross IPC as plain strings and end up
     // stamped on <html>, so an unvalidated value would ship an attribute no

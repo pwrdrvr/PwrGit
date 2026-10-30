@@ -492,7 +492,8 @@ describe("maintenance lifecycle and profile scope", () => {
       );
       expect(emitEvent).toHaveBeenCalledWith("graph:changed", { repoId: "a" });
       expect(emitEvent).toHaveBeenCalledWith("repo:changed", {
-        profileId: "one"
+        profileId: "one",
+        repoIds: ["a"]
       });
     }
   );

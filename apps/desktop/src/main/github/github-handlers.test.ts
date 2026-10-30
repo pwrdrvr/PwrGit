@@ -37,7 +37,7 @@ describe("github:hydrateCommitAuthorIdentities handler", () => {
       }))
     } as unknown as GitHubCommitAuthorIdentityService;
     const bus = new CommandBus();
-    registerGitHubHandlers(bus, {} as PrService, identities);
+    registerGitHubHandlers(bus, ({ onCommitsChanged: () => () => undefined } as unknown as PrService), identities);
 
     const secondHash = "fedcba9876543210fedcba9876543210fedcba98";
     const dispatched = bus.dispatch("github:hydrateCommitAuthorIdentities", {
@@ -128,7 +128,7 @@ describe("github:hydrateCommitAuthorIdentities handler", () => {
       })
     } as unknown as GitHubCommitAuthorIdentityService;
     const bus = new CommandBus();
-    registerGitHubHandlers(bus, {} as PrService, identities);
+    registerGitHubHandlers(bus, ({ onCommitsChanged: () => () => undefined } as unknown as PrService), identities);
 
     await expect(bus.dispatch("github:hydrateCommitAuthorIdentities", {
       worktreeId: request.worktreeId,
@@ -171,7 +171,7 @@ describe("github:hydrateCommitAuthorIdentities handler", () => {
       }))
     } as unknown as GitHubCommitAuthorIdentityService;
     const bus = new CommandBus();
-    registerGitHubHandlers(bus, {} as PrService, identities);
+    registerGitHubHandlers(bus, ({ onCommitsChanged: () => () => undefined } as unknown as PrService), identities);
 
     await expect(bus.dispatch("github:hydrateCommitAuthorIdentities", {
       worktreeId: request.worktreeId,
@@ -214,7 +214,7 @@ describe("people:replaceInterest handler", () => {
     vi.useFakeTimers();
     const identities = peopleIdentities();
     const bus = new CommandBus();
-    const handlers = registerGitHubHandlers(bus, {} as PrService, identities);
+    const handlers = registerGitHubHandlers(bus, ({ onCommitsChanged: () => () => undefined } as unknown as PrService), identities);
 
     await expect(bus.dispatch(
       "people:replaceInterest",
@@ -236,7 +236,7 @@ describe("people:replaceInterest handler", () => {
   it("needs a window to own the interest", async () => {
     const identities = peopleIdentities();
     const bus = new CommandBus();
-    const handlers = registerGitHubHandlers(bus, {} as PrService, identities);
+    const handlers = registerGitHubHandlers(bus, ({ onCommitsChanged: () => () => undefined } as unknown as PrService), identities);
 
     await expect(bus.dispatch("people:replaceInterest", {
       worktreeId: request.worktreeId,
@@ -251,7 +251,7 @@ describe("people:replaceInterest handler", () => {
     vi.useFakeTimers();
     const identities = peopleIdentities();
     const bus = new CommandBus();
-    const handlers = registerGitHubHandlers(bus, {} as PrService, identities);
+    const handlers = registerGitHubHandlers(bus, ({ onCommitsChanged: () => () => undefined } as unknown as PrService), identities);
 
     await bus.dispatch(
       "people:replaceInterest",
@@ -282,6 +282,7 @@ describe("PR monitor renderer ownership", () => {
       finishRefresh = resolve;
     });
     const prs = {
+      onCommitsChanged: () => () => undefined,
       ownsWorktree: () => true,
       cachedCommitPrs: (_repoId: string, hashes: string[]) =>
         new Map(hashes.map((commitHash) => [commitHash, pullRequest])),
@@ -325,6 +326,7 @@ describe("PR monitor renderer ownership", () => {
       commits: new Map()
     }));
     const prs = {
+      onCommitsChanged: () => () => undefined,
       ownsWorktree: () => true,
       cachedCommitPrs: (_repoId: string, hashes: string[]) =>
         new Map(hashes.map((commitHash) => [commitHash, pullRequest])),

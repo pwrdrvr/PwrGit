@@ -47,6 +47,12 @@ export type PwrGitError = {
   detail?: string;
   /** Present only when trace2 proves a hook refused this Git operation. */
   hook?: HookRun;
+  /**
+   * The files Git named when it refused, for a refusal about particular files
+   * (`switch_would_overwrite`: the local changes a checkout would overwrite).
+   * Parsed from Git's own list, so the reader sees exactly what Git meant.
+   */
+  paths?: string[];
   cause?: unknown;
 };
 

@@ -12,6 +12,9 @@ overrides:
 # Ignore machine-local hooks so every install hashes only .pnpmfile.cjs.
 globalPnpmfile: null
 
+# Completed CI trees must use portable files and relative workspace links.
+packageImportMethod: auto
+
 # Dependencies that need their build scripts to run during install.
 allowBuilds:
   # v13 ships Node-API binaries. pnpm otherwise infers `node-gyp rebuild` from

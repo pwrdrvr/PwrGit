@@ -55,33 +55,65 @@ repositories after rotation. See the distribution runbook for exact checks.
 | `preview-build.yml` | `build-preview` PR label | Unsigned macOS universal + arm64 DMGs and updater ZIPs (macOS 26/Xcode 26) + Windows NSIS installer, uploaded as workflow artifacts. |
 | `release.yml` | `v*` tag push, manual dispatch with a tag, or `ci:linux-packages` / `ci:windows-signing` PR label | Tests and stages via `apps/desktop/scripts/release.mjs`. Tagged runs gate GitHub Pre-release creation on native Linux package/runtime validation, signed/notarized macOS (macOS 26/Xcode 26), and Azure-signed Windows. On same-repo PRs every job skips unless a label opts in: `ci:linux-packages` validates Linux packages on both CPUs and `ci:windows-signing` runs the real Windows signing path; both upload artifacts only. |
 
+## Dependency caches
+
+All dependency jobs pin configure-nodejs v1.7.1 to
+`d416c1c78119b25fe03ee3ef78b75af0d69b10a7` and use the integrity-pinned pnpm
+release in `package.json`. pnpm 12.13.0 includes the macOS pnpmfile worker
+pipe-inheritance fix ([pnpm #16871](https://github.com/pnpm/pnpm/pull/16871)).
+
+| Jobs | Mode | Installation behavior |
+| --- | --- | --- |
+| Linux/Windows/macOS CI install gates | Completed tree, `populate` | Exact hit probes only; miss frozen-installs with lifecycle scripts, validates inputs/lock bytes and saves inline. |
+| Linux/Windows/macOS CI lint, build, test and E2E | Completed tree, `restore` | Exact restore and Node ABI validation; missing/incompatible trees fail without installing. |
+| Release, preview, docs screenshots and opt-in check benchmark | Default download store | Frozen-installs with lifecycle scripts on every run; caches Electron downloads too. |
+
+Completed trees use the same action SHA, Node version, policy suffix and explicit
+`cache-inputs` in every producer/consumer pair. The action also hashes lockfile
+bytes, workspace manifests/config and `.pnpmfile.cjs`. Extra inputs cover
+`.nvmrc`, the preinstall guard, Electron downloader, SQLite staging scripts and
+the Linux sandbox warning's imported helper. OS, architecture, stable image
+family, Node major/ABI and exact pnpm pin remain compatibility boundaries.
+`packageImportMethod: auto` keeps materialized files portable. No prefix fallback
+or shared `node_modules` links are used.
+
+The action revision excludes nested `node_modules` matches from the archive
+manifest before tar runs. Each workspace dependency root is archived recursively
+once, preserving its relative package links and native files. This avoids tar
+directory/hard-link failures when the cache glob visits pnpm symlink aliases.
+The Windows restore codec also preserves producer-recorded directory-link types
+when GNU tar restores a directory alias with a file-link flag. It validates
+existing sources and internal targets after key/ABI checks; missing or changed
+links fail. No tar overrides or dependency installs are required.
+
+Consumers disable pnpm's implicit dependency verification/install before
+`pnpm run`. They rebuild the MCP server's `prepare` output from current sources
+because `packages/mcp-server/dist` is outside the archived dependency trees.
+The existing SQLite native guards remain in unit-test jobs. A producer still
+runs the full install lifecycle on a miss; no install uses `--ignore-scripts`.
+
+Every workflow runs on GitHub-hosted runners, which are free for this public
+repository. The self-hosted Tart pool shared with PwrAgnt is no longer used.
+
 ## macOS desktop E2E
 
-Four shards run on the same self-hosted ARM64 Tart pool as PwrAgnt, selected
-by `[self-hosted, macOS, ARM64, pwrdrvr-macos]`. Add `pwrdrvr/PwrGit` to that
-organization runner group's selected repositories before enabling the jobs;
-otherwise they remain queued. Guests need a logged-in desktop session.
-The hosted `macos-26` install job primes the matching macOS/ARM64 cache.
+Four shards run on hosted `macos-26` (ARM64), restoring the completed tree
+that `macos-install-deps` produces, like the Windows lane. Hosted macOS
+runners have a logged-in desktop session.
 
-Mac jobs run on main pushes and code-impacting same-repository PRs. Fork PRs
-skip both Mac jobs so untrusted fork code never reaches the persistent guests.
+Mac jobs run on main pushes and every code-impacting PR, forks included.
 The required `Desktop E2E` check is the `desktop-e2e-result` aggregate, not
-any one platform job. It requires all Linux shards, all Windows shards, and —
-for eligible runs — all Mac shards. A fork PR is the one exception: the Mac
-lane is not scheduled there, so the aggregate records a warning that macOS
-coverage is unverified and passes on the other two. Every other missing result,
-a `skipped` from a broken install job included, fails the check.
+any one platform job. It requires all Linux, macOS and Windows shards; any
+other result, a `skipped` from a broken install job included, fails the check.
 
 Adding a platform to the gate is a change to that job's `needs`, not to branch
 protection: the ruleset names only `Desktop E2E`, so the context stays valid.
 Do not add per-shard job names as required checks — they bind the ruleset to
-the matrix size, and a skipped job satisfies a required check, so a fork-guarded
+the matrix size, and a skipped job satisfies a required check, so a skipped
 lane would gate nothing.
 
 Each shard uses one Playwright worker and uploads its own artifacts. The Mac
-lane uses software rendering to avoid Tart virtual GPU resets and clears
-workspace-scoped orphaned Electron processes plus dev Electron saved window
-state before testing, following PwrAgnt's persistent-runner cleanup.
+lane uses software rendering to avoid virtual GPU resets in the runner VM.
 
 ## macOS Icon Composer runner
 
@@ -136,8 +168,8 @@ Keep label names namespaced when they start, skip, or narrow CI work.
 
 `ci:benchmark-checks` opts same-repo PRs into `check-performance.yml`: three
 paired TS6/TS7 samples of identical typecheck and full-lint commands on one
-self-hosted Mac. Artifacts record revisions, source inventories, injected defect
-rejection, versions, load and RSS. Caches are warm; do not compare runners or
+hosted `macos-26` runner. Artifacts record revisions, source inventories, injected defect
+rejection, versions, load and RSS. Do not compare runners or
 interpret process RSS as LSP memory. Fork PRs cannot run this workflow.
 
 If you add another label-influenced workflow path, document it here in the same

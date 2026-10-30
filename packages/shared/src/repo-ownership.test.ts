@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { Repo, Worktree } from "@pwrgit/shared";
+import type { Repo, Worktree } from "./types";
 import { claimWorktreeOwnership } from "./repo-ownership";
 
 const wt = (id: string, path: string, isPrimary: boolean): Worktree => ({

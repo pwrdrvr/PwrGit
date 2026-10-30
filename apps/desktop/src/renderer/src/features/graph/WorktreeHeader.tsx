@@ -5,6 +5,13 @@ import {
   type ReactNode,
   type RefObject
 } from "react";
+import {
+  ASSUMED_FORGE_KIND,
+  changeRequestNoun,
+  changeRequestSigil,
+  landedChangeRequest,
+  type PrSummary
+} from "@pwrgit/shared";
 import type {
   RepositorySetup,
   ForkSourceTarget,
@@ -35,7 +42,15 @@ import { WorktreeMenu } from "../shell/WorktreeMenu";
 import { GitLfsChip } from "./GitLfsChip";
 import { PullDivergenceDialog } from "./PullDivergenceDialog";
 import { PullMenu, type PullMenuRow } from "./PullMenu";
-import { readPullChoice, writePullChoice, type PullChoice } from "./pull-choice";
+import {
+  forkMovedOn,
+  readMovedOnAnswer,
+  readPullChoice,
+  writeMovedOnAnswer,
+  writePullChoice,
+  type MovedOnAnswer,
+  type PullChoice
+} from "./pull-choice";
 import { openResetToRemote } from "./reset-to-remote";
 import { SshRemoteRecoveryDialog } from "./SshRemoteRecoveryDialog";
 import { ForkCheckoutDialog } from "../sidebar/ForkCheckoutDialog";
@@ -109,6 +124,16 @@ function baseChip(
   if (fromSource !== null) return fromSource;
   if (state === null) return { text: "…", tone: "muted" };
   if (!state.hasUpstream) {
+    const landed = landedFor(state, worktree);
+    if (landed !== null) {
+      const ref = `${changeRequestSigil(landed.forge ?? ASSUMED_FORGE_KIND)}${landed.number}`;
+      return {
+        text: `landed in ${ref}`,
+        tone: "muted",
+        mid: `landed ${ref}`,
+        short: "landed"
+      };
+    }
     return state.ahead > 0
       ? { text: `↑${state.ahead} local · no upstream`, tone: "ok", mid: `↑${state.ahead} local` }
       : { text: "no upstream", tone: "muted" };
@@ -133,6 +158,25 @@ function baseChip(
 }
 
 /**
+ * The merged change request a no-upstream branch's tip IS, from the shared
+ * predicate the sidebar row also asks. Its commits are on no remote ref once
+ * the change request's branch is deleted, so `ahead` counts them as local
+ * work; this is what says they landed. The head is the live snapshot's when
+ * it is this worktree's, else the row's.
+ */
+function landedFor(
+  state: WorktreeState | null,
+  worktree: Worktree
+): PrSummary | null {
+  const live = state?.worktreeId === worktree.id ? state : null;
+  return landedChangeRequest(
+    worktree.pr,
+    live?.head ?? worktree.head,
+    live?.hasUpstream ?? worktree.tracking !== "unpublished"
+  );
+}
+
+/**
  * The chip's tooltip at rest: the state in words, and on a fork, which
  * repository `upstream` is — the chip alone never said.
  */
@@ -141,7 +185,8 @@ function chipExplanation(
   fork: Pick<ForkStatus, "tracked"> & {
     source: (SourceCounts & { label: string; parent?: string }) | null;
   } | null,
-  branch: string
+  branch: string,
+  landed: PrSummary | null = null
 ): string | undefined {
   const source = fork?.source ?? null;
   if (source !== null && source.behind > 0) {
@@ -163,6 +208,16 @@ function chipExplanation(
     return `${who} ${branch} is ${commits(source.behind)} behind ${source.label}.${own}${trackedLine}`;
   }
   if (state === null) return undefined;
+  if (!state.hasUpstream && landed !== null) {
+    const kind = landed.forge ?? ASSUMED_FORGE_KIND;
+    const name = `${changeRequestNoun(kind)} ${changeRequestSigil(kind)}${landed.number}`;
+    if (state.ahead === 0) {
+      return `${branch} is ${name}'s head, which was merged. ${branch} has no upstream configured.`;
+    }
+    return state.ahead === 1
+      ? `This commit is ${name}'s head, which was merged. Its remote branch is gone, so no remote branch holds it.`
+      : `These ${commits(state.ahead)} are ${name}'s head, which was merged. Its remote branch is gone, so no remote branch holds them.`;
+  }
   if (!state.hasUpstream) {
     const local = state.ahead > 0
       ? `${commits(state.ahead)} not on fetched remote branches. ` : "";
@@ -297,10 +352,17 @@ function pullMenuRows(
     pick: (choice: PullChoice) => void;
     rebase: () => void;
     reset: () => void;
-  }
+  },
+  /** The fork has moved on from the original (`forkMovedOn`), and what the
+   *  user said when asked. */
+  movedOn: { now: boolean; answer: MovedOnAnswer | null } = { now: false, answer: null }
 ): { note?: ReactNode; actions: PullMenuRow[]; choices: PullMenuRow[] } {
   const { branch, source, tracked } = fork;
   const own = hasOwnCommits(fork);
+  // A fork that went its own way pulls from itself; the original's work comes
+  // in some other way (ported PR by PR), so the menu leads with the fork and,
+  // once that was the answer, offers nothing that rewrites onto the original.
+  const ownProject = movedOn.answer === "tracked";
   const stops = (
     <>
       <code>{branch}</code> has commits of its own, so this stops for the
@@ -388,6 +450,26 @@ function pullMenuRows(
       onSelect: () => on.pick("tracked")
     }
   ];
+  if (ownProject || movedOn.now) {
+    const [sync, src, mine] = choices;
+    if (sync !== undefined && src !== undefined && mine !== undefined) {
+      choices.splice(0, 3, mine, sync, src);
+    }
+  }
+  if (ownProject) {
+    return {
+      note: (
+        <>
+          Watching <code>{source.label}</code> ·{" "}
+          {source.behind > 0
+            ? `${repos.original} has ${commits(source.behind)} ${branch} doesn't`
+            : `nothing new on ${repos.original}`}
+        </>
+      ),
+      actions: [],
+      choices
+    };
+  }
   if (!own) return { actions: [], choices };
   const pushes = choice !== "source";
   return {
@@ -463,6 +545,21 @@ function forkSyncReceipt(
 ): { summary: string; flash: Chip; stands: boolean } {
   const moved = `Fast-forwarded ${branch} to ${outcome.source} · ${commits(outcome.arrived)}`;
   const { push } = outcome;
+  // Nothing arrived and the fork's branch is ahead of the source: the sync had
+  // nothing to do, and holding back a push it never had a reason to make is
+  // not a problem to stand a red card over. A fork that moved on looks like
+  // this on every Pull; the header asks about it separately.
+  if (
+    outcome.arrived === 0 &&
+    push.outcome === "diverged" &&
+    !outcome.reappliedWithConflicts
+  ) {
+    return {
+      summary: `${branch} is up to date with ${outcome.source} · ${push.remote}/${push.branch} has ${commits(push.overwrites)} it doesn't`,
+      flash: { text: "up to date", tone: "ok" },
+      stands: false
+    };
+  }
   let summary = moved;
   let pushFailed = false;
   let notPushed = false;
@@ -669,8 +766,13 @@ export function WorktreeHeader({
   const [pullChoice, setPullChoice] = useState<PullChoice>(() =>
     readPullChoice(repo.id)
   );
+  /** Asked once per repository when its fork has moved on from the original. */
+  const [movedOnAnswer, setMovedOnAnswer] = useState<MovedOnAnswer | null>(() =>
+    readMovedOnAnswer(repo.id)
+  );
   useEffect(() => {
     setPullChoice(readPullChoice(repo.id));
+    setMovedOnAnswer(readMovedOnAnswer(repo.id));
   }, [repo.id]);
 
   // Header instances stay mounted while selection changes, so an operation
@@ -942,7 +1044,8 @@ export function WorktreeHeader({
       "Fetch"
     );
   };
-  const onPull = (): void => {
+  /** `prompt` rides on a success's receipt: the moved-on question. */
+  const onPull = (prompt?: ReactNode): void => {
     const worktreeId = id;
     const current = beginOperation(worktreeId);
     setBusy("pull");
@@ -998,7 +1101,11 @@ export function WorktreeHeader({
         });
       } else {
         showFlash({ text: "fast-forwarded", tone: "ok" }, 1600);
-        status.settle({ status: "ok", summary: "Fast-forwarded" });
+        status.settle({
+          status: "ok",
+          summary: "Fast-forwarded",
+          ...(prompt === undefined ? {} : { prompt })
+        });
       }
     });
   };
@@ -1052,7 +1159,7 @@ export function WorktreeHeader({
    * gets there: the dialog that compares the two histories, aimed at the
    * source.
    */
-  const onSyncFork = (fork: ForkChoice, push: boolean): void => {
+  const onSyncFork = (fork: ForkChoice, push: boolean, prompt?: ReactNode): void => {
     const worktreeId = id;
     const current = beginOperation(worktreeId);
     setBusy("pull");
@@ -1096,7 +1203,8 @@ export function WorktreeHeader({
       showFlash(receipt.flash, receipt.stands ? 4000 : 2400);
       status.settle({
         status: receipt.stands ? "error" : "ok",
-        summary: receipt.summary
+        summary: receipt.summary,
+        ...(prompt === undefined || receipt.stands ? {} : { prompt })
       });
     });
   };
@@ -1474,11 +1582,16 @@ export function WorktreeHeader({
   // has nothing new, that is the tracked branch — the same fallback the
   // status chip makes — and a fast-forward to the source would pull nothing
   // while the chip counts commits waiting on `origin/main`.
+  // A fork that moved on from the original has nothing to sync from it, so
+  // Pull reads the fork's own branch until the user says to keep syncing.
+  // Design: `design/Tracking Another Remote - UX Review.dc.html`, turn 4.
+  const movedOn = forkChoice !== null && forkMovedOn(forkChoice.source);
   const runs: PullChoice =
-    choice === "sync" &&
-    split &&
-    (shownSource?.behind ?? 0) === 0 &&
-    behind > 0
+    (movedOn && movedOnAnswer !== "sync") ||
+    (choice === "sync" &&
+      split &&
+      (shownSource?.behind ?? 0) === 0 &&
+      behind > 0)
       ? "tracked"
       : choice;
   // The accent says pulling has something to do, so it follows what Pull
@@ -1506,8 +1619,65 @@ export function WorktreeHeader({
       return;
     }
     if (from !== null) pinStatus("pull", from);
-    if (forkChoice === null || run === "tracked") onPull();
-    else onSyncFork(forkChoice, run === "sync");
+    const prompt =
+      movedOn && movedOnAnswer === null && forkChoice !== null
+        ? movedOnPrompt(forkChoice)
+        : undefined;
+    if (forkChoice === null || run === "tracked") onPull(prompt);
+    else onSyncFork(forkChoice, run === "sync", prompt);
+  };
+  /** Names for the two repositories, as the Pull menu's routes print them. */
+  const repoNames = (fork: ForkChoice): { original: string; fork: string } => ({
+    original: fork.source.parent ?? fork.source.remote,
+    // `identity` is about origin, so it names the fork only when the
+    // branch follows origin and the forge called origin a fork.
+    fork:
+      fork.tracked.remote === "origin" && repo.identity?.parent !== undefined
+        ? repo.identity.nameWithOwner
+        : fork.tracked.remote
+  });
+  const answerMovedOn = (answer: MovedOnAnswer): void => {
+    writeMovedOnAnswer(repo.id, answer);
+    setMovedOnAnswer(answer);
+    if (answer === "tracked") {
+      setPullChoice("tracked");
+      writePullChoice(repo.id, "tracked");
+    }
+    status.dismiss();
+  };
+  /** The question, asked once, in the card of the Pull that showed it. */
+  const movedOnPrompt = (fork: ForkChoice): ReactNode => {
+    const names = repoNames(fork);
+    const ahead = fork.source.pushBack?.overwrites ?? 0;
+    return (
+      <div className="pull-moved-on" role="group" aria-label="Your fork has moved on">
+        <p className="pull-moved-on__text">
+          <b>{names.fork}</b> has moved on from <b>{names.original}</b>.{" "}
+          <code>{fork.tracked.label}</code> has {commits(ahead)}{" "}
+          <code>{fork.source.label}</code> doesn't, and there is nothing new
+          there to bring in.
+        </p>
+        <div className="remote-activity__actions pull-moved-on__actions">
+          <button
+            type="button"
+            className="remote-activity__button remote-activity__button--primary"
+            onClick={() => answerMovedOn("tracked")}
+          >
+            Pull from {fork.tracked.remote} only
+          </button>
+          <button
+            type="button"
+            className="remote-activity__button"
+            onClick={() => answerMovedOn("sync")}
+          >
+            Keep syncing
+          </button>
+        </div>
+        <p className="pull-moved-on__cap">
+          Remembered for {repo.name}. Change it in the Pull menu.
+        </p>
+      </div>
+    );
   };
   // The held click runs once the read lands, as whatever Pull now runs, and
   // only for the checkout it was made on.
@@ -1520,6 +1690,13 @@ export function WorktreeHeader({
   const pickPullChoice = (next: PullChoice): void => {
     setPullChoice(next);
     writePullChoice(repo.id, next);
+    // A pick from the menu of a moved-on fork answers the question too, and
+    // is how an earlier answer is changed ("Change it in the Pull menu").
+    if (movedOn || movedOnAnswer !== null) {
+      const answer: MovedOnAnswer = next === "tracked" ? "tracked" : "sync";
+      writeMovedOnAnswer(repo.id, answer);
+      setMovedOnAnswer(answer);
+    }
     runPull(next, pullButton.current);
   };
   const pullMenu =
@@ -1543,15 +1720,7 @@ export function WorktreeHeader({
         }
       : forkChoice === null
       ? null
-      : pullMenuRows(forkChoice, behind, choice, {
-          original: forkChoice.source.parent ?? forkChoice.source.remote,
-          // `identity` is about origin, so it names the fork only when the
-          // branch follows origin and the forge called origin a fork.
-          fork:
-            forkChoice.tracked.remote === "origin" && repo.identity?.parent !== undefined
-              ? repo.identity.nameWithOwner
-              : forkChoice.tracked.remote
-        }, {
+      : pullMenuRows(forkChoice, behind, choice, repoNames(forkChoice), {
           pick: pickPullChoice,
           rebase: () => {
             if (running !== null) return;
@@ -1569,7 +1738,7 @@ export function WorktreeHeader({
             });
           },
           reset: () => reviewForkReset(forkChoice.source.ref)
-        });
+        }, { now: movedOn, answer: movedOnAnswer });
 
   return (
     <div className="wt-header" ref={headerRef}>
@@ -1646,7 +1815,8 @@ export function WorktreeHeader({
                           state?.worktreeId === worktree.id ? state : null,
                           forkStatus ??
                             (seed === null ? null : { source: seed, tracked: null }),
-                          forkStatus?.branch ?? worktree.branch
+                          forkStatus?.branch ?? worktree.branch,
+                          landedFor(state, worktree)
                         )
                 )
               : {}

@@ -89,10 +89,23 @@ pnpm test
 pnpm build
 ```
 
-Commit the version and changelog together, land that commit on
-`<release-branch>`, rerun the metadata check on the landed commit, and create a
-signed annotated tag. Pushing the tag starts the workflow. A manual dispatch is
-allowed only for a tag that already exists in the repository.
+Commit the version and changelog together in an SSH-signed checkpoint and push
+it directly, without force, to `<release-branch>` (`main` for the active train).
+This is the maintainer-authorized default: do not create a routine release
+metadata PR and spend another PR CI run before the guarded release workflow.
+Local gates above still apply; ordinary main-branch CI is not disabled.
+
+Fetch immediately before pushing. If the remote advanced beyond the validated
+base, integrate and review the concurrent changes and rerun applicable gates;
+never overwrite them. Use a template-based metadata PR only if branch protection
+rejects direct push, then wait for required checks and squash merge. A
+non-fast-forward rejection is a sync/validation issue, not a reason to force-push.
+
+After landing, fetch again, identify the actual remote commit, and verify its
+tree matches the validated tree. Review and validate any newly landed changes
+before selecting the release commit. Rerun the metadata check there and create
+a signed annotated tag. Pushing the tag starts the workflow. A manual dispatch
+is allowed only for a tag that already exists in the repository.
 
 Every workflow-created release starts as a GitHub Pre-release. Promotion to
 Latest is a separate maintainer action after verification; only suffix-free

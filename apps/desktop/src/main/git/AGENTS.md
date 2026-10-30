@@ -4,800 +4,751 @@ Notes for the git layer. See `apps/desktop/AGENTS.md` for app-wide facts.
 
 ## Real-git tests run on Windows CI too
 
-Many suites here drive a real Git against temp repos. Some hazards only
-fail on the Windows runner, so a green local run proves nothing about them:
+Many suites here run a real Git against temp repos. Some hazards fail only on
+the Windows runner, so a green local run proves nothing about them.
 
-- **Never give a Git process a native cwd inside a directory we may remove.**
-  Git for Windows can hand execution from its launcher to descendant
-  `git.exe` processes; awaiting the launcher does not guarantee every
-  descendant has released that cwd, and removal then fails with `EPERM` or
-  `EBUSY`. Keep the process cwd in a stable directory and address the repo with
-  `git -C <repo>` (use `gitProcessInvocation` in `dugite.ts`).
-
-- **Get the `GitExec` from `test-support/system-git.ts`; never hand-roll one.**
-  It preserves the existing exit + stream-end policy and 250ms post-exit drain
-  grace. A grace expiry does not prove inherited pipes caused a test failure.
-  It honours cancellation and output callbacks like production's `execGit`.
-  The remote, partial-staging, rebase-assistant and branch-lifecycle tests
-  enable a 5s diagnostic tripwire. `timedGitSync` records their
-  fixture-helper calls before/after a blocking invocation; it cannot inspect
-  Git while blocked. CI uploads JSONL begin/end records and per-test totals
-  via `PWRGIT_GIT_DIAGNOSTICS_DIR` even on failure. Only instrumented calls
-  within test scopes count; beforeAll setup and production Dugite calls are
-  outside this narrow coverage. Reports omit raw arguments, paths, output and
-  environment. A `killed` flag is a signal request, not observed termination.
-  No diagnostic changes timeouts or cleanup.
-
-- **Before fixing a Windows timeout, compare the run against other runs.**
-  The Windows runner sometimes slows process spawning and disk I/O for a few
-  minutes. During that time every real-git file that is running slows down
-  together, while JS-only files keep their normal speed. A test that needs
-  only ~2s can reach the 20s limit this way (#397's `branch-lifecycle`
-  failure). Before changing code, take each file's `(N tests) Xms` line from
-  the failed log and compare it with the same file's median in other recent
-  Windows jobs. If the slow files ran at overlapping times, the runner caused
-  the failure. Don't respond with a higher timeout or a retry. A retry lets
-  an intermittent real hang pass, and the runner can slow a test past any
-  limit you choose. If only one file was slow, look for a hang, as #261 found.
-
+- **Never give a Git process a native cwd inside a directory that we may
+  remove.** Git for Windows can pass execution to descendant `git.exe`
+  processes. Awaiting the launcher does not mean they released the cwd, so
+  removal fails with `EPERM` or `EBUSY`. Keep the cwd in a stable directory and
+  use `git -C <repo>` (`gitProcessInvocation` in `dugite.ts`).
+- **Get the `GitExec` from `test-support/system-git.ts`. Never hand-roll one.**
+  It keeps the exit + stream-end policy, a 250ms post-exit drain grace, and
+  `execGit`'s cancellation and output callbacks. A grace expiry does not prove
+  that inherited pipes caused a failure.
+  - The remote, partial-staging, rebase-assistant and branch-lifecycle tests
+    enable a 5s diagnostic tripwire. `timedGitSync` records their fixture
+    calls before and after a blocking call. It cannot see inside the block.
+  - CI uploads JSONL begin/end records and per-test totals through
+    `PWRGIT_GIT_DIAGNOSTICS_DIR`, also on failure. Only instrumented calls in
+    test scopes count, not `beforeAll` or production Dugite calls.
+  - Reports omit arguments, paths, output and environment. `killed` means a
+    signal was requested, not observed. Diagnostics change no timeout or
+    cleanup.
+- **Before you fix a Windows timeout, compare the run against other runs.**
+  The runner sometimes slows spawning and disk I/O for minutes. Real-git files
+  then slow together, JS-only files do not (#397: a ~2s `branch-lifecycle`
+  test hit 20s). Compare each file's `(N tests) Xms` line with its median in
+  recent Windows jobs. Overlapping slow files mean the runner. Do not raise a
+  timeout or add a retry: a retry hides real hangs, and the runner can exceed
+  any limit. One slow file means a hang (#261).
 - **Code under test runs the bundled Git. Fixtures run the Git on PATH.**
-  Despite its name, `createSystemGit` launches Dugite's bundle the way
-  production does: `gitExecutionEnvironment` puts the bundle first on PATH
-  and sets `GIT_EXEC_PATH`. Its version therefore follows the lockfile, not
-  the machine. Fixture helpers that call `execFileSync("git")` run the first
-  `git` on PATH. `PWRGIT_TEST_GIT=installed` makes the code under test run
-  that same Git, through `installedGitEnvironment`, the way production runs
-  a Git chosen in Settings. CI runs only the default, so no CI run tests an
-  installed Git. If a change depends on Git's version, run the suite with the
-  switch, then again with another Git first on PATH. On macOS that can be a
-  scratch directory holding a symlink to `/usr/bin/git`. The switch does not
-  reach suites that call production's `execGit`. Those follow
-  `useInstalledGit`, which is the bundle unless a test sets it.
-
-- **`core.autocrlf` defaults to true on Windows.** Anything restored out of
-  HEAD comes back with CRLF, and a test comparing file *contents* against the
-  bytes it committed fails on that alone. Set it off in the repo setup, beside
+  - Despite its name, `createSystemGit` runs Dugite's bundle like production:
+    `gitExecutionEnvironment` puts the bundle first on PATH and sets
+    `GIT_EXEC_PATH`. Its version follows the lockfile, not the machine.
+  - Fixture helpers that call `execFileSync("git")` run the first `git` on
+    PATH. So another Git first on PATH changes the fixtures only.
+  - `PWRGIT_TEST_GIT=installed` makes the code under test run that PATH Git
+    through `installedGitEnvironment`, as production runs a Git chosen in
+    Settings. CI runs only the default, so CI never tests an installed Git.
+  - If a change depends on Git's version, run the suite with the switch. Then
+    run it again with another Git first on PATH (on macOS, a scratch directory
+    with a symlink to `/usr/bin/git`).
+  - The switch does not reach suites that call production's `execGit`. Those
+    follow `useInstalledGit`, which is the bundle unless a test sets it.
+- **`core.autocrlf` defaults to true on Windows.** A file restored from HEAD
+  comes back with CRLF, so a test that compares file *contents* with the
+  committed bytes fails. If a test reads contents back, set it off beside
   `user.name` / `user.email`:
 
   ```ts
   git(repo, ["config", "core.autocrlf", "false"]);
   ```
 
-  Only needed when a test reads file contents back — suites that only compare
-  paths are unaffected.
-
-- **Windows forbids `* ? : " < > |` in filenames.** A test that needs an
-  awkwardly-named file on disk cannot use `*` or `?`, so `writeFileSync` fails
-  with ENOENT before the assertion is reached. `[` and `]` are legal
-  everywhere, and a bracket expression exercises glob-escaping just as well
-  (see `gitignore.test.ts`). Keep `*` / `?` cases to pure string assertions.
+- **Windows forbids `* ? : " < > |` in filenames.** `writeFileSync` of a name
+  with `*` or `?` fails with ENOENT before the assertion. `[` and `]` are legal
+  everywhere and test glob-escaping equally well (see `gitignore.test.ts`).
+  Keep `*` / `?` cases to pure string assertions.
 
 ## A stale remote-tracking ref comes from a separate clone
 
 Git 2.56 changed `git push <url>`. When exactly one configured remote has that
 push URL, Git now moves that remote's tracking ref (`refs/remotes/<name>/*`,
-`@{push}`), as a push by remote name always has. Older Git leaves it alone.
-Today the match is byte for byte (`file://`, `./`, a trailing slash or a
-relative path all miss), and a later release may normalize it. Depend on
-neither answer:
+`@{push}`). Older Git does not. Today the match is byte for byte (`file://`,
+`./`, a trailing slash or a relative path all miss). A later release may
+normalize it. Do not depend on either behavior.
 
 - **To make `origin/<branch>` stale, push from a separate clone.** A push never
-  writes another repository's refs. A second linked worktree is not separate,
-  because worktrees share `refs/remotes`. Prefer this to rewinding the ref with
-  `update-ref`, so the precondition a test asserts is a state Git produced.
+  writes another repository's refs. A linked worktree is not separate, because
+  worktrees share `refs/remotes`. Prefer this to `update-ref`, so the asserted
+  precondition is a state that Git produced.
 - **Product code that pushes a branch to a URL refreshes the ref itself.**
-  `pushPlannedRefs` pushes to the remote's push URL. The bundled Git predates
-  2.56 and Settings accepts any installed Git, so it keeps its refetch.
-  `remote.test.ts` pins that with two remotes on one URL, which 2.56 declines
-  to choose between. The remote tag actions also push to the URL but need no
-  refresh, because the default fetch refspec maps no tags.
-- **`createSystemGit` runs the bundled Git, not the one on PATH.**
-  `gitExecutionEnvironment` puts the bundle first on PATH and sets
-  `GIT_EXEC_PATH`. Fixture helpers that call `execFileSync("git")` run the PATH
-  Git. So putting another Git first on PATH (on macOS, a scratch directory
-  holding a symlink to `/usr/bin/git`) switches the fixtures, not the code
-  under test.
+  `pushPlannedRefs` pushes to the remote's push URL and keeps its refetch. The
+  bundled Git predates 2.56, and Settings accepts any installed Git.
+  `remote.test.ts` pins this with two remotes on one URL, where 2.56 moves
+  neither. The remote tag actions also push to the URL. They need no refresh,
+  because the default fetch refspec maps no tags.
 
 ## Which Git runs: the bundle, set up the way an installed Git would be
 
 Every Git process goes through `gitLaunch` in `dugite.ts`. It returns the
-bundled Git unless Settings › General › Git runtime chose an installed one
+bundled Git unless Settings › General › Git runtime chose an installed Git
 (`useInstalledGit`, persisted as `gitPath`). `execGit`, `execGitRecords` and
-`execGitBinary` spawn whatever `gitLaunch` returns and do not call
-`dugite.exec`. Three things here are easy to undo:
+`execGitBinary` spawn what `gitLaunch` returns. They do not call
+`dugite.exec`.
 
-- **The bundle needs a system config of PwrGit's own.** Dugite points
-  `GIT_CONFIG_SYSTEM` at its `etc/gitconfig`. That file only includes
-  `/etc/gitconfig`, so it never reads the config file of the Git the user
-  installed. Homebrew and Apple set `credential.helper = osxkeychain` there,
-  and with no helper every keychain-backed HTTPS fetch fails with "terminal
-  prompts disabled". The file also sets no LFS filter, so LFS repositories
-  check out pointer files. `bundledGitEnvironment`
-  (`packages/mcp-server/src/git-runtime.ts`) writes a content-named file under
-  `<userData>/git` with the `git lfs install --system` filter. On macOS it
-  adds the installed Git's own `git-credential-osxkeychain`, then includes
-  Dugite's config. The file is system scope, so the user's global config
-  still wins, and `credential.helper =` still opts out. Until
-  `configureBundledGitConfig` runs, nothing is written. That keeps unit tests
-  out of the real data directory, and tests that need the file configure a
-  temp one.
-- **Borrow the keychain helper from the Git the user runs in their terminal.**
-  A keychain item stays readable without an access prompt only for the helper
-  binary that stored it. An app opened from Finder has launchd's PATH, which
-  puts Apple's `/usr/bin/git` before Homebrew's, the opposite of a shell that
-  ran `brew shellenv`. So `keychainSearchPath` tries launchd's directories
-  last.
+- **The bundle needs a system config that PwrGit owns.** Dugite sets
+  `GIT_CONFIG_SYSTEM` to its `etc/gitconfig`, which includes only
+  `/etc/gitconfig`, not the installed Git's config. That loses Homebrew's and
+  Apple's `credential.helper = osxkeychain` (HTTPS fetches fail with "terminal
+  prompts disabled") and any LFS filter (LFS repos check out pointer files).
+  - `bundledGitEnvironment` (`packages/mcp-server/src/git-runtime.ts`) writes a
+    content-named file under `<userData>/git`: the `git lfs install --system`
+    filter, on macOS the installed Git's `git-credential-osxkeychain`, then an
+    include of Dugite's config. At system scope, the user's global config still
+    wins and `credential.helper =` still opts out.
+  - Nothing is written until `configureBundledGitConfig` runs, so unit tests
+    stay out of the real data directory. Tests that need it use a temp one.
+- **Borrow the keychain helper from the user's terminal Git.** A keychain item
+  is readable without a prompt only by the helper binary that stored it. An
+  app opened from Finder has launchd's PATH, which puts Apple's `/usr/bin/git`
+  before Homebrew's (the opposite of a shell that ran `brew shellenv`). So
+  `keychainSearchPath` tries launchd's directories last.
 - **A chosen Git never falls back.** If it breaks, every command fails with a
-  message that names it and points at Settings. Running the bundle instead
-  would make Settings wrong about which Git is running. `installedGitEnvironment`
-  strips every bundle variable: `GIT_EXEC_PATH`, the generated
-  `GIT_CONFIG_SYSTEM`, and the bundle's directories on PATH. Any one of them
-  would quietly send that Git to the bundle's helpers or config.
+  message that names it and points at Settings. A fallback would make Settings
+  wrong about which Git runs. `installedGitEnvironment` removes every bundle
+  variable: `GIT_EXEC_PATH`, the generated `GIT_CONFIG_SYSTEM` and the
+  bundle's PATH directories. Any one of them silently sends that Git to the
+  bundle's helpers or config.
 
 Discovery (`runtime-status.ts`) never runs Apple's `/usr/bin/git`. Without
-developer tools that shim opens the installer dialog. Discovery lists the Git
-under `xcode-select -p` instead, and only when that Git exists. A Git without
-working Git LFS is listed but cannot be chosen, and `git:selectRuntime` probes
-a path before saving it.
+developer tools, that shim opens the installer dialog. Discovery lists the Git
+under `xcode-select -p` instead, only when that Git exists. A Git without
+working Git LFS is listed but cannot be chosen. `git:selectRuntime` probes a
+path before it saves it.
 
 ## Main decides how many Git processes exist, not the renderer
 
-`file-insights-handlers.ts` tracks live reads per renderer **and kind**
-(`<webContentsId>:history`), never per operation id. A pane shows one file one
-way, so a second read of a kind supersedes the first.
+**Bound every Git spawn that an IPC message starts on the main side.** A
+renderer guard is useful but not sufficient: the renderer does not own process
+lifetime, and renderer bugs are the case the bound is for.
 
-That keying is the point. Operation ids are unique per request by construction,
-so keying on them capped nothing: a renderer that asked in a loop — a retry that
-never backed off, a bad effect dependency — had this process spawning a Git
-child per iteration for as long as it kept asking. It happened, and the guard
-that stopped it lived in a React hook.
-
-So the rule for anything here that spawns off an IPC message: **bound it on this
-side.** A renderer-side guard is worth having and is not sufficient, because the
-renderer does not own process lifetime and its bugs are exactly the case the
-bound exists for. Fan-out over a list already has `mapLimit` (`util/map-limit.ts`)
-for the same reason; a per-message spawn needs its own ceiling.
+- `file-insights-handlers.ts` tracks live reads per renderer **and kind**
+  (`<webContentsId>:history`), never per operation id. A pane shows one file in
+  one way, so a second read of a kind supersedes the first.
+- Operation ids are unique per request, so a key on them caps nothing. A
+  renderer that asked in a loop (a retry with no backoff, a bad effect
+  dependency) made main spawn one Git per iteration.
+- Fan-out over a list uses `mapLimit` (`util/map-limit.ts`). A per-message
+  spawn needs its own ceiling.
 
 ## Every long-running remote command registers an activity
 
-`remote-activity.ts` holds one record per live fetch / pull / push, and the
-toolbar popover, the elsewhere-toast and the cancel button all read it. A new
-network command belongs in it too — wrap it in `tracked()` in
-`remote-handlers.ts` rather than calling `execGit` directly.
+**Wrap every command that reaches a remote in `tracked()` in
+`remote-handlers.ts`, not only toolbar commands. Do not call `execGit`
+directly.**
 
-What the registry is *for* is the distinction a spinner cannot draw. Three
-fields carry it, and none of them is decoration:
+`remote-activity.ts` holds one record per live fetch / pull / push. The
+toolbar popover, the elsewhere-toast and the cancel button read it. Three
+fields carry what a spinner cannot show:
 
 - **`queued`.** An operation waits for `WorktreeOperationQueue`'s repository
-  lock before it runs any Git at all. That wait is not Git being slow, and the
-  watchdog deliberately does not start until the lock is held — so registering
-  BEFORE taking the lock is what keeps the two stories consistent.
+  lock before it runs Git. The watchdog starts only when the lock is held. So
+  register BEFORE you take the lock.
 - **`silent` / `lastOutputAt`.** `--progress` is forced on fetch and push
-  (`forceProgress`), so those phases are *obliged* to emit; silence there is
-  evidence. The local phases promise nothing, which is why the renderer only
-  warns about quiet during network phases.
-- **`command` + `tail`.** Git's own words. A wedged transfer is diagnosed from
-  "which command" and "what did it last print", and both used to exist only
-  inside a process that had not exited yet.
+  (`forceProgress`), so silence there is evidence. Local phases promise no
+  output, so the renderer warns about silence only in network phases.
+- **`command` + `tail`.** Git's own words: which command, and what it printed
+  last. These diagnose a wedged transfer.
 
-Two rules that are easy to undo:
+Rules:
 
-- **Cancel and the watchdog are different endings, and both must reach Git.**
-  Pull combines them with `AbortSignal.any([watchdog.signal, activity.signal])`
-  and hands Git one signal. Passing either alone silently disables the other.
-  Rollback/recovery is deliberately NOT cancellable — stopping a rollback is
-  how a checkout is left broken.
+- **Cancel and the watchdog must both reach Git.** Pull combines them with
+  `AbortSignal.any([watchdog.signal, activity.signal])`. Passing one silently
+  disables the other. Rollback/recovery is deliberately NOT cancellable,
+  because a stopped rollback leaves a broken checkout.
 - **A cancel is an outcome, not a failure.** `safePullError` returns it
-  untouched and the pull logs at `info`; the renderer shows a neutral flash
-  and raises no error toast. Anything that routes `code: "canceled"` into the
-  failure path is reporting the user's own decision back to them as a fault.
+  unchanged and the pull logs at `info`. The renderer shows a neutral flash, no
+  error toast. Do not route `code: "canceled"` into the failure path.
+- Output lines go through `sanitizeGitLogDetail` on the way in, so a
+  credential in a remote URL never reaches the record, the event or the
+  clipboard.
+- `remote:planPushRefs` and `remote:pushRefs` (a sidebar dialog, not the
+  header) are tracked and repo-scoped (`worktreeId: null`), because no checkout
+  owns a push to named remotes. The review fetches EVERY destination remote.
+  Every network command they run forces `--progress`, or the silence warning
+  would be false.
+- `collapseProgress` (git-service.ts) is the other half. Git writes the
+  progress meter with CR. Without it, a rejection's stderr reaches the review
+  table behind every repaint of "Writing objects".
 
-Output lines are sanitized through `sanitizeGitLogDetail` on the way in, so a
-credential in a remote URL never reaches the record, the event, or the clipboard.
-
-**"Long-running remote command" means every command that reaches a remote, not
-just the ones with a toolbar button.** `remote:planPushRefs` and
-`remote:pushRefs` sat outside the registry for exactly that reason — they
-belong to a sidebar dialog rather than the worktree header — and the review
-half fetches EVERY destination remote before it can compare anything. Both are
-tracked now, repo-scoped (`worktreeId: null`, since no checkout owns a push
-aimed at named remotes), and every network command they run forces
-`--progress`: the quiet warning reads silence as evidence, so a command that
-was never obliged to emit would make that reading a lie. `pushFailureMessage`
-is the other half of forcing it — Git writes the meter with CR, and a
-rejection's stderr would otherwise reach the review table with every repaint of
-"Writing objects" in front of it.
-
-The failure that motivated all of this: an SSH agent that is present but cannot
-answer (1Password's agent with 1Password stopped or locked) accepts the
-connection and then blocks forever. Git prints nothing, exits never, and every
-timeout in the app is measured in *minutes* by design because a large clone
-looks the same from the outside. Nothing short of "Git has written nothing at
-all since this command started" separates the two — which is why `silent` is
-scoped to the command and why Cancel exists.
+Why: a present but unanswering SSH agent (1Password's, with 1Password stopped
+or locked) blocks Git forever with no output. Timeouts are in *minutes*,
+because a large clone looks the same. So `silent` is per command, and Cancel
+exists.
 
 **The one exception is `remote:checkSelected`, the automatic check behind the
-header's "up to date".** The registry drives the header's buttons, so a
-registered check showed "Preparing local changes…" on Fetch and locked Pull and
-Push for up to its whole timeout, every minute, with nothing asked for. It
-stays out because it cannot wedge: a 12s timeout of its own, the repository
-lock held only for ref writes (`ls-remote` runs unlocked), and `tracked()`
-aborting it so a user's fetch never queues behind it. A background check
-without all three belongs in the registry.
+header's "up to date".** The registry drives the header's buttons. Registered,
+this check showed "Preparing local changes…" on Fetch and locked Pull and Push
+every minute. It stays out because it cannot wedge: it has its own 12s
+timeout, holds the repository lock only for ref writes (`ls-remote` runs
+unlocked), and `tracked()` aborts it so a user's fetch never queues behind it.
+A background check without all three belongs in the registry.
+
+## `repo:changed` names its repositories when it can
+
+Pass `repoIds` when known repositories changed in place (a fetch, a branch,
+a tag, a worktree, a state re-read). The sidebar then re-reads only those
+rows (`repo:list` with `repoIds`), and every other repository keeps its
+object. Without it, each window re-reads the whole profile and every
+expanded repository re-runs `repo:refs`. Over a bulk fetch that was one git
+call per expanded repository per repository fetched.
+
+Leave `repoIds` off only when the list or its order may move: a scan, clone,
+fork, removal, hide, pin or reorder.
+
+A change that only moves refs (a new branch on a remote) changes no
+checkout's state, so the worktree refresher says nothing. That is why
+`refreshRemoteBranches` in `remote-handlers.ts` names its repository: it is
+the only signal that reloads that repository's Branches and Remotes.
 
 ## Paths from git are always forward-slash
 
-`git status`, `ls-files` and `ls-tree` report `a/b/c` on every platform, so
-path handling here splits on `/` rather than reaching for `node:path`. Don't
-"fix" that with `sep` — and don't rebuild a git path with `join()`, which
-would produce backslashes git never emits.
+`git status`, `ls-files` and `ls-tree` report `a/b/c` on every platform. Split
+on `/`. Do not use `node:path`, `sep`, or `join()`, which makes backslashes
+that git never emits.
+
+## A nested agent worktree is not a change
+
+Agents put worktrees inside the repository (`.claude/worktrees/<name>`).
+`git status` reports each one as an untracked folder, so a clean primary read
+`●1` and every branch switch asked about it. Any status read that becomes a
+dirty count or a change list appends `nestedWorktreePathspec(cwd)`
+(`@pwrgit/mcp-server/nested-worktrees`): exclude pathspecs for this
+repository's linked worktrees inside `cwd`.
+
+- It is fs-only (no Git process) and keeps a real file beside the worktree
+  visible. A folder whose `.git` link is gone counts as content again.
+- Removal checks (`worktreeRemove`, `repo-removal.ts`) deliberately do not use
+  it: deleting the folder deletes the nested checkout too.
 
 ## Batched pathspecs are all-or-nothing
 
-`runBatched` splits long path lists across several git runs (Windows caps a
-command line at ~32 KB). Two consequences worth holding onto:
+`runBatched` splits long path lists across several git runs, because Windows
+limits a command line to ~32 KB.
 
-- Git validates a whole pathspec list *before* touching anything, so one bad
-  path aborts its entire batch. Anything that mixes kinds — say untracked and
-  staged-new paths in one discard — must partition first and send each set to
-  the command that suits it, or the batch fails as a unit and later steps see
-  a state they did not expect.
-- A failure in a later batch leaves earlier ones applied. A caller that
-  reports "nothing happened" on error is wrong; announce the change either
-  way (`notifyChanged` in `changes-handlers.ts`).
+- Git validates a whole pathspec list before it changes anything, so one bad
+  path aborts its batch. Partition mixed kinds (for example, untracked and
+  staged-new paths in one discard) and send each set to the command that suits
+  it. Otherwise later steps see an unexpected state.
+- A failure in a later batch leaves earlier batches applied. Announce the
+  change also on error (`notifyChanged` in `changes-handlers.ts`).
+
+## Switching with uncommitted work: bring is a plain switch first
+
+`branch:switch` answers "where does the uncommitted work go", and no answer
+commits. `guardedSwitchBranch` (renderer `features/shell/branchSwitch.ts`)
+asks; `switch-carrying.test.ts` pins all three paths against real Git.
+
+- **Bring is a plain `git switch`; stash only on refusal.** Git carries what
+  the destination does not touch and refuses atomically when it would
+  overwrite a file. Do not stash "to be safe": the common case needs none.
+  The refusal is `switch_would_overwrite` with Git's list in `error.paths`,
+  parsed under `LC_ALL=C` (`parseSwitchOverwritePaths`, tracked and untracked
+  lists). Only then does the renderer offer `"merge"`
+  (`switchBranchCarryingChanges`) or `"leave"`.
+- **Leave stashes as `pwrgitLeftOnStashMessage(<branch>)`**, the exact text a
+  later switch onto that branch looks for to offer the work back. Change the
+  spelling in `@pwrgit/shared` only.
+- **Every stash in a switch is addressed by SHA, never `stash pop`**, and a
+  failed switch reapplies it before returning Git's original refusal
+  (`checked_out_elsewhere` is a navigation upstream).
+- A linked worktree nested in the checkout (`.claude/worktrees/x`) is an
+  untracked directory with a `.git` file. `stash -u` prints "Ignoring path"
+  and leaves it alone; keep a test proving each path still does.
 
 ## The lane graph draws fetched work, not just local work
 
-`graph-handlers.ts` composes the lineage from a trunk walk plus one
-not-in-trunk walk over the drawn branches. A branch that is BEHIND its upstream
-has commits sitting in the object store that no local ref reaches, so walking
-local tips alone silently omits them — the lane reads as current while the
-sidebar says "↓1", and the row the user wants is simply absent.
+`graph-handlers.ts` builds the lineage from a trunk walk plus one not-in-trunk
+walk over the drawn branches. A branch BEHIND its upstream has commits that no
+local ref reaches. A walk of local tips omits them: the lane looks current,
+the sidebar says "↓1", and the row is absent.
 
-`unappliedUpstreams` (git-service) answers "which branches are behind?" in one
-`for-each-ref`, via `%(upstream:trackshort)` — `<` behind, `<>` diverged. Use
-the short form, not `%(upstream:track)`: it is a fixed set of symbols rather
-than a sentence git may translate.
+`unappliedUpstreams` (git-service) finds behind branches in one `for-each-ref`
+with `%(upstream:trackshort)` (`<` behind, `<>` diverged). Do not use
+`%(upstream:track)`: it is a sentence that git may translate.
 
-Two rules follow. `graph-lanes.test.ts` pins which commits get walked;
-`lane-layout.test.ts` pins how the result is drawn — run both when you touch
-either half:
+`graph-lanes.test.ts` pins which commits get walked. `lane-layout.test.ts` pins
+how they are drawn. Run both when you change either half.
 
-- Every drawn branch contributes its upstream to the walk when it is behind.
-  That ref rides in `upstreamRefs`, NOT `shownBranches` — the toolbar counts
-  the latter as active branches — and the renderer draws the union, dashing it
-  as fetched-but-unapplied. `lane-layout.ts` handles the drawing already: it
-  needs the data, not new logic. A diverged branch forks at the merge base,
-  below the local tip, so the dashed leg runs past our own rows and bends into
-  our lane there; `lane-layout.test.ts` pins that geometry, including the
+- **Every drawn branch adds its upstream to the walk when it is behind.** That
+  ref goes in `upstreamRefs`, NOT `shownBranches`, which the toolbar counts as
+  active branches. The renderer draws the union and dashes the upstream as
+  fetched-but-unapplied. `lane-layout.ts` already draws it. A diverged branch
+  forks at the merge base, so the dashed leg runs past our rows and bends into
+  our lane. `lane-layout.test.ts` pins that geometry, including the
   rewritten-SHA case where both legs carry the same work.
+- **The lane cache is checked against the refs, not trusted for its TTL.**
+  Each build stores a digest of `refs/heads` + `refs/remotes`, read before
+  the build reads anything. An unforced request whose digest no longer
+  matches rebuilds, and only the newest build started for a key may write
+  the cache. Why: a pull fetches, then fast-forwards seconds later. A build
+  in between sees `origin/main` ahead of `main` and dashes the trunk; as
+  last writer it used to stay cached after the fast-forward.
+  `graph-handlers.test.ts` reproduces it with a held `git log`.
 - **The focused worktree's own branch is never skipped.** It can fall out of
-  the repo-level set entirely (`ACTIVE_DRAW_CAP` keeps 30 branches by
-  recency), so the per-worktree step re-adds its upstream. Anything scoped
-  "what the user is looking at right now" belongs there, not in the
-  repo-level cache, which is deliberately shared across a repo's worktrees.
+  the repo-level set (`ACTIVE_DRAW_CAP` keeps 30 branches by recency), so the
+  per-worktree step adds its upstream again. Put anything scoped to "what the
+  user looks at now" there, not in the repo-level cache, which all worktrees
+  of a repo share.
 
 ## `--continue` exits non-zero on ordinary progress
 
-`git rebase --continue` returns **1** when it successfully commits the current
-step and then stops on the *next* conflict. So does a multi-commit
-`cherry-pick`. Reading the exit code alone reports the normal path of a
-multi-commit rebase as a failure, and dumps Git's `hint:` block into the user's
-face at the exact moment things are going fine.
+`git rebase --continue` returns **1** when it commits the current step and
+stops on the *next* conflict. A multi-commit `cherry-pick` does the same. An
+exit-code check shows normal progress as a failure, with Git's `hint:` block.
 
-`operation-service.ts` classifies against observed state instead: it snapshots
-HEAD, the sequencer counter, and the conflict count, runs the command, and calls
-the result `stopped` (progress) when any of them moved. Only a run where
-nothing moved is a real `continue_failed`. `operation-service.test.ts` pins both
-halves against real Git — keep that rebase test if you touch this.
+`operation-service.ts` snapshots HEAD, the sequencer counter and the conflict
+count, then runs the command. If any moved, the result is `stopped`
+(progress). Only a run where nothing moved is `continue_failed`.
+`operation-service.test.ts` pins both against real Git. Keep that rebase test.
 
-Two related traps in the same area:
-
-- **An operation with zero conflicts is normal.** `rebase -i` paused on `edit`,
-  and `merge --no-commit`, both leave markers with a clean index. Treating
-  "mid-operation" as "conflicted" is wrong, and gating UI on it hides the
-  Changes and Rebase tabs exactly when they are needed.
-- **`GIT_AUTHOR_*` / `GIT_COMMITTER_*` outrank `-c user.email`.** Tests that set
-  those in the environment cannot prove identity handling; unset them for that
-  assertion (see `execGitWithoutIdentityEnv`).
+- **An operation with zero conflicts is normal.** `rebase -i` paused on `edit`
+  and `merge --no-commit` leave markers with a clean index. Do not treat
+  "mid-operation" as "conflicted". That hides the Changes and Rebase tabs when
+  the user needs them.
+- **`GIT_AUTHOR_*` / `GIT_COMMITTER_*` outrank `-c user.email`.** A test with
+  them in the environment cannot prove identity handling. Unset them (see
+  `execGitWithoutIdentityEnv`).
 
 ## A PwrGit commit records the profile, completely
 
-`commit-identity.ts` owns who a commit is by. Every commit PwrGit writes
-(commit, amend, annotated tag, operation continue, the rebase assistant) gets
-`commitIdentityArgs` plus `SCRUBBED_IDENTITY_ENV`. Four things are easy to undo:
+`commit-identity.ts` owns authorship. Every commit PwrGit writes (commit,
+amend, annotated tag, operation continue, the rebase assistant) gets
+`commitIdentityArgs` plus `SCRUBBED_IDENTITY_ENV`.
 
 - **`-c user.email` alone is not enforcement.** It loses to `author.email` /
-  `committer.email` at any scope and to `GIT_AUTHOR_*` / `GIT_COMMITTER_*` /
-  `EMAIL` in the environment PwrGit inherited from a shell. So the args set all
-  three keys, and the env overlay *unsets* the variables (an `undefined` value
-  removes a key for a Node child). The footer's prediction (`git var`, same
-  args, same env) can then not drift from what is written.
-- **An empty profile email must not reach `-c`.** `-c user.email=` makes Git
-  record `Name <>`. With no email the args pass `user.useConfigOnly=true`
-  instead, so Git uses its own config or refuses, never guesses.
-- **`git var` succeeding proves nothing on macOS.** With nothing configured,
-  macOS Git invents `login@host.local` and exits 0; Linux Git refuses. "Is Git
-  configured outside PwrGit" is the same call under `user.useConfigOnly=true`
-  (`resolveOutsideIdentity`), from `tmpdir()` for the machine-wide answer.
-- **Refusal text puts the reason last.** Git opens with an "Author identity
-  unknown" banner; the trailing `fatal:` line says which field is missing.
+  `committer.email` at any scope, and to `GIT_AUTHOR_*` / `GIT_COMMITTER_*` /
+  `EMAIL` inherited from a shell. So the args set all three keys, and the env
+  overlay *unsets* the variables (an `undefined` value removes a key for a
+  Node child). The footer's prediction (`git var`, same args and env) then
+  matches what is written.
+- **An empty profile email must not reach `-c`.** `-c user.email=` records
+  `Name <>`. With no email, pass `user.useConfigOnly=true`, so Git uses its own
+  config or refuses.
+- **A successful `git var` proves nothing on macOS.** Unconfigured macOS Git
+  invents `login@host.local` and exits 0; Linux Git refuses.
+  `resolveOutsideIdentity` adds `user.useConfigOnly=true`, run from `tmpdir()`
+  for the machine-wide answer.
+- **Refusal text puts the reason last.** After the "Author identity unknown"
+  banner, the trailing `fatal:` line names the missing field.
 
-The rebase assistant's *check* never signs (`commit.gpgSign=false`, so it can
-never prompt). *Apply* honours the user's signing config and, when the signer
-fails, aborts, restores and returns `signing_failed`; the handler keeps the
-approval for exactly one explicit `unsigned: true` apply. "Is it signed" comes
-from the commit's `gpgsig` header (`git log --pretty=raw`), never `%G?`, which
-reports an SSH signature as `N` without `gpg.ssh.allowedSignersFile`.
+Rebase-assistant signing:
 
-PwrGit writes identity config in exactly two places, each first from a
-Settings dialog that previewed it: `identity:writeGlobal` (`user.name` /
-`user.email`) and `identity:setFolderSync` (below). `git config --global` picks
-the file (`GIT_CONFIG_GLOBAL`, else `~/.gitconfig` if present, else the XDG
-file); `globalConfigFile` reproduces that choice for the preview. Tests isolate
-`HOME`, `XDG_CONFIG_HOME` and `GIT_CONFIG_NOSYSTEM`, or the dev machine's own
-identity leaks into every assertion.
+- The *check* never signs (`commit.gpgSign=false`), so it can never prompt.
+- *Apply* honours the user's signing config. When the signer fails, it aborts,
+  restores and returns `signing_failed`. The handler keeps the approval for
+  exactly one explicit `unsigned: true` apply.
+- "Is it signed" reads the `gpgsig` header (`git log --pretty=raw`). Never use
+  `%G?`: without `gpg.ssh.allowedSignersFile` it reports an SSH signature as
+  `N`.
 
-`folder-identity.ts` is Settings › Profiles › By folder: an
-`[includeIf "gitdir/i:<root>/"]` per profile root, each pointing at
+PwrGit writes identity config in exactly two places, each first previewed in a
+Settings dialog: `identity:writeGlobal` (`user.name` / `user.email`) and
+`identity:setFolderSync`. `git config --global` writes `GIT_CONFIG_GLOBAL`,
+else `~/.gitconfig` if present, else the XDG file. `globalConfigFile`
+reproduces that for the preview. Tests isolate `HOME`, `XDG_CONFIG_HOME` and
+`GIT_CONFIG_NOSYSTEM`, or the dev machine's identity leaks into assertions.
+
+`folder-identity.ts` is Settings › Profiles › By folder. It writes one
+`[includeIf "gitdir/i:<root>/"]` per profile root, pointing at
 `<global dir>/.gitconfig-pwrgit-<profile id>`. That file name is the only mark
-of ownership; every other include is the user's and is only read. Three
-things are easy to undo:
+of ownership. All other includes are the user's and are only read.
 
 - **Order is the whole mechanism.** An include overrides only what comes
-  before it, and `git config --global user.email` on a file without `[user]`
-  appends one after the includes, which silently wins. So a sync removes
-  PwrGit's entries and re-appends them last, and `planIsApplied` checks the
-  order as well as the content.
-- **A folder cannot be asked.** `gitdir:` matches a repository's `.git`, so
+  before it. `git config --global user.email` on a file without `[user]`
+  appends one after the includes, and it wins. So a sync removes PwrGit's
+  entries and appends them at the end. `planIsApplied` checks order and
+  content.
+- **You cannot ask a folder.** `gitdir:` matches a repository's `.git`, so
   `git -C <root> config` outside a repo ignores the include. The report asks
   every indexed repository (`mapLimit`, six at a time).
-- **Once the switch is on, profile edits rewrite the includes without another
-  preview.** That is the opt-in the dialog discloses, and the profile editor
-  says so while it is on. The rewrite runs from `observeEvent("profile:changed")`
-  in `index.ts`, debounced, serialized with the switch, and skipped when the
-  config already matches. Nothing else may write these entries.
+- **With the switch on, profile edits rewrite the includes without a preview**
+  (disclosed in the dialog and the profile editor). The rewrite runs from `observeEvent("profile:changed")` in `index.ts`:
+  debounced, serialized with the switch, skipped when the config matches.
+  Nothing else may write these entries.
 
 ## A scan that found nothing is not proof anything was deleted
 
-`rescanProfile` prunes the repos a scan did not see, and that delete cascades
-through every table keyed to `repos(id)` — pins, sort and custom order,
-identity, the branch and PR caches, the LFS notice. Re-discovering the same
-directory later re-inserts the row under the same hashed id and rebuilds none
-of it, so a prune driven by a bad scan is unrecoverable.
+**A prune caused by a bad scan cannot be undone.** `rescanProfile` prunes the
+repos that a scan did not see. The delete cascades through every table keyed
+to `repos(id)`: pins, sort and custom order, identity, the branch and PR
+caches, the LFS notice. Rediscovery recreates the row under the same hashed id
+but none of that data.
 
-Discovery skips unreadable directories rather than throwing, so an empty result
-is ambiguous. `scanRepoRoot` reports `rootReadable` to break the tie, and
-`canPruneFromScan` refuses a scan that is too weak to act on: one whose root
-could not be listed (an unmounted volume, a share not up yet at login), or one
-that resolved no repos at all while roots remain configured. Clearing every
-root is the one deliberate route to zero and still prunes.
+Discovery skips unreadable directories, so an empty result is ambiguous.
+`scanRepoRoot` reports `rootReadable`. `canPruneFromScan` refuses a scan whose
+root could not be listed (an unmounted volume, a share not up at login), or
+that resolved no repos while roots are configured. Clearing every root is the
+one deliberate route to zero, and it prunes.
 
-Three things follow that are easy to undo by accident:
-
-- **The scan clock and the prune answer different questions.** Pruning wants
-  evidence the repos are gone; `profile_scan_state` only records that a pass
-  got to *look*, and a readable-but-empty root did look. Stamping it after an
-  unreadable root arms the 24h throttle in `shouldRescanProfile` off a scan
-  that saw nothing — and there is no manual rescan channel, only
-  `profile:setRoots`, so the volume stays undiscovered for a day after it
-  mounts.
-- **A repository whose own folder is gone asks for the rescan early.** When the
+- **The scan clock and the prune answer different questions.**
+  `profile_scan_state` records only that a pass could *look*, and a readable
+  empty root did look. Stamped after an unreadable root, it starts the 24h
+  throttle in `shouldRescanProfile` from a scan that saw nothing. The only
+  rescan channel is `profile:setRoots`, so the volume stays undiscovered for a
+  day after it mounts.
+- **A repository whose own folder is gone requests the rescan early.** When the
   state probe finds a PRIMARY checkout missing, `missing-repo-rescan.ts` runs
-  the profile's rescan past the throttle, at most once per repo per ten
-  minutes. It changes when the scan runs, not what it may prune — every guard
-  above still decides — so a deleted repo leaves the sidebar within one poll,
-  and a hand-added one (never pruned) stays flagged missing.
-- **Readability is only observed at the root.** A mount point *below* a
-  configured root that is unmounted still reads as an ordinary empty directory
-  (or throws where discovery ignores it), so repos under it are pruned as long
-  as some other repo resolved. Widening the check to every depth is not the
-  fix: macOS denies a non-FDA app `~/Documents` and friends, and one EACCES
-  would disable pruning for good.
+  the rescan past the throttle, at most once per repo per ten minutes. It
+  changes when the scan runs, not what it may prune. A deleted repo leaves the
+  sidebar within one poll. A hand-added repo (never pruned) stays flagged
+  missing.
+- **Readability is checked only at the root.** An unmounted mount point
+  *below* a root reads as an empty directory (or throws where discovery
+  ignores it), so its repos are pruned if another repo resolved. Do not check
+  every depth: macOS denies a non-FDA app `~/Documents` and similar folders,
+  and one EACCES would disable pruning permanently.
 
 ## A worktree whose directory is gone is dropped, unless it may come back
 
-Agents delete their checkouts without `git worktree remove` (Codex cleans up
-`~/.codex/worktrees/…`), and git keeps listing the entry with a `prunable`
-line. That entry is worse than a stale row: git refuses to check its branch
-out anywhere else ("already used by worktree at …"). So every index pass
-(`vanished-worktrees.ts`, called from all three `listWorktrees` sites in the
-indexer) runs `git worktree remove --force <path>` for each such entry, one
-entry at a time, and the row goes with it. A probe that finds a linked
-checkout gone asks for that re-index (`onWorktreePathMissing`, once per
-worktree per ten minutes, one pass per repo at a time), so the row leaves
-within one poll. Passes still overlap (a rescan, a user refresh), so "is not a
-working tree" from the remove means another pass got there first — treated
-as done, here and in `gitWorktreeRemove`.
+Agents delete checkouts without `git worktree remove` (Codex cleans up
+`~/.codex/worktrees/…`). Git keeps the entry with a `prunable` line and
+refuses to check out its branch elsewhere ("already used by worktree at …").
 
-What stays, flagged `worktrees.missing` (0027):
+- Every index pass (`vanished-worktrees.ts`, from all three `listWorktrees`
+  sites in the indexer) runs `git worktree remove --force <path>` for each
+  such entry, one at a time. The row goes with it.
+- A probe that finds a linked checkout gone requests the re-index
+  (`onWorktreePathMissing`, once per worktree per ten minutes, one pass per
+  repo at a time). The row leaves within one poll.
+- Passes overlap (a rescan, a user refresh). "is not a working tree" from the
+  remove means another pass won. Treat it as done, here and in
+  `gitWorktreeRemove`.
 
-- **A locked worktree.** `git worktree lock` is git's "do not touch", and the
-  usual reason is removable media.
-- **A folder on a volume that is not attached.** An unmounted drive reads
-  exactly like a deleted folder to git. `onDetachedVolume` breaks the tie:
-  under `/Volumes`, `/media`, `/run/media` or `/mnt`, a path with no mount
-  point between the container and it (a device id differing from its
-  parent's) is waiting for its drive; on Windows, a drive root that does not
-  exist. Anywhere else the disk is fixed and a missing folder was deleted.
-- **A folder that exists but lost its `.git` link.** Its files are still
-  there; git would refuse to remove it anyway.
-- **A detached HEAD no ref contains.** Git's record is the last thing
-  pointing at those commits; dropping it is the user's call (Remove).
-- **Anything git declined to remove**, logged, and not asked again for ten
-  minutes — every refresh of the repo re-lists it.
+These stay, flagged `worktrees.missing` (0027):
 
-One case it gets wrong: a folder **moved by hand** (`mv`, not `git worktree
-move`) reads as gone at its old path, and dropping the record orphans the
-moved checkout, because `git worktree repair` needs that record. Accepted for
-now — agents delete far more often than people move.
+- **A locked worktree** (git's "do not touch", usually removable media).
+- **A folder on an unattached volume**, which git cannot tell from a deleted
+  one. `onDetachedVolume`: under `/Volumes`, `/media`, `/run/media` or `/mnt`,
+  a path with no mount point (device id unlike its parent's) below the
+  container waits for its drive. On Windows, a missing drive root waits.
+  Elsewhere the folder was deleted.
+- **A folder that lost its `.git` link.** Its files remain, and git would
+  refuse to remove it.
+- **A detached HEAD that no ref contains.** The record is the last pointer to
+  those commits. Remove is the user's decision.
+- **Anything git declined to remove.** Logged, not retried for ten minutes
+  (every refresh lists it again).
 
-Never `git worktree prune`: it is repo-wide and would also drop the entries
-above. For the kept rows, `missing` lets the sidebar say "directory missing"
-and every per-worktree handler refuse with one typed `worktree_missing` error
-(`worktree-liveness.ts`) instead of git's raw "cannot change to '<path>'":
+Known gap: a folder **moved by hand** (`mv`, not `git worktree move`) looks
+gone at its old path. Dropping the record orphans the moved checkout, because
+`git worktree repair` needs it. Accepted: agents delete much more often than
+people move.
 
-- **Two sources set it, and they must agree.** The indexer reads git's
-  `prunable` line; the state probe stats the checkout before it spawns git.
-  Both are the same question — `checkoutExists`, the `.git` link inside the
-  worktree, which is git's own prunability test — and the indexer only stats
-  a *locked* worktree itself, because git never reports one prunable (a
-  locked checkout on an unmounted drive would otherwise flip between the two
-  forever) and a synchronous stat per worktree per rescan is main-thread
-  time. The probe must not trust `git status`'s exit code instead: run from a
-  nested worktree whose link is gone, git resolves the *parent* repo and
-  succeeds with that checkout's branch and dirt.
-- **A remounted checkout clears the flag by itself** (the next successful
-  probe or re-index does). Remove stays available on a missing row — git
-  removes a prunable entry cleanly — and removal is deliberately not guarded.
-- **The guard reads only the flag, in the lookup.** Handlers that resolve a
-  worktree through a per-file closure (`pathOf`, `rowOf`, `worktreeOf`) get
-  the refusal from that closure, so a new handler cannot reach git without
-  it; the one-off lookups check `missing` inline or call
-  `missingWorktreeError`. None of them stat the path: handler tests stub the
-  DB with paths that do not exist, and a live check would turn every one of
-  them into a "missing" worktree.
+**Never run `git worktree prune`.** It is repo-wide and drops the entries
+above too.
+
+For kept rows, the sidebar says "directory missing", and every per-worktree
+handler refuses with one typed `worktree_missing` error
+(`worktree-liveness.ts`) instead of git's "cannot change to '<path>'".
+
+- **Two sources set the flag, and they must agree.** The indexer reads git's
+  `prunable` line. The state probe stats `checkoutExists` (the worktree's
+  `.git` link, git's own test) before it spawns git. The indexer stats only
+  *locked* worktrees, which git never reports prunable (else they flip
+  forever). A sync stat per worktree per rescan costs main-thread time. Do not
+  trust `git status`'s exit code: in a nested worktree with no link, git
+  resolves the *parent* repo and succeeds.
+- **A remounted checkout clears the flag** at the next probe or re-index.
+  Remove stays available and unguarded on a missing row: git removes a
+  prunable entry cleanly.
+- **The guard reads only the flag, in the lookup.** Per-file closures
+  (`pathOf`, `rowOf`, `worktreeOf`) return the refusal, so a new handler cannot
+  reach git without it. One-off lookups check `missing` inline or call
+  `missingWorktreeError`. None stat the path: handler tests stub the DB with
+  nonexistent paths, which a live check would mark missing.
 
 ## The pruner: one rule, one removal path, and `clean -X` is not what it looks like
 
-The worktree pruner is `worktree-prune.ts` (the sweep), `worktree-reclaim.ts`
-(the `git clean -Xd` operation) and `prune-handlers.ts` (both commands). Four
-things about it are load-bearing.
+Files: `worktree-prune.ts` (the sweep), `worktree-reclaim.ts` (the
+`git clean -Xd` operation) and `prune-handlers.ts` (both commands).
 
-**"Safe to prune" has exactly one definition, and it is in `@pwrgit/shared`.**
-`prunableReason` / `isPrunableWorktree` (`packages/shared/src/prunable.ts`) are
-run by the Stale lens in the renderer *and* by the sweep in main. It lives in
-shared because two processes ask the same question from opposite sides of the
-IPC boundary, and a second copy would let the lens and the verb disagree about
-which rows the pruner may touch. Loosening or tightening the rule moves both —
-that is the point, not a side effect.
+- **"Safe to prune" has one definition.** `prunableReason` /
+  `isPrunableWorktree` (`packages/shared/src/prunable.ts`) run in the
+  renderer's Stale lens *and* the sweep in main. A second copy would let the
+  two disagree about which rows the pruner may touch.
+- **A merged branch's age comes from `general.worktreeFinishedAfterDays`**
+  (0 is "right away"). Both callers pass it: the sidebar through
+  `FinishedAfterDaysContext`, the dialog in `prune:scan`'s request. A diverged
+  branch keeps the fixed `STALE_AGE_DAYS`, because nothing proves it merged.
+- **`prunableReason` returns null for `locked === true`**, as for dirty and
+  missing. `git worktree lock` is git's only explicit "do not touch"
+  (`repo-indexer.ts` reasons the same way). Removing a locked worktree needs
+  `--force`, which `removeWorktrees` offers only for the *dirty* set. So a
+  locked row would confirm "Remove 3 worktrees" and then fail one.
+  `PruneCandidate` has no `locked` field.
+- **The sweep computes its own state.** Per-worktree state is computed lazily
+  on expand (`repo:computeState`), because computing ~150 at launch overloads
+  git. So the Stale lens is empty on an unbrowsed profile (see
+  pwrdrvr/PwrGit#248). `sweepPrunableWorktrees` runs at
+  `PRUNE_SCAN_CONCURRENCY` (4, inside the indexer's
+  `HYDRATION_GIT_CONCURRENCY`) and takes the repository lock per repo. Results
+  go into `worktree_state`, so a cancelled sweep is not wasted and a re-run
+  reports `cached` without git. `prune-handlers.test.ts` pins this.
+- **Sizing is a separate phase** after candidates are known, because walking
+  `node_modules` is slow. `util/dir-size.ts` has an entry ceiling (the answer
+  becomes a floor, with the same decision), an abort signal, a yield every few
+  directories, and never follows symlinks (a pnpm store outside the tree is
+  not this worktree's bytes).
+- **Sizes de-duplicate hard links.** pnpm hard-links one store blob into every
+  package, so summing `stat.size` turned a 400 MB checkout into "freeing
+  4.2 GB". `directorySize` counts each `dev:ino` once (`hardLinks` reports the
+  skipped repeats). Links from *another* worktree still count, so the figure is
+  an upper bound on what a delete returns.
+- **Removal is `worktree:removeMany`. Do not add a second path.** It removes in
+  bulk, streams `worktree:removed` (and `worktree:removeProgress` during a
+  folder delete), updates sidebar rows live, logs outcomes and owns the
+  dirty/force retry. The pruner passes `{ confirmed: true }` to
+  `useRepoTree.removeWorktrees`, because its own confirm names repos, reasons
+  and bytes. Two confirms in a row train people to click through.
+- **The byte figure is file size, never free space.** Confirms say "holding
+  4.9 GB on disk" or "totalling 3.9 GB", never "freeing X". APFS clones look
+  like copies to `stat` and `du`, and deleting a clone frees nothing. A local
+  Time Machine snapshot keeps deleted blocks until it expires.
+  `diskSpaceNote` (renderer `prune-view.ts`) explains this (darwin: APFS
+  clones + Time Machine; elsewhere: hard links). Do not add a free-space
+  delta: `f_bavail` drifted 1.1 MB in one idle second.
 
-**The sweep exists because the tree cannot answer.** Per-worktree Git state is
-computed lazily, one repo at a time, on expand (`repo:computeState`) —
-computing all ~150 at launch storms git. So on a profile nobody has browsed the
-Stale lens is empty *by construction*, and a pruner that read the current tree
-would report "nothing to prune" on a disk full of finished worktrees
-(pwrdrvr/PwrGit#248 fixed the first-run confusion this caused; it did not
-change the constraint). `sweepPrunableWorktrees` therefore computes its own,
-capped at `PRUNE_SCAN_CONCURRENCY` (4 — inside the indexer's
-`HYDRATION_GIT_CONCURRENCY` budget) and taking the repository lock per repo.
-It is resumable for free: everything it computes lands in `worktree_state`, so
-a cancelled sweep is not wasted and a re-run reports those repos as `cached`
-and spawns no git. `prune-handlers.test.ts` pins that against real git.
+**`git clean -e <pattern>` does not spare anything under `-X`.** This trap is
+silent data loss.
 
-Sizing is a **separate phase** after the candidate set is known, because it is
-the slow half and it is not git — measuring a checkout means walking its
-`node_modules`. `util/dir-size.ts` bounds it: an entry ceiling (the answer
-comes back as a floor, which is the same decision), an abort signal, a yield
-every few directories, and symlinks never followed (a pnpm store outside the
-tree is not this worktree's bytes).
+- `-e` *adds* an ignore rule, and `-X` deletes the ignored set. So
+  `clean -Xdn -e '.env'` reports `Would remove .env`.
+- Spare a path with a **negated** pattern (`-e '!.env'`). It un-ignores the
+  path. Command-line excludes outrank `.gitignore`. Globs and trailing-slash
+  directory patterns work the same way.
+- `spareArgs` adds the negation. `excludePatternProblem` refuses a user-typed
+  `!`, which would become `!!foo`.
+- `worktree-reclaim.test.ts` pins both directions against real git. It is the
+  only guard against this bug. Do not remove it as redundant.
 
-**Removal is `worktree:removeMany`, not a second path.** That command already
-removes in bulk, streams `worktree:removed` (and `worktree:removeProgress`
-while a folder is deleted), prunes the sidebar rows live, logs every outcome,
-and owns the dirty/force retry. The pruner passes `{ confirmed: true }` to
-`useRepoTree.removeWorktrees` because its own confirm names the repos, the
-reasons and the bytes; two confirms in a row train people to click through
-both.
-
-**`git clean -e <pattern>` does not spare anything under `-X`.** This is the
-trap, and it is silent. `-e` *adds* to git's ignore rules and `-X` deletes
-exactly the ignored set, so `clean -Xdn -e '.env'` still reports
-`Would remove .env` — a "default spare list" implemented that way would delete
-precisely the files it advertises as protected. Sparing needs a **negated**
-command-line pattern (`-e '!.env'`), which un-ignores the path so `-X` has no
-reason to touch it; command-line excludes outrank `.gitignore`, and globs and
-trailing-slash directory patterns work the same way. `spareArgs` does the
-negation, `excludePatternProblem` refuses a user-typed `!` (it would become
-`!!foo`), and `worktree-reclaim.test.ts` pins both directions against real git.
-If that test ever looks redundant, it is the only thing between this feature
-and a silent data-loss bug.
-
-Three more invariants in the same file:
+Invariants in `worktree-reclaim.ts`:
 
 - **`-X`, never `-x`.** `-x` also deletes untracked files that no rule covers,
-  which is uncommitted work. There is no UI for it, deliberately.
-- **The preview is git's own dry run; the deletion re-runs git.** The parsed
-  `Would remove …` paths are shown to the user and then thrown away. Do not
-  "optimize" `reclaimIgnored` into `clean -- <paths>`: as written, a mis-parse
-  can only mis-*draw* a row, never widen what gets deleted. The dry run is
-  also the reason that command forces `LC_ALL=C` (git translates its own
-  messages, so the prefix would otherwise be a guess) and
-  `-c core.quotePath=false` (or a non-ASCII path arrives as octal escapes).
-- **A single `-f`.** Git refuses to delete a directory holding its own `.git`
-  unless `-f` is given twice, which is what keeps a vendored clone inside an
-  ignored directory alive. One `-f` is the whole authorization wanted here.
-
-And the reason all of this care is warranted: **ignored does not mean
-worthless.** `.env` files, local SQLite databases, keys and scratch notes are
-all routinely gitignored and have no object in the object store, so
-`clean -X` is unrecoverable in a way that `discardAllChanges` (which restores
-from HEAD) is not. `RECLAIM_DEFAULT_EXCLUDES` spares that class by default and
-the user can narrow it; `discardAllChanges`' own `clean -fd` must keep
-excluding ignored paths — two commands, two blast radii, and neither may
-quietly acquire the other's flags.
-
-**A lock is a refusal, and the predicate honours it.** `prunableReason` returns
-null for `locked === true`, alongside dirty and missing. Two reasons, and the
-second is the one that bites: `git worktree lock` is the only explicit "do not
-touch this" in git's worktree model — repo-indexer.ts already reasons from it
-("Git never reports a LOCKED worktree prunable ... that is what locking is
-for") — and removing one needs `--force`, which `removeWorktrees` only offers
-for the *dirty* set behind its own prompt. So a locked row in the list would be
-a confirm promising "Remove 3 worktrees" followed by a failure notice for one of
-them. `PruneCandidate` therefore carries no `locked` field: nothing that reaches
-the dialog can be locked.
-
-**The byte figure is the size of the files, never a promise about free space.**
-Both confirms say what is being deleted ("holding 4.9 GB on disk", "totalling
-3.9 GB") and never "freeing X", because the space returned to the volume is not
-knowable ahead of time and sometimes not even afterwards. Measured on an APFS
-volume: `cp -c` clone and a real `cp` copy of the same 20 MB file are
-indistinguishable in every field `stat` exposes — same `nlink=1`, same
-`st_blocks=40960`, same `du` — yet the volume lost 20 MB for both, and deleting
-the clone returned nothing. `du` accordingly reported 60 MB for 20 MB of real
-consumption. macOS adds a second layer: a local Time Machine snapshot pins the
-blocks of anything deleted until it expires, so a correct measurement would
-read zero and be right. `diskSpaceNote` in the renderer's prune-view.ts carries
-this to the user, in two variants (APFS clones + Time Machine on darwin, hard
-links elsewhere), and says the space does come back — later. Do not "fix" this
-by reintroducing a free-space delta: on a live machine `f_bavail` drifted 1.1 MB
-in the one second of an idle measurement.
-
-**Sizes de-duplicate hard links, and are still a floor.** pnpm fills
-`node_modules` by hard-linking one store blob into every package that needs it,
-so summing `stat.size` per directory entry counts the same blocks repeatedly —
-a 400 MB checkout measures as several GB, and that number becomes "freeing
-4.2 GB" on a confirm. `directorySize` keys multiply-linked files by `dev:ino`
-and counts each once (`hardLinks` reports how many repeats it skipped). Links
-from *another* worktree into the same blob are still counted, because from this
-root's view they are its bytes; what a delete returns to the filesystem is at
-most this, never more.
-
-**The reclaim panel will not delete with unapplied edits.** `reclaim()` sends
-`appliedExcludes` — the patterns the visible preview was taken with — so a
-pattern typed but not applied via "Update preview" would be silently dropped
-and the file it was meant to protect deleted. The Delete button is disabled
-while the field differs from the applied list, and the footer says both things:
-what is currently spared, *and* that it is not applied yet. Do not collapse
-those two messages into one; the dangerous fact must not be displaced by the
-procedural one.
+  which is uncommitted work. There is deliberately no UI for it.
+- **The preview is git's dry run. The deletion runs git again.** The parsed
+  `Would remove …` paths are only displayed. Do not "optimize"
+  `reclaimIgnored` into `clean -- <paths>`: a mis-parse can then only draw a
+  row wrongly, never widen the delete. The dry run needs `LC_ALL=C` (git
+  translates the prefix) and `-c core.quotePath=false` (else non-ASCII paths
+  arrive as octal escapes).
+- **A single `-f`.** Git deletes a directory that holds its own `.git` only
+  with `-f` twice. This keeps a vendored clone inside an ignored directory.
+- **Ignored does not mean worthless.** `.env` files, local SQLite databases,
+  keys and notes are often gitignored and have no object in the store, so
+  `clean -X` cannot be undone. `RECLAIM_DEFAULT_EXCLUDES` spares that class by
+  default, and the user can narrow it. `discardAllChanges` restores from HEAD.
+  Its own `clean -fd` must keep excluding ignored paths. Neither command may
+  take the other's flags.
+- **The reclaim panel does not delete with unapplied edits.** `reclaim()`
+  sends `appliedExcludes` (the preview's patterns), so an unapplied pattern
+  would be dropped and its file deleted. Delete is disabled until "Update
+  preview". The footer says what is spared *and* that the edit is not applied.
+  Keep both messages, so the procedure does not hide the danger.
 
 ## Partial staging works through Git, never through renderer patch text
 
-`partial-staging.ts` stages and unstages hunks and lines. Four invariants hold
-it together; breaking any of them corrupts the index quietly.
+`partial-staging.ts` stages and unstages hunks and lines. If you break one of
+these invariants, the index is silently corrupted.
 
-- **Line IDs are positional, and only valid for their fingerprint.** An ID is
-  `h:<hunkIndex>:<oldStart>:<newStart>:a|d:<lineNo>` — derived from where a
-  line sits in one exact `-U0` snapshot, not from its content. The same ID
-  names a different line as soon as the diff moves, so `applyPartialSelection`
-  refuses any selection whose `fingerprint` no longer matches. The renderer
-  relies on the same token to decide whether ticks survive a refresh: equal
-  fingerprint means the ticks still point at the lines the user chose. Anything
-  that can change what the pane shows must therefore change the fingerprint —
-  which is why it hashes the display patch as well as the selection patch (an
-  untracked file has no `-U0` output at all).
-
-- **The fingerprint covers one path.** Status is read repo-wide so a
-  path-limited query cannot disguise a rename's destination as a new file, but
-  only this path's statuses enter the token. An edit to an unrelated file must
-  not stale a diff the user is reading — the change watcher fingerprints the
-  whole worktree and fires constantly.
-
+- **Line IDs are positional and valid only for their fingerprint.** An ID is
+  `h:<hunkIndex>:<oldStart>:<newStart>:a|d:<lineNo>`, a position in one `-U0`
+  snapshot. `applyPartialSelection` refuses a stale `fingerprint`, and the
+  renderer keeps ticks only while it is equal. So anything that changes the
+  pane must change the fingerprint: it hashes the display patch too (an
+  untracked file has no `-U0` output).
+- **The fingerprint covers one path.** Status is read repo-wide, so a rename's
+  destination does not look like a new file. Only this path's statuses enter
+  the token. The change watcher fingerprints the whole worktree and fires
+  constantly. An unrelated edit must not stale the diff.
 - **Unstaging is a forward patch applied in reverse.** `buildSelectedPatch`
-  describes residual-index → current-index and sets `reverse`, rather than
-  inventing an inverted edit script. That keeps replacement ordering and
-  `\ No newline at end of file` markers native to Git. The two directions
-  compute different hunk starts, and `priorDelta` accumulates across hunks in
-  both — the multi-hunk cases are the ones worth testing, since a single-hunk
-  patch leaves that term zero.
-
-- **`git apply` gets `--unidiff-zero --recount`.** `--recount` recomputes hunk
-  counts from the body, so the counts written into the header are advisory;
-  the *starts* are not, and neither is line order. `--unidiff-zero` disables
-  context matching, so a wrong start silently writes to the wrong place instead
-  of failing to apply.
+  describes residual-index → current-index and sets `reverse`. This keeps
+  replacement order and `\ No newline at end of file` markers native to Git.
+  The two directions compute different hunk starts. `priorDelta` accumulates
+  across hunks in both, so test multi-hunk cases (one hunk leaves it zero).
+- **`git apply` gets `--unidiff-zero --recount`.** `--recount` recomputes
+  counts, so header counts are advisory. Hunk starts and line order are not.
+  `--unidiff-zero` disables context matching, so a wrong start writes to the
+  wrong place and does not fail.
 
 Whole-file actions stay available for every kind partial staging refuses
-(binary, conflicted, submodule, non-UTF-8, new, deleted, renamed, mode-only);
-`partialDiffCapability` names the reason and the pane shows it.
+(binary, conflicted, submodule, non-UTF-8, new, deleted, renamed, mode-only).
+`partialDiffCapability` names the reason, and the pane shows it.
 
 ## Clone and fork reach a forge INSTANCE, not a forge
 
-`CloneService` and `ForkService` resolve providers through
-`ForgeRepoRegistry.get(kind, hostname)`. Passing only the kind returns the
-**SaaS** provider, so a project on `ghe.acme.example` is answered by github.com
-— and a slug that exists on both confirms, clones, or forks the wrong
-repository, silently. Every lookup here passes the hostname the request
-carried; `repo:searchCloneSources` is the one channel that still cannot.
+**Every provider lookup passes the hostname from the request.**
+`CloneService` and `ForkService` call `ForgeRepoRegistry.get(kind, hostname)`.
+With only the kind it returns the **SaaS** provider, so github.com answers for
+`ghe.acme.example`. A slug on both then confirms, clones or forks the wrong
+repository, silently. `repo:searchCloneSources` is the one channel that still
+cannot pass the hostname.
 
-Resolving an instance is not permission to talk to it. Anything that spawns a
-CLI also asks `forgeBlockAt(status, provider.hostname)` — including
-`runClone`'s CLI branch and `fork`, which writes. SSH and HTTPS clones are
-plain git and are deliberately not gated: the per-host switch governs the
-forge, not `git clone`.
-
-The local-checkout index (`repoKey`) is keyed on the hostname for the same
-reason — two instances can host the same slug.
+- Resolving an instance is not permission to use it. Anything that spawns a
+  CLI also calls `forgeBlockAt(status, provider.hostname)`, including
+  `runClone`'s CLI branch and `fork`, which writes.
+- SSH and HTTPS clones are plain git and are deliberately not gated. The
+  per-host switch governs the forge, not `git clone`.
+- The local-checkout index (`repoKey`) is keyed on the hostname, because two
+  instances can host the same slug.
 
 `apps/desktop/src/main/forge/AGENTS.md` has the whole rule, including why a
 hostname is never evidence of which forge runs on it.
 
 ## A fresh clone of a fork keeps its original through `keepForkOriginal`
 
-`repo:clone` (with `upstream`) and `repo:fork` both add the fork's original
-after the transfer, through one helper in `fork-remotes.ts`. Two rules:
+`repo:clone` (with `upstream`) and `repo:fork` add the fork's original after
+the transfer, through one helper in `fork-remotes.ts`.
 
 - **Read the remotes first.** `gh repo clone` of a fork writes `upstream`
-  itself; a bare `git remote add upstream` then failed every fork cloned with
-  the CLI. A remote already pointing at the original is kept; a different
-  repository under that name pushes the original to `upstream-2`.
-- **Main re-asks the forge before transferring.** `CloneService` refuses a
-  slug that is not the source's `parent` or `root`, so a renderer cannot
-  have a remote written at any slug. If only the remote fails, the clone is
-  still a success (`ClonedRepo.upstreamFailure`): an error would leave the
-  dialog offering a retry into the folder it just made.
+  itself, so a bare `git remote add upstream` failed. A remote that already
+  points at the original is kept. If another repository has the name, the
+  original goes to `upstream-2`.
+- **Main asks the forge again before the transfer.** `CloneService` refuses a
+  slug that is not the source's `parent` or `root`, so a renderer cannot get a
+  remote written for any slug. If only the remote fails, the clone succeeds
+  (`ClonedRepo.upstreamFailure`). An error would offer a retry into the folder
+  it just made.
 
 ## Forking a checkout in place: add `upstream` first, then re-point `origin`
 
-`ForkService.forkCheckout` forks what a checkout was cloned from and points the
-checkout at the fork. Nothing is cloned and nothing moves on disk; the remote
-rewire (`fork-remotes.ts`) is the whole operation, and **its order is not
-interchangeable with the obvious one.**
+`ForkService.forkCheckout` forks the checkout's source and points the checkout
+at the fork. Nothing is cloned or moved. The remote rewire (`fork-remotes.ts`)
+is the whole operation.
 
-`git remote rename origin upstream` rewrites every `branch.<name>.remote` that
-named it. Renaming and then adding a fresh `origin` therefore leaves every
-local branch tracking the ORIGINAL — so the next push goes straight back to the
-repository the user just established they cannot push to, and the feature
-silently does nothing. Adding the upstream remote first and re-pointing
-`origin` in place leaves tracking untouched and correct: those branches already
-track `origin`, and `origin` is now the fork.
+**Add the upstream remote, then change `origin`'s URL in place. Never rename
+`origin`.** `git remote rename origin upstream` rewrites every
+`branch.<name>.remote`. Every branch then tracks the ORIGINAL, and the next
+push goes to the repository the user cannot push to. With the correct order,
+branches track `origin`, which is now the fork.
 
-Three more things that are easy to undo:
+- **A separate `pushurl` is re-pointed too.** The fetch URL does not decide
+  where a push goes. `SshRemoteRecovery` deliberately *keeps* a custom push
+  URL, because it changes how you reach the same repository. This changes
+  which repository you push to.
+- **An existing remote is never overwritten.** `planUpstreamRemote` reuses a
+  remote that already points at the original, else takes `upstream` or a
+  suffixed variant. The user may have configured a remote (a mirror, a second
+  fork).
+- **`defaultBranchOnly` is never set here, and the fetches never `--prune`.**
+  A partial fork only saves clone size, and this clones nothing. It would
+  leave `origin/*` refs for branches the fork lacks, and the next pruning
+  fetch would delete refs that local branches track.
 
-- **A separate `pushurl` is re-pointed too.** `origin`'s fetch URL alone
-  decides nothing about where a push lands. `SshRemoteRecovery` deliberately
-  *preserves* a custom push URL — it is changing how you reach the same
-  repository, where this changes which repository you push to.
-- **An existing remote is never clobbered.** `planUpstreamRemote` reuses a
-  remote that already points at the original, and otherwise takes `upstream`
-  or a suffixed variant. A remote is something the user may have configured
-  deliberately (a mirror, a second fork).
-- **`defaultBranchOnly` is never set on this path**, and the fetches never
-  `--prune`. A partial fork is a clone-size saving, and this clones nothing —
-  what it buys instead is `origin/*` refs for branches the fork does not have,
-  which the next pruning fetch deletes out from under any local branch
-  tracking them.
+Four entry points raise `ForkCheckoutDialog`: the sidebar repo row's
+read-only mark, the fork action on REMOTES' `origin` row, the worktree
+header's `read-only` chip, and a forge-refused push. A mark that states the
+constraint must also offer the way past it.
 
-**Four ways in, and all of them are the same command.** The read-only mark in
-the sidebar repo row, the fork action on the `origin` row under REMOTES, the
-`read-only` chip in the worktree header, and a push the forge refuses all raise
-`ForkCheckoutDialog`. The first three are statements of a constraint and each
-one is also the way past it — a mark that reports "you cannot push here" and
-offers no verb sends people hunting through REMOTES, which is exactly what
-happened when the header chip was the only entry point. The sidebar's `Fork…`
-button is the OTHER operation (`repo:fork`: search, fork, clone somewhere new)
-and seeds itself from the selected row via `forkSeedFromRepo`.
-
-Neither the mark nor the REMOTES action asks the forge whether a fork already
-exists before offering. That answer costs a round trip per row, and the dialog
-resolves it anyway: `forkCheckoutAction` says "Switch origin to my fork"
-instead of "Fork & switch origin" once the preflight lands.
-
-`pushWasDenied` (git-service.ts) is the other half: it classifies the one push
-failure with a remedy inside PwrGit, and deliberately excludes a protected
-branch, which reads almost identically on GitLab and means the opposite thing
-about access.
+- The sidebar's `Fork…` button is the OTHER operation (`repo:fork`: search,
+  fork, clone elsewhere), seeded from the selected row by `forkSeedFromRepo`.
+- The marks do not ask the forge if a fork exists (a round trip per row).
+  After its preflight, `forkCheckoutAction` says "Switch origin to my fork"
+  instead of "Fork & switch origin".
+- `pushWasDenied` (git-service.ts) classifies the one push failure with a
+  remedy in PwrGit. It excludes a protected branch, which reads almost the
+  same on GitLab but means the opposite about access.
 
 ## Publishing a branch asks for a remote, never a name
 
-`remote:push` with `publish` runs `git push --set-upstream -- <remote> HEAD` —
-the `--` because `git remote add -- -x` is accepted and Git would otherwise read
-that name as an option. The
-branch keeps its own name on the remote because Git's default
-`push.default=simple` refuses a plain push whose upstream is named differently:
-publish under another name and the toolbar's next Push fails, with no way back
-short of a terminal. Verified against real Git in `remote.test.ts`.
+`remote:push` with `publish` runs `git push --set-upstream -- <remote> HEAD`.
 
-A failed push's `message` is the **reason** (`pushFailureHeadline`) and Git's
-stderr rides as `PwrGitError.detail`. The renderer's headline is the message's
-first line, and Git's first line is `To <url>` — so a rejected push used to
-headline as the one thing the user already knew. The headline is Git's first
-line that says *why* — never simply its first `fatal:`, which is usually a
-wrapper around the cause printed just before it ("Could not read from remote
-repository" after "Permission denied (publickey)"). Keep the two apart: the card's
-Git-output block, Copy and the command log read `detail`, and a sentence
-PwrGit wrote must never be quoted there as something Git printed.
+- The `--` is needed because `git remote add -- -x` is accepted, and Git would
+  read that name as an option.
+- The branch keeps its own name. `push.default=simple` (Git's default) refuses
+  a plain push to a differently named upstream. Publish under another name and
+  the next Push fails, with only a terminal to fix it. `remote.test.ts`
+  verifies this.
+
+A failed push's `message` is the **reason** (`pushFailureHeadline`). Git's
+stderr goes in `PwrGitError.detail`.
+
+- The renderer's headline is the first line of `message`. Git's first line is
+  `To <url>`, which the user already knows.
+- The headline is Git's first line that says *why*, not the first `fatal:`.
+  That line usually wraps the cause printed before it ("Could not read from
+  remote repository" after "Permission denied (publickey)").
+- The card's Git-output block, Copy and the command log read `detail`. Never
+  show a PwrGit sentence there as Git output.
 
 ## A missing credential reads the same from fetch, pull and push
 
-`classifyAuthFailure` (`remote-handlers.ts`) turns "Git had no credential it
-may prompt for" into `authentication_required` for all three toolbar
-operations; the worktree header answers it with `SshRemoteRecoveryDialog`.
-Pull still rewrites the message through `safePullError`. Two things are easy
-to undo:
+`classifyAuthFailure` (`remote-handlers.ts`) maps "Git had no credential it
+may prompt for" to `authentication_required` for all three toolbar
+operations. The worktree header answers with `SshRemoteRecoveryDialog`. Pull
+still rewrites the message through `safePullError`.
 
-- **It reads `detail` as well as `message`**, because a push's message is
-  `pushFailureHeadline`'s sentence and Git's stderr is in `detail`. It never
-  overrides `canceled`, `push_denied` (the forge accepted the credential, and
-  an SSH key signs in as the same account) or the pull watchdog's codes.
-- **A push is offered the change only if the push uses the URL being
-  changed.** `inspectSshPushRecovery` returns null for a separate `pushurl`
-  and for a `pushRemote` / `pushDefault` that names another remote. Offering
-  it there would test and rewrite a URL the failed push never used.
+- **It reads `detail` as well as `message`**, because a push's message is the
+  `pushFailureHeadline` sentence. It never overrides `canceled`,
+  `push_denied` (the forge accepted the credential, and an SSH key signs in as
+  the same account) or the pull watchdog's codes.
+- **Offer a push the change only if the push uses the URL being changed.**
+  `inspectSshPushRecovery` returns null for a separate `pushurl` and for a
+  `pushRemote` / `pushDefault` that names another remote. Otherwise PwrGit
+  tests and rewrites a URL the push never used.
 
 ## SSH host approval
 
 `ssh-host-trust.ts` keeps scanned keys in expiring, window-bound proposals.
-The renderer can approve an opaque proposal ID, never submit key bytes or a
-known_hosts path. Inspection sends no account credentials. Approval appends only
-the displayed key, and refuses existing trust entries, published-key mismatches,
-or configuration/trust changes since inspection. Preserve the terminal fallback
-for custom SSH commands, proxy routing, aliases and trust files; do not bypass
-those settings or replace existing keys to make a clone succeed.
+
+- The renderer approves an opaque proposal ID. It never submits key bytes or
+  a known_hosts path.
+- Inspection sends no account credentials.
+- Approval appends only the displayed key. It refuses existing trust entries,
+  published-key mismatches, and configuration or trust changes since
+  inspection.
+- Keep the terminal fallback for custom SSH commands, proxy routing, aliases
+  and trust files. Do not bypass those settings or replace existing keys to
+  make a clone succeed.
 
 ## A hidden repository is filtered in SQL, by path
 
-`hidden_repos` (0041) is keyed `(profile_id, path)`, not by `repos.id`: a
-rescan drops and recreates repo rows, and a hide has to outlive that.
-Anything that hands a profile's repositories to someone — `listRepos`,
-`browseRepos`, `searchAll`, bulk sync, maintenance, the pruner — puts
-`visibleRepoSql("r")` (`hidden-repos.ts`) in its WHERE clause, because several
-of those are capped and a filter after the cap does not give the slots back.
-⌘K rows have no repo column, so `SEARCH_ROW_REPO_SQL` maps each kind to its
-repository; a `change_request` row's `entity_id` is its `repo_open_pr` id
-(0039), not `repo:number`. A caller asking what is on disk rather than what to
-show (clone's "already cloned", fork's "Reveal checkout") passes
-`listRepos(id, { includeHidden: true })`. `hidden-repos.test.ts` covers both
-profiles.
+`hidden_repos` (0041) is keyed `(profile_id, path)`, not `repos.id`, because a
+rescan recreates repo rows and a hide must survive.
+
+- **Anything that hands out a profile's repositories puts
+  `visibleRepoSql("r")` (`hidden-repos.ts`) in its WHERE clause**:
+  `listRepos`, `browseRepos`, `searchAll`, bulk sync, maintenance, the pruner.
+  Several are capped, and a filter after the cap does not return the slots.
+- ⌘K rows have no repo column. `SEARCH_ROW_REPO_SQL` maps each kind to its
+  repository. A `change_request` row's `entity_id` is its `repo_open_pr` id
+  (0039), not `repo:number`.
+- A caller that asks what is on disk, not what to show (clone's "already
+  cloned", fork's "Reveal checkout"), passes
+  `listRepos(id, { includeHidden: true })`.
+- `hidden-repos.test.ts` covers both profiles.
 
 ## Removing a worktree: PwrGit deletes the folder, then Git drops the record
 
 `worktreeRemove` (git-service.ts) does not let `git worktree remove` delete the
-checkout. It checks what Git checks (main worktree, lock, and unless forced the
-same `status --porcelain --ignore-submodules=none` Git runs), deletes the folder
-with `util/delete-tree.ts`, and only then runs `git worktree remove --force` on
-the now-missing path, which drops one admin entry. Three reasons, all from the
-2026-10-16 beachball:
+checkout:
 
-- **Git's delete stops at a read-only directory and unregisters anyway.** Go
-  writes its module cache 0555. Git failed with "Permission denied" partway,
-  deleted the worktree's record regardless, and left a folder no list shows.
-  `deleteTree` adds the owner's rwx to a real directory before emptying it.
-- **Never delete synchronously in main.** The old fallback was `rmSync` with
-  `maxRetries`, which also *sleeps* on the main thread between attempts: 34s of
-  spinning beachball. `deleteTree` streams unlink/rmdir through p-map-iterable,
-  four at once, and reports progress. Keep anything recursive off `*Sync`.
-- **A delete that stops partway keeps the worktree registered.** The `.git`
-  link goes last (`deleteLast`), so Git still recognises what is left and a
-  forced retry finishes it. The renderer's Retry passes `force` for exactly
-  that reason: Git now reads PwrGit's half-finished delete as changes.
+1. It checks what Git checks: main worktree, lock, and (unless forced) the
+   same `status --porcelain --ignore-submodules=none`.
+2. It deletes the folder with `util/delete-tree.ts`.
+3. It runs `git worktree remove --force` on the missing path, which drops one
+   admin entry.
 
-Anything `worktreeRemove` does not check itself (submodules, a missing `.git`
-link, a `prunable` entry) is handed to `git worktree remove` unchanged. The
-lifecycle handler tests pin all of this against real Git, including an
-event-loop stall assertion that the old path failed at 33s.
+Reasons (2026-10-16 beachball):
+
+- **Git's delete stops at a read-only directory and unregisters anyway.** On
+  Go's 0555 module cache, Git failed with "Permission denied" and left an
+  unlisted folder. `deleteTree` adds the owner's rwx to a real
+  directory before it empties it.
+- **Never delete synchronously in main.** `rmSync` with `maxRetries` *sleeps*
+  on the main thread between attempts (34s of beachball). `deleteTree` streams
+  unlink/rmdir through p-map-iterable, four at a time, with progress. Keep all
+  recursive work off `*Sync`.
+- **A partial delete keeps the worktree registered.** The `.git` link goes
+  last (`deleteLast`), so Git still recognises the rest and a forced retry
+  finishes it. The renderer's Retry passes `force`, because Git reads the
+  half-finished delete as changes.
+
+Cases `worktreeRemove` does not check (submodules, a missing `.git` link, a
+`prunable` entry) go to `git worktree remove` unchanged. The lifecycle handler
+tests pin this against real Git, with an event-loop stall assertion that the
+old path failed at 33s.
 
 Worktree sharing through `pwrgit-share` is opt-in; unavailable sharing falls
 back to a normal Git checkout. It uses reflinks, never hardlinks. Size UI must
@@ -809,14 +760,16 @@ opt-in handler-to-binary tests; ordinary tests use the fake executable.
 
 ## Removing a repository never prunes
 
-`repo-removal.ts` reviews every checkout, then on `repo:remove` reviews again
-and refuses (`review_changed`) if the answers no longer fit — the renderer's
-review is never trusted to move anything. Linked worktrees go first, each
-inside its worktree lock with `lockForRemoval` held: the folder moves to the
-Trash, then `git worktree remove --force <path>` clears that one record. The
-main checkout goes last, only if every worktree went and nothing that lives
-in `.git` was kept, inside the worktree and then the repository lock. No step
-runs `git worktree prune`. Push first is the renderer's, through the tracked
-push commands, before `repo:remove` is sent; main refuses a decision set that
-still contains one. E2E swaps the Trash for a directory with
-`PWRGIT_E2E_TRASH_DIR`.
+**No step runs `git worktree prune`.** `repo-removal.ts`:
+
+- Reviews every checkout. On `repo:remove` it reviews again and refuses
+  (`review_changed`) if the answers changed. Main never trusts the renderer's
+  review.
+- Removes linked worktrees first, each in its worktree lock with
+  `lockForRemoval` held: the folder goes to the Trash, then
+  `git worktree remove --force <path>` clears that record.
+- Removes the main checkout last, only if every worktree went and nothing in
+  `.git` was kept, inside the worktree lock and then the repository lock.
+- "Push first" is the renderer's job, through the tracked push commands,
+  before `repo:remove`. Main refuses a decision set that still has one.
+- E2E replaces the Trash with a directory through `PWRGIT_E2E_TRASH_DIR`.

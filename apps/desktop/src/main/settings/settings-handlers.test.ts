@@ -447,3 +447,25 @@ describe("combined maintenance preference", () => {
     expect(saved.ok && saved.value.general.maintenanceBranchMode).toBe("auto");
   });
 });
+
+describe("worktree clean-up rules", () => {
+  it("default to a week's guard and 14 days, remember changes, and reject other values", async () => {
+    const service = freshService();
+    const bus = new CommandBus();
+    registerSettingsHandlers(bus, service, { diagnosticsOutputRoot: "/diag", onChanged: () => undefined });
+    const initial = await bus.dispatch("settings:read", undefined);
+    expect(initial.ok && initial.value.general.worktreeCleanupKeepDays).toBe(7);
+    expect(initial.ok && initial.value.general.worktreeFinishedAfterDays).toBe(14);
+    await bus.dispatch("settings:update", {
+      patch: { general: { worktreeCleanupKeepDays: null, worktreeFinishedAfterDays: 0 } }
+    });
+    expect(service.get().general?.worktreeCleanupKeepDays).toBeNull();
+    expect(service.get().general?.worktreeFinishedAfterDays).toBe(0);
+    await bus.dispatch("settings:update", {
+      patch: { general: { worktreeCleanupKeepDays: 5 as never, worktreeFinishedAfterDays: -1 as never } }
+    });
+    const saved = await bus.dispatch("settings:read", undefined);
+    expect(saved.ok && saved.value.general.worktreeCleanupKeepDays).toBeNull();
+    expect(saved.ok && saved.value.general.worktreeFinishedAfterDays).toBe(0);
+  });
+});

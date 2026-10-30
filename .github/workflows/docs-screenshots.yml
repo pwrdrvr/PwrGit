@@ -39,9 +39,12 @@ jobs:
           persist-credentials: false
 
       - name: Install Node.js and dependencies
-        uses: pwrdrvr/configure-nodejs@v1
+        uses: pwrdrvr/configure-nodejs@d416c1c78119b25fe03ee3ef78b75af0d69b10a7 # v1.7.1
+        timeout-minutes: 10
         with:
           node-version: 24.22.1
+          cache-electron: "true"
+          cache-key-suffix: pwrgit-store-d416c1c78119b25fe03ee3ef78b75af0d69b10a7-v1
 
       # The capture drives the BUILT app (out/main/index.js); the script's
       # pretest:docs-shots hook builds it, exactly as pretest:e2e does for the

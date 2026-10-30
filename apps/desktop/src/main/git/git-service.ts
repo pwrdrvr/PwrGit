@@ -8,6 +8,7 @@ import {
 import { realpath } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
+import { nestedWorktreePathspec } from "@pwrgit/mcp-server/nested-worktrees";
 import {
   type BranchRef,
   type BranchTrackingStatus,
@@ -33,6 +34,7 @@ import {
   type PushRefResult,
   type PullProgressPhase,
   PWRGIT_PULL_STASH_MESSAGE,
+  pwrgitLeftOnStashMessage,
   type PwrGitError,
   type RemoteBranchPage,
   type RemoteBranchSummary,
@@ -214,7 +216,10 @@ export async function readChanges(
       // parent status to recurse into it duplicates that state and can turn a
       // 20-child parent refresh into a long synchronous walk. Commit-pin
       // mismatches still appear as changes.
-      "--ignore-submodules=dirty"
+      "--ignore-submodules=dirty",
+      // An agent's worktree inside this checkout is another checkout, not
+      // content to stage.
+      ...(await nestedWorktreePathspec(cwd))
     ],
     cwd,
     NO_OPTIONAL_LOCKS
@@ -239,7 +244,9 @@ export async function readCheckoutDirtyCount(
     "status",
     "--porcelain=v2",
     "--untracked-files=normal",
-    "--ignore-submodules=none"
+    "--ignore-submodules=none",
+    // A nested worktree of this repository is never carried by a switch.
+    ...(await nestedWorktreePathspec(cwd))
   ];
   const raw = await git(args, cwd, NO_OPTIONAL_LOCKS);
   if (!raw.ok) return raw;
@@ -1963,7 +1970,10 @@ async function requireCleanWorktree(
   git: GitExec,
   cwd: string
 ): Promise<Result<void>> {
-  const statusRaw = await git(["status", "--porcelain"], cwd);
+  const statusRaw = await git(
+    ["status", "--porcelain", ...(await nestedWorktreePathspec(cwd))],
+    cwd
+  );
   if (!statusRaw.ok) return statusRaw;
   const status = requireExit0(statusRaw.value, ["status"]);
   if (!status.ok) return status;
@@ -2077,7 +2087,9 @@ export async function inspectRemoteDivergence(
   if (!upstream.ok) return upstream;
 
   const [statusRaw, comparison] = await Promise.all([
-    git(["status", "--porcelain"], cwd),
+    nestedWorktreePathspec(cwd).then((nested) =>
+      git(["status", "--porcelain", ...nested], cwd)
+    ),
     compareCommitRanges(git, cwd, ref ?? "@{u}")
   ]);
   if (!statusRaw.ok) return statusRaw;
@@ -3105,7 +3117,12 @@ export async function pullFastForward(
     .filter((path) => path !== "");
 
   onProgress("prepare");
-  const statusRaw = await pullGit(["status", "--porcelain"], cwd);
+  // A nested agent worktree alone must not make the pull stash: git skips it
+  // ("Ignoring path") and would record an empty stash.
+  const statusRaw = await pullGit(
+    ["status", "--porcelain", ...(await nestedWorktreePathspec(cwd))],
+    cwd
+  );
   if (!statusRaw.ok) return statusRaw;
   const status = requireExit0(statusRaw.value, ["status", "--porcelain"]);
   if (!status.ok) return status;
@@ -3459,8 +3476,31 @@ const BRANCH_FORMAT = [
   "%(contents:subject)"
 ].join("%09");
 
+/** `refs/remotes/team/fork/main` → `team/fork` + `main` when `team/fork` is a
+ *  configured remote. Longest remote name first: `team` is a prefix of
+ *  `team/fork`. Null for a ref no configured remote owns, and for `HEAD`. */
+export function splitRemoteRefname(
+  refname: string,
+  remotes: readonly string[]
+): { remote: string; remoteBranch: string } | null {
+  const prefix = "refs/remotes/";
+  if (!refname.startsWith(prefix)) return null;
+  const rest = refname.slice(prefix.length);
+  const remote = [...remotes]
+    .sort((a, b) => b.length - a.length)
+    .find((name) => rest.startsWith(`${name}/`));
+  if (remote === undefined) return null;
+  const remoteBranch = rest.slice(remote.length + 1);
+  return remoteBranch === "" || remoteBranch === "HEAD"
+    ? null
+    : { remote, remoteBranch };
+}
+
 /** Parse the tab-delimited `git for-each-ref` output produced with BRANCH_FORMAT. */
-export function parseBranchRefs(stdout: string): BranchRef[] {
+export function parseBranchRefs(
+  stdout: string,
+  remotes: readonly string[] = []
+): BranchRef[] {
   const out: BranchRef[] = [];
   for (const line of stdout.split("\n")) {
     if (line.trim() === "") continue;
@@ -3475,6 +3515,11 @@ export function parseBranchRefs(stdout: string): BranchRef[] {
     if (upstream !== "") ref.upstream = upstream;
     if (date !== "") ref.lastCommitAt = date;
     if (subject !== "") ref.subject = subject;
+    const owner = isRemote ? splitRemoteRefname(full, remotes) : null;
+    if (owner !== null) {
+      ref.remote = owner.remote;
+      ref.remoteBranch = owner.remoteBranch;
+    }
     out.push(ref);
   }
   return out;
@@ -3489,20 +3534,25 @@ export async function listBranches(
   git: GitExec,
   cwd: string
 ): Promise<Result<BranchRef[]>> {
-  const raw = await git(
-    [
-      "for-each-ref",
-      "--sort=-committerdate",
-      `--format=${BRANCH_FORMAT}`,
-      "refs/heads",
-      "refs/remotes"
-    ],
-    cwd
-  );
+  const [raw, remotes] = await Promise.all([
+    git(
+      [
+        "for-each-ref",
+        "--sort=-committerdate",
+        `--format=${BRANCH_FORMAT}`,
+        "refs/heads",
+        "refs/remotes"
+      ],
+      cwd
+    ),
+    listRemoteNames(git, cwd)
+  ]);
   if (!raw.ok) return raw;
   const checked = requireExit0(raw.value, ["for-each-ref"]);
   if (!checked.ok) return checked;
-  return ok(parseBranchRefs(checked.value.stdout));
+  // Without the remote names a ref only loses its `remote` field — the list
+  // itself is still right, so a failed `git remote` does not fail it.
+  return ok(parseBranchRefs(checked.value.stdout, remotes.ok ? remotes.value : []));
 }
 
 const REPO_REFS_FORMAT = [
@@ -4670,28 +4720,76 @@ export async function listRemoteBranchPage(
 }
 
 /**
+ * Git translates its refusals, and the files a checkout would overwrite are
+ * only listed inside one of them. Forcing C makes the headers below stable
+ * tokens rather than a guess about the user's locale (the same reasoning as
+ * `worktree-reclaim.ts`'s dry run). Paths are printed as raw bytes either way.
+ */
+const PARSEABLE_SWITCH = {
+  env: { LC_ALL: "C", LANGUAGE: "C", LANG: "C" }
+};
+
+/** "error: Your local changes to the following files would be overwritten by
+ *  checkout:" and its untracked twins ("…untracked working tree files would be
+ *  overwritten / removed by checkout:"). Each is followed by one TAB-indented
+ *  path per line. */
+const WOULD_CLOBBER_HEADER = /would be (?:overwritten|removed) by \w+:\s*$/;
+
+/**
+ * The paths a refused checkout named, in Git's order, from every list in the
+ * message — a switch can refuse over tracked and untracked files at once and
+ * prints one list for each.
+ */
+export function parseSwitchOverwritePaths(stderr: string): string[] {
+  const paths: string[] = [];
+  let listing = false;
+  for (const line of stderr.split(/\r?\n/)) {
+    if (WOULD_CLOBBER_HEADER.test(line)) {
+      listing = true;
+      continue;
+    }
+    if (listing && line.startsWith("\t") && line.length > 1) {
+      paths.push(line.slice(1));
+      continue;
+    }
+    listing = false;
+  }
+  return [...new Set(paths)];
+}
+
+/**
  * Check out `branch` in this worktree. `git switch` DWIMs a bare remote name
  * (e.g. "main" when only origin/main exists) into a new tracking branch, so
  * callers pass the short local name even for remote-only branches.
+ *
+ * A plain switch brings modified and untracked files along when `branch` does
+ * not touch them, and refuses — atomically, before touching anything — when
+ * one would be overwritten. That refusal is `switch_would_overwrite`, carrying
+ * the files Git named in `paths`, so the caller can ask what to do about
+ * exactly those.
  */
 export async function switchBranch(
   git: GitExec,
   cwd: string,
   branch: string
 ): Promise<Result<void>> {
-  const raw = await git(["switch", branch], cwd);
+  const raw = await git(["switch", branch], cwd, PARSEABLE_SWITCH);
   if (!raw.ok) return raw;
   if (raw.value.exitCode !== 0) {
-    const message = raw.value.stderr.trim();
+    const stderr = raw.value.stderr;
+    const message = stderr.trim();
+    const paths = parseSwitchOverwritePaths(stderr);
     const code = /already used by worktree|already checked out/i.test(message)
       ? "checked_out_elsewhere"
-      : /overwritten by checkout|local changes|would be overwritten/i.test(message)
-        ? "dirty"
+      : paths.length > 0 ||
+          /overwritten by checkout|local changes|would be overwritten/i.test(message)
+        ? "switch_would_overwrite"
         : "switch_failed";
     return err({
       kind: "repo",
       code,
-      message: message !== "" ? message : "Could not switch branch"
+      message: message !== "" ? message : "Could not switch branch",
+      ...(code === "switch_would_overwrite" ? { paths } : {})
     });
   }
   return ok(undefined);
@@ -4975,6 +5073,80 @@ export async function switchBranchCarryingChanges(
     kind: "repo",
     code: "carry_rollback_failed",
     message: `Your changes could not be brought over to ${branch}, and PwrGit could not put the checkout back: ${failure}. Your work is kept in the stash as "pwrgit: carrying changes to ${branch}".`
+  });
+}
+
+/** `refs/stash`'s commit, or null when the stack is empty. */
+async function stashTip(
+  git: GitExec,
+  cwd: string
+): Promise<Result<string | null>> {
+  const raw = await git(["rev-parse", "--verify", "--quiet", "refs/stash"], cwd);
+  if (!raw.ok) return raw;
+  if (raw.value.exitCode !== 0) return ok(null);
+  const sha = raw.value.stdout.trim();
+  return ok(sha === "" ? null : sha);
+}
+
+/**
+ * Check out `branch`, leaving the checkout's uncommitted work behind on the
+ * branch it was made on — stashed as `pwrgitLeftOnStashMessage(<that branch>)`,
+ * which is what coming back to it looks for to offer the work back.
+ *
+ * Same promise as `switchBranchCarryingChanges`, from the other side: either
+ * the checkout is on `branch` with the work in the stash, or it is where it
+ * started with the work back in the tree. A switch that fails after the stash
+ * reapplies it by commit identity, never a bare `stash pop`, and reports Git's
+ * original refusal (`checked_out_elsewhere` is a navigation upstream, not a
+ * failure). `leave_rollback_failed` is the one case that breaks the promise,
+ * and it names the stash entry the work is in.
+ */
+export async function switchBranchLeavingChanges(
+  git: GitExec,
+  cwd: string,
+  branch: string
+): Promise<Result<{ left: boolean }>> {
+  // The branch being left, or a short commit for a detached checkout: there
+  // is no branch to come back to then, but the entry still says where the
+  // work came from.
+  const here = await currentCheckoutRef(git, cwd);
+  if (!here.ok) return here;
+  const message = pwrgitLeftOnStashMessage(
+    /^[0-9a-f]{40,64}$/.test(here.value) ? here.value.slice(0, 12) : here.value
+  );
+
+  // Compared before and after rather than reading Git's "No local changes to
+  // save", which is translated.
+  const before = await stashTip(git, cwd);
+  if (!before.ok) return before;
+  const stashArgs = ["stash", "push", "--include-untracked", "-m", message];
+  const stashRaw = await git(stashArgs, cwd);
+  if (!stashRaw.ok) return stashRaw;
+  const stashed = requireExit0(stashRaw.value, stashArgs);
+  if (!stashed.ok) return stashed;
+  const after = await stashTip(git, cwd);
+  if (!after.ok) return after;
+  const sha = after.value;
+  if (sha === null || sha === before.value) {
+    // The tree went clean between the caller's probe and this operation.
+    // `left: false` is what stops the UI claiming it stashed something.
+    const plain = await switchBranch(git, cwd, branch);
+    return plain.ok ? ok({ left: false }) : plain;
+  }
+
+  const switched = await switchBranch(git, cwd, branch);
+  if (switched.ok) return ok({ left: true });
+
+  // Nothing moved except the stash, and the checkout is still where it was, so
+  // the repair is the reapply.
+  const restored = await reapplyStash(git, cwd, sha);
+  if (restored.ok && restored.value.reapplied) return switched;
+  return err({
+    kind: "repo",
+    code: "leave_rollback_failed",
+    message: `${switched.error.message}\n\nYour changes were saved to the stash first and could not be restored: ${
+      restored.ok ? restored.value.detail : restored.error.message
+    } They are kept in the stash as "${message}".`
   });
 }
 

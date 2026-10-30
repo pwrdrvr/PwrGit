@@ -16,6 +16,8 @@ export type ProfileWindows = {
   close: (profileId: string) => boolean;
   /** The profile bound to a window (null for unknown/none). */
   profileFor: (win: BrowserWindow | null) => string | null;
+  /** The live window bound to a profile; null when none, or it is closing. */
+  windowFor: (profileId: string) => BrowserWindow | null;
   focusedProfileId: () => string | null;
   /** Every profile with a live window. Not the same as "the active profile":
    *  several windows can be up at once, and work that repaints a sidebar has
@@ -105,6 +107,7 @@ export function createProfileWindows(options: {
       return true;
     },
     profileFor,
+    windowFor: alive,
     focusedProfileId: () => profileFor(BrowserWindow.getFocusedWindow()),
     openProfileIds: () =>
       [...byProfile.keys()].filter((profileId) => alive(profileId) !== null)

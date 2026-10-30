@@ -25,9 +25,22 @@ export type MenuItem =
        *  check typed into the label instead was read aloud as "check mark"
        *  and announced no state. */
       checked?: boolean;
+      /** With `checked`: one of a group where exactly one is on, so the
+       *  entry is a `menuitemradio` rather than a checkbox. */
+      radio?: boolean;
+      /** A setting, not a command: choosing it leaves the menu open, so the
+       *  reader can change several and see each take. The menu still closes
+       *  on its trigger, an outside click and Escape. */
+      keepOpen?: boolean;
+      /** Without `checked`: still lead with an empty check slot, so a command
+       *  under a group of checkable entries lines up with them. */
+      inset?: boolean;
       onSelect: () => void;
     }
-  | { type: "sep" };
+  | { type: "sep" }
+  /** A label over the group of entries below it ("Fetch automatically").
+   *  Not focusable, and not a menu item: the arrow keys pass over it. */
+  | { type: "heading"; label: string };
 
 /**
  * A context menu anchored at a screen point (right-click). Portalled to <body>,
@@ -129,23 +142,33 @@ export function ContextMenu({
       {items.map((it, i) =>
         it.type === "sep" ? (
           <div key={i} className="pop-menu__sep" />
+        ) : it.type === "heading" ? (
+          <div key={i} className="pop-menu__heading" role="presentation">
+            {it.label}
+          </div>
         ) : (
           <button
             key={i}
             className={`pop-menu__item${it.danger === true ? " pop-menu__item--danger" : ""}`}
-            role={it.checked === undefined ? "menuitem" : "menuitemcheckbox"}
+            role={
+              it.checked === undefined
+                ? "menuitem"
+                : it.radio === true
+                  ? "menuitemradio"
+                  : "menuitemcheckbox"
+            }
             aria-checked={it.checked}
             disabled={it.disabled === true}
             onClick={(e) => {
               e.stopPropagation();
               e.preventDefault();
               it.onSelect();
-              onClose();
+              if (it.keepOpen !== true) onClose();
             }}
           >
-            {it.checked !== undefined && (
+            {(it.checked !== undefined || it.inset === true) && (
               <span className="pop-menu__check" aria-hidden="true">
-                {it.checked && <CheckGlyph />}
+                {it.checked === true && <CheckGlyph />}
               </span>
             )}
             {it.hint === undefined ? (

@@ -77,7 +77,10 @@ export function registerTagHandlers(bus: CommandBus, db: DB): void {
       "tag",
       `created ${created.value.kind} tag ${created.value.name} at ${created.value.targetId}`
     );
-    emitEvent("repo:changed", { profileId: repo.profile_id });
+    emitEvent("repo:changed", {
+      profileId: repo.profile_id,
+      repoIds: [req.repoId]
+    });
     // The lineage graph chips one prominent tag per commit and caches that map
     // with the lanes for LANE_TTL_MS. `repo:changed` only reaches the sidebar,
     // so without this the tag the user just made at a visible commit stays
@@ -97,7 +100,10 @@ export function registerTagHandlers(bus: CommandBus, db: DB): void {
     );
     if (!deleted.ok) return deleted;
     logMain("info", "tag", `deleted local tag ${req.name}`);
-    emitEvent("repo:changed", { profileId: repo.profile_id });
+    emitEvent("repo:changed", {
+      profileId: repo.profile_id,
+      repoIds: [req.repoId]
+    });
     // Same reason as tag:create — a deleted tag must lose its chip too.
     emitEvent("graph:changed", { repoId: req.repoId });
     return ok(null);

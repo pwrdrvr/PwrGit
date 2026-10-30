@@ -15,13 +15,16 @@ jobs:
   benchmark:
     if: github.event.pull_request.head.repo.full_name == github.repository && contains(github.event.pull_request.labels.*.name, 'ci:benchmark-checks')
     name: Paired TS6 and TS7 checks
-    runs-on: [self-hosted, macOS, ARM64, pwrdrvr-macos]
+    runs-on: macos-26
     timeout-minutes: 40
     steps:
       - uses: actions/checkout@v5
-      - uses: pwrdrvr/configure-nodejs@v1
+      - uses: pwrdrvr/configure-nodejs@d416c1c78119b25fe03ee3ef78b75af0d69b10a7 # v1.7.1
+        timeout-minutes: 10
         with:
           node-version: 24.22.1
+          cache-electron: "true"
+          cache-key-suffix: pwrgit-store-d416c1c78119b25fe03ee3ef78b75af0d69b10a7-v1
       - name: Compare identical sources and check commands on this runner
         run: node scripts/resource-run.mjs node scripts/benchmark-checks.mjs check-benchmark
       - uses: actions/upload-artifact@v7

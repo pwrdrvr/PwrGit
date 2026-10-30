@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { Lens, Repo, Worktree } from "@pwrgit/shared";
+import { RECENT_DAYS, type Lens, type Repo, type Worktree } from "@pwrgit/shared";
 import {
   dropPositionWithin,
   filterReposByLens,
@@ -181,14 +181,10 @@ describe("Focused lens", () => {
   it("uses a transparent priority ladder and excludes incidental repos", () => {
     const rows = [
       repo({
-        id: "recent",
+        id: "authored",
         worktrees: [
-          wt({ id: "recent-wt", branch: "recent", lastActivityAt: daysAgo(3) })
+          wt({ id: "authored-wt", branch: "mine", lastAuthoredAt: daysAgo(3) })
         ]
-      }),
-      repo({
-        id: "changed",
-        worktrees: [wt({ id: "changed-wt", branch: "changed", ahead: 1 })]
       }),
       repo({
         id: "viewed",
@@ -213,56 +209,61 @@ describe("Focused lens", () => {
       "current",
       "pinned",
       "viewed",
-      "changed",
-      "recent"
+      "authored"
     ]);
     expect(
       filterReposByLens(rows, "Focused", NOW, context).map((r) => r.id)
-    ).toEqual(["current", "pinned", "viewed", "changed", "recent"]);
-    expect(focusReasonForRepo(rows[5] as Repo, context, NOW)).toBeNull();
+    ).toEqual(["current", "pinned", "viewed", "authored"]);
+    expect(focusReasonForRepo(rows[4] as Repo, context, NOW)).toBeNull();
   });
 
-  it("expires views and branch activity after 30 days", () => {
+  it("expires views and your commits after RECENT_DAYS", () => {
     const viewed = repo({
       id: "viewed",
       worktrees: [wt({ id: "viewed-wt", branch: "viewed" })]
     });
-    const recent = repo({
-      id: "recent",
+    const authored = repo({
+      id: "authored",
       worktrees: [
-        wt({ id: "recent-wt", branch: "recent", lastActivityAt: daysAgo(31) })
+        wt({ id: "authored-wt", branch: "mine", lastAuthoredAt: daysAgo(RECENT_DAYS + 1) })
       ]
     });
     expect(
       focusedRepos(
-        [viewed, recent],
+        [viewed, authored],
         {
           selectedWorktreeId: null,
-          visits: { "viewed-wt": NOW - 31 * 86_400_000 }
+          visits: { "viewed-wt": NOW - (RECENT_DAYS + 1) * 86_400_000 }
         },
         NOW
       )
     ).toEqual([]);
   });
 
-  it("keeps clean unpublished work even when its last commit is old", () => {
-    const unpublished = wt({
-      id: "unpublished-wt",
-      branch: "feature/local-only",
-      tracking: "unpublished",
-      lastActivityAt: daysAgo(90)
+  // Through 0.46.0 "recent" counted HEAD's date and any uncommitted or unpushed work, so a
+  // pulled repo or an agent's worktree made "recent" most of a profile.
+  it("ignores a fresh HEAD you did not author and unpushed work you did not touch", () => {
+    const pulled = repo({
+      id: "pulled",
+      worktrees: [wt({ id: "pulled-wt", branch: "main", lastActivityAt: daysAgo(1) })]
     });
-    const unpublishedRepo = repo({
-      id: "unpublished",
-      worktrees: [unpublished]
+    const agent = repo({
+      id: "agent",
+      worktrees: [
+        wt({
+          id: "agent-wt",
+          branch: "agent/fix",
+          ahead: 3,
+          dirty: 2,
+          tracking: "unpublished",
+          lastActivityAt: daysAgo(1)
+        })
+      ]
     });
     const context = { selectedWorktreeId: null, visits: {} };
-
-    expect(focusReasonForWorktree(unpublished, context, NOW)).toBe("changed");
-    expect(focusReasonForRepo(unpublishedRepo, context, NOW)).toBe("changed");
-    expect(focusedRepos([unpublishedRepo], context, NOW)).toEqual([
-      unpublishedRepo
-    ]);
+    expect(focusedRepos([pulled, agent], context, NOW)).toEqual([]);
+    // The worktree list inside a repo still surfaces work in flight.
+    expect(focusReasonForWorktree(agent.worktrees[0]!, context, NOW)).toBe("changed");
   });
 
   it("caps a large first page and reveals the complete focused set on demand", () => {
@@ -767,6 +768,20 @@ describe("staleness (isPrunableWorktree + Stale lens)", () => {
     ];
     expect(lensCounts(repos).Stale).toBe(1);
     expect(filterReposByLens(repos, "Stale").map((r) => r.id)).toEqual(["stale"]);
+  });
+
+  it("Stale lens follows the finished-after setting for a merged branch", () => {
+    const now = Date.now();
+    const repos = [
+      repo({
+        id: "today",
+        worktrees: [wt({ id: "t", branch: "feat/merged-today", mergedIntoDefault: true, lastActivityAt: new Date(now - 3_600_000).toISOString() })]
+      })
+    ];
+    const focus = { selectedWorktreeId: null, visits: {} };
+    expect(lensCounts(repos, now).Stale).toBe(0);
+    expect(lensCounts(repos, now, focus, [], 0).Stale).toBe(1);
+    expect(filterReposByLens(repos, "Stale", now, focus, 0).map((r) => r.id)).toEqual(["today"]);
   });
 });
 

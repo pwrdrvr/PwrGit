@@ -180,7 +180,7 @@ export function switchFailureMessage(
   error: PwrGitError,
   branch: string
 ): string {
-  if (error.code === "dirty") {
+  if (error.code === "switch_would_overwrite") {
     return `This worktree has uncommitted changes that switching to ${branch} would overwrite. Commit or stash them first.`;
   }
   if (error.code === "checked_out_elsewhere") {

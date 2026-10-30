@@ -1,193 +1,241 @@
 # scripts/
 
-Repo-wide policy, license, and release checks. Most are wired into `pnpm lint`
-through the root `package.json`; add new repo-wide checks to that chain rather
-than as another CI step.
+Repo-wide policy, license and release checks.
 
-Every script here is both an importable module (its checks are unit tested) and
-a CLI, so each guards `runCli()` with `isCliEntrypoint(import.meta.url)` from
-[lib/cli-entrypoint.mjs](lib/cli-entrypoint.mjs). Use it rather than
-open-coding the `process.argv[1]` comparison a fourth time.
+- Most run in `pnpm lint` via the root `package.json`. Add a new repo-wide
+  check to that chain, not as another CI step.
+- Each script is an importable, unit-tested module and a CLI. Guard `runCli()`
+  with `isCliEntrypoint(import.meta.url)` from
+  [lib/cli-entrypoint.mjs](lib/cli-entrypoint.mjs). Do not open-code the
+  `process.argv[1]` comparison.
 
 ## Machine resource policy
 
-`resource-run.mjs` wraps repository checks, builds, dev/watch and package tools.
-Below 16 GiB of total effective capacity (host total, OS limit, and every
-visible cgroup ancestor), PwrGit uses 2048 MiB Node old space and one workspace
-or test worker. At 16 GiB or above, argv and environment pass through unchanged.
-CI (nonempty `CI`, except `false`/`0`, or `GITHUB_ACTIONS=true`) bypasses the cap, shared lane and
-worker restrictions, retaining the CI job's original environment/argv and
-parallelism. This policy targets developer machines sharing several builds.
-Keep Vitest's default process isolation; SQLite staging supports native test
-workers separately from Electron.
+`resource-run.mjs` wraps repository checks, builds, dev/watch commands and
+package tools. The policy is for developer machines that run several builds
+at once.
 
-PwrGit and PwrAgent share `~/.cache/pwragent-tools-<sha256(home)[0:16]>/heavy-tool`
-using proper-lockfile (30 s stale, 5 s heartbeat). The sibling
-`heavy-tool.owner.json` and `PWRAGENT_TOOL_RESOURCE_OWNER` carry matching
-`{pid,path,token}`. The sidecar additionally records `ownerStartedAt`; POSIX
-records `groupPid`, `groupStartedAt`, a separate fresh `descendantToken`, and
-observed `descendantGroups: [{pid,startedAt}]`. Publish identities and the private
-capability before starting tools. The internal `PWRAGENT_TOOL_DESCENDANT_TOKEN`
-marks only constrained POSIX bridge/tool descendants so fast-exiting launchers
-can be recovered after reparenting; copied owner JSON alone grants no cleanup.
-Keep the inherited owner environment at exactly three fields. Validate start
-identities before stale recovery or signalling, and keep legacy live owners
-with unreadable/missing identities fail closed.
-Only verified descendants inherit a lease. Coordinate contract changes with
-both projects. Keep fixture lanes separate from the outer test runner's lease.
+- Capacity is the lowest of host total, OS limit and every visible cgroup
+  ancestor.
+- Below 16 GiB: 2048 MiB Node old space and one workspace or test worker.
+- At 16 GiB or above: argv and environment pass through unchanged.
+- CI (nonempty `CI` except `false`/`0`, or `GITHUB_ACTIONS=true`) bypasses the
+  cap, shared lane and worker limits. It keeps the job's environment, argv and
+  parallelism.
+- Keep Vitest's default process isolation. SQLite staging supports native
+  test workers separately from Electron.
 
-Use `node scripts/resource-run.mjs <tool> ...` for ad hoc heavy probes. Direct
-`pnpm exec` or `node` calls bypass this repository launcher. Long-running dev
-and watch commands hold the lane until they exit. Cancellation drains the
-primary and detached POSIX tool groups or Windows native Job before releasing the lease; do not
-replace Windows ownership with a `taskkill /T` fallback.
+### The shared lock contract
+
+PwrGit and PwrAgent share this lock. Change the contract only in both
+projects together.
+
+- Lock: `~/.cache/pwragent-tools-<sha256(home)[0:16]>/heavy-tool`, via
+  proper-lockfile (30 s stale, 5 s heartbeat).
+- The sibling `heavy-tool.owner.json` and `PWRAGENT_TOOL_RESOURCE_OWNER` carry
+  matching `{pid,path,token}`. The sidecar also records `ownerStartedAt`.
+- On POSIX the sidecar also records `groupPid`, `groupStartedAt`, a separate
+  fresh `descendantToken`, and observed `descendantGroups: [{pid,startedAt}]`.
+- Publish the identities and the private capability before starting tools.
+- The internal `PWRAGENT_TOOL_DESCENDANT_TOKEN` marks only constrained POSIX
+  bridge/tool descendants, so fast-exiting launchers can be recovered after
+  reparenting. Copied owner JSON alone grants no cleanup.
+- Keep the inherited owner environment at exactly three fields.
+- Validate start identities before stale recovery or signalling. Legacy live
+  owners with unreadable or missing identities fail closed; keep that.
+- Only verified descendants inherit a lease. Keep fixture lanes separate from
+  the outer test runner's lease.
+
+### Running heavy tools
+
+- Run ad hoc heavy probes with `node scripts/resource-run.mjs <tool> ...`.
+  Direct `pnpm exec` or `node` calls bypass the launcher.
+- Long-running dev and watch commands hold the lane until they exit.
+- Cancellation drains the primary and detached POSIX tool groups, or the
+  Windows native Job, before it releases the lease. Do not replace Windows Job
+  ownership with a `taskkill /T` fallback.
 
 ## Syntax correctness lint
 
-`lint:syntax` runs exact-pinned Oxlint with `.oxlintrc.json` from the repository
-root. Rules are explicit so adding a plugin cannot silently enable new rule
-categories. Classic Rules of Hooks apply only to renderer sources; React
-Compiler migration rules are outside this check. TS unused bindings remain
-owned by `tsconfig.base.json`, including its strict treatment of `_` locals.
-JS files use Oxlint's unused-binding check. Generated output, dependency trees
-and standalone design prototypes are excluded.
+`lint:syntax` runs exact-pinned Oxlint with `.oxlintrc.json` from the repo
+root.
 
-The `no-empty-pattern` exceptions cover Playwright's required destructured
-fixture parameters and the renderer's `act` fixture. Keep those narrow.
-`oxlint-config.test.mjs` injects unsafe-access and conditional-Hooks defects to
-verify scope and rejection. Keep test-shaped probes outside Vitest's discovered
-source patterns so watch mode cannot schedule them as suites.
-Syntax lint adds coverage; PwrGit had no ESLint
-baseline to accelerate. Oxfmt/automatic formatting requires its own scoped
-change rather than a bulk format alongside correctness checks.
+- Rules are explicit, so a new plugin cannot silently enable rule categories.
+- Classic Rules of Hooks apply only to renderer sources. React Compiler
+  migration rules are out of scope.
+- `tsconfig.base.json` owns TS unused bindings, including strict `_` locals.
+  JS files use Oxlint's unused-binding check.
+- Excluded: generated output, dependency trees, standalone design prototypes.
+- The `no-empty-pattern` exceptions cover Playwright's destructured fixture
+  parameters and the renderer's `act` fixture. Keep them narrow.
+- `oxlint-config.test.mjs` injects unsafe-access and conditional-Hooks defects
+  to verify scope and rejection. Keep test-shaped probes outside Vitest's
+  discovered patterns, so watch mode does not run them as suites.
+- Syntax lint adds coverage; PwrGit had no ESLint baseline.
+- Oxfmt or other auto-formatting needs its own scoped change. Do not bulk
+  format with correctness checks.
+
+## Typecheck: which compiler, and what it gates
+
+- `pnpm typecheck` runs the exact-pinned TypeScript 7 native compiler
+  (`typescript-native` alias) through `typecheck.mjs`.
+- TypeScript 6 (`typescript`) stays for dependency-cruiser's JavaScript API
+  and the MCP server's declaration/JS emit.
+- Both publish `tsc`. Never rely on whichever wins `node_modules/.bin/tsc`.
+- `PWRGIT_TYPECHECK_COMPILER=typescript pnpm typecheck` runs TS6, for
+  comparison or fallback. Editor/LSP compiler selection is independent.
+
+`tsconfig.base.json` sets `noUnusedLocals` and `noUnusedParameters`.
+`apps/desktop`, `packages/mcp-server` and `packages/shared` extend it.
+
+- An unused import or local, or the dead value half of
+  `import { x, type X }`, fails `pnpm typecheck` and `pnpm lint`. It also
+  fails `pnpm build` for `packages/mcp-server` (its build is `tsc`).
+- The desktop build (electron-vite) type-checks nothing. Trust
+  `pnpm typecheck`.
+
+Blind spots, verified by probe:
+
+- **A leading `_` exempts parameters and imports, but not locals.**
+  `function f(_x: string) {}` and `import { y as _y } from "./m"` are silent;
+  `const _z = 1` is still TS6133. Use the prefix for a parameter that
+  documents a signature (a test double's ignored argument, a `describe.each`
+  title slot). Never use it to hide a dead import.
+- **An export nobody imports is invisible.** After you delete an import, grep
+  for the symbol.
+
+"The compiler says unused" is not "dead code". In a test, an unused binding is
+often a missing assertion. Find its purpose before you delete it.
 
 ## Compiler measurements
 
-`typecheck.mjs` resolves TS7's CLI explicitly; `PWRGIT_TYPECHECK_COMPILER=typescript`
-selects TS6 for fallback or comparison. Keep TS6 for dependency-cruiser and MCP
-emit. `benchmark-checks.mjs OUTPUT` runs on macOS through `resource-run.mjs`:
-identical sources/configs/dependencies, three paired workspace typecheck/full-lint
-samples, warm caches, CI mode and 6 GiB Node old space. It verifies repository
-file inventories and rejects injected type/unused-binding defects before timing.
-Inventory paths and compiler `PWD` use the physical checkout path. Timed
-commands use an IPC gate and the existing POSIX descendant tracker; timeout
-cleanup drains the entire command tree before returning, and aborts sampling.
-Run on the managed E2E guest or the opt-in CI workflow; do not compare hardware
-or infer editor/session memory from process RSS. Keep raw artifacts outside Git.
+`benchmark-checks.mjs OUTPUT` compares TS7 and TS6 on macOS through
+`resource-run.mjs`.
+
+- Conditions: identical sources, configs and dependencies; three paired
+  workspace typecheck/full-lint samples; warm caches; CI mode; 6 GiB Node old
+  space.
+- Before timing, it verifies repository file inventories and that injected
+  type and unused-binding defects are rejected.
+- Inventory paths and compiler `PWD` use the physical checkout path.
+- Timed commands use an IPC gate and the POSIX descendant tracker. On timeout,
+  cleanup drains the full command tree before returning, and sampling stops.
+- Run on the managed E2E guest or the opt-in CI workflow. Do not compare
+  hardware or infer editor/session memory from process RSS.
+- Keep raw artifacts outside Git.
 
 ## The dependency cooldown
 
-`check-dependency-maturity.mjs` (`pnpm deps:maturity`) re-applies
-`minimumReleaseAge` from `pnpm-workspace.yaml` — seven days — to every version
+`check-dependency-maturity.mjs` (`pnpm deps:maturity`) applies
+`minimumReleaseAge` from `pnpm-workspace.yaml` (seven days) to every version
 pinned in `pnpm-lock.yaml`.
 
-pnpm enforces that setting **only while it resolves**, and this repo almost
-never resolves. `pnpm install --frozen-lockfile` prints "resolution step is
-skipped", so install, typecheck, test, build and E2E all pass over a
-day-old dependency without a word. The one command that resolves from scratch
-is the release's `pnpm deploy --legacy`, which re-applies the gate to the
-lockfile's pinned versions. That is a policy enforced at exactly the last step
-that can act on it: zod 4.5.1 merged clean via Dependabot and then blocked
-v0.11.0 at packaging, with nothing to do but wait out the window.
+Why: pnpm enforces `minimumReleaseAge` **only while it resolves**, and this
+repo almost never resolves. `pnpm install --frozen-lockfile` prints
+"resolution step is skipped". Install, typecheck, test, build and E2E all pass
+a one-day-old dependency silently. Only the release's `pnpm deploy --legacy`
+resolves from scratch and applies the gate. Example: zod 4.5.1 merged through
+Dependabot, then blocked v0.11.0 at packaging until the window ended.
 
-Three things close that gap, and they only work together:
+Three controls close that gap. They work only together:
 
 | Where | What it does |
 |---|---|
-| `cooldown` in `.github/dependabot.yml` | No PR is opened for a release younger than the window, so the state normally never arises. |
-| `minimumReleaseAge` in `pnpm-workspace.yaml` | The window is the repo's, identical on every machine and in CI. It previously lived only in individual developers' pnpm config — enforced for one person, absent from CI, and the reason the failure looked machine-specific. |
-| `pnpm deps:maturity` in the `pnpm lint` chain | Fails the PR that lands a too-young version, not the release that ships it. Also runs first in `release.mjs`, so a release fails in seconds instead of after a full build. |
+| `cooldown` in `.github/dependabot.yml` | No PR opens for a release younger than the window. |
+| `minimumReleaseAge` in `pnpm-workspace.yaml` | The window is the repo's, identical on every machine and in CI. In personal pnpm config it was absent from CI, so failures looked machine-specific. |
+| `pnpm deps:maturity` in the `pnpm lint` chain | Fails the PR that adds a too-young version, not the release. It also runs first in `release.mjs`, so a release fails in seconds, not after a full build. |
 
-Publish times come from the registry, so the check needs network for releases
-it has not seen; they are immutable, so
-`node_modules/.cache/pwrgit/dependency-publish-times.json` keeps the ones the
-current lockfile needs and only new pins cost a request.
+Publish times come from the registry, so new pins need network. They are
+immutable: `node_modules/.cache/pwrgit/dependency-publish-times.json` keeps the
+ones the current lockfile needs.
 
-**Adding a `minimumReleaseAgeExclude` entry is a supply-chain decision.** The
-window exists so a compromised publish has a week to be caught. Prefer waiting
-it out. When a release genuinely has to be taken early, pin the exact version
-(`zod@4.5.1`, never a bare `zod`) and say why in a comment — a bare name
-exempts every future version of that package, which is what the standing
-`@pwrdrvr/*` entries deliberately do and what a one-off waiver must not. The
-check reports a pin as prunable once its version has matured or left the
-lockfile; it never fails over that.
+### Exclusions
 
-Semver ranges (`zod@^4.5.0`) are rejected even though pnpm accepts them. An
-allowlist entry covering more releases than its author intended is the failure
-mode worth designing against.
+**Adding a `minimumReleaseAgeExclude` entry is a supply-chain decision.**
+
+- The window gives a compromised publish one week to be found. Prefer to wait.
+- To take a release early, pin the exact version (`zod@4.5.1`, never bare
+  `zod`) and add a comment that says why.
+- A bare name exempts every future version. The standing `@pwrdrvr/*` entries
+  do this intentionally; a one-off waiver must not.
+- The check reports a pin as prunable when its version has matured or left
+  the lockfile. It never fails for that.
+- Semver ranges (`zod@^4.5.0`) are rejected, although pnpm accepts them. An
+  entry that covers more releases than its author intended is the failure
+  this design prevents.
 
 ## The three license scripts
 
-`pnpm licenses:check` runs them in this order, and they do different jobs:
+`pnpm licenses:check` runs them in this order:
 
 | Script | Checks |
 |---|---|
-| `check-package-license-policy.mjs` | OUR five workspace `package.json` files declare MIT, plus `LICENSE` and the electron-builder attribution. **Never looks at a dependency.** It also keeps former-employer names out of tracked files — a name failure there is not a license failure. A public package's npm name (`@scope/pkg`) may appear anywhere; only the bare vendor name is flagged. |
+| `check-package-license-policy.mjs` | OUR five workspace `package.json` files declare MIT; also `LICENSE` and the electron-builder attribution. **Never looks at a dependency.** It also keeps former-employer names out of tracked files (a name failure is not a license failure). A public npm name (`@scope/pkg`) may appear anywhere; only the bare vendor name is flagged. |
 | `check-third-party-license-allowlist.mjs` | Every license the notice discloses is on an explicit allowlist. This is the gate. |
-| `generate-third-party-licenses.mjs` | Transcribes the tree into `THIRD_PARTY_LICENSES`. **Judges nothing.** |
+| `generate-third-party-licenses.mjs` | Writes the tree into `THIRD_PARTY_LICENSES`. **Judges nothing.** |
 
-That last row is why the gate exists. The generator groups records by whatever
-license string pnpm hands it, so before the gate a dependency flipping
-MIT → GPL-3.0 wrote a new `GPL-3.0` section into the notice and
-`licenses:generate --check` then PASSED — committed file matches generated
-file, green CI, copyleft shipped, nobody told. The only safety was that a human
-might spot a new heading in the diff, which is worth nothing once regeneration
-is automated on a Dependabot branch.
+Why the gate exists: the generator groups records by pnpm's license string.
+Before the gate, a dependency that changed MIT → GPL-3.0 added a `GPL-3.0`
+section, and `licenses:generate --check` PASSED: CI was green and copyleft
+shipped silently. Only a human reading the diff could catch it, and Dependabot
+branches regenerate automatically.
 
 ## Always-allowed licenses
 
 `ALLOWED_LICENSE_IDS`: MIT, Apache-2.0, BSD-2-Clause, BSD-3-Clause, ISC, 0BSD,
-Unlicense, CC0-1.0, MPL-2.0, BlueOak-1.0.0, OFL-1.1, Python-2.0. Anything else
-in a **shipped** dependency: pause and confirm with the user before adding the
-dep. Dev-only tooling is out of scope (the tree already carries WTFPL and
-CC-BY-4.0 there, harmlessly).
+Unlicense, CC0-1.0, MPL-2.0, BlueOak-1.0.0, OFL-1.1, Python-2.0.
 
-The list was seeded from what the tree actually declares, reconciled against
-the permissive set the Pwr family treats as always-allowed. PwrGit documented
-no allowlist at all before the gate, so BlueOak-1.0.0, OFL-1.1 and Python-2.0
-had arrived without anyone deciding. That is the drift an unenforced policy
-accumulates; the reconciled list is recorded above and in the script.
+- A **shipped** dependency under any other license: stop and confirm with the
+  user before you add it.
+- Dev-only tooling is out of scope (the tree has WTFPL and CC-BY-4.0 there,
+  harmlessly).
+- The list is the tree's declared licenses reconciled with the Pwr family's
+  always-allowed permissive set. BlueOak-1.0.0, OFL-1.1 and Python-2.0 had
+  arrived with no decision, because no allowlist was enforced.
 
-Adding an id is a legal decision. Make it in a commit that says why — **never
-to make CI green.**
+**Adding an id is a legal decision.** Make it in a commit that says why.
+**Never add an id to make CI green.**
 
 ## The GPL-2.0 carve-out for embedded Git
 
-PwrGit ships a strong-copyleft binary on purpose: Dugite downloads Git, and
-`EMBEDDED_GIT_NOTICE_SOURCES` discloses it as GPL-2.0-only. A permissive-only
-allowlist would be wrong here, so `ALLOWED_EMBEDDED_COPYLEFT_IDS` permits that
-one id for the embedded-runtime surface **only**, and only for an entry
-carrying a `copyleft` descriptor naming its corresponding source. The same
-string on an ordinary npm dependency fails — a dependency is linked into the
-app, and nothing would put its source pointer in the notice.
+PwrGit ships a strong-copyleft binary intentionally: Dugite downloads Git, and
+`EMBEDDED_GIT_NOTICE_SOURCES` discloses it as GPL-2.0-only.
 
-Both sides enforce it: the gate refuses a copyleft runtime with no descriptor,
-and `validateEmbeddedNoticeSource` refuses to generate a notice for one. Keep
-them in step.
+- `ALLOWED_EMBEDDED_COPYLEFT_IDS` permits that one id for the
+  embedded-runtime surface **only**, and only for an entry with a `copyleft`
+  descriptor that names its corresponding source.
+- The same id on an npm dependency fails. A dependency is linked into the
+  app, and nothing would put its source pointer in the notice.
+- Both sides enforce it: the gate refuses a copyleft runtime with no
+  descriptor, and `validateEmbeddedNoticeSource` refuses to generate a notice
+  for one. Keep them in step.
 
-**Open legal question, not closed by this gate.** Git is invoked as a separate
-executable over a process boundary, so PwrGit is not a derivative work of it —
-but PwrGit does redistribute the binary, which carries GPL-2.0 section 3. The
-notice now reproduces the GPL text and points at the exact corresponding
-source, which reads on 3(a); it carries **no** written offer under 3(b). If
-counsel wants the 3(b) offer, it belongs in the `copyleft` descriptor so the
-generator emits it. Do not treat the carve-out as a ruling that the disclosure
-is complete.
+**Open legal question, not closed by this gate.**
+
+- Git runs as a separate executable across a process boundary, so PwrGit is
+  not a derivative work. But PwrGit redistributes the binary, which carries
+  GPL-2.0 section 3.
+- The notice reproduces the GPL text and points at the exact corresponding
+  source (3(a)). It has **no** written offer under 3(b).
+- If counsel wants the 3(b) offer, put it in the `copyleft` descriptor so the
+  generator emits it.
+- Do not treat the carve-out as a ruling that the disclosure is complete.
 
 ## What the gate covers, exactly
 
-Its input set is the notice's contents — three surfaces, all read:
+The gate reads all three surfaces of the notice:
 
 1. The npm production tree (`NOTICE_PNPM_ARGS.production`).
-2. `NOTICE_DEV_DEPENDENCIES` out of the `all` report. Electron is a
-   devDependency that ships, so `--prod` never reports it; the generator merges
-   it in and the gate follows. **Keep the two in step** — a name the generator
-   discloses but the set omits is the largest shipped component with an ungated
-   license.
+2. `NOTICE_DEV_DEPENDENCIES` from the `all` report. Electron is a shipped
+   devDependency that `--prod` never reports; the generator merges it in and
+   the gate follows. **Keep the two in step**, or the largest shipped
+   component has an ungated license.
 3. `EMBEDDED_GIT_NOTICE_SOURCES`, the Dugite runtimes.
 
-**Not** covered: optional dependencies (`--no-optional` is what makes the notice
-platform-identical, so neither report enumerates them — an optional dependency
-that ships is disclosed by neither the notice nor the gate until someone adds
-it deliberately); devDependencies outside `NOTICE_DEV_DEPENDENCIES`; and
-Chromium's own credits inside Electron, which the notice points at upstream.
+**Not** covered:
+
+- Optional dependencies. `--no-optional` keeps the notice identical across
+  platforms, so neither report lists them. A shipped optional dependency is
+  undisclosed and ungated until someone adds it deliberately.
+- devDependencies outside `NOTICE_DEV_DEPENDENCIES`.
+- Chromium's credits inside Electron. The notice points to them upstream.

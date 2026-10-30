@@ -159,6 +159,75 @@ describe("WorktreeStateService (system git)", () => {
     ).toBe("unpublished");
   });
 
+  // "Recent" is what you did. HEAD's date moves with every pull, so a pulled
+  // commit by someone else must not make the repo yours.
+  it("dates your newest commit on HEAD, not someone else's", async () => {
+    const repo = join(mkdtempSync(join(tmpdir(), "pwrgit-authored-")), "repo");
+    mkdirSync(repo, { recursive: true });
+    git(repo, ["init", "-b", "main"]);
+    git(repo, ["config", "user.email", "Me@Example.com"]);
+    git(repo, ["config", "user.name", "Me"]);
+    git(repo, ["commit", "--allow-empty", "-m", "mine", "--date=2020-01-01T00:00:00Z"]);
+    const isolatedDb = openDatabase(":memory:");
+    const profile = new ProfileService(isolatedDb).create({ name: "T", email: "me@example.com" });
+    const added = await new RepoIndexer(isolatedDb, systemGit).indexRepoAt(profile.id, repo);
+    if (!added.ok) throw new Error("indexRepoAt failed");
+    const id = added.value.worktrees[0]!.id;
+    const isolated = new WorktreeStateService(isolatedDb, systemGit);
+
+    // Committed now but authored long ago: outside the window, so not recent.
+    expect((await isolated.compute(id))?.lastAuthoredAt).toBeUndefined();
+
+    git(repo, ["commit", "--allow-empty", "-m", "mine, now"]);
+    const mine = (await isolated.compute(id))?.lastAuthoredAt;
+    expect(mine).toBeTruthy();
+
+    // A newer commit by someone else (a pull) leaves your date where it was.
+    git(repo, [
+      "-c", "user.email=someone@else.dev", "-c", "user.name=Someone",
+      "commit", "--allow-empty", "-m", "theirs"
+    ]);
+    const after = await isolated.compute(id);
+    expect(after?.lastAuthoredAt).toBe(mine);
+    expect(after?.lastActivityAt).toBeTruthy();
+    const repoId = added.value.id;
+    expect(
+      new RepoIndexer(isolatedDb, systemGit).getRepo(repoId)?.worktrees[0]?.lastAuthoredAt
+    ).toBe(mine);
+
+    // Under another identity none of it is yours.
+    git(repo, ["config", "user.email", "new@example.com"]);
+    expect((await isolated.compute(id))?.lastAuthoredAt).toBeUndefined();
+  });
+
+  // compute() runs for rows on screen, and Focused decides what is on screen,
+  // so a commit made elsewhere reaches the store only through the sweep.
+  it("sweeps your commits into every worktree's row, and honours .mailmap", async () => {
+    const repo = join(mkdtempSync(join(tmpdir(), "pwrgit-sweep-")), "repo");
+    mkdirSync(repo, { recursive: true });
+    git(repo, ["init", "-b", "main"]);
+    git(repo, ["config", "user.email", "me@work.example"]);
+    git(repo, ["config", "user.name", "Me"]);
+    // A mailmap that renames your configured address must not hide you.
+    writeFileSync(join(repo, ".mailmap"), "Me <me@home.example> <me@work.example>\n");
+    git(repo, ["add", ".mailmap"]);
+    git(repo, ["-c", "user.email=other@x.example", "commit", "-m", "theirs"]);
+    const isolatedDb = openDatabase(":memory:");
+    const profile = new ProfileService(isolatedDb).create({ name: "T", email: "me@work.example" });
+    const added = await new RepoIndexer(isolatedDb, systemGit).indexRepoAt(profile.id, repo);
+    if (!added.ok) throw new Error("indexRepoAt failed");
+    const id = added.value.worktrees[0]!.id;
+    const isolated = new WorktreeStateService(isolatedDb, systemGit);
+    expect((await isolated.compute(id))?.lastAuthoredAt).toBeUndefined();
+
+    git(repo, ["commit", "--allow-empty", "-m", "mine"]);
+    const moved = await isolated.sweepAuthored();
+    expect(moved.get(profile.id)).toEqual([added.value.id]);
+    expect(isolated.getCached(id)?.lastAuthoredAt).toBeTruthy();
+    // Nothing moved since: nothing to announce.
+    expect((await isolated.sweepAuthored()).size).toBe(0);
+  });
+
   // On a fork `main` tracks the user's own copy, so its counts read 0/0 while
   // the source moves on. The source counts ride in the same snapshot, so the
   // sidebar (which reads only the stored row) says what the header says.
@@ -510,6 +579,44 @@ describe("WorktreeStateService (system git)", () => {
         .prepare("SELECT branch, missing FROM worktrees WHERE id = ?")
         .get(row.id)
     ).toEqual({ branch: "feature", missing: 1 });
+  });
+
+  // Agents put their worktrees inside the repository (`.claude/worktrees/x`).
+  // `git status` in the primary reports that checkout as an untracked folder,
+  // which read as `●1` on a clean primary and gated every branch switch.
+  it("does not count a nested agent worktree as the primary's change", async () => {
+    const isolatedRoot = mkdtempSync(join(tmpdir(), "pwrgit-state-agent-"));
+    const repo = join(isolatedRoot, "repo");
+    const nested = join(repo, ".claude", "worktrees", "agent-1");
+    mkdirSync(repo, { recursive: true });
+    git(repo, ["init", "-b", "main"]);
+    git(repo, ["config", "user.email", "t@t.com"]);
+    git(repo, ["config", "user.name", "Tester"]);
+    writeFileSync(join(repo, "README.md"), "# repo\n");
+    git(repo, ["add", "."]);
+    git(repo, ["commit", "-m", "init"]);
+    git(repo, ["worktree", "add", nested, "-b", "agent"]);
+    writeFileSync(join(nested, "wip.txt"), "agent work\n");
+
+    const isolatedDb = openDatabase(":memory:");
+    const profiles = new ProfileService(isolatedDb);
+    const profile = profiles.create({ name: "N", email: "n@t.com" });
+    const indexer = new RepoIndexer(isolatedDb, systemGit);
+    const added = await indexer.indexRepoAt(profile.id, repo);
+    if (!added.ok) throw new Error("indexRepoAt failed");
+    const primaryRow = added.value.worktrees.find((w) => w.branch === "main");
+    const agentRow = added.value.worktrees.find((w) => w.branch === "agent");
+    if (primaryRow === undefined || agentRow === undefined) {
+      throw new Error("worktrees not indexed");
+    }
+    const isolated = new WorktreeStateService(isolatedDb, systemGit);
+    expect((await isolated.compute(primaryRow.id))?.dirty).toBe(0);
+    // The agent's own work still counts, on its own row.
+    expect((await isolated.compute(agentRow.id))?.dirty).toBe(1);
+
+    // A real file beside it is still the primary's change.
+    writeFileSync(join(repo, ".claude", "notes.md"), "mine\n");
+    expect((await isolated.compute(primaryRow.id))?.dirty).toBe(1);
   });
 
   it("returns null for an unknown worktree id", async () => {

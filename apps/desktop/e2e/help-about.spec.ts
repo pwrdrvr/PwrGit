@@ -159,13 +159,35 @@ test("Help and About expose identity, canonical support links, and recovery", as
   expect(copiedIdentity).toContain("Build: Development");
   expect(copiedIdentity).toContain(`${runtime.platformVersion} (${runtime.arch})`);
 
-  // Help → Copy Diagnostics Info puts the same identity on the system
-  // clipboard from main, with no Settings window needed.
+  // Help → Copy Diagnostics Info puts the full report on the system
+  // clipboard from main, as plain text and as a code block for rich editors,
+  // then the profile window re-copies it with the repository it shows.
   await app.evaluate(({ clipboard }) => clipboard.writeText(""));
   await clickMenuItem(app, "Copy Diagnostics Info");
+  const live = await app.evaluate(({ app: electronApp }) => ({
+    pid: process.pid,
+    execPath: process.execPath,
+    userData: electronApp.getPath("userData")
+  }));
   await expect
     .poll(() => app.evaluate(({ clipboard }) => clipboard.readText()))
-    .toBe(copiedIdentity);
+    .toMatch(/^Repository: /m);
+  const report = await app.evaluate(({ clipboard }) => clipboard.readText());
+  expect(report).toContain(`Version: PwrGit ${DESKTOP_VERSION}`);
+  expect(report).toContain("Build: Development");
+  expect(report).toContain(`Electron: ${runtime.electronVersion}`);
+  expect(report).toContain(`Executable: ${live.execPath}`);
+  expect(report).toContain(`Main PID: ${live.pid}`);
+  expect(report).toMatch(/^Renderer PID: \d+$/m);
+  expect(report).toMatch(/^Log file: .*main\.log$/m);
+  expect(report).toContain(`User data: ${live.userData}`);
+  expect(report).toMatch(/^Git version: git version \S/m);
+  const html = await app.evaluate(async ({ clipboard }) => {
+    const [item] = await clipboard.read();
+    return item === undefined ? "" : await (await item.getType("text/html")).text();
+  });
+  expect(html).toContain("<pre><code>");
+  expect(html).toContain(`Main PID: ${live.pid}`);
 
   await stubExternalOpening(app, true);
   await settings.getByRole("button", { name: "Open documentation" }).click();

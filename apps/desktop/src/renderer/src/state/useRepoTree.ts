@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import type { Repo, Res } from "@pwrgit/shared";
+import { claimWorktreeOwnership, type Repo, type Res } from "@pwrgit/shared";
 import { confirmDialog, notifyDialog } from "../features/shell/dialogs";
 import { dispatch, subscribe } from "../lib/pwrgit";
 import { showErrorToast, showInfoToast } from "../lib/toast";
@@ -10,6 +10,31 @@ import {
 } from "./readState";
 
 export type RemovalProgress = { done: number; total: number };
+
+/**
+ * Swap re-read repositories into the tree by id. Every other repository keeps
+ * its object, so nothing keyed on it (memoized rows, each expanded repo's
+ * `repo:refs`) re-runs. A named repository missing from the answer is gone or
+ * hidden, so it leaves. Ownership runs over the merged list, as main runs it
+ * over a full one (`repo-ownership.ts`), so a fossil duplicate stays single.
+ */
+export function mergeChangedRepos(
+  current: Repo[],
+  asked: readonly string[],
+  fresh: readonly Repo[]
+): Repo[] {
+  const byId = new Map(fresh.map((repo) => [repo.id, repo]));
+  const named = new Set(asked);
+  const merged: Repo[] = [];
+  for (const repo of current) {
+    if (!named.has(repo.id)) merged.push(repo);
+    else {
+      const next = byId.get(repo.id);
+      if (next !== undefined) merged.push(next);
+    }
+  }
+  return claimWorktreeOwnership(merged);
+}
 
 export type RemoveWorktreesOptions = {
   /**
@@ -173,10 +198,56 @@ export function useRepoTree(activeProfileId: string | null): UseRepoTree {
     // stale arrives as a repo:identityChanged delta a moment later. Rows that
     // arrive after this are asked about by `reload` — see `identityAskedRef`.
     void dispatch("repo:refreshIdentities", { profileId: activeProfileId });
+    /*
+     * Re-read only the repositories a `repo:changed` names. A bulk fetch
+     * sends one per repository it finishes; re-reading the whole profile
+     * each time replaced every Repo object, so every expanded repository
+     * re-ran `repo:refs` once per repository fetched (O(n²) git).
+     *
+     * One read at a time: ids that arrive meanwhile join the next batch, so a
+     * burst costs a few reads and answers cannot land out of order. A full
+     * reload started after a read covers it, so that answer is dropped. The
+     * queue belongs to this profile's subscription and dies with it, so a
+     * read still out after a profile switch cannot drain the next profile's
+     * ids under the old profile's name.
+     */
+    const profileId = activeProfileId;
+    const changed = new Set<string>();
+    let reading = false;
+    let live = true;
+    const reloadChanged = async (): Promise<void> => {
+      if (reading) return;
+      reading = true;
+      try {
+        while (live && changed.size > 0) {
+          const asked = [...changed];
+          changed.clear();
+          const request = requestRef.current;
+          const r = await dispatch("repo:list", { profileId, repoIds: asked });
+          if (!live || request !== requestRef.current) continue;
+          if (!r.ok) {
+            // The full read owns the error and ready states; let it decide.
+            changed.clear();
+            void reload();
+            return;
+          }
+          setRepos((rs) => mergeChangedRepos(rs, asked, r.value));
+        }
+      } finally {
+        reading = false;
+      }
+    };
     const off = subscribe("repo:changed", (p) => {
-      if (p.profileId === activeProfileId) void reload();
+      if (p.profileId !== profileId) return;
+      if (p.repoIds === undefined) {
+        void reload();
+        return;
+      }
+      for (const id of p.repoIds) changed.add(id);
+      void reloadChanged();
     });
     return () => {
+      live = false;
       mountedRef.current = false;
       requestRef.current += 1;
       off();

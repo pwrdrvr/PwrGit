@@ -2,15 +2,20 @@
 
 Shared renderer primitives. See `apps/desktop/AGENTS.md` for app-wide notes.
 
+Rules that always apply here:
+
+- **Open a hover popup through `hoverIntentHandlers`**, not raw `onMouseEnter`.
+- **Show a tooltip with `hoverTooltip(tip, content)`.** Never add a native `title`.
+- **Close a click-opened overlay with `useDismissable` / `useModal`.** Never hand-roll a keydown effect.
+- **A `window` keydown handler calls `preventDefault` when it spends a key, and skips a key that is `defaultPrevented`.**
+- **Pass `subject` on every toast about a repository.**
+- **Never list remote branches or tags whole.** Page them through main.
+
 ## Hover-opened popups go through `useHoverIntent`
 
-Every SHA chip sits in the same fixed column, so a pointer crossing the graph
-enters every trigger on its way elsewhere. Opening on raw `onMouseEnter` leaves
-a trail of cards (and fires per-row IPC). `hoverIntent.ts` gates the **pointer**
-path on dwell *and* evidence the pointer is aiming; focus and click bypass it.
-
-Wire a new hover popup with `hoverIntentHandlers({ intent, show, hide })` rather
-than hand-rolling the four handlers — it is the tested routing:
+`hoverIntentHandlers({ intent, show, hide })` is the tested routing. Read
+`e.currentTarget` **synchronously** into the call. The open is deferred, and
+React sets `currentTarget` to null after the handler returns.
 
 ```tsx
 const chip = hoverIntentHandlers({ intent: hoverIntent, show, hide });
@@ -20,40 +25,41 @@ const chip = hoverIntentHandlers({ intent: hoverIntent, show, hide });
       onBlur={chip.onBlur} />
 ```
 
-Read `e.currentTarget` **synchronously** into the call, as above. The open is
-deferred, and React nulls `currentTarget` once the handler returns.
-
-Components that render one gate for many rows (`LineageGraph`) own the hook and
-pass the `HoverIntent` down; a lone chip may call `useHoverIntent()` itself.
-When a popup outlives the hover that opened it (an interactive card the pointer
-moves into), tell the gate with `cardClosed()` when it leaves the screen, or its
-"user is browsing" warm window expires while the card is still being read.
+- `hoverIntent.ts` gates the **pointer** path on dwell *and* on evidence that
+  the pointer is aiming. Focus and click bypass the gate.
+- Why: all SHA chips sit in one fixed column. A pointer that crosses the graph
+  enters every trigger, so a raw open leaves a trail of cards and fires IPC
+  per row.
+- A component with one gate for many rows (`LineageGraph`) owns the hook and
+  passes the `HoverIntent` down. A lone chip may call `useHoverIntent()`.
+- If a card stays open after its hover (an interactive card the pointer moves
+  into), call `cardClosed()` when it leaves the screen. Otherwise the gate's
+  "user is browsing" warm window expires while the user reads the card.
 
 ## Which hover popups are gated
 
-Gate a popup when its trigger **repeats down a column the pointer crosses on
-its way elsewhere** (SHA chips, PR chips, author bylines), or when opening it
-costs something.
-Leave it instant when the trigger is an isolated control the pointer had to aim
-at — `RepoRow`'s refresh button, `CopyTarget` inside an already-opened card.
-There is no sweep to suppress there, and a delay would only feel sluggish.
-
-Hover work that is expensive rather than visual takes a longer, plainer delay
-of its own: `WorktreeRow` prefetches a PR after 750ms and cancels on leave.
+- **Gate** a popup when its trigger repeats down a column that the pointer
+  crosses (SHA chips, PR chips, author bylines), or when opening it costs
+  something.
+- **Keep it instant** for an isolated control that the pointer had to aim at:
+  `RepoRow`'s refresh button, `CopyTarget` inside an open card. There is no
+  sweep to suppress, and a delay only feels slow.
+- Expensive (not visual) hover work uses its own longer delay. `WorktreeRow`
+  prefetches a PR after 750ms (`PR_HOVER_PREFETCH_DELAY_MS`) and cancels on
+  leave.
 
 ## Aiming is two conditions, either of which is enough
 
-The pointer counts as aiming if it has stayed within `HOVER_INTENT_JITTER_PX`
-of where it entered the trigger, **or** slowed below
-`HOVER_INTENT_SETTLE_PX_PER_MS`. Speed alone would exclude anyone whose hand
-does not hold still — a 10px tremor reads as 0.5 px/ms and would never open a
-card. A sweep satisfies neither, so the extra path costs no suppression.
+The pointer is aiming if it stayed within `HOVER_INTENT_JITTER_PX` of its
+entry point, **or** slowed below `HOVER_INTENT_SETTLE_PX_PER_MS`. Speed alone
+excludes an unsteady hand: a 10px tremor reads as 0.5 px/ms and never opens a
+card. A sweep satisfies neither condition.
 
 ## A tooltip is `hoverTooltip`, never a native `title`
 
-There are no `title` tooltips left in `renderer/src`. Every one of them —
-around 130 across the sidebar, graph, diff, rail, chrome and settings — now
-goes through `hoverTooltip(tip, content)` from `useViewportTooltip.tsx`:
+Use one `useViewportTooltip()` and one `tooltipNode` per component, for any
+number of triggers. `hoverTooltip` (from `useViewportTooltip.tsx`) adds no
+state:
 
 ```tsx
 const tip = useViewportTooltip();
@@ -61,428 +67,374 @@ const tip = useViewportTooltip();
 {tip.tooltipNode}
 ```
 
-One hook and one `tooltipNode` per component, however many triggers it has.
-Four separate reasons, and the first is the one that matters most:
+- `hoverTooltip` returns `onMouseEnter`/`onMouseLeave`/`onFocus`/`onBlur`
+  together. Hand-written copies eventually drop the focus half.
+- **Convert a native `title` when you touch its surface.** About 130 were
+  converted across sidebar, graph, diff, rail, chrome and settings. A few came
+  back: the `<code>` paths in `RepositorySetupSheet` and the copy-actions
+  button in `RepoSwitcherOverlay`.
 
-- **`title` is pointer-only.** It never appears on keyboard focus, so every
-  keyboard user was being told nothing at all. `hoverTooltip` wires focus and
-  blur alongside enter and leave, which is why it exists as a helper rather
-  than four hand-written props — a call site cannot quietly reintroduce the
-  gap by remembering only `onMouseEnter`.
-- **`title` cannot be dismissed** (SC 1.4.13); the hook handles Escape.
-- **`title` is not a reliable accessible name.** On a `<span>` it is advisory,
-  and on a control with text content the content wins — `.diff-gutter--blame`
-  announced as its own line number until it was given an `aria-label`.
-- **On some elements it never rendered at all.** The `.repo-mark` glyphs are
-  the recorded case: a bare 12×12 box around an SVG with `fill="none"` showed
-  nothing, while `ForgeChip` beside it — same list, same row — showed its
-  title fine. The cause was never pinned down. Don't chase it.
+Why not `title` (most important first):
+
+- **Pointer-only.** It never appears on keyboard focus.
+- **Not dismissible** (SC 1.4.13). The hook handles Escape.
+- **Not a reliable accessible name.** On a `<span>` it is advisory. On a
+  control with text, the text wins: `.diff-gutter--blame` announced its line
+  number until it got an `aria-label`.
+- **Sometimes never renders.** `.repo-mark` (a 12×12 box around an SVG with
+  `fill="none"`) showed nothing, while `ForgeChip` in the same row did. The
+  cause is unknown. Do not investigate it.
+- **Looks different.** The OS draws a dark square box at the pointer's
+  bottom-right. Other surfaces draw a light card, so one 320px column shows two
+  styles.
+
+### Replacing a `title` that carried the name
+
+- If the `title` was the element's only name, use `aria-label`. Add
+  `role="img"` for a meaningful glyph.
+- If the element is INSIDE a named control, make it `aria-hidden`. An
+  `aria-label` there joins the parent button's name. That made `origin` read
+  "origin You can't push to desktop/dugite. Fork it to contribute. default".
 
 ### A disabled control still gets a card — say it in both places
 
 Chromium fires `mouseover`, `mouseenter` and `mousemove` on a disabled
-`<button>`; only the click-shaped events are suppressed. **Verified by probe,
-not assumed** — the opposite is the intuitive answer and it is wrong, so a
-disabled control keeps whatever sentence explains why it is disabled.
+`<button>`; only click-type events are suppressed. This was **verified by
+probe**, against intuition. So a disabled control keeps its card with the
+reason.
 
-**Repeat the visible label verbatim.** `aria-label` *replaces* a button's
-contents for name computation, it does not add to them — so
-`aria-label="Clone — unavailable, …"` on a button reading `Clone…` renames it,
-and the name no longer contains its own visible label. That is SC 2.5.3, it is
-what voice control matches on, and it is what every `getByRole("button", {
-name })` in the e2e suite matches on: four specs went red on exactly this,
-because the reason had been written in place of the label rather than after it.
-The shape is **`<visible label, character for character> — unavailable,
-<reason>`**, trailing ellipsis included.
-
-It also goes in `aria-label`, and that half is not optional: a disabled button
-still announces its name, and AT reads the name over any card. So
-the sidebar's day-one Add folders button, before a profile has loaded, is
-named "Add folders… — unavailable, load or create a profile first" *and*
-carries the plain sentence on its card. (A disabled `ContextMenu` entry has no
-card; it shows the reason as its `hint` line instead.)
+- **Also put the reason in `aria-label`.** A disabled button still announces
+  its name, and assistive technology reads the name, not the card.
+- **Shape: `<visible label, character for character> — unavailable,
+  <reason>`**, trailing ellipsis included.
+- Why: `aria-label` *replaces* the contents for name computation. A label
+  without the visible text breaks SC 2.5.3, voice control, and
+  `getByRole("button", { name })`. Four e2e specs failed when the reason
+  replaced the label.
+- Example: before a profile loads, the sidebar's Add folders button is named
+  "Add folders… — unavailable, load or create a profile first". Its card shows
+  the plain sentence.
+- A disabled `ContextMenu` entry has no card. It shows the reason in its `hint`
+  line.
 
 ### What is not a tooltip
 
-`grep 'title='` over this renderer still hits, and none of them should change:
-a `title` prop on a component (`SettingsSection`, `SettingsPanelHead`,
-`ReadError`, `GraphColumn`, `AuxiliaryTitleBar`) renders as a heading or an
-`aria-label`; `<svg><title>` and `<iframe title>` are not tooltips either.
+`grep 'title='` still finds these. Do not change them:
 
-Two `title`s were deleted rather than converted, because the string was
-already fully on screen: `.ssh-trust__link` (`overflow-wrap: anywhere`) and
-`.refs-plan__notice small` (wraps). A card that repeats the line under the
-pointer is noise. Check for `text-overflow: ellipsis` before assuming a
-duplicated string is overflow recovery — most of them are.
+- A `title` prop on a component (`SettingsSection`, `SettingsPanelHead`,
+  `ReadError`, `GraphColumn`, `AuxiliaryTitleBar`). It renders as a heading or
+  an `aria-label`.
+- `<svg><title>` and `<iframe title>`.
 
-Even then, a name that fits is on screen too. An ellipsised label whose card
-would only repeat it — the repo and branch names in the sidebar, the title
-bar's repo crumb — takes `truncatedTooltip(tip, text)`, which opens only while
-the element is actually cut short.
+A card that repeats text already fully on screen is noise. So two `title`s
+were deleted, not converted: `.ssh-trust__link` (`overflow-wrap: anywhere`)
+and `.refs-plan__notice small` (wraps). Before you delete one, check for
+`text-overflow: ellipsis`. Most repeats are overflow recovery.
+
+For an ellipsised label whose card only repeats it, use
+`truncatedTooltip(tip, text)`. It opens only while the text is cut short.
+Examples: sidebar repo and branch names, the title bar's repo crumb.
 
 ### Testing it
 
-The sentence only exists while something is hovered, so assert the **rendered
-card** or the **accessible name** — never restore a `title` to make a spec
-pass. In Playwright, `await el.hover()` then
-`expect(window.getByRole("tooltip"))`. In vitest, dispatch a bubbling
-`mouseover` inside `act` and read `[role="tooltip"]` from `document`
-(`WorktreeRow.test.tsx`, `ForgeChip.test.tsx`). Two cards can be open at once
-when each row owns its own hook, so a test that hovers several rows in turn
-has to dispatch `mouseout` between them — a real pointer always does.
-
-A static-markup test (`renderToStaticMarkup`) cannot see a card at all, and
-`expect(markup).not.toContain("Drag to reorder")` now passes for a *draggable*
-row too. Assertions of that shape are worse than useless after this change.
-
-**Use `hoverTooltip(tip, content)`, not four hand-written handlers.** It is
-exported beside the hook and returns
-`onMouseEnter`/`onMouseLeave`/`onFocus`/`onBlur` together, because the two
-halves are not optional separately: a mark that opens on hover but not on focus
-is a mark a keyboard user never sees, and every hand-rolled copy eventually
-drops one. The component owns the `useViewportTooltip()` and renders
-`tip.tooltipNode`; the helper adds no state.
-
-**The mixed-tooltip problem is the visible one.** A native `title` renders as
-the OS tooltip — dark, square, bottom-right of the pointer — beside the light
-card every other surface draws, so one 320px column ends up speaking in two
-voices. The REMOTES list and the repo row are converted (`ForgeChip`, the
-remote disclosure row, both fetch buttons, the fork verb, all three repo
-marks); the rest of the renderer is not, and the sweep is tracked separately.
-When you touch a surface that still has a `title`, convert it rather than
-matching it.
-
-**A `title` is not an accessible name.** On a `span` it is advisory and
-unreliable. When you take one away, ask what it was carrying: if it was the
-element's only name, replace it with `aria-label` (plus `role="img"` for a
-meaningful glyph), and if the element sits INSIDE a control that already has a
-name, make it `aria-hidden` — an `aria-label` there is spliced into the parent
-button's name rather than read as its own, which is how `origin` became
-"origin You can't push to desktop/dugite. Fork it to contribute. default".
+- **Assert the rendered card or the accessible name.** Never restore a `title`
+  to make a spec pass.
+- Playwright: `await el.hover()`, then `expect(window.getByRole("tooltip"))`.
+- vitest: dispatch a bubbling `mouseover` inside `act`, then read
+  `[role="tooltip"]` from `document` (`WorktreeRow.test.tsx`,
+  `ForgeChip.test.tsx`).
+- When each row owns a hook, two cards can be open at once. Dispatch
+  `mouseout` between rows, as a real pointer does.
+- `renderToStaticMarkup` cannot see a card.
+  `expect(markup).not.toContain("Drag to reorder")` passes even for a
+  *draggable* row, so that assertion proves nothing.
 
 ## Popups shown on hover must be dismissible
 
-`useViewportTooltip` handles Escape (WCAG 2.1 SC 1.4.13) and returns focus to
-the trigger when the user had tabbed into the card. Anything that renders its
-own hover surface outside that hook owes the same.
+`useViewportTooltip` handles Escape (WCAG 2.1 SC 1.4.13). It returns focus to
+the trigger if the user tabbed into the card. **A hover surface outside that
+hook must do the same.**
 
-An interactive card is dismissed by any scroll — **unless the user has reached
-it**, by pointer or by focus. Both halves matter: the pointer flag came first,
-and focus was added when a second trigger (`WorktreeHeader`, after `GraphRow`)
-started handing Tab into a card. A keyboard user sets no pointer flag, so
-without it an unrelated scroll — the graph adjusting `scrollTop` as commits
-stream in — took the card away with their focus still inside it.
+Any scroll dismisses an interactive card, **unless the user reached it** by
+pointer or by focus. A keyboard user sets no pointer flag, so without the focus
+condition an unrelated scroll (the graph changing `scrollTop` as commits
+stream in) removed the card with focus inside it. Tab moves into cards from
+`GraphRow` and `WorktreeHeader`.
 
 ### A card belongs to a connected trigger
 
-`show` refuses a trigger that is no longer in the document, and an open card
-closes — pinned or not — when its trigger leaves. Both exist because a graph row
-can unmount under the pointer (a refresh drops its commit) and React dispatches
-no `mouseleave` for a removed node. A gated open (`hoverIntentHandlers`) holds
-its trigger across the dwell, so it can call `show` on a row that is already
-gone; a detached element's rect is all zeros, which put the card at the viewport
-origin over the traffic lights with nothing left to dismiss it. Don't "fix" a
-misplaced card by special-casing the caller — the hook owns this.
+`show` refuses a trigger that is not in the document. An open card closes,
+pinned or not, when its trigger leaves. **Do not fix a misplaced card in the
+caller; the hook owns this.**
+
+Why: a refresh can unmount a graph row under the pointer, and React sends no
+`mouseleave` for a removed node. A gated open (`hoverIntentHandlers`) can call
+`show` after the dwell on a row that is gone. A detached rect is all zeros, so
+the card appeared at the viewport origin, over the traffic lights, with no way
+to dismiss it.
 
 ### Nested triggers restore, they don't just hide
 
-A row carries a card and the path inside it carries another. React fires no
-`mouseenter` on an ancestor the pointer never left, so leaving the inner one
-must put the outer one's card back — `hoverTooltip` leaves through `hideFrom`,
-not `hide`, for exactly this. A native `title` did it for free; a plain `hide()`
-leaves the pointer on a trigger showing nothing.
+A row has a card, and a path inside it has another. React fires no
+`mouseenter` on an ancestor the pointer never left. So `hoverTooltip` leaves
+through `hideFrom`, not `hide`, which shows the outer card again. A plain
+`hide()` leaves the pointer on a trigger that shows nothing.
 
 ## Click-opened overlays go through `useDismissable` / `useModal`
 
-The same rule, for the surfaces a click opens. Do not hand-roll a keydown
-effect: four menus and fourteen dialogs each grew their own, and the result was
-that `.branch-pop` and the sidebar options menu could not be closed from the
-keyboard at all, and five dialogs had no Escape of any kind.
+Hand-rolled keydown effects (four menus, fourteen dialogs) left `.branch-pop`
+and the sidebar options menu without keyboard close, and five dialogs without
+Escape.
 
-- **A menu**: `useDismissable` + `useMenuNavigation`. The second is not
-  optional if the surface says `role="menu"` — the role promises arrows,
-  Home/End and typeahead, and a screen-reader user told "menu" reaches for
-  them.
-- **A dialog**: `useModal`, which is the two above plus `useFocusTrap`. Give
-  the element `role="dialog"`, `aria-modal="true"` and `tabIndex={-1}`.
+- **A menu**: `useDismissable` + `useMenuNavigation`. With `role="menu"`,
+  `useMenuNavigation` is required: the role promises arrows, Home/End and
+  typeahead.
+- **A dialog**: `useModal` (the two above plus `useFocusTrap`). Give the
+  element `role="dialog"`, `aria-modal="true"` and `tabIndex={-1}`.
 - **A tablist**: `tablistKeys`, plus a roving tab stop
   (`tabIndex={selected ? 0 : -1}`).
 
 ### Escape belongs to exactly one overlay, and focus decides which
 
-`useDismissable` resolves the owner **once per keypress**, from a single
-module-level listener, by which registered surface holds focus (deepest wins,
-trigger included). Three simpler rules are wrong, and each looks right:
+`useDismissable` finds the owner **once per keypress**, from one module-level
+listener: the registered surface that holds focus. The deepest wins, and a
+trigger counts as part of its surface.
 
-- *Listener order.* Everything listens on `window`, so `stopPropagation` has
-  nothing to stop and `stopImmediatePropagation` only reaches listeners added
-  later — backwards for a menu opened inside an existing dialog.
-- *Open order.* React runs child effects before parent effects, so a nested
-  pair mounting in one commit registers innermost-first.
-- *One listener per hook instance.* They all fire for the same key, and
-  dismissing the owner moves focus, so the next listener computes a different
-  owner and dismisses that too — one Escape closing a menu and the dialog
-  behind it.
+Three simpler rules are wrong:
 
-Focus parked in something **unregistered** means nobody claims the key. Not
-every floating surface uses the hook (the ⌘F repo switcher does not), and
-claiming it there closes the dialog underneath while the user is dismissing the
-thing on top of it. Only "nowhere in particular" (`<body>`, null, detached)
-falls through to the newest overlay.
+- *Listener order.* All listeners are on `window`, so `stopPropagation` does
+  nothing. `stopImmediatePropagation` reaches only later listeners, which is
+  backwards for a menu inside a dialog.
+- *Open order.* React runs child effects first, so a nested pair mounted in
+  one commit registers innermost first.
+- *One listener per hook.* Dismissing the owner moves focus. The next listener
+  then finds a new owner, so one Escape closed a menu and its dialog.
+
+Focus in an **unregistered** element (the ⌘F repo switcher does not use the
+hook) means no overlay claims the key. Otherwise Escape closes the dialog below
+the surface the user is dismissing. Only "nowhere in particular" (`<body>`,
+null, detached) falls through to the newest overlay.
 
 ### Claiming Escape means calling `preventDefault` — and checking it first
 
-`DiffPane` and `FileInsightsPane` close only `if (!event.defaultPrevented)`
-(`features/diff/AGENTS.md` writes this out). An overlay that dismisses without
-claiming takes the pane behind it down too — which is what ContextMenu did.
-`useDismissable` claims for every caller, so this is handled as long as you use
-it.
+- **Claim.** `DiffPane` and `FileInsightsPane` close only
+  `if (!event.defaultPrevented)` (see `features/diff/AGENTS.md`). An overlay
+  that dismisses without claiming also closes that pane, as ContextMenu did.
+  `useDismissable` claims for every caller.
+- **Check.** `useDismissable` (click-opened overlays) and `useViewportTooltip`
+  (hover cards) keep separate stacks on `window`. Before each checked
+  `defaultPrevented`, one Escape closed both a card and the menu below it.
 
-The rule runs **both ways**, and that half was missing. `useDismissable` and
-`useViewportTooltip` own separate stacks — click-opened overlays and hover
-cards — and both listen on `window`, so a hover card showing over an open menu
-had one Escape dismiss both. Each now returns early on `defaultPrevented`.
-A third keydown handler on `window` owes the same on both counts: claim the key
-when you spend it, and leave it alone when someone else already has.
+#### Ordering between the two stacks
+
+- `useDismissable`'s listener is on the **capture** phase, so it runs before
+  every bubble listener. Why: a deferred check settles ties by listener order,
+  and `useDismissable` re-adds its listener each time its stack empties and
+  fills. The same gesture then closed the menu or the card at random.
+- The deliberate surface (menu, dialog) wins over the hover card.
+- When focus is inside a card, `escapeOwner` finds no registered owner and
+  claims nothing, so the card's handler gets an unspent key.
+- `DiffPane` defers its `defaultPrevented` check by one tick instead. Both
+  approaches work. **A synchronous check from a bubble listener does not**; its
+  result is random.
 
 ### A hover card claims Escape only if the keyboard summoned it
 
-`useViewportTooltip` dismisses on Escape always; it calls `preventDefault` only
-when the card is where the user actually **is** — focus inside the card, or a
-trigger matching `:focus-visible`. A card the pointer opened does not claim,
-because focus is elsewhere (in the diff pane, in a dialog) and that is the
-surface the user meant. Swallowing the key there is unrecoverable without
-moving the mouse, and moving the mouse is exactly what SC 1.4.13 says a user
-must not have to do.
+`useViewportTooltip` always dismisses on Escape. It calls `preventDefault` only
+when focus is inside the card or the trigger matches `:focus-visible`. A
+pointer-opened card does not claim: focus is on the surface the user meant (the
+diff pane, a dialog). Taking the key would force a mouse move, which SC 1.4.13
+forbids.
 
-Claiming unconditionally was the original rule and it survived only because
-few things carried cards. Converting the renderer off native `title` put a card
-on nearly every control in `DiffPane` and `FileInsightsPane`, at which point the
-pointer was **always** resting on one, and "Escape closes the diff pane" and
-"Escape leaves file details" both went red in `e2e/diff.spec.ts`. The bug was
-never in those panes; it was a hover card answering for a user who was not
-looking at it.
+Why: the pointer almost always rests on a card in `DiffPane` and
+`FileInsightsPane`. Claiming always failed "Escape closes the diff pane" and
+"Escape leaves file details" in `e2e/diff.spec.ts`.
 
-`:focus-visible`, never `:focus` — Chromium focuses a button on click without
-making it focus-visible, so the card left under the pointer by a click does not
-pass as a keyboard one. The same browser fact `WHERE_THE_USER_IS` leans on in
-`features/remote`. **jsdom answers `false` to `:focus-visible` for everything**,
-so a unit test reaches the claiming branch by putting focus inside the card, not
-by focusing the trigger.
+- **Use `:focus-visible`, never `:focus`.** Chromium focuses a clicked button
+  without making it focus-visible. `WHERE_THE_USER_IS` in `features/remote`
+  uses the same fact.
+- **jsdom matches `:focus-visible` on any focused element** (verified on
+  jsdom 30.1.3). Chromium does not after a click. So a unit test cannot tell a
+  clicked trigger from a keyboard one. Reach the claiming branch by focusing
+  inside the card, not the trigger.
 
-**The dismissal latches the trigger, and a pin clears it.** After a claimed
-Escape the trigger sits in `dismissedTargetRef` until the pointer or focus
-leaves it, so restoring focus there cannot reopen what was just dismissed. The
-latch is about that focus restore, not about the button — so `setSticky(true)`
-drops it, a click or Enter being a fresh ask rather than a restore. Left set it
-fails silently in both directions: `show` refuses, and the caller has no way to
-see that it did. `features/remote` is where that bites, because a pin with no
-card on screen still reports its outcome as *carried*, so the failure that
-would have raised a toast is reported nowhere at all.
+**The dismissal latches the trigger, and a pin clears it.**
+
+- After a claimed Escape, the trigger stays in `dismissedTargetRef` until
+  pointer or focus leaves it. So restoring focus to it cannot reopen the card.
+- `setSticky(true)` clears the latch. A click or Enter is a new request, not a
+  focus restore.
+- A latch left set fails silently: `show` refuses, and the caller cannot see
+  it. In `features/remote`, a pin with no card still reports *carried*, so the
+  failure that should raise a toast is reported nowhere.
 
 `onPointerWithin` is reported from the card's own root, so the padding ring
-counts as inside it — and `hide()` reports `false` on the way out, because the
-`mouseleave` that would otherwise say so never comes once the node is gone.
-
-Deferring alone is not enough, because it settles ties by **listener order**,
-and `useDismissable`'s listener is removed and re-added each time the overlay
-stack empties and refills — so the same gesture would close the menu sometimes
-and hide the card other times. Its listener is therefore on the **capture**
-phase, which runs ahead of every bubble listener however late it was added. A
-menu or dialog is something the user opened on purpose and a hover card is not,
-so the deliberate surface wins. The card is not cheated out of its own case:
-when focus is inside one, `escapeOwner` finds no registered surface holding it
-and claims nothing, so the card's handler gets an unspent key.
-
-`DiffPane` solves the same ordering problem the other way, by deferring its
-`defaultPrevented` check a tick. Either is fine; what is not fine is a
-synchronous check from a bubble listener, which is a coin flip.
+counts as inside. `hide()` reports `false`, because no `mouseleave` comes after
+the node is gone.
 
 ### Tab belongs to exactly one trap, by the same rule
 
-Two traps can be open at once: `confirmDialog` from inside
-`PruneWorktreesDialog` puts DialogHost's trap over Prune's. Each trap listens
-on `window` and pulls stray focus back into itself, so with no owner rule the
-lower trap took every Tab in the confirm and dragged focus behind it, and once
-the confirm had a trap too the two fought until focus stuck on an edge.
-`useFocusTrap` now resolves one owner per keypress: the trap holding focus
-(deepest wins), otherwise the newest. A new trap gets this for free; don't add
-a second keydown handler for Tab.
+`useFocusTrap` finds one owner per keypress: the trap that holds focus
+(deepest wins), else the newest. **A new trap gets this automatically. Do not
+add a second keydown handler for Tab.**
+
+Why: `confirmDialog` inside `PruneWorktreesDialog` puts DialogHost's trap over
+Prune's. Each trap pulls stray focus back. Without an owner rule, the lower
+trap took Tab from the confirm, and two traps fought until focus stuck on an
+edge.
 
 A menu portalled out of a trapped dialog (ImageLightbox's copy menu) is the
-one case where focus outside the trap is not stray. The trap listens in the
-capture phase, so it sees Tab first, and pulling focus in then left the menu
-open: `useMenuNavigation` closes on Tab only while focus is still inside.
-For focus inside a `[role="menu"]`, the trap claims the key but moves focus
-only after the menu's own listener has run.
+one case where outside focus is not stray. The trap listens in capture, so it
+sees Tab first, and `useMenuNavigation` closes on Tab only while focus is
+inside. So for focus inside a `[role="menu"]`, the trap claims the key but
+moves focus after the menu's listener runs.
 
 ### A scroller can be a Tab stop with no tabindex
 
-Chromium puts an overflowing scroller that holds nothing focusable into the Tab
-order by itself (measured on 151: a nested pair yields only the inner one).
-Its `tabIndex` still reads -1, so no selector finds it. `useFocusTrap` checks
-layout for these when it works out where the cycle ends. Without that it wrapped
-straight past one before a dialog's first control or after its last, and a long
-facts list or Bulk Sync's results could not be scrolled from the keyboard.
-Initial focus still skips them and lands on a control. jsdom does no layout, so
-a test has to supply `scrollHeight`/`clientHeight` itself (see the trap's tests).
+Chromium puts an overflowing scroller with nothing focusable into the Tab
+order. Its `tabIndex` still reads -1, so no selector finds it. In a nested
+pair, only the inner one is a stop. (Measured on Chromium 151 in #307; Electron
+44.9.3 now ships Chromium 152.)
+
+- `useFocusTrap` checks layout for these scrollers at the ends of the Tab
+  cycle. Without this, Tab skipped them, and a long facts list or Bulk Sync's
+  results could not be scrolled from the keyboard.
+- Initial focus skips scrollers and goes to a control.
+- jsdom does no layout. A test sets `scrollHeight`/`clientHeight` itself (see
+  the trap's tests).
 
 ### `useFocusTrap` captures the opener during render
 
-Not in an effect. React applies `autoFocus` while committing, which is *before*
-passive effects, so a dialog with an autoFocused field — most of them — had
-already moved focus inside itself by the time an effect could look. The hook
-then recorded that field as the opener and restored nothing on close.
+Not in an effect. React applies `autoFocus` during commit, *before* passive
+effects. An effect therefore recorded the autoFocused field as the opener and
+restored nothing on close.
 
 ## `useAutoPaging` re-observes on `loading`, never on `error`
 
-`useAutoPaging` fills a tall viewport by rebuilding its IntersectionObserver
-every time `loading` clears — the "load more" control does not move enough to
-emit a fresh intersection of its own, so without that the fill stops after one
-page.
+- **Pass the real error state.** `null` brings back the request loop below.
+- **Keep the "load more" control rendered.** It is the keyboard control, the
+  retry after a failure, and the fallback where `IntersectionObserver` is
+  undefined (the hook does nothing there).
 
-The same edge is what makes the `error` argument load-bearing rather than
-cosmetic. A page that FAILS also clears `loading` without advancing the cursor,
-so re-observing fired the identical request again, immediately, forever: a
-probe reached 200+ dispatches in a few microtask flushes, each spawning a Git
-process. A failed page waits for the reader to press the button.
+`useAutoPaging` rebuilds its IntersectionObserver each time `loading` clears,
+because the control does not move enough to emit a new intersection. Without
+it, the fill stops after one page. A FAILED page also clears `loading` without
+advancing the cursor. Re-observing then repeated the request without end: 200+
+dispatches in a few microtask flushes, each a Git process. A failed page now
+waits for the button.
 
-Two rules for callers, then:
-
-- **Pass the real error state.** Passing `null` reintroduces the loop.
-- **The control stays rendered.** It is the keyboard affordance, the retry
-  after a failure, and the fallback where `IntersectionObserver` is undefined
-  (the hook no-ops there rather than paging).
-
-The hook also refuses to request any one cursor twice, so a caller that
-returns an unchanged `nextCursor` stalls instead of spinning.
+The hook never requests one cursor twice. A caller that returns an unchanged
+`nextCursor` stalls instead of looping.
 
 ## Remote branches are paged — never list them whole
 
-`repo:refs` returns every **local** branch, but only a six-row
-`previewBranches` per remote plus a `branchCount`. It is not the whole
-repository, and it must not become that again: on a fetched fork network
-(openclaw, 4,470 remote-tracking refs) shipping them all was 1.5 MB of JSON per
-call, held in renderer state, and — in the reset and push dialogs — one
-`<option>` per ref.
+`repo:refs` returns every **local** branch, but per remote only a six-row
+`previewBranches` and a `branchCount`. Do not change this. On a fetched fork
+network (openclaw, 4,470 remote-tracking refs), full lists were 1.5 MB of JSON
+per call, held in renderer state, with one `<option>` per ref in the reset and
+push dialogs.
 
-Any surface that browses or picks from more than the preview pulls pages
-through `useRemoteBranchSearch` (→ `repo:remoteBranches`), which debounces the
-query, filters in the main process, and returns `{ rows, total }`. Two rules
-that fall out of that:
+To browse or pick past the preview, use `useRemoteBranchSearch`
+(→ `repo:remoteBranches`). It debounces the query, filters in main, and returns
+`{ rows, total }`.
 
-- **Say what you truncated.** A page that stops at 50 of 4,466 with no marker
-  reads as the whole remote — render `RefsPageFooter` (or the picker's own
-  status line) so the count is visible.
-- **Filter in main, not in the page.** Filtering only the rows already fetched
-  silently hides matches that sort past the first page.
+- **Say what you truncated.** 50 of 4,466 with no marker looks like the whole
+  remote. Render `RefsPageFooter` or the picker's status line.
+- **Filter in main, not in the page.** A page filter hides matches past the
+  first page.
 
-`BranchRefPicker` is the shared control for "pick one ref" (reset-to-remote,
-push source). It stays a sized `<select>` — a native listbox already has the
-keyboard and screen-reader model — and note that a sized select exposes role
-**listbox**, not combobox, which is what Playwright specs must query.
+`BranchRefPicker` is the shared "pick one ref" control (reset-to-remote, push
+source). It stays a sized `<select>` for the native keyboard and screen-reader
+model. A sized select has role **listbox**, not combobox; Playwright specs must
+query listbox.
 
-Tags follow the same bounded-IPC rule. `repo:refs` carries only `previewTags`
-plus `tagCount`; tag browsers search and page through `repo:tags` via
-`useTagSearch`. A tag is never a `BranchRef`: do not feed it to branch switching,
-branch pickers, or worktree creation without a separate UI that explicitly
-chooses detached HEAD or a newly named branch.
+Tags: `repo:refs` carries only `previewTags` and `tagCount`. Tag browsers page
+through `repo:tags` with `useTagSearch`. **A tag is never a `BranchRef`.** Do
+not pass it to branch switching, branch pickers or worktree creation without a
+UI that explicitly chooses detached HEAD or a new named branch.
 
 ## Forge host classification comes from main, never from the hostname
 
-`useForgeHostMap` reads the host → forge map over `forge:hosts`, and
-`exactRepository` hands it to `parseForgeRemote` — the renderer's only
-classifier; `classifyForgeHost` itself is called from shared and from main, not
-from here. Do not classify a remote without the map: a
-hostname is not evidence of which forge runs on it, so with no map every
-self-managed instance reads as `other` and the clone and fork dialogs silently
-lose a host the user is signed in to. `apps/desktop/src/main/forge/AGENTS.md`
-has the whole rule.
+**Do not classify a remote without the host map.** A hostname does not show
+which forge runs on it. Without the map, every self-managed instance reads as
+`other`, and the clone and fork dialogs lose a signed-in host. Full rule:
+`apps/desktop/src/main/forge/AGENTS.md`.
 
-The map is main's own (`ForgeHosts.overrides()`), shipped rather than derived
-from the settings rows in the same response — the two are different sets. The
-hook re-reads on `forge:statusChanged` because main enumerates hosts in two
-background CLI spawns at boot, so a dialog opened in the first second would
-otherwise cache an empty map for its whole lifetime. Reads are sequence-numbered
-because those events arrive in bursts and the replies are not ordered — a stale
-empty answer landing last pinned the degraded state for the dialog's lifetime.
+- `useForgeHostMap` reads the map over `forge:hosts`. `exactRepository` passes
+  it to `parseForgeRemote`, the renderer's only classifier. Only shared code and
+  main call `classifyForgeHost`.
+- The map is main's own (`ForgeHosts.overrides()`), not derived from the
+  settings rows in the same response. The two are different sets.
+- The hook re-reads on `forge:statusChanged`. Main finds hosts in two
+  background CLI spawns at boot, so a dialog opened in the first second would
+  keep an empty map.
+- Reads are sequence-numbered. Replies arrive in bursts, out of order, and a
+  stale empty reply arriving last kept the degraded state.
 
-Classifying in the renderer picks which forge to ask; it does **not** pick which
-instance. `repo:checkCloneSource`, `repo:forkPreflight`, `repo:forkTargets` and
-`repo:clone`/`repo:fork` therefore carry `hostname` as well as the kind, or main
-answers from github.com/gitlab.com. `repo:searchCloneSources` is the exception
-and is still SaaS-only — see `apps/desktop/src/main/forge/AGENTS.md`.
+The renderer picks the forge, **not** the instance. So
+`repo:checkCloneSource`, `repo:forkPreflight`, `repo:forkTargets` and
+`repo:clone`/`repo:fork` carry `hostname` with the kind. Otherwise main answers
+from github.com/gitlab.com. `repo:searchCloneSources` is still SaaS-only.
 
-A slug carries no host. `chooseRepository` rewrites the query to
-`owner/name`, which `exactRepository` can only resolve against the forge's SaaS
-hostname — so the dialog remembers the instance the user picked and resolves the
-slug back to it. Re-confirming an Enterprise repository against github.com is a
-wrong answer, not merely a wasted round trip.
+A slug carries no host. `chooseRepository` rewrites the query to `owner/name`,
+which `exactRepository` resolves only against the SaaS hostname. So the dialog
+remembers the picked instance and resolves the slug against it. Checking an
+Enterprise repository against github.com gives a wrong answer.
 
 ## A vendor's logo is not an icon — it does not take `currentColor`
 
-Every glyph in this renderer is hand-transcribed from Lucide and painted with
-`currentColor`. A trademark is the one case where that is the wrong instinct:
-GitHub and GitLab (and Git itself) publish their marks and forbid redrawing or
-recoloring them, so a stroke-language lookalike is our rendition of someone
-else's logo, and a CSS filter over the real one is a recolor.
+Glyphs here are copied from Lucide and painted with `currentColor`.
+Trademarks are the exception: GitHub, GitLab and Git forbid redrawing or
+recoloring their marks. A lookalike is a redraw; a CSS filter is a recolor.
 
-Brand marks therefore live as the vendors' own files under
-`renderer/src/assets/<vendor>/`, each beside a README recording the source, the
-usage rules, and the command that re-downloads it. They render as `<img>` —
-never inlined as `<svg stroke="currentColor">` — inside a square box with
-`object-fit: contain`, because none of these artboards is square and a bare
-`width`/`height` pair would stretch the mark.
+- **Use the vendor's files** under `renderer/src/assets/<vendor>/`. A README
+  beside each records the source, the usage rules and the download command.
+- **Render as `<img>`**, never as inline `<svg stroke="currentColor">`.
+- **Use a square box with `object-fit: contain`.** No artboard is square, so a
+  bare `width`/`height` stretches the mark.
+- `brandTheme.ts` is the shared subscription. `useBrandTheme()` selects between
+  a vendor's per-theme files (GitHub's black and white Invertocat). A vendor
+  with one colorway (GitLab's tanuki) keeps it on both themes.
+- **Pass `useBrandTheme(false)` when the caller ignores the answer.** The marks
+  are on every repo row, and every subscriber keeps the document-wide
+  MutationObserver open.
 
-`brandTheme.ts` is the one subscription they share. Where a vendor publishes
-per-theme colorways (GitHub's black and white Invertocat), `useBrandTheme()`
-picks between THOSE FILES; a vendor that publishes one colorway (GitLab's
-tanuki) keeps it on both themes. Pass `useBrandTheme(false)` when the caller
-cannot use the answer — these marks sit on every repo row, and a subscriber
-that ignores the value still holds the document-wide MutationObserver open.
-
-`sidebar/ForgeMark.tsx` is the worked example.
+Worked example: `features/sidebar/ForgeMark.tsx`.
 
 ## A toast about a repository says which one — pass `subject`
 
-`showErrorToast` / `showInfoToast` take `subject`, and every toast raised about
-a repository or one of its checkouts passes one. `ToastHost` draws it as chips
-under the title — `diskhound › upstream` — that select the repo and open it
-(and that remote's row) in the sidebar. Without it, a stack reading "Fetched
-origin" three times does not say whose origin, and the card outlives the user
-moving to another repo.
+`showErrorToast` / `showInfoToast` take `subject`. `ToastHost` draws it as
+chips under the title (`diskhound › upstream`). The chips select the repo and
+open it (and the remote's row) in the sidebar. Without them, three "Fetched
+origin" toasts do not say whose origin, and the card outlives a repo switch.
 
-- **Name it by id, never by name:** `{ repoId }`, or `{ worktreeId }` from a
+- **Name by id, never by name:** `{ repoId }`, or `{ worktreeId }` from a
   surface that knows only its checkout (rail, diff, graph). The host reads the
-  name from the live repo list, and a repo that has since left it draws no chip.
+  name from the live repo list. A repo no longer in the list draws no chip.
 - **Add `remote: { name, url? }` for a toast about one remote.** Pass the fetch
-  URL when you have it; the tooltip is the only thing telling one `upstream`
-  from another.
-- **Don't repeat the repo name in the title.** The chip says it.
-- **Omit it only when nothing is left to go to** — `useRepoTree`'s "Removed …
-  from the list" — or when the toast is not about a repository at all (app
-  updates).
+  URL when known; its tooltip is the only way to tell two `upstream`s apart.
+- **Don't repeat the repo name in the title.** The chip shows it.
+- **Omit it only when there is nothing to go to** (`useRepoTree`'s "Removed …
+  from the list") or the toast is not about a repository (app updates).
 
 ## A render error is logged by the root, and contained by `ErrorBoundary`
 
-An error thrown while rendering, with no boundary above it, unmounts the whole
-React root: a blank white window, a live renderer process, and — before this —
-nothing in `main.log`, because `render-process-gone` never fires for it.
+A render error with no boundary above it unmounts the whole React root: a
+blank white window, a live renderer. `render-process-gone` does not fire, so
+`main.log` used to record nothing.
 
-- **Logging is the root's job, not the boundary's.** `main.tsx` passes
-  `rendererRootErrorOptions` ([renderer-errors.ts](renderer-errors.ts)) to
-  `createRoot`, so every uncaught, caught and recoverable React error goes to
-  `logs:reportRendererError` with its component stack, whichever boundary (if
-  any) caught it. `installRendererErrorReporting` adds window `error` and
-  `unhandledrejection`. A boundary's `onError` is for UI side effects only.
+- **Logging is the root's job.** `main.tsx` passes `rendererRootErrorOptions`
+  ([renderer-errors.ts](renderer-errors.ts)) to `createRoot`. Every uncaught,
+  caught and recoverable React error goes to `logs:reportRendererError` with
+  its component stack. `installRendererErrorReporting` adds window `error` and
+  `unhandledrejection`. Use a boundary's `onError` for UI side effects only.
 - **Main owns the rate limit** (`src/main/renderer-errors.ts`): a burst of 10
-  per window, then one per 6s, then a "suppressed N" line. It is there rather
-  than here because a reload resets anything kept in the renderer.
-- **Inside `act()`, React never calls `onUncaughtError`** — it queues the
-  error for act to rethrow. Test the uncaught path outside act
-  (`ErrorBoundary.test.tsx` shows how).
-- **Wrap a surface that can fail on its own**: a pane in the main column
-  (`PaneErrorFallback`, keyed with `resetKey` so pointing it elsewhere is a
-  fresh try), or an overlay that should just close and raise a toast (the
-  image lightbox in `DiffViewer`). The root boundary is the last resort and
-  offers Reload.
+  per window, then one per 6s, then a "suppressed N" line. A reload would reset
+  a renderer-side limit.
+- **Inside `act()`, React never calls `onUncaughtError`**; it queues the error
+  for act to rethrow. Test the uncaught path outside act
+  (`ErrorBoundary.test.tsx`).
+- **Wrap a surface that can fail on its own:** a main-column pane
+  (`PaneErrorFallback`, keyed with `resetKey` so a new target retries), or an
+  overlay that should close and raise a toast (the image lightbox in
+  `DiffViewer`). The root boundary is the last resort and offers Reload.
