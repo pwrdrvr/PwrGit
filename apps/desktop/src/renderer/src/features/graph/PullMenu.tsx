@@ -62,8 +62,10 @@ export function PullMenu({
   choices: PullMenuRow[];
   /** The `key` of the choice Pull will run. */
   checked: string;
-  /** The `key` of the choice kept for this repository. */
-  kept: string;
+  /** The `key` of the choice kept for this repository, or null while the
+   *  repository has a question open that decides it: nothing is kept yet,
+   *  and naming the built-in default then contradicts the check. */
+  kept: string | null;
 }) {
   const tip = useViewportTooltip();
   const noteId = useId();
