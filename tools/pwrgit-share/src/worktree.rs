@@ -32,9 +32,7 @@ impl Drop for Registration {
         if self.armed {
             // Deliberately bypass cancellation for cleanup. Never prune and
             // never remove any registration other than the one just created.
-            let _ = Command::new("git")
-                .arg("-C")
-                .arg(&self.donor)
+            let _ = git_command(&self.donor)
                 .args(["worktree", "remove", "--force"])
                 .arg(&self.dest)
                 .output();
@@ -102,9 +100,7 @@ fn dirty(root: &Path) -> Result<HashSet<PathBuf>> {
         .collect()
 }
 fn ignored(root: &Path, path: &Path) -> Result<bool> {
-    let o = Command::new("git")
-        .arg("-C")
-        .arg(root)
+    let o = git_command(root)
         .args(["check-ignore", "--no-index", "-q", "--"])
         .arg(path)
         .output()?;
@@ -114,7 +110,96 @@ fn ignored(root: &Path, path: &Path) -> Result<bool> {
         _ => Err(Error::new(1, "git check-ignore failed")),
     }
 }
-/// Register only through Git. Returns success only after a valid clean checkout.
+fn checkout_conversions(root: &Path, tree: &[Entry]) -> Result<HashSet<PathBuf>> {
+    check_cancel()?;
+    let autocrlf = git_command(root)
+        .args(["config", "--get", "core.autocrlf"])
+        .output()?;
+    check_cancel()?;
+    if !matches!(autocrlf.status.code(), Some(0 | 1)) {
+        return Err(Error::new(1, "cannot read core.autocrlf"));
+    }
+    let value = String::from_utf8_lossy(&autocrlf.stdout)
+        .trim()
+        .to_ascii_lowercase();
+    if autocrlf.status.success() && !["", "false", "no", "off", "0"].contains(&value.as_str()) {
+        // Without proving which blobs Git considers text, leave all paths to
+        // Git when automatic line-ending conversion is enabled.
+        return Ok(tree.iter().map(|e| e.path.clone()).collect());
+    }
+    let mut conversions = HashSet::new();
+    // --cached reads the target's attributes from read-tree's index, even
+    // before .gitattributes has been checked out. Bound argv for large trees;
+    // NUL-delimited output preserves arbitrary Git path bytes.
+    for chunk in tree.chunks(128) {
+        let mut args = vec![
+            OsStr::new("check-attr"),
+            OsStr::new("--cached"),
+            OsStr::new("-z"),
+            OsStr::new("--all"),
+            OsStr::new("--"),
+        ];
+        args.extend(chunk.iter().map(|e| e.path.as_os_str()));
+        let out = git(root, &args, 1)?;
+        if out.stdout.is_empty() {
+            continue;
+        }
+        let bytes = out
+            .stdout
+            .strip_suffix(b"\0")
+            .ok_or_else(|| Error::new(1, "invalid Git attribute response"))?;
+        let fields = bytes.split(|b| *b == 0).collect::<Vec<_>>();
+        let mut triples = fields.chunks_exact(3);
+        for triple in &mut triples {
+            // --all omits unspecified attributes. Skip even explicitly unset
+            // conversion attributes: the CLI renders -filter and a driver
+            // literally named "unset" identically, so values cannot prove it
+            // safe to bypass Git's conversion machinery.
+            if [
+                b"text".as_slice(),
+                b"eol".as_slice(),
+                b"filter".as_slice(),
+                b"ident".as_slice(),
+                b"working-tree-encoding".as_slice(),
+                b"crlf".as_slice(),
+            ]
+            .contains(&triple[1])
+            {
+                conversions.insert(bytes_path(triple[0])?);
+            }
+        }
+        if !triples.remainder().is_empty() {
+            return Err(Error::new(1, "invalid Git attribute response"));
+        }
+    }
+    Ok(conversions)
+}
+
+fn post_checkout(root: &Path) -> Result<()> {
+    let out = git_s(root, &["rev-parse", "HEAD"], 1)?;
+    let head = String::from_utf8_lossy(&out.stdout);
+    let head = head.trim();
+    // Ordinary worktree add passes a null old OID, the new OID and branch=1.
+    // Match the repository's object format, including SHA-256 repositories.
+    let old = "0".repeat(head.len());
+    git_s(
+        root,
+        &[
+            "hook",
+            "run",
+            "--ignore-missing",
+            "post-checkout",
+            "--",
+            &old,
+            head,
+            "1",
+        ],
+        1,
+    )?;
+    Ok(())
+}
+
+/// Register only through Git. Returns success after checkout and its hook.
 /// Donor is also the repository in which Git registers the destination.
 pub fn worktree_add(
     donor: &Path,
@@ -179,9 +264,7 @@ pub fn worktree_add(
     args.push(commit.into());
     // No cancellation check between successful registration and arming guard.
     check_cancel()?;
-    let o = Command::new("git")
-        .arg("-C")
-        .arg(&donor)
+    let o = git_command(&donor)
         .args(&args)
         .output()
         .map_err(|e| Error::new(4, e.to_string()))?;
@@ -213,10 +296,12 @@ pub fn worktree_add(
     let stage = unique_dir(&parent, dest.file_name().unwrap())?;
     let mut clones = Vec::new();
     if capability.cow != "none" {
+        let conversions = checkout_conversions(&dest, &tree)?;
         for entry in &tree {
             check_cancel()?;
             if !["100644", "100755"].contains(&entry.mode.as_str())
                 || dirty.contains(&entry.path)
+                || conversions.contains(&entry.path)
                 || wanted.get(&entry.path) != Some(&(&entry.oid, &entry.mode))
             {
                 continue;
@@ -291,9 +376,7 @@ pub fn worktree_add(
     // Refresh hashes and stat data for existing entries. Missing paths are
     // expected (checkout fills them), so status 1 here is not a Git failure.
     check_cancel()?;
-    let refresh = Command::new("git")
-        .arg("-C")
-        .arg(&dest)
+    let refresh = git_command(&dest)
         .args(["update-index", "--refresh"])
         .output()?;
     if !matches!(refresh.status.code(), Some(0 | 1)) {
@@ -334,6 +417,9 @@ pub fn worktree_add(
         }
     }
     check_cancel()?;
+    // --no-checkout suppresses this hook at registration, and reset --hard
+    // does not run it. Capture its output to preserve the CLI JSON protocol.
+    post_checkout(&dest)?;
     let admin = git_s(
         &dest,
         &[

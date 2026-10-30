@@ -169,3 +169,30 @@ python3 scripts/apfs-audit.py --donor /temp/snapshot --recipient /temp/shared --
 ```
 
 Keep `CARGO_HOME` explicitly pointed at a new temporary directory for every Cargo/share invocation that can query metadata; fetch the selected target's locked dependencies there before offline builds. Use the project's pinned toolchain, and create/remove only these disposable worktrees.
+
+
+## Review regression validation — 2026-10-30
+
+After fixing PR #505's four review findings, the native APFS suite passes **20 tests** (4 library and 16 contract tests). The regressions first failed against the reviewed implementation: donor edits were discarded under inherited repository overrides, target conversion attributes were bypassed, checkout hooks were absent, and a no-CoW benchmark raised `KeyError: target`.
+
+The passing suite checks donor bytes and index preservation in both sharing and forced fallback modes; ordinary-checkout byte parity for smudge filters, CRLF, ident, UTF-16LE encoding, and core.autocrlf; and unaffected paths still cloning. It also covers filter drivers literally named `unset` and `unspecified`. Hook arguments, destination cwd, file availability, exactly-once execution, and JSON output are compared with ordinary Git in SHA-1 and SHA-256 repositories, in both modes. A failing hook removes only this operation's registration and partial directory. The complete benchmark now runs inside a regression test with CoW forced unavailable, reports `targetSkipped: cow-unavailable`, and finishes its builds and output/isolation assertions.
+
+`cargo fmt --check`, `cargo clippy --locked --all-targets -- -D warnings`, and `cargo build --locked --release` pass. The ordinary APFS fixture benchmark was rerun with the release binary, Cargo 1.94.1, and its own temporary Cargo home. Its source observations were:
+
+| Source run | Seconds | Logical bytes | Clone / copy counts |
+| --- | ---: | ---: | ---: |
+| source-plain | 0.0382 | 8,390,131 | 0 / 0 |
+| source-reflink | 0.2832 | 8,390,133 | 9 / 0 |
+| source-forced-none | 0.1014 | 8,390,137 | 0 / 0 |
+
+There are 9 tracked regular files totaling 8,390,000 logical bytes. The seed result remains `unitsSeeded: 0`, `cloneCount: 0`, `copyCount: 0`, `reason: fingerprint-unproven`; the donor target was renamed away before the recipient build.
+
+| Build | Seconds | Registry/Git Fresh / Compiling | Workspace/path Fresh / Compiling |
+| --- | ---: | ---: | ---: |
+| same-commit | 0.4885 | 0 / 2 | 0 / 3 |
+| changed-source | 0.1408 | 2 / 0 | 2 / 1 |
+| changed-rustflags | 0.4643 | 0 / 2 | 0 / 3 |
+| changed-features | 0.4673 | 1 / 1 | 2 / 1 |
+| second-profile | 0.5639 | 0 / 2 | 0 / 3 |
+
+Two private-target builds completed concurrently in 0.5348 s with unchanged donor rlib hashes and verified program outputs. Both compiled 2 registry/Git and 3 workspace/path packages. The shared-target baseline observed lock waiting. These clone counts describe operations; no new physical allocation claim is inferred from them. Free-space deltas in the JSON remain explicitly noisy. Fresh output from a worktree's own subsequent builds is not target-seeding evidence or a correctness proof.

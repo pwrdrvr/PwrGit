@@ -84,8 +84,36 @@ fn output(cmd: &mut Command, code: i32) -> Result<Output> {
     }
     Ok(o)
 }
+fn git_command(root: &Path) -> Command {
+    let mut cmd = Command::new("git");
+    // Git's repository-local environment (rev-parse --local-env-vars), plus
+    // namespaces, must not redirect -C to the caller's repository or index.
+    // Keep ordinary config discovery so filters and hooks still work normally.
+    for key in [
+        "GIT_ALTERNATE_OBJECT_DIRECTORIES",
+        "GIT_CONFIG",
+        "GIT_CONFIG_PARAMETERS",
+        "GIT_CONFIG_COUNT",
+        "GIT_OBJECT_DIRECTORY",
+        "GIT_DIR",
+        "GIT_WORK_TREE",
+        "GIT_IMPLICIT_WORK_TREE",
+        "GIT_GRAFT_FILE",
+        "GIT_INDEX_FILE",
+        "GIT_NO_REPLACE_OBJECTS",
+        "GIT_REPLACE_REF_BASE",
+        "GIT_PREFIX",
+        "GIT_SHALLOW_FILE",
+        "GIT_COMMON_DIR",
+        "GIT_NAMESPACE",
+    ] {
+        cmd.env_remove(key);
+    }
+    cmd.arg("-C").arg(root);
+    cmd
+}
 fn git(root: &Path, args: &[&std::ffi::OsStr], code: i32) -> Result<Output> {
-    output(Command::new("git").arg("-C").arg(root).args(args), code)
+    output(git_command(root).args(args), code)
 }
 fn git_s(root: &Path, args: &[&str], code: i32) -> Result<Output> {
     git(
@@ -186,9 +214,7 @@ pub fn measure(path: &Path) -> Result<Measurement> {
     let record = if regular(path, Path::new(".pwrgit-share.json")).is_ok() {
         Some(local)
     } else if fs::symlink_metadata(path.join(".git")).is_ok_and(|m| m.is_file()) {
-        let out = Command::new("git")
-            .arg("-C")
-            .arg(path)
+        let out = git_command(path)
             .args([
                 "rev-parse",
                 "--path-format=absolute",
