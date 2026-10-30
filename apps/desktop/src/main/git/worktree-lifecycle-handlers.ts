@@ -13,6 +13,7 @@ import {
 } from "./git-service";
 import type { RepoIndexer } from "./repo-indexer";
 import { worktreePathFor } from "./worktree-paths";
+import type { WorktreeOperationQueue } from "./worktree-operation-queue";
 import { worktreeAddWithSharing } from "./worktree-share";
 import type { WorktreeStateService } from "./worktree-state";
 
@@ -21,7 +22,8 @@ export function registerWorktreeLifecycleHandlers(
   db: DB,
   indexer: RepoIndexer,
   settings: SettingsService,
-  state: WorktreeStateService
+  state: WorktreeStateService,
+  operations: WorktreeOperationQueue
 ): void {
   const repoRow = (
     repoId: string
@@ -46,10 +48,12 @@ export function registerWorktreeLifecycleHandlers(
       return err({ kind: "repo", code: "not_found", message: "repo not found" });
     }
     const wtPath = worktreePathFor(settings, repo.name, req.branch);
-    const added = await worktreeAddWithSharing(execGit, repo.path, wtPath, req.branch, {
-      newBranch: req.newBranch,
-      ...(req.startPoint === undefined ? {} : { startPoint: req.startPoint })
-    }, settings.get(), (message) => logMain("info", "worktree", message), ctx.signal);
+    const added = await operations.runRepository(repo.id, () =>
+      worktreeAddWithSharing(execGit, repo.path, wtPath, req.branch, {
+        newBranch: req.newBranch,
+        ...(req.startPoint === undefined ? {} : { startPoint: req.startPoint })
+      }, settings.get(), (message) => logMain("info", "worktree", message), ctx.signal)
+    );
     if (!added.ok) return added;
     await indexer.refreshRepoWorktrees(repo.id);
     emitEvent("repo:changed", { profileId: repo.profile_id });

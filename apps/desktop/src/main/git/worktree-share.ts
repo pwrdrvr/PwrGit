@@ -27,7 +27,9 @@ async function canonicalPath(path: string): Promise<string> {
   }
 }
 
-/** Only creation changes; shared checkouts use the ordinary removal path. */
+/** Only creation changes; shared checkouts use the ordinary removal path.
+ * Callers hold the shared repository queue for this entire operation: an
+ * overlapping create must not register a checkout between snapshot and rollback. */
 export async function worktreeAddWithSharing(
   git: GitExec,
   repoPath: string,

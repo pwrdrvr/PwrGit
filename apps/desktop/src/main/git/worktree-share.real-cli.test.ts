@@ -11,12 +11,14 @@ import { openDatabase, type DB } from "../persistence/db";
 import { ProfileService } from "../profiles/profile-service";
 import { SettingsService } from "../settings/settings-service";
 import { bundledGitPath, useInstalledGit, type GitExec } from "./dugite";
+import { registerBranchHandlers } from "./branch-handlers";
 import { listWorktrees } from "./git-service";
 import { RepoIndexer } from "./repo-indexer";
 import { createSystemGit } from "./test-support/system-git";
 import { registerWorktreeLifecycleHandlers } from "./worktree-lifecycle-handlers";
 import { worktreePathFor } from "./worktree-paths";
 import { WorktreeStateService } from "./worktree-state";
+import { WorktreeOperationQueue } from "./worktree-operation-queue";
 
 const hoisted = vi.hoisted(() => ({ git: null as unknown as GitExec }));
 vi.mock("../ipc", () => ({ emitEvent: vi.fn() }));
@@ -40,6 +42,7 @@ describe.skipIf(binary === undefined || process.platform !== "darwin")("worktree
   let bus: CommandBus;
   let repoId: string;
   let otherRepo: string;
+  let indexer: RepoIndexer;
   const calls: string[][] = [];
   let lockHolder: ChildProcess | undefined;
 
@@ -74,7 +77,7 @@ describe.skipIf(binary === undefined || process.platform !== "darwin")("worktree
     const profiles = new ProfileService(db);
     const profile = profiles.create({ name: "Fixture", email: "fixture@example.invalid" });
     const otherProfile = profiles.create({ name: "Other", email: "other@example.invalid" });
-    const indexer = new RepoIndexer(db, systemGit);
+    indexer = new RepoIndexer(db, systemGit);
     const indexed = await indexer.indexRepoAt(profile.id, donor);
     if (!indexed.ok) throw new Error("fixture indexing failed");
     donor = indexed.value.path;
@@ -87,7 +90,11 @@ describe.skipIf(binary === undefined || process.platform !== "darwin")("worktree
       return systemGit(args, cwd, options);
     };
     bus = new CommandBus();
-    registerWorktreeLifecycleHandlers(bus, db, indexer, settings, new WorktreeStateService(db, systemGit));
+    const operations = new WorktreeOperationQueue();
+    registerWorktreeLifecycleHandlers(bus, db, indexer, settings, new WorktreeStateService(db, systemGit, operations), operations);
+    registerBranchHandlers(bus, db, indexer, {
+      refreshWorktree: vi.fn(), refreshRepoWorktrees: vi.fn()
+    }, operations, settings);
   });
 
   afterEach(async () => {
@@ -153,6 +160,27 @@ describe.skipIf(binary === undefined || process.platform !== "darwin")("worktree
     expect(await create("existing", false)).toMatchObject({ ok: true });
     expect(git(destination("existing"), ["symbolic-ref", "--short", "HEAD"])).toBe("existing");
     expect((await measure(destination("existing"))).cloneCount).toBeGreaterThan(0);
+    expect(normalAdds()).toHaveLength(0);
+  });
+
+  it("shares branch-from-commit creation from the focused linked donor", async () => {
+    const linked = join(root, "linked-donor");
+    git(donor, ["worktree", "add", "-b", "donor", linked]);
+    writeFileSync(join(linked, "clean.txt"), "linked donor source\n");
+    git(linked, ["commit", "-am", "linked donor update"]);
+    const selected = git(linked, ["rev-parse", "HEAD"]);
+    await indexer.refreshRepoWorktrees(repoId);
+    const row = db.prepare("SELECT id FROM worktrees WHERE repo_id = ? AND branch = ?").get(repoId, "donor") as { id: string };
+    const result = await bus.dispatch("branch:create", {
+      worktreeId: row.id, branch: "from-commit", startPoint: selected, checkout: "new-worktree"
+    });
+    expect(result).toMatchObject({ ok: true, value: { checkedOutWorktreeId: expect.any(String) } });
+    const path = destination("from-commit");
+    expect(git(path, ["rev-parse", "HEAD"])).toBe(selected);
+    expect(readFileSync(join(path, "clean.txt"), "utf8")).toBe("linked donor source\n");
+    // All three regular files are clean in the linked donor. The primary
+    // checkout has a dirty file and a different blob, so it cannot clone them.
+    expect((await measure(path)).cloneCount).toBe(3);
     expect(normalAdds()).toHaveLength(0);
   });
 

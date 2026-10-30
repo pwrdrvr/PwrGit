@@ -19,13 +19,13 @@ import {
   listRepoRefs,
   readCheckoutDirtyCount,
   switchBranch,
-  switchBranchCarryingChanges,
-  worktreeAdd
+  switchBranchCarryingChanges
 } from "./git-service";
 import type { RepoIndexer } from "./repo-indexer";
 import { worktreePathFor } from "./worktree-paths";
 import type { WorktreeRefresher } from "./worktree-handlers";
 import { WorktreeOperationQueue } from "./worktree-operation-queue";
+import { worktreeAddWithSharing } from "./worktree-share";
 
 const notFound = {
   kind: "repo" as const,
@@ -210,7 +210,7 @@ export function registerBranchHandlers(
     });
   });
 
-  bus.register("branch:create", async (req) => {
+  bus.register("branch:create", async (req, ctx) => {
     const live = rowOf(req.worktreeId);
     if (!live.ok) return live;
     const row = live.value;
@@ -260,13 +260,19 @@ export function registerBranchHandlers(
 
     let worktreePath: string | null = null;
     if (req.checkout === "new-worktree") {
-      worktreePath = worktreePathFor(settings, row.repo_name, req.branch);
-      const added = await worktreeAdd(
-        execGit,
-        row.repo_path,
-        worktreePath,
-        req.branch,
-        { newBranch: true, startPoint: req.startPoint }
+      const targetPath = worktreePathFor(settings, row.repo_name, req.branch);
+      worktreePath = targetPath;
+      const added = await operations.runRepository(row.repo_id, () =>
+        worktreeAddWithSharing(
+          execGit,
+          row.path,
+          targetPath,
+          req.branch,
+          { newBranch: true, startPoint: req.startPoint },
+          settings.get(),
+          (message) => logMain("info", "worktree", message),
+          ctx.signal
+        )
       );
       if (!added.ok) return added;
     } else {

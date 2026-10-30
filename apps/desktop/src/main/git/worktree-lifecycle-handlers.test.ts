@@ -23,6 +23,7 @@ import { RepoIndexer } from "./repo-indexer";
 import { registerWorktreeLifecycleHandlers } from "./worktree-lifecycle-handlers";
 import { WorktreeStateService } from "./worktree-state";
 import { createSystemGit } from "./test-support/system-git";
+import { WorktreeOperationQueue } from "./worktree-operation-queue";
 
 // The handlers spawn git through dugite's execGit and broadcast over Electron
 // IPC; neither exists under vitest. Route execGit through the test's recording
@@ -114,13 +115,14 @@ beforeAll(async () => {
   repoId = added.value.id;
   repoPath = added.value.path;
 
-  state = new WorktreeStateService(db, recordingGit);
+  const operations = new WorktreeOperationQueue();
+  state = new WorktreeStateService(db, recordingGit, operations);
   bus = new CommandBus();
   const settings = new SettingsService(join(root, "settings.json"));
   // `worktree:create` resolves its own path from settings — point it inside the
   // sandbox, or the default (~/wt) makes the test write to the real home.
   settings.update({ worktreeRoot: join(root, "wt") });
-  registerWorktreeLifecycleHandlers(bus, db, indexer, settings, state);
+  registerWorktreeLifecycleHandlers(bus, db, indexer, settings, state, operations);
 });
 
 describe("worktree:removeMany × state probes", () => {
