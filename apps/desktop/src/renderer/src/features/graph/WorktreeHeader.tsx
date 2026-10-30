@@ -470,6 +470,21 @@ function pullMenuRows(
       choices
     };
   }
+  // Undecided: Pull already reads the fork, so its row carries the check, and
+  // without words that check reads as a choice the user made. Say it is not
+  // one yet, and that a pick here is the answer.
+  if (movedOn.now && movedOn.answer === null) {
+    return {
+      note: (
+        <>
+          {repos.fork} has moved on from {repos.original}, so Pull reads{" "}
+          <code>{tracked.label}</code> for now. Pick one below to decide.
+        </>
+      ),
+      actions: [],
+      choices
+    };
+  }
   if (!own) return { actions: [], choices };
   const pushes = choice !== "source";
   return {
@@ -1586,6 +1601,9 @@ export function WorktreeHeader({
   // Pull reads the fork's own branch until the user says to keep syncing.
   // Design: `design/Tracking Another Remote - UX Review.dc.html`, turn 4.
   const movedOn = forkChoice !== null && forkMovedOn(forkChoice.source);
+  /** Moved on and never answered: Pull reads the fork until the user says
+   *  otherwise, so the stored (or built-in) choice is not what Pull does. */
+  const movedOnUndecided = movedOn && movedOnAnswer === null;
   const runs: PullChoice =
     (movedOn && movedOnAnswer !== "sync") ||
     (choice === "sync" &&
@@ -1620,7 +1638,7 @@ export function WorktreeHeader({
     }
     if (from !== null) pinStatus("pull", from);
     const prompt =
-      movedOn && movedOnAnswer === null && forkChoice !== null
+      movedOnUndecided && forkChoice !== null
         ? movedOnPrompt(forkChoice)
         : undefined;
     if (forkChoice === null || run === "tracked") onPull(prompt);
@@ -1920,7 +1938,7 @@ export function WorktreeHeader({
                   anchorRef={pullSplit}
                   disabled={running !== null || pullMenu === null}
                   checked={runs}
-                  kept={choice}
+                  kept={movedOnUndecided ? null : choice}
                   {...(pullMenu ?? { actions: [], choices: [] })}
                 />
               </div>

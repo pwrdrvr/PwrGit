@@ -2753,6 +2753,33 @@ describe("WorktreeHeader keeps a fork up with its source", () => {
     expect(document.querySelector(".pull-menu__note")?.textContent).toContain("Watching upstream/main");
   });
 
+  it("says in the Pull menu that a moved-on fork's question is still open", async () => {
+    answer(movedOnFork());
+    await remount();
+    await openMenu();
+    // Pull already reads origin, so that row is checked; the note says that
+    // is not a saved answer.
+    expect(menuRows()[0]?.getAttribute("aria-checked")).toBe("true");
+    expect(menuRows()[0]?.querySelector(".pull-menu__title")?.textContent).toBe("Pull origin/main only");
+    expect(document.querySelector(".pull-menu__note")?.textContent).toBe(
+      "origin has moved on from octo-labs/sparkline, so Pull reads origin/main for now. Pick one below to decide."
+    );
+  });
+
+  it("marks one row as what Pull does while a moved-on fork's question is open", async () => {
+    // Nothing stored: the user never picked a Pull choice or answered. Pull
+    // reads origin until they do, so only that row may claim to be Pull's;
+    // "Your default for this repo" under Sync said the opposite.
+    answer(movedOnFork());
+    await remount();
+    expect(pull()?.getAttribute("title") ?? "").not.toContain("upstream/main");
+    await openMenu();
+    const claims = menuRows()
+      .filter((el) => el.getAttribute("aria-checked") === "true" || el.querySelector(".pull-menu__kept") !== null)
+      .map((el) => el.querySelector(".pull-menu__title")?.textContent);
+    expect(claims).toEqual(["Pull origin/main only"]);
+  });
+
   it("changes the moved-on answer from the Pull menu, as the card says", async () => {
     window.localStorage.setItem("pwrgit.forkMovedOn.repo-1", "tracked");
     window.localStorage.setItem("pwrgit.pullChoice.repo-1", "tracked");
