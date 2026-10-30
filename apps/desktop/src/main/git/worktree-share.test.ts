@@ -1,8 +1,8 @@
 import { execFileSync } from "node:child_process";
-import { chmodSync, constants, copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { chmodSync, constants, copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, unlinkSync, watch, writeFileSync } from "node:fs";
 import { rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { delimiter, join } from "node:path";
+import { basename, delimiter, join } from "node:path";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { CommandBus } from "../command-bus";
 import { logMain } from "../logs";
@@ -10,12 +10,14 @@ import { openDatabase, type DB } from "../persistence/db";
 import { ProfileService } from "../profiles/profile-service";
 import { SettingsService } from "../settings/settings-service";
 import type { GitExec } from "./dugite";
+import { registerBranchHandlers } from "./branch-handlers";
 import { listWorktrees } from "./git-service";
 import { RepoIndexer } from "./repo-indexer";
 import { createSystemGit } from "./test-support/system-git";
 import { registerWorktreeLifecycleHandlers } from "./worktree-lifecycle-handlers";
 import { worktreePathFor } from "./worktree-paths";
 import { WorktreeStateService } from "./worktree-state";
+import { WorktreeOperationQueue } from "./worktree-operation-queue";
 
 const hoisted = vi.hoisted(() => ({ git: null as unknown as GitExec }));
 vi.mock("../ipc", () => ({ emitEvent: vi.fn() }));
@@ -36,6 +38,7 @@ let db: DB;
 let bus: CommandBus;
 let settings: SettingsService;
 let repoId: string;
+let primaryWorktreeId: string;
 let indexer: RepoIndexer;
 let otherProfile: string;
 const calls: string[][] = [];
@@ -63,6 +66,10 @@ beforeAll(() => {
       const spec = JSON.parse(fs.readFileSync(process.env.PWRGIT_TEST_SHARE_SPEC, 'utf8'));
       const args = ['worktree', ...process.argv.slice(2)];
       fs.writeFileSync(spec.invocationFile, JSON.stringify(args));
+      if (spec.gate) {
+        fs.writeFileSync(spec.waitingFile, 'waiting');
+        while (fs.existsSync(spec.gate)) Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 10);
+      }
       if (spec.create) {
         const gitArgs = args.filter((arg, i) => arg !== '--json' && arg !== '--seed-target' && arg !== '--donor' && args[i - 1] !== '--donor');
         cp.execFileSync('git', ['-C', spec.repo, ...gitArgs], { cwd: require('node:os').tmpdir(), stdio: 'ignore' });
@@ -101,6 +108,8 @@ beforeEach(async () => {
   repoId = indexed.value.id;
   // Use the same canonical donor spelling the handler reads from the DB.
   repo = indexed.value.path;
+  const primary = db.prepare("SELECT id FROM worktrees WHERE repo_id = ? AND is_primary = 1").get(repoId) as { id: string };
+  primaryWorktreeId = primary.id;
   await indexer.indexRepoAt(otherProfile, otherRepo);
   settings = new SettingsService(join(fixture, "settings.json"));
   settings.update({ worktreeRoot: join(fixture, "worktrees") });
@@ -109,7 +118,11 @@ beforeEach(async () => {
     calls.push(args);
     return systemGit(args, cwd, options);
   };
-  registerWorktreeLifecycleHandlers(bus, db, indexer, settings, new WorktreeStateService(db, systemGit));
+  const operations = new WorktreeOperationQueue();
+  registerWorktreeLifecycleHandlers(bus, db, indexer, settings, new WorktreeStateService(db, systemGit, operations), operations);
+  registerBranchHandlers(bus, db, indexer, {
+    refreshWorktree: vi.fn(), refreshRepoWorktrees: vi.fn()
+  }, operations, settings);
   specFile = join(fixture, "spec.json");
   invocationFile = join(fixture, "invocation.json");
   configureFake({ create: true });
@@ -131,12 +144,16 @@ afterEach(async () => {
 
 afterAll(async () => { await rm(root, { recursive: true, force: true }); });
 
-function configureFake(spec: { create?: boolean; fallback?: string; exitCode?: number; crash?: boolean; missingFolder?: boolean }): void {
+function configureFake(spec: { create?: boolean; fallback?: string; exitCode?: number; crash?: boolean; missingFolder?: boolean; gate?: string; waitingFile?: string }): void {
   writeFileSync(specFile, JSON.stringify({ repo, invocationFile, ...spec }));
 }
 
 function create(branch = "feature", newBranch = true, startPoint?: string) {
   return bus.dispatch("worktree:create", { repoId, branch, newBranch, ...(startPoint === undefined ? {} : { startPoint }) });
+}
+
+function createFromCommit(branch = "feature", startPoint = "main", worktreeId = primaryWorktreeId) {
+  return bus.dispatch("branch:create", { worktreeId, branch, startPoint, checkout: "new-worktree" });
 }
 
 function normalAdds(): string[][] {
@@ -148,6 +165,54 @@ function invocation(): string[] {
 }
 
 describe("opt-in worktree sharing through the create handler", () => {
+  it.each([
+    ["worktree:create", "worktree:create"],
+    ["worktree:create", "branch:create"],
+    ["branch:create", "worktree:create"]
+  ] as const)("serializes overlapping %s and %s without deleting the winner's checkout", async (firstKind, secondKind) => {
+    settings.update({ worktreeReflink: "on" });
+    let branchDonorId = primaryWorktreeId;
+    const usesLinkedDonor = firstKind === "branch:create" || secondKind === "branch:create";
+    if (usesLinkedDonor) {
+      const linked = join(fixture, "concurrent-donor");
+      git(repo, ["worktree", "add", "-b", "donor", linked]);
+      await indexer.refreshRepoWorktrees(repoId);
+      branchDonorId = (db.prepare("SELECT id FROM worktrees WHERE repo_id = ? AND branch = ?").get(repoId, "donor") as { id: string }).id;
+    }
+    const gate = join(fixture, "create-gate");
+    const waitingFile = join(fixture, "create-waiting");
+    writeFileSync(gate, "hold");
+    configureFake({ create: true, gate, waitingFile });
+    let entered!: () => void;
+    const ready = new Promise<void>((resolve) => { entered = resolve; });
+    const watcher = watch(fixture, (_event, file) => {
+      if (file?.toString() === basename(waitingFile)) entered();
+    });
+    const dispatch = (kind: string) => kind === "branch:create" ? createFromCommit("feature", "main", branchDonorId) : create();
+    const first = dispatch(firstKind);
+    let second: ReturnType<typeof dispatch> | undefined;
+    let snapshotsWhileCreating = 0;
+    try {
+      await Promise.race([ready, first.then((result) => {
+        if (!existsSync(waitingFile)) throw new Error(`create finished before reaching the CLI gate: ${JSON.stringify(result)}`);
+      })]);
+      second = dispatch(secondKind);
+      await Promise.resolve();
+      snapshotsWhileCreating = calls.filter((args) => args[0] === "worktree" && args[1] === "list").length;
+    } finally {
+      watcher.close();
+      unlinkSync(gate);
+      await Promise.all([first, second]);
+    }
+    expect(snapshotsWhileCreating).toBe(1);
+    expect(await first).toMatchObject({ ok: true });
+    expect(await second).toMatchObject({ ok: false, error: { code: "already_exists" } });
+    expect(readFileSync(join(worktreePathFor(settings, "repo", "feature"), "source.txt"), "utf8")).toBe("fixture source\n");
+    const listed = await listWorktrees(systemGit, repo);
+    expect(listed.ok && listed.value).toHaveLength(usesLinkedDonor ? 3 : 2);
+    expect(calls.some((args) => args[0] === "worktree" && args[1] === "remove")).toBe(false);
+  });
+
   it("does not execute the fake when off and uses today's add", async () => {
     expect((await create()).ok).toBe(true);
     expect(existsSync(invocationFile)).toBe(false);
@@ -236,5 +301,48 @@ describe("opt-in worktree sharing through the create handler", () => {
     expect((await create()).ok).toBe(true);
     if (reflink === "off") expect(existsSync(invocationFile)).toBe(false);
     else expect(invocation().includes("--seed-target")).toBe(seed === "on");
+  });
+});
+
+describe("branch-from-commit worktree sharing", () => {
+  it.each([["off", "off"], ["on", "off"], ["on", "on"]] as const)(
+    "honors source and Cargo settings (%s, %s)", async (reflink, seed) => {
+      settings.update({ worktreeReflink: reflink, worktreeSeedCargoTarget: seed });
+      const result = await createFromCommit("from-commit", "main");
+      expect(result).toMatchObject({ ok: true, value: { checkedOutWorktreeId: expect.any(String) } });
+      if (reflink === "off") {
+        expect(existsSync(invocationFile)).toBe(false);
+        expect(normalAdds()).toHaveLength(1);
+      } else {
+        expect(invocation()).toContain("--json");
+        expect(invocation().includes("--seed-target")).toBe(seed === "on");
+        expect(invocation().at(-1)).toBe("main");
+        expect(normalAdds()).toHaveLength(0);
+      }
+    }
+  );
+
+  it("uses the focused linked worktree as donor and honors the selected commit", async () => {
+    const startPoint = execFileSync("git", ["-C", repo, "rev-parse", "HEAD"], { cwd: tmpdir(), encoding: "utf8" }).trim();
+    const donor = join(fixture, "linked-donor");
+    git(repo, ["worktree", "add", "-b", "donor", donor]);
+    writeFileSync(join(donor, "source.txt"), "new donor commit\n");
+    git(donor, ["commit", "-am", "donor update"]);
+    await indexer.refreshRepoWorktrees(repoId);
+    const linked = db.prepare("SELECT id, path FROM worktrees WHERE repo_id = ? AND branch = ?").get(repoId, "donor") as { id: string; path: string };
+    settings.update({ worktreeReflink: "on", worktreeSeedCargoTarget: "on" });
+    expect(await createFromCommit("selected", startPoint, linked.id)).toMatchObject({ ok: true });
+    const args = invocation();
+    expect(args[args.indexOf("--donor") + 1]).toBe(linked.path);
+    expect(args.at(-1)).toBe(startPoint);
+    expect(readFileSync(join(worktreePathFor(settings, "repo", "selected"), "source.txt"), "utf8")).toBe("fixture source\n");
+  });
+
+  it("uses a normal checkout and records fallback when sharing is unavailable", async () => {
+    settings.update({ worktreeReflink: "on" });
+    configureFake({ fallback: "git-checkout" });
+    expect(await createFromCommit()).toMatchObject({ ok: true });
+    expect(normalAdds()).toHaveLength(1);
+    expect(logMain).toHaveBeenCalledWith("info", "worktree", "Worktree sharing is unavailable; using a normal Git checkout.");
   });
 });
