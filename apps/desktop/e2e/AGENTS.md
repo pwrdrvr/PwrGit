@@ -81,9 +81,8 @@ MCP job shape, ownership and lock rules, and the script fallback.
   that eventually stall Electron teardown. The switches prevent accumulation
   but do not repair a degraded guest. The `PWRGIT_E2E_DISABLE_GPU` gate must
   call `app.disableHardwareAcceleration()` before ready (PwrAgent #1656) and
-  pass `--disable-gpu`. CI records
-  `ioclasscount AppleVideoToolboxParavirtualizationUserClient` before and after
-  each shard. Reboot a degraded guest only after its active jobs finish.
+  pass `--disable-gpu`. CI's hosted macOS runners are fresh VMs per job, but
+  a long local or lab VM session can still degrade.
 
 - **Tear down anything a Git process is blocked on BEFORE `handle.cleanup()`.**
   `remote-activity.spec.ts` stalls a fetch on a `git://` socket it owns. Git for
