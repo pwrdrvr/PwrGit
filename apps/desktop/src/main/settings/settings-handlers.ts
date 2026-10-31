@@ -21,14 +21,12 @@ import {
   type AppSettingsSnapshot,
   type DiagnosticsSettings,
   type ForgeHostConfig,
-  type ForgeSettings,
   type ExperimentalSettings,
   type GeneralSettings,
-  type UpdatesSelection,
   type UpdatesSettings
 } from "@pwrgit/shared";
 import type { CommandBus } from "../command-bus";
-import type { SettingsService } from "./settings-service";
+import type { AppSettings, SettingsService } from "./settings-service";
 import { resolveHeapMonitorConfig } from "../diagnostics/heap-monitor-config";
 import { resolveHotCpuProfileConfig } from "../diagnostics/hot-cpu-profile-config";
 import { resolveStartupCpuProfileConfig } from "../diagnostics/startup-cpu-profile-config";
@@ -45,6 +43,10 @@ export function settingsSnapshot(
   // an env-armed monitor is running.
   const off = { enabled: false, outputRoot: diagnosticsOutputRoot };
   return {
+    worktreeReflink: stored.worktreeReflink === "on" ? "on" : "off",
+    worktreeSeedCargoTarget:
+      stored.worktreeReflink === "on" && stored.worktreeSeedCargoTarget === "on" ? "on" : "off",
+    ...(stored.worktreeShareCommand === undefined ? {} : { worktreeShareCommand: stored.worktreeShareCommand }),
     general: {
       ...GENERAL_DEFAULTS,
       ...stored.general,
@@ -250,17 +252,17 @@ export function registerSettingsHandlers(
   bus.register("settings:update", (req) => {
     const sanitized = sanitizePatch(req.patch);
     const stored = settings.get();
-    const next: {
-      general: Partial<GeneralSettings>;
-      experimental: Partial<ExperimentalSettings>;
-      diagnostics: Partial<DiagnosticsSettings>;
-      updates?: UpdatesSelection;
-      forges?: ForgeSettings;
-    } = {
+    const next: Partial<AppSettings> = {
       general: { ...stored.general, ...sanitized.general },
       experimental: { ...stored.experimental, ...sanitized.experimental },
       diagnostics: { ...stored.diagnostics, ...sanitized.diagnostics }
     };
+    for (const key of ["worktreeReflink", "worktreeSeedCargoTarget"] as const) {
+      if (req.patch[key] === "on" || req.patch[key] === "off") next[key] = req.patch[key];
+    }
+    if (typeof req.patch.worktreeShareCommand === "string") {
+      next.worktreeShareCommand = req.patch.worktreeShareCommand.trim();
+    }
     // Persist both axes whenever the user touches Updates, including
     // stable/latest, so a Beta binary does not re-infer after they pick
     // Stable. Naming EITHER axis is what makes the pair a pin: deriving

@@ -13,6 +13,21 @@ function freshService(): SettingsService {
 }
 
 describe("settings handlers", () => {
+  it("validates sharing switches over IPC, persists the command, and enforces the seed prerequisite", async () => {
+    const service = freshService();
+    const bus = new CommandBus();
+    registerSettingsHandlers(bus, service, { diagnosticsOutputRoot: "/diag", onChanged: () => undefined });
+    expect(settingsSnapshot(service, "/diag")).toMatchObject({ worktreeReflink: "off", worktreeSeedCargoTarget: "off" });
+    const enabled = await bus.dispatch("settings:update", { patch: {
+      worktreeReflink: "on", worktreeSeedCargoTarget: "on", worktreeShareCommand: " /fixture/pwrgit-share "
+    } });
+    expect(enabled).toMatchObject({ ok: true, value: { worktreeReflink: "on", worktreeSeedCargoTarget: "on", worktreeShareCommand: "/fixture/pwrgit-share" } });
+    await bus.dispatch("settings:update", { patch: { worktreeReflink: "invalid" as never, worktreeSeedCargoTarget: true as never, worktreeShareCommand: 42 as never } });
+    expect(service.get()).toMatchObject({ worktreeReflink: "on", worktreeSeedCargoTarget: "on", worktreeShareCommand: "/fixture/pwrgit-share" });
+    const disabled = await bus.dispatch("settings:update", { patch: { worktreeReflink: "off", worktreeSeedCargoTarget: "on", worktreeShareCommand: "" } });
+    expect(disabled).toMatchObject({ ok: true, value: { worktreeReflink: "off", worktreeSeedCargoTarget: "off", worktreeShareCommand: "" } });
+  });
+
   it("reads a fully-defaulted snapshot from empty storage", async () => {
     const bus = new CommandBus();
     registerSettingsHandlers(bus, freshService(), {

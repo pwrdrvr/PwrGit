@@ -1158,7 +1158,7 @@ if (!gotSingleInstanceLock) {
       }
       return ok(null);
     });
-    registerWorktreeLifecycleHandlers(bus, db, indexer, settings, stateService);
+    registerWorktreeLifecycleHandlers(bus, db, indexer, settings, stateService, worktreeOperations);
     // PWRGIT_E2E_TRASH_DIR (e2e seam): move removed folders into a test
     // directory instead of the machine's Trash.
     const e2eTrashDir = app.isPackaged

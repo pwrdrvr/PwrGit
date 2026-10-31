@@ -15,6 +15,10 @@ export type AppSettings = {
   localAgentAccessEnabled?: boolean;
   /** Root under which PwrGit-managed worktrees are created (U14). */
   worktreeRoot?: string;
+  worktreeReflink?: "off" | "on";
+  worktreeSeedCargoTarget?: "off" | "on";
+  /** Executable path or command name; absent uses pwrgit-share on PATH. */
+  worktreeShareCommand?: string;
   /** An installed Git chosen in Settings › General › Git runtime. Absent is
    *  the bundled Git. Written only by `git:selectRuntime`, which probes it
    *  first; never through `settings:update`. `undefined` clears it. */
@@ -34,7 +38,7 @@ export type AppSettings = {
   forges?: ForgeSettings;
 };
 
-const DEFAULTS: AppSettings = {};
+const DEFAULTS: AppSettings = { worktreeReflink: "off", worktreeSeedCargoTarget: "off" };
 
 /**
  * Atomic JSON settings: write to a temp file then rename, so a crash never
@@ -64,6 +68,7 @@ export class SettingsService {
 
   update(patch: Partial<AppSettings>): AppSettings {
     this.cache = { ...this.cache, ...patch };
+    this.normalizeWorktreeSharing(this.cache);
     this.writeAtomic(this.cache);
     for (const listener of this.writeListeners) listener();
     return this.get();
@@ -74,9 +79,20 @@ export class SettingsService {
       const parsed = JSON.parse(
         readFileSync(this.filePath, "utf8")
       ) as AppSettings;
-      return { ...DEFAULTS, ...parsed };
+      const settings = { ...DEFAULTS, ...parsed };
+      this.normalizeWorktreeSharing(settings);
+      return settings;
     } catch {
       return { ...DEFAULTS };
+    }
+  }
+
+  private normalizeWorktreeSharing(settings: AppSettings): void {
+    if (settings.worktreeReflink !== "on") {
+      settings.worktreeReflink = "off";
+      settings.worktreeSeedCargoTarget = "off";
+    } else if (settings.worktreeSeedCargoTarget !== "on") {
+      settings.worktreeSeedCargoTarget = "off";
     }
   }
 
