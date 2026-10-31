@@ -43,6 +43,8 @@ export function WorktreeRow({
   onContextMenu,
   onTogglePin,
   onRemove,
+  forkLabel,
+  onFork,
   onRefreshPullRequest,
   dragProps,
   dragging,
@@ -63,6 +65,10 @@ export function WorktreeRow({
   onContextMenu: (e: ReactMouseEvent) => void;
   onTogglePin: () => void;
   onRemove: () => void;
+  /** Fork the repository, offered from this checkout's menu as the graph
+   *  header's menu offers it. Absent on rows that never fork. */
+  forkLabel?: string;
+  onFork?: () => void;
   /** Refresh this branch's PR after deliberate row hover. */
   onRefreshPullRequest?: () => void;
   /** Drag handlers from useListReorder; false for fixed/computed rows. */
@@ -454,10 +460,11 @@ export function WorktreeRow({
         worktree={worktree}
         className="wt-row__menu"
         platform={platform}
-        {...(missing
+        {...(forkLabel === undefined || onFork === undefined
           ? {}
-          : { onResetToRemote: () => openResetToRemote({ worktree }) })}
-        {...(worktree.isPrimary ? {} : { onRemove })}
+          : { fork: { label: forkLabel, onSelect: onFork } })}
+        onResetToRemote={() => openResetToRemote({ worktree })}
+        onRemove={onRemove}
       />
       {tip.tooltipNode}
     </div>

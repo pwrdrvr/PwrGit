@@ -12710,6 +12710,11 @@ body.is-col-resizing {
   opacity: 0;
   transition: opacity 120ms ease;
 }
+/* Also at rest on the repository you are in. Hidden there, the nearest kebab
+   in sight was the primary checkout's, one row down, and its menu has none of
+   the repository's verbs: people read "Repository setup…" as missing from the
+   lens they were in. Its room is already held, so showing it moves nothing. */
+.repo-row.holds-selection .repo-row__menu,
 .repo-row:hover .repo-row__menu,
 .repo-row:focus-visible .repo-row__menu,
 .repo-row:has(:focus-visible) .repo-row__menu,

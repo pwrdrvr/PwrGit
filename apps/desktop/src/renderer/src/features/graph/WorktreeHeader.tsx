@@ -39,6 +39,7 @@ import { useRemoteActivityPopover } from "../remote/useRemoteActivityPopover";
 import { useRemoteActivityFor } from "../../state/useRemoteActivity";
 import { useForkStatus } from "../../state/useForkStatus";
 import { WorktreeMenu } from "../shell/WorktreeMenu";
+import { forkMenuLabel } from "../shell/worktree-menu-items";
 import { GitLfsChip } from "./GitLfsChip";
 import { PullDivergenceDialog } from "./PullDivergenceDialog";
 import { PullMenu, type PullMenuRow } from "./PullMenu";
@@ -1992,7 +1993,7 @@ export function WorktreeHeader({
           // Not gated on the read-only answer, unlike the chip: the forge may
           // not have been asked yet, and the fork dialog reads `origin` itself.
           fork={{
-            label: `Fork ${repo.identity?.nameWithOwner ?? repo.name}…`,
+            label: forkMenuLabel(repo),
             onSelect: () => setForkPrompt({ tracking: null })
           }}
           onResetToRemote={() =>
