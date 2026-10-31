@@ -22,7 +22,7 @@ async function setup(decision: ConsentDecision = { decision: "allow", sessionNam
   const policyFile = join(dir, "policy.json");
   const policy = new McpPolicyStore(policyFile);
   policy.initialize();
-  const options = { runner: runCommand, policyFile, clientsFile: join(dir, "clients.json"), port: 0,
+  const options = { desktopVersion: "0.49.0", runner: runCommand, policyFile, clientsFile: join(dir, "clients.json"), port: 0,
     requestConsent: requestConsent ?? (async () => decision), onChanged: () => undefined };
   const server = new AgentAccessServer(options);
   await server.start();

@@ -1,27 +1,31 @@
 # @pwrgit/mcp-server
 
 PwrGit app profiles, indexed repositories, recent navigation, open/refresh actions,
-and read-only Git metadata and live status. App-backed tools require the desktop
-HTTP server; standalone stdio remains filesystem-based. Standalone stdio always
-runs the bundled Git and Git LFS, with the app's Git LFS filter and macOS keychain
-helper. App-backed tools run whichever Git is chosen in the app's Settings, which
-is the bundled Git unless someone picks an installed one.
+and read-only Git metadata and live status. The running desktop owns every MCP
+handler. It runs the Git selected in Settings, bundled Git by default.
 
-The desktop app exposes OAuth-protected MCP at
-`http://127.0.0.1:51731/mcp`. Enable local-agent access in Settings → Local Agents,
-connect a standard MCP OAuth client, and approve it in PwrGit’s native window.
-See [the connection guide](../../docs/mcp-server.md#connect-an-agent).
+Open PwrGit yourself and enable Settings → Local Agents → Enable local-agent
+access before connecting. The caller never launches the app.
 
-The package also retains its original standalone stdio entry point for existing
-clients. It requires `PWRGIT_MCP_SESSION_TOKEN` and reads the desktop policy
-file (or `PWRGIT_MCP_POLICY_FILE`). Workspace installation builds the standalone
-server automatically. Start it with:
+New clients should use the OAuth-protected endpoint at
+`http://127.0.0.1:51731/mcp` and approve access in PwrGit’s native window.
+See [connection instructions](../../docs/mcp-server.md#connect-an-agent).
+
+Existing stdio configurations can keep `PWRGIT_MCP_SESSION_TOKEN` and the same
+command after updating this package. `pwrgit-mcp` now relays opaque bytes to the
+running desktop over authenticated loopback WebSocket. It does not read a policy
+file, run Git, or provide an independent server. A stopped, disabled, outdated or
+disconnected desktop fails with manual reconnect instructions; it never falls
+back, reconnects automatically, or replays requests. HTTP continues to require
+OAuth-issued Sessions. Existing roles, repository boundaries and OAuth scopes
+apply to the relay too.
 
 ```sh
 pnpm --filter @pwrgit/mcp-server start
 ```
 
-After changing its source, rebuild with `pnpm --filter @pwrgit/mcp-server build`.
-
-The desktop HTTP interface uses OAuth rather than a pairing CLI or copied
-tokens. Revocation and repository boundaries apply to both transports.
+Workspace installation builds the relay. After changing source, rebuild with
+`pnpm --filter @pwrgit/mcp-server build`. `pwrgit-mcp --version` reports the relay
+package release. MCP initialization reports the connected desktop release.
+Release equality is not required: the relay transport protocol and MCP protocol
+are negotiated independently. See the [migration and compatibility decision](../../docs/desktop-owned-mcp.md).

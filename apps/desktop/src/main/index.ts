@@ -1385,6 +1385,7 @@ if (!gotSingleInstanceLock) {
     );
     consent.register(bus);
     const agentAccess = new AgentAccessService({
+      desktopVersion: app.getVersion(),
       ...(!app.isPackaged && process.env["PWRGIT_E2E_AGENT_ACCESS_PORT"] === "0" ? { port: 0 } : {}),
       appBackend: createAppBackend(db, profiles, indexer, bus),
       runner: createDesktopMcpRunner(execGit),

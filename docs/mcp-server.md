@@ -2,21 +2,20 @@
 
 PwrGit exposes app state and explicit workspace navigation through MCP, plus
 read-only Git discovery and live status. The server lives under `packages/mcp-server`, available
-as a standalone stdio process or through the desktop app’s opt-in HTTP listener. It follows the Pwr family conventions established by
+in the independently launched desktop, reached through its opt-in HTTP listener or an authenticated stdio byte relay. It follows the Pwr family conventions established by
 PwrSnap: the official TypeScript SDK, explicit capabilities, structured tool
 results, accurate tool annotations, typed resources, stderr-only diagnostics,
 bounded inputs, fail-closed RBAC, named revocable Sessions, and contract-level
 integration tests.
 
-The Electron app does not need to remain running for stdio clients; HTTP
-clients require the app and its local-agent listener to remain running. Settings → Local Agents owns the
-authorization graph and writes the cross-platform `mcp-policy.json` consumed
-by standalone processes.
+Both transports require PwrGit to already be running with local-agent access enabled.
+The caller never launches PwrGit. Settings → Local Agents owns the authorization
+graph; only the desktop reads `mcp-policy.json`. See the
+[ownership, compatibility and migration decision](desktop-owned-mcp.md).
 
 ## Running-app tools (`pwrgit.app/v1`)
 
-Use the desktop HTTP connection for app state. Standalone stdio tools cannot
-see PwrGit's profiles or navigation history and do not advertise these tools.
+Both HTTP and the stdio relay discover these tools from the connected desktop.
 
 | Tool | Purpose |
 | --- | --- |
@@ -69,20 +68,20 @@ and navigate tools neither list nor open it; the path-based Git tools still
 read it, because it is still on disk. No arbitrary command dispatch, commit, push,
 file editing or destructive Git operation is exposed by these app tools.
 
-Desktop root discovery now uses profile roots and indexed repositories rather
-than the Electron process's working directory. Standalone discovery retains its
-bounded configured/conventional-folder behavior.
+Root discovery uses desktop profile roots and indexed repositories rather than
+the caller's working directory. Caller environment discovery roots are not used
+by the relay.
 
 ## Authorization policy v1
 
-Every standalone MCP process must receive a named Session token through
+Every stdio relay process must receive a named Session token through
 `PWRGIT_MCP_SESSION_TOKEN`. HTTP clients send their Session token as a Bearer
 credential on every request. Stdio is a one-client process transport, so the
 Session environment is its client principal; HTTP OAuth would add a second
 identity ceremony without improving isolation for that transport. The token is
 256 random bits, is returned to the OAuth client at token exchange, and is stored only as a SHA-256 hash in a
-user-private policy file. `PWRGIT_MCP_POLICY_FILE` overrides the standard
-PwrGit app-data path when needed.
+user-private policy file. The relay does not read policy files; `PWRGIT_MCP_POLICY_FILE` no longer
+redirects stdio authorization. The running desktop uses its own app-data policy.
 
 Settings → Local Agents visualizes **Session → role → effective permissions and
 repository boundary**. It can revoke Sessions, assign roles, and
@@ -167,14 +166,20 @@ Later role edits cannot enlarge an OAuth Session beyond those scopes.
 HTTP accepts only OAuth-issued Sessions. There are no custom pairing endpoints
 or manual credential-creation controls.
 
-Existing standalone stdio clients remain compatible with their saved Session
-tokens. Revoking those Sessions disables them too; turning off the HTTP listener
-does not stop an independently launched stdio process.
+Existing stdio configurations keep their saved Session tokens after updating the
+relay executable. The authenticated `/mcp/stdio` WebSocket upgrade accepts these
+legacy Sessions with their existing roles and boundaries. It also preserves
+OAuth scope limits on OAuth-issued Sessions. `/mcp` still requires OAuth. Turning
+off local-agent access or quitting PwrGit disconnects both transports. There is
+no standalone fallback or automatic reconnect. Open PwrGit yourself, enable
+local-agent access, then reconnect the MCP server in the host. Older standalone
+binaries must be replaced; this update does not terminate them or revoke their
+Sessions. New clients should use HTTP OAuth.
 
 ## Transport decision
 
-The standalone MCP server uses stdio; the optional desktop listener uses
-Streamable HTTP. MCP defines
+The desktop serves full-duplex MCP through the stdio relay and stateless
+Streamable HTTP directly. MCP defines
 standard resource subscriptions on stdio, so those clients use:
 
 1. Call `pwrgit_watch_repository` with an absolute worktree path.
@@ -183,7 +188,7 @@ standard resource subscriptions on stdio, so those clients use:
 4. When PwrGit sends `notifications/resources/updated`, re-read the URI.
 5. Send `resources/unsubscribe` when the status is no longer needed.
 
-The stdio server advertises `resources: { subscribe: true, listChanged: true }`.
+The desktop behind the stdio relay advertises `resources: { subscribe: true, listChanged: true }`.
 Stateless HTTP advertises no resource subscriptions: read status resources on
 demand, or use the WebSocket for live updates. Watch resources and WebSocket
 capabilities remain isolated per authorized Session across HTTP requests and
@@ -220,13 +225,12 @@ serialized JSON text block, so a host that renders only `content` still shows
 the caller the data.
 
 
-`pwrgit_repository_roots` inspects, in priority order:
-
-- roots explicitly supplied by the caller;
-- roots in `PWRGIT_MCP_ROOTS`;
-- the current repository's parent, unless that is the home directory or a
-  filesystem root;
-- existing conventional folders under the home directory.
+`pwrgit_repository_roots` inspects roots explicitly supplied by the caller,
+subject to the Session boundary. Without explicit roots it uses the assigned
+role's concrete roots, or desktop profile roots and indexed repositories for an
+unrestricted role. It never infers roots from the relay's environment or current
+working directory. `includeConventional` remains in the schema for compatibility
+but does not widen desktop-backed discovery.
 
 Each scan uses a depth of four by default and five at most, a per-root
 directory budget, a 20,000 directory total budget, 32 roots, and explicit skip
@@ -245,7 +249,7 @@ segments, matching PwrGit's existing forge identity rules. Remote URLs are
 parsed inside the process and discarded; only this shape is returned:
 
 When the tool receives `roots`, it searches only those roots. Without `roots`,
-it uses the configured, workspace, and conventional candidates above.
+it uses the authorized desktop or role roots described above.
 
 ```json
 {
@@ -354,7 +358,7 @@ lifecycle is `open`, `merged`, or `closed`.
 
 The server polls only while a resource is subscribed. Cadence is bounded from
 5 seconds to 5 minutes (15 seconds by default), with at most 64 resources per
-server process. A changed normalized snapshot triggers one standard resource
+MCP server instance (per stdio connection or HTTP principal). A changed normalized snapshot triggers one standard resource
 update notification; the client then reads the full latest snapshot.
 
 ## Optional WebSocket fallback v1
@@ -423,9 +427,6 @@ GitLab does not expose a GitHub-style change-requested review aggregate, so the
 v1 contract reports the explicit blockers GitLab does expose rather than
 guessing.
 
-The server does not read PwrGit's Electron SQLite profile index. Set
-`PWRGIT_MCP_ROOTS` for deterministic broad discovery when the assigned role
-allows all bounded repositories, or configure concrete repository roots on a
-custom role. A future index-backed discovery implementation can replace
-conventional-root inference without changing the versioned tool, resource, or
-authorization contracts.
+The desktop reads its SQLite profile index for app-backed discovery. Configure
+concrete repository roots on a custom role to narrow access. The stdio relay
+does not read the index, inspect repositories, or run Git.
