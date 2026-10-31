@@ -55,6 +55,98 @@ async function relayed(port: number, token: string) {
   return { client, completion, diagnostics: () => diagnosticText };
 }
 
+async function trackedRelay(policy: McpPolicyStore, beforeClose: () => Promise<void> = async () => undefined) {
+  const http = createServer(); http.listen(0, "127.0.0.1"); await once(http, "listening");
+  const port = (http.address() as { port: number }).port;
+  const created: Array<Awaited<ReturnType<typeof createPwrGitMcpServer>>> = [];
+  const closeStarted = vi.fn();
+  const closeFinished = vi.fn();
+  const relay = new DesktopMcpRelay({ http, policyFile: policy.filePath, desktopVersion: "9.8.7",
+    authority: () => `127.0.0.1:${port}`, allowedOrigin: origin => origin === undefined,
+    createServer: async token => {
+      const server = await createPwrGitMcpServer({ serverVersion: "9.8.7", authorizer: new PolicyFileAuthorizer(policy.filePath, token) });
+      const close = server.close;
+      server.close = async () => { closeStarted(); await beforeClose(); await close(); closeFinished(); };
+      vi.spyOn(server.statusResources, "close");
+      vi.spyOn(server.eventServer, "close");
+      created.push(server);
+      return server;
+    } });
+  cleanups.push(async () => { await relay.close(); await new Promise<void>(resolve => http.close(() => resolve())); });
+  return { port, created, closeStarted, closeFinished };
+}
+
+function attemptSocket(port: number, token: string) {
+  const socket = new WebSocket(`ws://127.0.0.1:${port}${MCP_RELAY_PATH}`, MCP_RELAY_PROTOCOL, {
+    headers: { authorization: `Bearer ${token}` }
+  });
+  socket.on("error", () => undefined);
+  cleanups.push(async () => { socket.terminate(); });
+  const status = new Promise<number>(resolve => {
+    socket.once("open", () => resolve(101));
+    socket.once("unexpected-response", (_req, response) => { response.resume(); socket.terminate(); resolve(response.statusCode!); });
+  });
+  return { socket, status };
+}
+
+it("tears down the desktop server and frees its slot when stdio input overflows across permitted frames", async () => {
+  const { policy, credential } = await fixture();
+  const { port, created, closeFinished } = await trackedRelay(policy);
+  const connections = Array.from({ length: 16 }, () => attemptSocket(port, credential.token));
+  expect(await Promise.all(connections.map(connection => connection.status))).toEqual(Array(16).fill(101));
+  await vi.waitFor(() => expect(created).toHaveLength(16));
+  const socket = connections[0]!.socket;
+  const initialized = once(socket, "message");
+  socket.send(JSON.stringify({ jsonrpc: "2.0", id: 1, method: "initialize", params: {
+    protocolVersion: "2025-06-18", capabilities: {}, clientInfo: { name: "overflow-host", version: "1" }
+  } }) + "\n");
+  await initialized;
+  // Each WebSocket message is below the frame limit; the unfinished stdio
+  // message exceeds the read buffer only after the second message arrives.
+  socket.send("x".repeat(48 * 1024));
+  socket.send("x".repeat(48 * 1024));
+  await vi.waitFor(() => {
+    expect(socket.readyState).toBe(WebSocket.CLOSED);
+    expect(closeFinished).toHaveBeenCalledTimes(1);
+  });
+  const retired = created.filter(server => vi.mocked(server.statusResources.close).mock.calls.length === 1);
+  expect(retired).toHaveLength(1);
+  expect(retired[0]!.eventServer.close).toHaveBeenCalledTimes(1);
+  expect(await attemptSocket(port, credential.token).status).toBe(101);
+});
+
+it("reclaims all idle revoked connections before admitting concurrent replacements without exceeding the cap", async () => {
+  const { policy, credential } = await fixture();
+  let release!: () => void;
+  const drain = new Promise<void>(resolve => { release = resolve; });
+  const { port, created, closeStarted, closeFinished } = await trackedRelay(policy, () => drain);
+  try {
+    const connections = Array.from({ length: 16 }, () => attemptSocket(port, credential.token));
+    expect(await Promise.all(connections.map(connection => connection.status))).toEqual(Array(16).fill(101));
+    await vi.waitFor(() => expect(created).toHaveLength(16));
+    const replacement = policy.createSession("Replacement", "builtin.discovery");
+    expect(await attemptSocket(port, replacement.token).status).toBe(429);
+    policy.revokeSession(credential.session.id);
+    const replacements = [attemptSocket(port, replacement.token), attemptSocket(port, replacement.token)];
+    const admitted: number[] = [];
+    const admissions = Promise.all(replacements.map(async connection => { const status = await connection.status; admitted.push(status); return status; }));
+    await vi.waitFor(() => expect(closeStarted).toHaveBeenCalledTimes(16));
+    expect(closeFinished).not.toHaveBeenCalled();
+    expect(admitted).toEqual([]);
+    expect(created).toHaveLength(16);
+    release();
+    expect(await admissions).toEqual([101, 101]);
+    await vi.waitFor(() => expect(created).toHaveLength(18));
+    expect(closeFinished).toHaveBeenCalledTimes(16);
+    expect(connections.every(connection => connection.socket.readyState === WebSocket.CLOSED)).toBe(true);
+    // Both admitted connections consume slots; only fourteen more fit.
+    const more = Array.from({ length: 15 }, () => attemptSocket(port, replacement.token));
+    const statuses = await Promise.all(more.map(connection => connection.status));
+    expect(statuses.filter(status => status === 101)).toHaveLength(14);
+    expect(statuses.filter(status => status === 429)).toHaveLength(1);
+  } finally { release(); }
+});
+
 it("uses desktop discovery, schemas, annotations, instructions and version with a differently versioned relay", async () => {
   const { server, policy, credential, options } = await fixture();
   const { client, diagnostics } = await relayed(server.port, credential.token);
