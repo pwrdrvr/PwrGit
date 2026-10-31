@@ -560,6 +560,12 @@ describe("dryRunRebase (disposable clone)", () => {
     chmodSync(hook, 0o755);
     git(repo, ["config", "commit.gpgSign", "true"]);
     git(repo, ["config", "user.signingKey", "missing-test-key"]);
+    // Exercise Git's signing failure independently of the host's signing
+    // format, GPG agent and key lookup.
+    const signer = join(repo, ".git", "pwrgit-missing-signer");
+    expect(existsSync(signer)).toBe(false);
+    git(repo, ["config", "gpg.format", "openpgp"]);
+    git(repo, ["config", "gpg.openpgp.program", signer]);
     const commits = topCommits(repo, 3);
 
     // The check's commits are thrown away, so it never asks the signer.
@@ -577,7 +583,7 @@ describe("dryRunRebase (disposable clone)", () => {
       headRef: checked.value.sourceRef
     };
 
-    // Apply follows commit.gpgSign. A signer that cannot sign is reported as
+    // Apply follows commit.gpgSign. A signer that cannot run is reported as
     // what it is, not as a conflict, and nothing moved.
     const applied = await applyRebase(
       systemGit,
@@ -590,6 +596,7 @@ describe("dryRunRebase (disposable clone)", () => {
     expect(applied.ok).toBe(false);
     if (applied.ok) return;
     expect(applied.error.code).toBe("signing_failed");
+    expect(applied.error.message).toContain("pwrgit-missing-signer");
     expect(applied.error.message).toMatch(/restored unchanged/);
     expect(gitOut(repo, ["rev-parse", "HEAD"])).toBe(checked.value.sourceHead);
     expect(gitOut(repo, ["status", "--porcelain"])).toBe("");
