@@ -1,4 +1,5 @@
 import {
+  forgeProductFor,
   isForgeKind,
   parseForgeRemote,
   toForgeHost,
@@ -396,6 +397,19 @@ export class IdentityService {
     // repo's identity off github.com/gitlab.com instead of its own instance,
     // which for a same-named SaaS slug reports a STRANGER's visibility and
     // fork lineage as this repo's.
+    if (forgeProductFor(origin.host)?.capabilities.repositoryApi === false) {
+      const slash = origin.nameWithOwner.lastIndexOf("/");
+      const identity: RepoIdentity = {
+        host: origin.host, hostname: origin.hostname,
+        owner: origin.nameWithOwner.slice(0, slash), name: origin.nameWithOwner.slice(slash + 1),
+        nameWithOwner: origin.nameWithOwner, visibility: "unknown", remoteHostnames: hostnames
+      };
+      this.write(origin.repoId, identity);
+      return {
+        outcome: { repoId: repo.id, status: "unknown", identity },
+        ...(sameIdentity(previous, identity) ? {} : { change: { repoId: repo.id, identity } })
+      };
+    }
     const provider = this.forges.get(origin.host, origin.hostname);
     if (provider === null) return unavailable;
     let identity: RepoIdentity;

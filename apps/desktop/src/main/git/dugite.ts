@@ -9,6 +9,13 @@ import { err, ok, type PwrGitError, type Result } from "@pwrgit/shared";
 import { cliSearchPath } from "../forge/cli-runner";
 import { logMain } from "../logs";
 
+import type { GitAuthentication } from "../forge/artifacts/git-auth";
+let gitAuthentication: GitAuthentication | null = null;
+/** Configured at app startup; tests and standalone Git keep existing behavior. */
+export function configureGitAuthentication(authentication: GitAuthentication | null): void {
+  gitAuthentication = authentication;
+}
+
 let bundledDirectory = dugite.resolveEmbeddedGitDir();
 let generatedConfigDirectory: string | null = null;
 let installedGit: string | null = null;
@@ -313,7 +320,7 @@ export function sanitizeGitLogDetail(detail: unknown): string {
   const sanitized = raw
     .replace(/([a-z][a-z0-9+.-]*:\/\/)[^\s/@]+@/gi, "$1[redacted]@")
     .replace(
-      /\b(?:gh[pousr]_[a-z0-9_]{8,}|github_pat_[a-z0-9_]{8,})\b/gi,
+      /\b(?:gh[pousr]_[a-z0-9_]{8,}|github_pat_[a-z0-9_]{8,}|art_v1_[a-f0-9]{40}(?:\?expires=[0-9]+)?)\b/gi,
       "[redacted credential]"
     )
     .replace(
@@ -380,7 +387,13 @@ export const execGit: GitExec = async (args, cwd, options) => {
   if (alreadyAborted !== null) return err(abortError(alreadyAborted));
   try {
     const invocation = gitProcessInvocation(args, cwd);
-    const result = await execFileGit(gitLaunch(options?.env), invocation.args, invocation.processCwd, {
+    const authentication = gitAuthentication === null
+      ? ok(options?.env ?? {})
+      : await gitAuthentication(args, cwd, options?.env ?? {});
+    if (!authentication.ok) return authentication;
+    const cancelledAfterAuthentication = abortedSignal(options);
+    if (cancelledAfterAuthentication !== null) return err(abortError(cancelledAfterAuthentication));
+    const result = await execFileGit(gitLaunch(authentication.value), invocation.args, invocation.processCwd, {
       encoding: "utf8",
       ...(options?.signal !== undefined ? { signal: options.signal } : {}),
       ...(options?.killSignal !== undefined

@@ -63,7 +63,11 @@ for that.
   a new worktree.
 - **GitHub and GitLab, through the CLIs you already use.** `gh` for GitHub,
   `glab` for gitlab.com and self-managed GitLab. PwrGit
-  never asks for a password and stores no token of its own.
+  uses their existing credentials for these forge APIs.
+- **Cloudflare Artifacts, over HTTPS Git.** Connect Wrangler to browse accounts,
+  namespaces and repositories, with fresh tokens for clone, fetch, pull and push.
+  Manually saved encrypted repository tokens also work. Artifacts has no pull
+  request API; [setup and integration limits](docs/cloudflare-artifacts.md).
 - **Worktrees are the model.** Repositories and their linked worktrees live
   together in the sidebar; create, pin, and remove them without losing which
   checkout owns which branch. Hide a repository you are not working in, or
@@ -138,6 +142,8 @@ never installs. The `.tar.gz` is updated by replacing the extracted directory.
 **Optional:** sign in to `gh` or `glab` for pull request, merge request, and
 fork features. **Settings → Forges** shows what is connected and the command
 to run when it is not.
+For an existing Cloudflare Artifacts repository, save its exact remote and
+repository token in **Settings → Forges → Cloudflare Artifacts** before cloning.
 
 Full walkthrough, first launch, and uninstall: [docs.pwrgit.com/install](https://docs.pwrgit.com/install/).
 

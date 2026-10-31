@@ -38,7 +38,8 @@ const PROVIDERS: Record<
 > = {
   github: (host) => new GitHubContributionProvider(host),
   gitlab: null,
-  gitcafe: null
+  gitcafe: null,
+  artifacts: null
 };
 const RETENTION_MS = 30 * 86_400_000;
 const REPO_CAP = 10_000,

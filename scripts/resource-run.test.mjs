@@ -106,7 +106,10 @@ describe("shared resource lease", () => {
     const f = await fixture();
     // A live private lane must not delay an automatically detected CI job.
     await mkdir(`${f.lockPath}.lock`);
-    const owner = { pid: process.pid, path: f.lockPath, token: "another-build", ownerStartedAt: processStartedAt(process.pid) };
+    // A legacy live owner without a start identity must be treated as alive
+    // (ownerRunning fails closed). CI must bypass it without inspecting any
+    // process identities, including an unrelated cold PowerShell at setup.
+    const owner = { pid: process.pid, path: f.lockPath, token: "another-build" };
     await writeFile(`${f.lockPath}.owner.json`, JSON.stringify(owner));
     const originalStat = await stat(`${f.lockPath}.lock`);
     const args = ["--max-old-space-size=6144", "-e", "console.log(JSON.stringify({options:process.env.NODE_OPTIONS,argv:process.argv.slice(1),marker:process.env.PWRAGENT_TOOL_DESCENDANT_TOKEN}));process.exitCode=7", "--", "application-arg"];

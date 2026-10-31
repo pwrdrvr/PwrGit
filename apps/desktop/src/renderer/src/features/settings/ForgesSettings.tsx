@@ -252,7 +252,7 @@ export function ForgesSettings(props: {
       <SettingsPanelHead
         eyebrow="Integrations"
         title="Forges"
-        help="PwrGit reads change-request status through the CLI you already sign in with. It never asks for a password and stores no token of its own."
+        help="PwrGit reads forge APIs through the CLI you already sign in with. Cloudflare Artifacts uses repository tokens stored with OS encryption."
         action={
           // One control for the pane, not one per section: it asks every CLI,
           // so it was never a property of one product.

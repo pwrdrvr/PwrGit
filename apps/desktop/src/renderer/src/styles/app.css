@@ -3725,6 +3725,27 @@ a.forge-chip:focus-visible {
 .clone-section + .clone-section {
   margin-top: 15px;
 }
+.artifacts-browser {
+  display: grid;
+  gap: 10px;
+  margin-top: 12px;
+}
+.artifacts-browser > .modal__cancel {
+  justify-self: start;
+}
+.artifacts-browser .clone-label {
+  display: grid;
+  gap: 7px;
+  margin: 0;
+}
+.artifacts-browser p {
+  margin: 0;
+  color: var(--text-secondary);
+  font: 400 12px/1.5 var(--font-sans);
+}
+.artifacts-browser [role="alert"] {
+  color: var(--danger-text);
+}
 .clone-label {
   display: flex;
   align-items: baseline;

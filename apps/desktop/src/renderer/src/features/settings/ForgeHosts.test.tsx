@@ -100,6 +100,7 @@ beforeEach(() => {
   writes = [];
   mocks.subscribe.mockImplementation(() => () => {});
   mocks.dispatch.mockImplementation(async (channel: string, req: unknown) => {
+    if (channel === "artifacts:credentials") return ok({ secureStorageAvailable: true, credentials: [] });
     if (channel === "forge:hosts") return ok({ hosts: rows });
     if (channel === "forge:status") return ok({ forges: forges() });
     if (channel === "settings:update") {
@@ -447,6 +448,7 @@ describe("Settings → Forges — adding a host by hand", () => {
     // rewrites its product — sending that instance's metadata at the other CLI.
     let settle: ((value: unknown) => void) | undefined;
     mocks.dispatch.mockImplementation(async (channel: string) => {
+      if (channel === "artifacts:credentials") return ok({ secureStorageAvailable: true, credentials: [] });
       if (channel === "forge:hosts") {
         return await new Promise((resolve) => {
           settle = resolve;
