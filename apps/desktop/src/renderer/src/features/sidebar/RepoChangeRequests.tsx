@@ -22,7 +22,7 @@ import {
 import { PrChip } from "./PrChip";
 import { RemoteChip } from "./RemoteChip";
 import { RefRowActions, RefRowMenu } from "./RefRowMenu";
-import { copyText } from "../../lib/copyText";
+import { changeRequestMenuItems } from "../shell/change-request-menu-items";
 import { lastSegment } from "./repo-view";
 import { ShowWorktreeButton, WorktreeHolderChip } from "./WorktreeHolderChip";
 
@@ -572,19 +572,11 @@ export function ChangeRequestTable({
               menu={
                 <RefRowMenu
                   label={`Actions for #${pr.number}`}
-                  items={[
-                    {
-                      type: "item",
-                      label: `Open ${noun} in browser`,
-                      onSelect: () =>
-                        void dispatch("shell:openExternal", { url: pr.url })
-                    },
-                    {
-                      type: "item",
-                      label: `Copy ${noun} link`,
-                      onSelect: () => void copyText(pr.url)
-                    }
-                  ]}
+                  items={changeRequestMenuItems({
+                    number: pr.number,
+                    url: pr.url,
+                    forge: pr.forge ?? forge
+                  })}
                 />
               }
             />

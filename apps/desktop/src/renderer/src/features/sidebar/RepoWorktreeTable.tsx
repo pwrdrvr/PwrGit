@@ -139,6 +139,8 @@ export function RepoWorktreeTable({
   onRevealWorktree,
   onPruneWorktrees,
   onRemoveWorktree,
+  forkLabel,
+  onFork,
   onClose
 }: {
   /** Already filtered — the tab's count and its rows read one list. */
@@ -151,6 +153,9 @@ export function RepoWorktreeTable({
   onPruneWorktrees?: (() => void) | undefined;
   /** The sidebar row's Remove worktree, confirm and all. */
   onRemoveWorktree?: ((worktreeId: string) => void) | undefined;
+  /** Fork the repository, as the sidebar row's menu offers it. */
+  forkLabel?: string | undefined;
+  onFork?: (() => void) | undefined;
   onClose: () => void;
 }) {
   const tip = useViewportTooltip();
@@ -287,9 +292,25 @@ export function RepoWorktreeTable({
                     },
                     // The sidebar row's own menu, so a row past the six
                     // can do here what it could do there.
+                    // Fork and Reset open dialogs of their own, and the
+                    // browser is a modal too: the dialog replaces it.
                     ...worktreeMenuItems({
                       worktree,
-                      onResetToRemote: () => openResetToRemote({ worktree }),
+                      ...(forkLabel === undefined || onFork === undefined
+                        ? {}
+                        : {
+                            fork: {
+                              label: forkLabel,
+                              onSelect: () => {
+                                onClose();
+                                onFork();
+                              }
+                            }
+                          }),
+                      onResetToRemote: () => {
+                        onClose();
+                        openResetToRemote({ worktree });
+                      },
                       ...(onRemoveWorktree === undefined
                         ? {}
                         : { onRemove: () => onRemoveWorktree(worktree.id) })

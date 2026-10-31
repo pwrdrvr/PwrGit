@@ -1315,6 +1315,7 @@ export function RepoRefsSections({
           initialStatus={browser.status}
           initialWorktreeStatus={browser.worktreeStatus}
           onRemoveWorktree={onRemoveWorktree}
+          onFork={onFork}
           onPruneWorktrees={
             onPruneWorktrees === undefined
               ? undefined

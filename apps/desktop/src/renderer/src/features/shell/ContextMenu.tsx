@@ -137,7 +137,14 @@ export function ContextMenu({
       role="menu"
       aria-label={label}
       style={{ position: "fixed", left: pos.left, top: pos.top }}
-      onContextMenu={(event) => event.preventDefault()}
+      // A portal's React events still bubble to the component that rendered
+      // it: a click on a separator or a right-click here reached the
+      // worktree row under a kebab, selecting it or opening its own menu.
+      onClick={(event) => event.stopPropagation()}
+      onContextMenu={(event) => {
+        event.preventDefault();
+        event.stopPropagation();
+      }}
     >
       {items.map((it, i) =>
         it.type === "sep" ? (
