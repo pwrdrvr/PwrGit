@@ -2,7 +2,7 @@
   "name": "@pwrgit/mcp-server",
   "version": "0.1.0",
   "private": true,
-  "description": "Read-only MCP server for discovering and inspecting local GitHub and GitLab checkouts",
+  "description": "Desktop-owned PwrGit MCP implementation and authenticated stdio relay",
   "author": "PwrDrvr LLC",
   "license": "MIT",
   "copyright": "Copyright © 2026 PwrDrvr LLC",
@@ -20,6 +20,7 @@
     "./access-policy": "./src/access-policy.ts",
     "./agent-access-protocol": "./src/agent-access-protocol.ts",
     "./gh-default": "./src/gh-default.ts",
+    "./stdio-relay": "./src/stdio-relay.ts",
     "./nested-worktrees": "./src/nested-worktrees.ts",
     "./remote": "./src/remote.ts"
   },

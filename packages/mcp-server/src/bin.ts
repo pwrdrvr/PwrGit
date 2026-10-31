@@ -1,43 +1,13 @@
 #!/usr/bin/env node
 
-import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
-import { configureBundledGitConfigDirectory, defaultBundledGitConfigDirectory } from "./git-runtime.js";
-import { createPwrGitMcpServer } from "./server.js";
+import { relayStdio } from "./stdio-relay.js";
+import { MCP_PACKAGE_VERSION } from "./version.js";
 
-function stderr(message: string, cause?: unknown): void {
-  const suffix =
-    cause === undefined
-      ? ""
-      : ` ${JSON.stringify(
-          cause instanceof Error ? { message: cause.message } : cause
-        )}`;
-  process.stderr.write(`[pwrgit-mcp] ${message}${suffix}\n`);
-}
-
-async function main(): Promise<void> {
-  // The LFS filter and keychain helper the app's own Git runs with.
-  configureBundledGitConfigDirectory(defaultBundledGitConfigDirectory());
-  const server = await createPwrGitMcpServer();
-  let shuttingDown = false;
-  const shutdown = async (): Promise<void> => {
-    if (shuttingDown) return;
-    shuttingDown = true;
-    await server.close();
-  };
-  process.once("SIGINT", () => void shutdown());
-  process.once("SIGTERM", () => void shutdown());
-  process.stdin.once("end", () => void shutdown());
-  server.mcp.server.onclose = () => void shutdown();
-  server.mcp.server.onerror = (cause) => stderr("protocol error", cause);
-  await server.mcp.connect(new StdioServerTransport());
-  stderr("ready", {
-    transport: "stdio",
-    liveStatus: "mcp_resource_subscription",
-    websocketFallback: true
+if (process.argv.includes("--version")) {
+  process.stdout.write(`pwrgit-mcp relay ${MCP_PACKAGE_VERSION}\n`);
+} else {
+  void relayStdio().catch((cause: unknown) => {
+    process.stderr.write(`[pwrgit-mcp] ${cause instanceof Error ? cause.message : "Relay failed"}\n`);
+    process.exitCode = 1;
   });
 }
-
-void main().catch((cause) => {
-  stderr("fatal", cause);
-  process.exitCode = 1;
-});

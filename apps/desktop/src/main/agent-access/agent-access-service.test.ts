@@ -14,6 +14,7 @@ it("persists enablement and starts/stops the listener", async () => {
   const policyFile = join(dir, "policy.json");
   new McpPolicyStore(policyFile).initialize();
   const service = new AgentAccessService({
+    desktopVersion: "0.49.0",
     runner: runCommand, policyFile, clientsFile: join(dir, "clients.json"), port: 0,
     saveEnabled: enabled => { settings.update({ localAgentAccessEnabled: enabled }); },
     onChanged: () => undefined,
