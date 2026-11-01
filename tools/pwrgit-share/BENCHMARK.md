@@ -1,12 +1,12 @@
 # Bounded and strict target seeding on PwrRoute — 2026-11-01
 
-`--seed-target` now defaults to bounded mode; `--seed-target=strict` is the stricter rule measured in the next section. Same donor (`git clone --local` of PwrRoute `02bd47fc`, built with `cargo build --workspace` and `cargo test --workspace --no-run`), same toolchain (`cargo 1.97.1 (c980f4866 2026-06-30)`), same method: three runs per arm, each worktree removed completely before the next, cold `cargo build --workspace --locked --offline`, APFS private bytes after `sync`.
+`--seed-cargo` (called `--seed-target` when these runs were made) defaults to bounded mode; `--seed-cargo=strict` is the stricter rule measured in the next section. Same donor (`git clone --local` of PwrRoute `02bd47fc`, built with `cargo build --workspace` and `cargo test --workspace --no-run`), same toolchain (`cargo 1.97.1 (c980f4866 2026-06-30)`), same method: three runs per arm, each worktree removed completely before the next, cold `cargo build --workspace --locked --offline`, APFS private bytes after `sync`.
 
 | | crates compiled | create (incl. seed) | build | private disk |
 |---|---|---|---|---|
 | plain `git worktree add` | 549, 549, 549 | 0.15–0.64 s | 300, 332, 274 s | 3.31, 3.30, 3.30 GB |
-| `--seed-target=strict` | 139, 139, 139 | 4.1–5.0 s | 692, 137, 197 s | 1.92, 1.95, 1.97 GB |
-| `--seed-target` (bounded) | 24, 24, 24 | 5.5, 14.4, 10.1 s | 125, 215, 186 s | 1.16, 1.17, 1.16 GB |
+| `--seed-cargo=strict` | 139, 139, 139 | 4.1–5.0 s | 692, 137, 197 s | 1.92, 1.95, 1.97 GB |
+| `--seed-cargo` (bounded) | 24, 24, 24 | 5.5, 14.4, 10.1 s | 125, 215, 186 s | 1.16, 1.17, 1.16 GB |
 
 Load average was 40–76 throughout (two VMs and other work), so seconds are noisy; crate counts and bytes are not. The bounded seed published 699 units of 541 packages: 5,802 clones, 638 rewritten dep-info files, 0 copies. 10 units were seeded under the OUT_DIR exception (`unitsSeededWithDonorOutDirPaths`) and 4 under the debug-map exception (`unitsSeededWithDonorDebugMaps`). Packages rejected: 9 workspace, 86 not built, 9 depends-on-rejected, 1 out-dir-not-seeded, 1 unsupported-target. Seed time is 1–3 s more than strict because it clones about 1,800 more files; no recently-used filter is applied.
 
@@ -28,14 +28,14 @@ Every occurrence is metadata or debug information except the last row. That stri
 
 # Strict registry-only target seeding on PwrRoute — 2026-11-01
 
-This section is the strict rule, now `--seed-target=strict`. The sections below it describe the earlier gate, which seeded nothing.
+This section is the strict rule, now `--seed-cargo=strict`. The sections below it describe the earlier gate, which seeded nothing.
 
 The donor is a `git clone --local` of PwrRoute at `02bd47fc`, built once with `cargo build --workspace` and `cargo test --workspace --no-run`. The real checkout was never modified. Toolchain: `cargo 1.97.1 (c980f4866 2026-06-30)` from PwrRoute's `rust-toolchain.toml`, on macOS APFS, with the release CLI at this branch's head. Arms alternated plain/seeded, and each worktree was removed completely (`git worktree remove --force`, `rm -rf`, `prune`) before the next run. Each build is a cold `cargo build --workspace --locked --offline`. "Private" is APFS private data bytes per unique inode, measured after `sync`. On APFS, Cargo itself clones incremental output into `deps/`, so per-file private bytes can be 0 even for files built locally.
 
 | | crates compiled | create (incl. seed) | build | private disk |
 |---|---|---|---|---|
 | plain `git worktree add` | 549, 549, 549 | 0.15–0.64 s | 300, 332, 274 s | 3.31, 3.30, 3.30 GB |
-| `worktree add --seed-target` | 139, 139, 139 | 4.1–5.0 s | 692, 137, 197 s | 1.92, 1.95, 1.97 GB |
+| `worktree add --seed-cargo=strict` | 139, 139, 139 | 4.1–5.0 s | 692, 137, 197 s | 1.92, 1.95, 1.97 GB |
 
 Build times are unreliable here. The host's load average was 50–76 during these runs, from two VMs and other work, and the 692 s run overlapped the peak. Crate counts and private bytes do not depend on load. The seed published 521 units of 420 packages: 3,987 clones, 480 rewritten dep-info files, 0 copies.
 

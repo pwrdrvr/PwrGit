@@ -103,7 +103,7 @@ extra=["fixture-registry/extra"]
             _, elapsed = run(['git', 'worktree', 'add', '-b', name, dest, head], donor, env); report = {"clonedFiles": 0, "fallback": "git-checkout"}
         else:
             args = ['worktree', 'add', '--json', '-b', name]
-            if seed: args += ['--seed-target']
+            if seed: args += ['--seed-cargo']
             report, elapsed = cli(*args, dest, head, extra_env={'PWRGIT_SHARE_FORCE_NONE': '1'} if none else None)
         delta = before - shutil.disk_usage(root).free
         assert git(dest, 'rev-parse', 'HEAD') == head
@@ -123,15 +123,15 @@ extra=["fixture-registry/extra"]
     seeded, seed_report = source('seeded', seed=True)
     hidden = root / 'donor-hidden-target'; (donor / 'target').rename(hidden)
     first = build(seeded); first.update(run='same-commit', measure=measure(seeded / 'target')); result['rows'].append(first)
-    if 'targetSkipped' in seed_report:
-        assert seed_report['targetSkipped'] == 'cow-unavailable', seed_report
-        assert 'target' not in seed_report, seed_report
+    if 'cargoSkipped' in seed_report:
+        assert seed_report['cargoSkipped'] == 'cow-unavailable', seed_report
+        assert 'cargo' not in seed_report, seed_report
         assert seed_report['clonedFiles'] == 0, seed_report
     else:
-        assert seed_report['target']['unitsSeeded'] == 0
-        assert seed_report['target']['reason'] == 'fingerprint-unproven'
-        assert seed_report['target']['cloneCount'] == 0
-        assert seed_report['target']['copyCount'] == 0
+        assert seed_report['cargo']['unitsSeeded'] == 0
+        assert seed_report['cargo']['reason'] == 'fingerprint-unproven'
+        assert seed_report['cargo']['cloneCount'] == 0
+        assert seed_report['cargo']['copyCount'] == 0
     assert first['counts']['registryGit']['Fresh'] == 0, first
     assert first['counts']['registryGit']['Compiling'] == 2
     assert first['counts']['workspacePath']['Compiling'] == 3

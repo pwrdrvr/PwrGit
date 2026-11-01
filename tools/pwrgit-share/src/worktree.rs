@@ -6,7 +6,7 @@ use std::{
 #[derive(Default, Debug)]
 pub struct Options {
     pub branch: Option<String>,
-    pub seed_target: bool,
+    pub seed_cargo: bool,
     /// Seed in strict mode: no donor path at all in seeded artifacts, not
     /// even a seeded build script's OUT_DIR.
     pub seed_strict: bool,
@@ -21,9 +21,9 @@ pub struct WorktreeReport {
     pub checkout_files: u64,
     pub hashed_mismatches: u64,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub target: Option<SeedReport>,
+    pub cargo: Option<SeedReport>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub target_skipped: Option<String>,
+    pub cargo_skipped: Option<String>,
 }
 struct Registration {
     donor: PathBuf,
@@ -331,14 +331,14 @@ pub fn worktree_add(
     commit: &str,
     opts: &Options,
 ) -> Result<WorktreeReport> {
-    worktree_add_with(donor, dest, commit, opts, &target::SeedEnv::default())
+    worktree_add_with(donor, dest, commit, opts, &cargo::SeedEnv::default())
 }
 pub(crate) fn worktree_add_with(
     donor: &Path,
     dest: &Path,
     commit: &str,
     opts: &Options,
-    seed: &target::SeedEnv,
+    seed: &cargo::SeedEnv,
 ) -> Result<WorktreeReport> {
     check_cancel()?;
     let donor = fs::canonicalize(donor)?;
@@ -363,8 +363,8 @@ pub(crate) fn worktree_add_with(
     }
     // Hold the shared locks through checkout and seeding, including fallback.
     // A donor that is building right now is skipped, not waited for.
-    let locks = if opts.seed_target {
-        match target::DonorLocks::acquire(&donor.join("target")) {
+    let locks = if opts.seed_cargo {
+        match cargo::DonorLocks::acquire(&donor.join("target")) {
             Err(e) if e.code == 130 => return Err(e),
             r => Some(r),
         }
@@ -427,8 +427,8 @@ pub(crate) fn worktree_add_with(
         cloned_files: 0,
         checkout_files: tree.len() as u64,
         hashed_mismatches: 0,
-        target: None,
-        target_skipped: None,
+        cargo: None,
+        cargo_skipped: None,
     };
     let stage = unique_dir(&parent, dest.file_name().unwrap())?;
     let mut clones = Vec::new();
@@ -601,24 +601,24 @@ pub(crate) fn worktree_add_with(
             .count() as u64;
     }
     report.checkout_files = tree.len() as u64 - report.cloned_files;
-    if opts.seed_target {
+    if opts.seed_cargo {
         if report.fallback != "none" {
-            report.target_skipped = Some("cow-unavailable".into());
+            report.cargo_skipped = Some("cow-unavailable".into());
         } else if !donor.join("Cargo.toml").is_file() || !donor.join("target").is_dir() {
-            report.target_skipped = Some("layout-unknown".into());
+            report.cargo_skipped = Some("layout-unknown".into());
         } else {
             let mode = if opts.seed_strict {
-                target::SeedMode::Strict
+                cargo::SeedMode::Strict
             } else {
-                target::SeedMode::Bounded
+                cargo::SeedMode::Bounded
             };
-            report.target = Some(match locks.as_ref().unwrap() {
+            report.cargo = Some(match locks.as_ref().unwrap() {
                 Err(e) => {
-                    let mut r = target::lock_skip(e);
+                    let mut r = cargo::lock_skip(e);
                     r.mode = mode;
                     r
                 }
-                Ok(locks) => match target::seed_locked(
+                Ok(locks) => match cargo::seed_locked(
                     &donor.join("target"),
                     &dest.join("target"),
                     locks,
@@ -628,7 +628,7 @@ pub(crate) fn worktree_add_with(
                     Ok(r) => r,
                     Err(e) if e.code == 130 => return Err(e),
                     Err(e) => {
-                        let mut r = target::SeedReport::skipped("seed-error", Some(e.detail));
+                        let mut r = cargo::SeedReport::skipped("seed-error", Some(e.detail));
                         r.mode = mode;
                         r
                     }

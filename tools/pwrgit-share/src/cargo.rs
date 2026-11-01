@@ -172,7 +172,7 @@ pub(crate) fn lock_skip(e: &Error) -> SeedReport {
     SeedReport::skipped(reason, Some(e.detail.clone()))
 }
 
-pub fn target_seed(from: &Path, to: &Path, mode: SeedMode) -> Result<SeedReport> {
+pub fn cargo_seed(from: &Path, to: &Path, mode: SeedMode) -> Result<SeedReport> {
     let locks = match DonorLocks::acquire(from) {
         Ok(locks) => locks,
         Err(e) if e.code == 130 => return Err(e),

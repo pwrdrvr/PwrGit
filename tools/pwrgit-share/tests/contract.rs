@@ -132,14 +132,14 @@ fn forced_none_is_an_ordinary_checkout() {
         &Options {
             branch: Some("fallback".into()),
             force_no_cow: true,
-            seed_target: true,
+            seed_cargo: true,
             seed_strict: false,
         },
     )
     .unwrap();
     assert_eq!(r.fallback, "git-checkout");
     assert_eq!(r.cloned_files, 0);
-    assert!(r.target_skipped.is_some());
+    assert!(r.cargo_skipped.is_some());
     assert!(git(&dest, &["status", "--porcelain"]).stdout.is_empty());
 }
 #[test]
@@ -217,7 +217,7 @@ fn busy_donor_is_a_skip_reason_and_the_worktree_still_succeeds() {
             &[
                 "worktree",
                 "add",
-                "--seed-target",
+                "--seed-cargo",
                 "-b",
                 "busy",
                 dest.to_str().unwrap(),
@@ -231,10 +231,10 @@ fn busy_donor_is_a_skip_reason_and_the_worktree_still_succeeds() {
         );
         let v: serde_json::Value = serde_json::from_slice(&o.stdout).unwrap();
         if v["fallback"] == "none" {
-            assert_eq!(v["target"]["reason"], "donor-busy", "{name}: {v}");
-            assert_eq!(v["target"]["unitsSeeded"], 0);
+            assert_eq!(v["cargo"]["reason"], "donor-busy", "{name}: {v}");
+            assert_eq!(v["cargo"]["unitsSeeded"], 0);
         } else {
-            assert_eq!(v["targetSkipped"], "cow-unavailable");
+            assert_eq!(v["cargoSkipped"], "cow-unavailable");
         }
         assert_eq!(fs::read(dest.join("clean")).unwrap(), b"original\n");
         assert!(!dest.join("target").exists());
@@ -245,7 +245,7 @@ fn busy_donor_is_a_skip_reason_and_the_worktree_still_succeeds() {
         let o = cli(
             &donor,
             &[
-                "target",
+                "cargo",
                 "seed",
                 "--from",
                 donor.join("target").to_str().unwrap(),
@@ -530,7 +530,7 @@ esac
                 format!("{}:{}", bin.display(), std::env::var("PATH").unwrap()),
             )
             .args([
-                "target",
+                "cargo",
                 "seed",
                 "--from",
                 donor.join("target").to_str().unwrap(),
@@ -575,7 +575,7 @@ esac
     let o = cli(
         &donor,
         &[
-            "target",
+            "cargo",
             "seed",
             "--from",
             donor.join("target").to_str().unwrap(),
@@ -930,7 +930,7 @@ fn failing_post_checkout_removes_only_its_worktree_and_partial() {
 
 #[test]
 #[cfg(unix)]
-fn benchmark_reports_json_when_target_seeding_is_skipped() {
+fn benchmark_reports_json_when_cargo_seeding_is_skipped() {
     use std::os::unix::fs::PermissionsExt;
     let f = Fixture::new();
     let wrapper = f.0.join("force-no-cow");
@@ -955,8 +955,8 @@ fn benchmark_reports_json_when_target_seeding_is_skipped() {
         .iter()
         .find(|r| r["run"] == "seeded")
         .unwrap();
-    assert_eq!(seeded["report"]["targetSkipped"], "cow-unavailable");
-    assert!(seeded["report"].get("target").is_none());
+    assert_eq!(seeded["report"]["cargoSkipped"], "cow-unavailable");
+    assert!(seeded["report"].get("cargo").is_none());
     assert_eq!(
         report["rows"]
             .as_array()
@@ -987,8 +987,8 @@ fn seed_mode_flags_reach_the_report() {
         0
     );
     for (flag, mode) in [
-        ("--seed-target", "bounded"),
-        ("--seed-target=strict", "strict"),
+        ("--seed-cargo", "bounded"),
+        ("--seed-cargo=strict", "strict"),
     ] {
         let dest = f.0.join(mode);
         let o = cli(
@@ -1006,9 +1006,9 @@ fn seed_mode_flags_reach_the_report() {
         assert!(o.status.success(), "{}", String::from_utf8_lossy(&o.stderr));
         let v: serde_json::Value = serde_json::from_slice(&o.stdout).unwrap();
         if v["fallback"] == "none" {
-            assert_eq!(v["target"]["mode"], mode, "{v}");
+            assert_eq!(v["cargo"]["mode"], mode, "{v}");
         }
-        let mut args = vec!["target", "seed"];
+        let mut args = vec!["cargo", "seed"];
         if mode == "strict" {
             args.push("--strict");
         }
@@ -1026,7 +1026,7 @@ fn seed_mode_flags_reach_the_report() {
     }
     let o = cli(
         &donor,
-        &["worktree", "add", "--seed-target=loose", "x", "HEAD"],
+        &["worktree", "add", "--seed-cargo=loose", "x", "HEAD"],
     );
     assert_eq!(o.status.code(), Some(2));
 }

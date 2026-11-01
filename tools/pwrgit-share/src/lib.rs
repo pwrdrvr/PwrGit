@@ -1,10 +1,10 @@
 //! Reflink-only source materialization. Cargo seeding is fail-closed until its
 //! exact Cargo version has passed the donor-independent freshness gate.
+mod cargo;
 mod cow;
-mod target;
 mod worktree;
+pub use cargo::{SeedMode, SeedReport, cargo_seed};
 pub use cow::{Probe, probe};
-pub use target::{SeedMode, SeedReport, target_seed};
 pub use worktree::{Options, WorktreeReport, worktree_add};
 
 use serde::Serialize;

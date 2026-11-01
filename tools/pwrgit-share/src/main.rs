@@ -3,7 +3,7 @@ use std::{
     ffi::OsString,
     path::{Path, PathBuf},
 };
-const HELP: &str = "pwrgit-share — reflink-only Git worktrees (MIT, PwrDrvr LLC)\n\n  probe --json <directory>\n  worktree add [-b <branch>] [--seed-target[=strict]] [--donor <worktree>] [--json] [--] <path> <commit-ish>\n  target seed [--strict] --from <donor-target> --to <dest-target> --json\n  measure --json <path>\n\nUnsupported filesystems use a normal Git checkout; targets are never copied or\nhardlinked. --seed-target clones only third-party units (registry and git\ndependencies under CARGO_HOME) that name no donor path, and only for Cargo\nversions that passed the freshness gate; otherwise it reports a reason and seeds\nnothing. Workspace crates always build in the new worktree. The default\n(bounded) mode also seeds third-party units whose artifacts name a seeded build\nscript's OUT_DIR, verified to be an exact copy, so their debug and panic paths\npoint into the donor's target. --seed-target=strict seeds none of those.\n\nFor compiler-level reuse, users may install sccache or Kache themselves. This\ntool does not configure or spawn either. Smaller debug info (line-tables-only)\nand a faster linker are separate user-side options. There is no --copy flag.";
+const HELP: &str = "pwrgit-share — reflink-only Git worktrees (MIT, PwrDrvr LLC)\n\n  probe --json <directory>\n  worktree add [-b <branch>] [--seed-cargo[=strict]] [--donor <worktree>] [--json] [--] <path> <commit-ish>\n  cargo seed [--strict] --from <donor-target> --to <dest-target> --json\n  measure --json <path>\n\nUnsupported filesystems use a normal Git checkout; targets are never copied or\nhardlinked. --seed-cargo clones only third-party units (registry and git\ndependencies under CARGO_HOME) that name no donor path, and only for Cargo\nversions that passed the freshness gate; otherwise it reports a reason and seeds\nnothing. Workspace crates always build in the new worktree. The default\n(bounded) mode also seeds third-party units whose artifacts name a seeded build\nscript's OUT_DIR, verified to be an exact copy, so their debug and panic paths\npoint into the donor's target. --seed-cargo=strict seeds none of those.\n\nFor compiler-level reuse, users may install sccache or Kache themselves. This\ntool does not configure or spawn either. Smaller debug info (line-tables-only)\nand a faster linker are separate user-side options. There is no --copy flag.";
 fn bad(s: &str) -> Error {
     Error::new(2, s)
 }
@@ -59,9 +59,9 @@ fn run() -> Result<()> {
                     match a[i].to_str() {
                         Some("--") => end = true,
                         Some("--json") => {}
-                        Some("--seed-target" | "--seed-target=bounded") => opts.seed_target = true,
-                        Some("--seed-target=strict") => {
-                            opts.seed_target = true;
+                        Some("--seed-cargo" | "--seed-cargo=bounded") => opts.seed_cargo = true,
+                        Some("--seed-cargo=strict") => {
+                            opts.seed_cargo = true;
                             opts.seed_strict = true;
                         }
                         Some("--donor") => donor = PathBuf::from(value(&a, &mut i)?),
@@ -91,7 +91,7 @@ fn run() -> Result<()> {
                 &opts,
             )?)
         }
-        Some("target") if a.get(1).is_some_and(|v| v == "seed") => {
+        Some("cargo") if a.get(1).is_some_and(|v| v == "seed") => {
             let mut from = None;
             let mut to = None;
             let mut mode = pwrgit_share::SeedMode::Bounded;
@@ -104,11 +104,11 @@ fn run() -> Result<()> {
                         from = Some(PathBuf::from(value(&a, &mut i)?))
                     }
                     Some("--to") if to.is_none() => to = Some(PathBuf::from(value(&a, &mut i)?)),
-                    _ => return Err(bad("unknown or duplicate target seed flag")),
+                    _ => return Err(bad("unknown or duplicate cargo seed flag")),
                 }
                 i += 1;
             }
-            json(pwrgit_share::target_seed(
+            json(pwrgit_share::cargo_seed(
                 &from.ok_or_else(|| bad("--from required"))?,
                 &to.ok_or_else(|| bad("--to required"))?,
                 mode,

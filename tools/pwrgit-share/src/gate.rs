@@ -11,8 +11,8 @@
 //! Run under another toolchain with PWRGIT_SHARE_GATE_TOOLCHAINS=1.97.1,1.95.0.
 //! A Cargo version enters PROVEN_CARGO only after this passes under it.
 use crate::*;
+use cargo::SeedMode;
 use std::collections::BTreeSet;
-use target::SeedMode;
 
 const DATA: &str = "gate fixture v1\n";
 
@@ -357,8 +357,8 @@ fn seeded_registry_values() {
             .trim()
             .to_owned()
     }
-    fn seed_env(&self, proven: bool) -> target::SeedEnv {
-        target::SeedEnv {
+    fn seed_env(&self, proven: bool) -> cargo::SeedEnv {
+        cargo::SeedEnv {
             home: Some(self.home.clone()),
             experiment: !proven,
         }
@@ -495,7 +495,7 @@ fn registry_gate(toolchain: &str, mode: SeedMode) {
     let mac = cfg!(target_os = "macos");
     let donor = f.workspace("donor");
     let version = f.cargo_version(&donor);
-    let proven = target::PROVEN_CARGO.contains(&version.as_str());
+    let proven = cargo::PROVEN_CARGO.contains(&version.as_str());
     eprintln!("gate {toolchain} {mode:?}: {version} (proven: {proven})");
     // Resolves the file:// Git dependency into CARGO_HOME; no network.
     ok(cargo(&donor, &f.home, &["generate-lockfile"]), "lock");
@@ -525,7 +525,7 @@ fn registry_gate(toolchain: &str, mode: SeedMode) {
     );
     let options = |branch: &str, seed: bool| Options {
         branch: Some(branch.into()),
-        seed_target: seed,
+        seed_cargo: seed,
         seed_strict: !bounded,
         ..Default::default()
     };
@@ -541,7 +541,7 @@ fn registry_gate(toolchain: &str, mode: SeedMode) {
             &f.seed_env(true),
         )
         .unwrap()
-        .target
+        .cargo
         .unwrap();
         assert_eq!(report.reason.as_deref(), Some("fingerprint-unproven"));
         assert_eq!(report.units_seeded, 0);
@@ -558,7 +558,7 @@ fn registry_gate(toolchain: &str, mode: SeedMode) {
         &f.seed_env(proven),
     )
     .unwrap();
-    let seed = report.target.expect("seed report");
+    let seed = report.cargo.expect("seed report");
     eprintln!("seed: {}", serde_json::to_string(&seed).unwrap());
     assert_eq!(seed.mode, mode);
     assert!(seed.units_seeded >= 3, "{seed:?}");
@@ -780,8 +780,8 @@ fn registry_gate(toolchain: &str, mode: SeedMode) {
     );
     fs::write(&lib, text).unwrap();
     fs::write(donor.join("shared/data.txt"), DATA).unwrap();
-    let locks = target::DonorLocks::acquire(&donor.join("target")).unwrap();
-    let late_seed = target::seed_locked(
+    let locks = cargo::DonorLocks::acquire(&donor.join("target")).unwrap();
+    let late_seed = cargo::seed_locked(
         &donor.join("target"),
         &late.join("target"),
         &locks,
@@ -791,7 +791,7 @@ fn registry_gate(toolchain: &str, mode: SeedMode) {
     .unwrap();
     assert!(late_seed.units_seeded > 0, "{late_seed:?}");
     // Never seed again into an existing target.
-    let again = target::seed_locked(
+    let again = cargo::seed_locked(
         &donor.join("target"),
         &late.join("target"),
         &locks,
@@ -962,7 +962,7 @@ fn vendored_gate(toolchain: &str) {
             .any(|p| p["name"] == "gate-vendored"
                 && p["source"].as_str().unwrap_or("").starts_with("registry+"))
     );
-    let proven = target::PROVEN_CARGO.contains(&f.cargo_version(&w).as_str());
+    let proven = cargo::PROVEN_CARGO.contains(&f.cargo_version(&w).as_str());
     let dest = f.path("recipient");
     let report = worktree::worktree_add_with(
         &w,
@@ -970,13 +970,13 @@ fn vendored_gate(toolchain: &str) {
         "HEAD",
         &Options {
             branch: Some("recipient".into()),
-            seed_target: true,
+            seed_cargo: true,
             ..Default::default()
         },
         &f.seed_env(proven),
     )
     .unwrap();
-    let seed = report.target.unwrap();
+    let seed = report.cargo.unwrap();
     assert_eq!(seed.units_seeded, 0, "{seed:?}");
     assert_eq!(
         seed.packages_rejected.get("outside-cargo-home"),
