@@ -1313,7 +1313,11 @@ fn publish(ctx: &Ctx, found: Discovery) -> Result<SeedReport> {
     }
     for (i, r) in &staged {
         let unit = &found.units[*i];
-        built.insert(unit.pkg);
+        // A package counts as built only with a library unit; a leftover
+        // build-script unit alone does not let its dependents through.
+        if unit.kind == Kind::Lib {
+            built.insert(unit.pkg);
+        }
         if r.reject.is_some() {
             rejected
                 .entry(unit.pkg)
