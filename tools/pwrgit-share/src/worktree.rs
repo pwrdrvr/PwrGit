@@ -7,6 +7,9 @@ use std::{
 pub struct Options {
     pub branch: Option<String>,
     pub seed_target: bool,
+    /// Seed in strict mode: no donor path at all in seeded artifacts, not
+    /// even a seeded build script's OUT_DIR.
+    pub seed_strict: bool,
     /// Explicit library test/diagnostic override. It can only disable sharing.
     pub force_no_cow: bool,
 }
@@ -604,17 +607,31 @@ pub(crate) fn worktree_add_with(
         } else if !donor.join("Cargo.toml").is_file() || !donor.join("target").is_dir() {
             report.target_skipped = Some("layout-unknown".into());
         } else {
+            let mode = if opts.seed_strict {
+                target::SeedMode::Strict
+            } else {
+                target::SeedMode::Bounded
+            };
             report.target = Some(match locks.as_ref().unwrap() {
-                Err(e) => target::lock_skip(e),
+                Err(e) => {
+                    let mut r = target::lock_skip(e);
+                    r.mode = mode;
+                    r
+                }
                 Ok(locks) => match target::seed_locked(
                     &donor.join("target"),
                     &dest.join("target"),
                     locks,
                     seed,
+                    mode,
                 ) {
                     Ok(r) => r,
                     Err(e) if e.code == 130 => return Err(e),
-                    Err(e) => target::SeedReport::skipped("seed-error", Some(e.detail)),
+                    Err(e) => {
+                        let mut r = target::SeedReport::skipped("seed-error", Some(e.detail));
+                        r.mode = mode;
+                        r
+                    }
                 },
             });
         }

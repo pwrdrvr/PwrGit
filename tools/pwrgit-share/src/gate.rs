@@ -2,15 +2,17 @@
 //!
 //! The fixture's registry is a Cargo local registry configured in the
 //! fixture's own CARGO_HOME, so its sources unpack under CARGO_HOME exactly as
-//! crates.io sources do. Positive units must be Fresh in the recipient with the
-//! donor's target hidden; every negative fixture must recompile there, and the
-//! recipient's test results must survive corrupting and then deleting the
-//! donor.
+//! crates.io sources do; a `file://` Git dependency covers `git/checkouts`.
+//! Positive units must be Fresh in the recipient with the donor's target
+//! hidden, every negative fixture must recompile there, and the recipient's
+//! test results must survive corrupting and then deleting the donor. Both
+//! seed modes run: bounded (the default) and strict.
 //!
 //! Run under another toolchain with PWRGIT_SHARE_GATE_TOOLCHAINS=1.97.1,1.95.0.
 //! A Cargo version enters PROVEN_CARGO only after this passes under it.
 use crate::*;
 use std::collections::BTreeSet;
+use target::SeedMode;
 
 const DATA: &str = "gate fixture v1\n";
 
@@ -27,7 +29,7 @@ fn write(path: &Path, text: &str) {
 
 /// Cargo with the fixture's home and no inherited overrides. RUSTUP_TOOLCHAIN
 /// is dropped so the fixture's rust-toolchain.toml decides.
-fn cargo(dir: &Path, home: &Path, args: &[&str]) -> Output {
+fn cargo_env(dir: &Path, home: &Path, args: &[&str], env: &[(&str, &str)]) -> Output {
     let mut cmd = Command::new("cargo");
     cmd.current_dir(dir).env("CARGO_HOME", home).args(args);
     for (k, _) in std::env::vars_os() {
@@ -45,12 +47,23 @@ fn cargo(dir: &Path, home: &Path, args: &[&str]) -> Output {
             cmd.env_remove(k.as_ref());
         }
     }
+    for (k, v) in env {
+        cmd.env(k, v);
+    }
     cmd.output().unwrap()
+}
+fn cargo(dir: &Path, home: &Path, args: &[&str]) -> Output {
+    cargo_env(dir, home, args, &[])
 }
 fn ok(o: Output, what: &str) -> String {
     let err = String::from_utf8_lossy(&o.stderr).into_owned();
     assert!(o.status.success(), "{what}:\n{err}");
     err
+}
+fn git_init(dir: &Path) {
+    git_s(dir, &["init", "-q", "-b", "main"], 1).unwrap();
+    git_s(dir, &["config", "user.email", "fixture@example.invalid"], 1).unwrap();
+    git_s(dir, &["config", "user.name", "Fixture"], 1).unwrap();
 }
 
 /// One package in the fixture's local registry.
@@ -60,6 +73,18 @@ struct Crate {
     files: Vec<(&'static str, String)>,
     deps: Vec<&'static str>,
 }
+
+const OUT_DIR_CODE: &str = r#"fn main() {
+    let out = std::env::var("OUT_DIR").unwrap();
+    std::fs::write(format!("{out}/data"), "generated\n").unwrap();
+    std::fs::write(
+        format!("{out}/gen.rs"),
+        "pub fn data_path() -> &'static str { concat!(env!(\"OUT_DIR\"), \"/data\") }\n",
+    )
+    .unwrap();
+    println!("cargo:rerun-if-changed=build.rs");
+}
+"#;
 
 impl Fixture {
     fn new(toolchain: &str, with_registry: bool) -> Self {
@@ -77,6 +102,7 @@ impl Fixture {
         };
         if with_registry {
             f.publish_registry();
+            f.publish_git();
         }
         f
     }
@@ -101,9 +127,11 @@ impl Fixture {
         let pkg = |name: &str, extra: &str| {
             format!("[package]\nname = '{name}'\nversion = '1.0.0'\nedition = '2021'\n{extra}")
         };
+        let proc_macro = "use proc_macro::TokenStream;\n#[proc_macro]\npub fn answer(_: TokenStream) -> TokenStream { \"42u64\".parse().unwrap() }\n";
         let crates = [
-            // Positive: a build script whose outputs pass the scan. It names
-            // its OUT_DIR in a link-search line, which Cargo must remap.
+            // Positive in both modes: a build script whose outputs pass the
+            // scan. It names its OUT_DIR in a link-search line, which Cargo
+            // must remap.
             Crate {
                 name: "gate-seed",
                 manifest: pkg("gate-seed", "build = 'build.rs'\n"),
@@ -116,28 +144,35 @@ impl Fixture {
                 ],
                 deps: vec![],
             },
-            // Positive: a proc macro.
+            // Positive in both modes: a proc macro.
             Crate {
                 name: "gate-macro",
                 manifest: pkg("gate-macro", "[lib]\nproc-macro = true\n"),
-                files: vec![(
-                    "src/lib.rs",
-                    "use proc_macro::TokenStream;\n#[proc_macro]\npub fn answer(_: TokenStream) -> TokenStream { \"42u64\".parse().unwrap() }\n".into(),
-                )],
+                files: vec![("src/lib.rs", proc_macro.into())],
                 deps: vec![],
             },
-            // Negative: a registry rlib that embeds a donor path.
+            // A proc macro the workspace builds with debug info, so its
+            // macOS dylib carries a debug map (N_OSO) naming donor objects:
+            // bounded only.
             Crate {
-                name: "gate-taint",
-                manifest: pkg("gate-taint", "build = 'build.rs'\n"),
+                name: "gate-dbg",
+                manifest: pkg("gate-dbg", "[lib]\nproc-macro = true\n"),
+                files: vec![("src/lib.rs", proc_macro.replace("answer", "dbg_answer"))],
+                deps: vec![],
+            },
+            // Negative in both modes: the donor's workspace root, derived
+            // by a registry build script and embedded in the rlib.
+            Crate {
+                name: "gate-root",
+                manifest: pkg("gate-root", "build = 'build.rs'\n"),
                 files: vec![
                     (
                         "build.rs",
-                        "fn main() { println!(\"cargo:rerun-if-changed=build.rs\"); }\n".into(),
+                        "fn main() {\n    let out = std::env::var(\"OUT_DIR\").unwrap();\n    let root = out.split(\"/target/\").next().unwrap();\n    println!(\"cargo:rustc-env=GATE_ROOT={root}\");\n    println!(\"cargo:rerun-if-changed=build.rs\");\n}\n".into(),
                     ),
                     (
                         "src/lib.rs",
-                        "pub const OUT: &str = env!(\"OUT_DIR\");\n#[inline(never)]\npub fn out() -> &'static str { OUT }\n".into(),
+                        "pub const ROOT: &str = env!(\"GATE_ROOT\");\n#[inline(never)]\npub fn root() -> &'static str { ROOT }\n".into(),
                     ),
                 ],
                 deps: vec![],
@@ -146,15 +181,26 @@ impl Fixture {
             // rejected dependency.
             Crate {
                 name: "gate-taint-user",
-                manifest: pkg(
-                    "gate-taint-user",
-                    "[dependencies]\ngate-taint = '=1.0.0'\n",
-                ),
+                manifest: pkg("gate-taint-user", "[dependencies]\ngate-root = '=1.0.0'\n"),
                 files: vec![(
                     "src/lib.rs",
-                    "pub fn out() -> &'static str { gate_taint::out() }\n".into(),
+                    "pub fn root() -> &'static str { gate_root::root() }\n".into(),
                 )],
-                deps: vec!["gate-taint"],
+                deps: vec!["gate-root"],
+            },
+            // Generated code that opens its own OUT_DIR at runtime. Bounded
+            // mode seeds it; the recipient then reads the donor's copy.
+            Crate {
+                name: "gate-outdir",
+                manifest: pkg("gate-outdir", "build = 'build.rs'\n"),
+                files: vec![
+                    ("build.rs", OUT_DIR_CODE.into()),
+                    (
+                        "src/lib.rs",
+                        "include!(concat!(env!(\"OUT_DIR\"), \"/gen.rs\"));\npub fn read_data() -> std::io::Result<String> { std::fs::read_to_string(data_path()) }\n".into(),
+                    ),
+                ],
+                deps: vec![],
             },
         ];
         let staging = self.path("registry-src");
@@ -197,7 +243,26 @@ impl Fixture {
             write(&registry.join("index").join(rel), &format!("{entry}\n"));
         }
     }
-    /// A Git workspace that uses the registry crates, plus every workspace
+    /// A `file://` Git dependency whose build script reads GATE_FLAVOR and
+    /// generates code into OUT_DIR, as mbx's freshness test does.
+    fn publish_git(&self) {
+        let dir = self.path("git-src/gate-git");
+        write(
+            &dir.join("Cargo.toml"),
+            "[package]\nname = 'gate-git'\nversion = '0.1.0'\nedition = '2021'\nbuild = 'build.rs'\n",
+        );
+        write(
+            &dir.join("build.rs"),
+            "fn main() {\n    println!(\"cargo:rerun-if-env-changed=GATE_FLAVOR\");\n    println!(\"cargo:rerun-if-changed=build.rs\");\n    let flavor = std::env::var(\"GATE_FLAVOR\").unwrap_or_else(|_| \"plain\".into());\n    let out = std::env::var(\"OUT_DIR\").unwrap();\n    std::fs::write(format!(\"{out}/flavor.rs\"), format!(\"pub const FLAVOR: &str = {flavor:?};\\n\")).unwrap();\n}\n",
+        );
+        write(
+            &dir.join("src/lib.rs"),
+            "include!(concat!(env!(\"OUT_DIR\"), \"/flavor.rs\"));\n",
+        );
+        git_init(&dir);
+        commit_all(&dir);
+    }
+    /// A Git workspace that uses the dependencies, plus every workspace
     /// hazard whole-target cloning got wrong.
     fn workspace(&self, name: &str) -> PathBuf {
         let w = self.path(name);
@@ -210,13 +275,16 @@ impl Fixture {
         );
         write(
             &w.join("Cargo.toml"),
-            "[workspace]\nmembers = ['app']\nresolver = '2'\n",
+            "[workspace]\nmembers = ['app', 'runtime']\nresolver = '2'\n[profile.dev.package.gate-dbg]\ndebug = true\n",
         );
         write(&w.join(".gitignore"), "target/\n");
         write(&w.join("shared/data.txt"), DATA);
         write(
             &w.join("app/Cargo.toml"),
-            "[package]\nname = 'gate-app'\nversion = '0.1.0'\nedition = '2021'\nbuild = 'build.rs'\n[[bin]]\nname = 'x'\npath = 'src/main.rs'\n[dependencies]\ngate-seed = '=1.0.0'\ngate-macro = '=1.0.0'\ngate-taint-user = '=1.0.0'\n",
+            &format!(
+                "[package]\nname = 'gate-app'\nversion = '0.1.0'\nedition = '2021'\nbuild = 'build.rs'\n[[bin]]\nname = 'x'\npath = 'src/main.rs'\n[dependencies]\ngate-seed = '=1.0.0'\ngate-macro = '=1.0.0'\ngate-dbg = '=1.0.0'\ngate-taint-user = '=1.0.0'\ngate-git = {{ git = 'file://{}' }}\n",
+                self.path("git-src/gate-git").display()
+            ),
         );
         // Absolute rerun-if-changed, judged against wherever it was built.
         write(
@@ -226,7 +294,7 @@ impl Fixture {
         // include_str! of a file outside the package.
         write(
             &w.join("app/src/lib.rs"),
-            "pub const SHARED: &str = include_str!(\"../../shared/data.txt\");\npub const BUILD_DATA: &str = env!(\"GATE_BUILD_DATA\");\npub fn seed() -> u64 { gate_seed::value() }\npub fn answer() -> u64 { gate_macro::answer!() }\npub fn taint() -> &'static str { gate_taint_user::out() }\n",
+            "pub const SHARED: &str = include_str!(\"../../shared/data.txt\");\npub const BUILD_DATA: &str = env!(\"GATE_BUILD_DATA\");\npub fn seed() -> u64 { gate_seed::value() }\npub fn answer() -> u64 { gate_macro::answer!() + gate_dbg::dbg_answer!() - 42 }\npub fn root() -> &'static str { gate_taint_user::root() }\npub fn flavor() -> &'static str { gate_git::FLAVOR }\n",
         );
         write(
             &w.join("app/src/main.rs"),
@@ -261,19 +329,27 @@ fn include_str_and_build_script_saw_this_checkout() {
     assert_eq!(gate_app::BUILD_DATA, "gate fixture v1");
 }
 #[test]
-fn registry_out_dir_is_this_checkouts() {
-    assert!(Path::new(gate_app::taint()).starts_with(target()), "{}", gate_app::taint());
+fn registry_root_is_this_checkouts() {
+    assert_eq!(Path::new(gate_app::root()), here().parent().unwrap());
 }
 #[test]
 fn seeded_registry_values() {
     assert_eq!(gate_app::seed(), 42u64.wrapping_mul(2654435761));
     assert_eq!(gate_app::answer(), 42);
+    assert_eq!(gate_app::flavor(), "plain");
 }
 "#,
         );
-        git_s(&w, &["init", "-q", "-b", "main"], 1).unwrap();
-        git_s(&w, &["config", "user.email", "fixture@example.invalid"], 1).unwrap();
-        git_s(&w, &["config", "user.name", "Fixture"], 1).unwrap();
+        // Prints where gate-outdir's generated code looks, and what it read.
+        write(
+            &w.join("runtime/Cargo.toml"),
+            "[package]\nname = 'gate-runtime'\nversion = '0.1.0'\nedition = '2021'\n[dependencies]\ngate-outdir = '=1.0.0'\n",
+        );
+        write(
+            &w.join("runtime/src/main.rs"),
+            "fn main() {\n    println!(\"{}\", gate_outdir::data_path());\n    match gate_outdir::read_data() {\n        Ok(d) => print!(\"{d}\"),\n        Err(e) => println!(\"error: {e}\"),\n    }\n}\n",
+        );
+        git_init(&w);
         w
     }
     fn cargo_version(&self, dir: &Path) -> String {
@@ -320,9 +396,12 @@ fn compiled(log: &str, name: &str) -> bool {
     assert!(!s.is_empty(), "{name} not built:\n{log}");
     s.iter().all(|(_, f)| !*f)
 }
+fn compile_count(log: &str) -> usize {
+    states(log).iter().filter(|(_, f)| !*f).count()
+}
 /// Test names and outcomes from `cargo test`, in a comparable form.
 fn results(dir: &Path, home: &Path) -> (bool, BTreeSet<String>) {
-    let o = cargo(dir, home, &["test", "--workspace", "--offline"]);
+    let o = cargo(dir, home, &["test", "-p", "gate-app", "--offline"]);
     let out = String::from_utf8_lossy(&o.stdout);
     let lines = out
         .lines()
@@ -330,6 +409,15 @@ fn results(dir: &Path, home: &Path) -> (bool, BTreeSet<String>) {
         .map(str::to_owned)
         .collect();
     (o.status.success(), lines)
+}
+/// gate-runtime's output: the path its generated code opens, then the data
+/// or the error.
+fn runtime(dir: &Path, home: &Path) -> (String, String) {
+    let o = cargo(dir, home, &["run", "-q", "-p", "gate-runtime", "--offline"]);
+    assert!(o.status.success(), "{}", String::from_utf8_lossy(&o.stderr));
+    let out = String::from_utf8_lossy(&o.stdout).into_owned();
+    let (path, rest) = out.split_once('\n').unwrap();
+    (path.to_owned(), rest.trim().to_owned())
 }
 /// Every file a seed published, relative to the recipient target.
 fn seeded_files(target: &Path) -> Vec<String> {
@@ -347,6 +435,36 @@ fn seeded_files(target: &Path) -> Vec<String> {
     walk(target, target, &mut out);
     out
 }
+/// Content of every file under `dir`, for "did this change" checks.
+fn snapshot(dir: &Path) -> Vec<(String, Vec<u8>)> {
+    let mut files: Vec<_> = seeded_files(dir)
+        .into_iter()
+        .map(|f| {
+            let b = fs::read(dir.join(&f)).unwrap();
+            (f, b)
+        })
+        .collect();
+    files.sort();
+    files
+}
+/// The single `<profile>/build/<name>-<hash>` directory holding an `out/`.
+fn run_dir(target: &Path, name: &str) -> PathBuf {
+    let build = target.join("debug/build");
+    let mut dirs: Vec<_> = fs::read_dir(&build)
+        .unwrap()
+        .map(|e| e.unwrap().path())
+        .filter(|p| {
+            p.file_name()
+                .unwrap()
+                .to_string_lossy()
+                .strip_prefix(name)
+                .is_some_and(|r| r.len() == 17 && r.starts_with('-'))
+                && p.join("out").is_dir()
+        })
+        .collect();
+    assert_eq!(dirs.len(), 1, "{name}: {dirs:?}");
+    dirs.pop().unwrap()
+}
 
 fn toolchains() -> Vec<String> {
     std::env::var("PWRGIT_SHARE_GATE_TOOLCHAINS")
@@ -360,25 +478,27 @@ fn toolchains() -> Vec<String> {
 #[test]
 fn cargo_registry_seed_freshness_gate() {
     for toolchain in toolchains() {
-        registry_gate(&toolchain);
+        for mode in [SeedMode::Bounded, SeedMode::Strict] {
+            registry_gate(&toolchain, mode);
+        }
         vendored_gate(&toolchain);
     }
 }
 
-fn registry_gate(toolchain: &str) {
+fn registry_gate(toolchain: &str, mode: SeedMode) {
     let f = Fixture::new(toolchain, true);
     if probe(&f.root.path).unwrap().cow == "none" {
         eprintln!("freshness gate: cow-unavailable; nothing seeded");
         return;
     }
+    let bounded = mode == SeedMode::Bounded;
+    let mac = cfg!(target_os = "macos");
     let donor = f.workspace("donor");
     let version = f.cargo_version(&donor);
     let proven = target::PROVEN_CARGO.contains(&version.as_str());
-    eprintln!("gate {toolchain}: {version} (proven: {proven})");
-    ok(
-        cargo(&donor, &f.home, &["generate-lockfile", "--offline"]),
-        "lock",
-    );
+    eprintln!("gate {toolchain} {mode:?}: {version} (proven: {proven})");
+    // Resolves the file:// Git dependency into CARGO_HOME; no network.
+    ok(cargo(&donor, &f.home, &["generate-lockfile"]), "lock");
     commit_all(&donor);
     let cold = ok(
         cargo(
@@ -388,10 +508,27 @@ fn registry_gate(toolchain: &str) {
         ),
         "donor build",
     );
-    for name in ["gate-seed", "gate-macro", "gate-taint", "gate-app"] {
+    for name in [
+        "gate-seed",
+        "gate-macro",
+        "gate-root",
+        "gate-git",
+        "gate-app",
+    ] {
         assert!(compiled(&cold, name));
     }
     assert!(results(&donor, &f.home).0, "donor tests");
+    let donor_flavor = run_dir(&donor.join("target"), "gate-git");
+    let donor_snapshot = (
+        snapshot(&donor_flavor),
+        snapshot(&donor.join("target/debug/.fingerprint")),
+    );
+    let options = |branch: &str, seed: bool| Options {
+        branch: Some(branch.into()),
+        seed_target: seed,
+        seed_strict: !bounded,
+        ..Default::default()
+    };
 
     // Production refuses every version the gate has not proven.
     if !proven {
@@ -400,11 +537,7 @@ fn registry_gate(toolchain: &str) {
             &donor,
             &unproven,
             "HEAD",
-            &Options {
-                branch: Some("unproven".into()),
-                seed_target: true,
-                ..Default::default()
-            },
+            &options("unproven", true),
             &f.seed_env(true),
         )
         .unwrap()
@@ -421,21 +554,27 @@ fn registry_gate(toolchain: &str) {
         &donor,
         &dest,
         "HEAD",
-        &Options {
-            branch: Some("recipient".into()),
-            seed_target: true,
-            ..Default::default()
-        },
+        &options("recipient", true),
         &f.seed_env(proven),
     )
     .unwrap();
     let seed = report.target.expect("seed report");
     eprintln!("seed: {}", serde_json::to_string(&seed).unwrap());
+    assert_eq!(seed.mode, mode);
     assert!(seed.units_seeded >= 3, "{seed:?}");
     assert_eq!(seed.copy_count, 0);
+    // gate-root names the donor root in both modes. In strict mode the
+    // OUT_DIR and debug-map units are rejected too.
+    let donor_path = if bounded {
+        1
+    } else if mac {
+        4
+    } else {
+        3
+    };
     assert_eq!(
         seed.packages_rejected.get("donor-path"),
-        Some(&1),
+        Some(&donor_path),
         "{seed:?}"
     );
     assert_eq!(
@@ -445,9 +584,20 @@ fn registry_gate(toolchain: &str) {
     );
     assert_eq!(
         seed.packages_rejected.get("workspace"),
-        Some(&1),
+        Some(&2),
         "{seed:?}"
     );
+    if bounded {
+        // gate-outdir and gate-git keep their donor OUT_DIR paths.
+        assert_eq!(seed.units_seeded_with_donor_out_dir_paths, 2, "{seed:?}");
+        assert_eq!(
+            seed.units_seeded_with_donor_debug_maps, mac as u64,
+            "{seed:?}"
+        );
+    } else {
+        assert_eq!(seed.units_seeded_with_donor_out_dir_paths, 0);
+        assert_eq!(seed.units_seeded_with_donor_debug_maps, 0);
+    }
     // R2: nothing of the workspace, no top-level outputs, incremental state
     // or locks; every seeded file is its own inode.
     let files = seeded_files(&dest.join("target"));
@@ -457,7 +607,7 @@ fn registry_gate(toolchain: &str) {
             "workspace file seeded: {file}"
         );
         assert!(
-            !file.contains("gate-taint") && !file.contains("gate_taint"),
+            !file.contains("gate-root") && !file.contains("gate_root"),
             "{file}"
         );
         assert!(
@@ -478,20 +628,30 @@ fn registry_gate(toolchain: &str) {
     }
     let dest_target = dest.join("target");
     let donor_root = donor.to_string_lossy().into_owned();
+    let donor_target = format!("{donor_root}/target/debug/");
     for file in &files {
         let bytes = fs::read(dest_target.join(file)).unwrap();
-        let hit = memchr::memmem::find(&bytes, donor_root.as_bytes()).is_some();
-        // Only a build script's OUT_DIR records (which Cargo remaps; checked
-        // on the link line below) and a proc macro's own install name may
-        // still name the donor.
-        if hit {
-            assert!(
-                file.ends_with("/root-output")
-                    || file.ends_with("/output")
-                    || (file.contains("libgate_macro-")
-                        && file.ends_with(std::env::consts::DLL_EXTENSION)),
-                "seeded file names the donor: {file}"
-            );
+        for at in memchr::memmem::find_iter(&bytes, donor_root.as_bytes()) {
+            let rest = String::from_utf8_lossy(&bytes[at..(at + 400).min(bytes.len())]);
+            // A build script's OUT_DIR records (which Cargo remaps; checked
+            // on the link line below) and a proc macro's own install name
+            // are allowed in both modes. Bounded mode also allows seeded
+            // OUT_DIRs and debug maps into donor deps/.
+            let record = file.ends_with("/root-output") || file.ends_with("/output");
+            let install_name =
+                file.contains("lib") && file.ends_with(std::env::consts::DLL_EXTENSION);
+            let allowed = record
+                || (install_name
+                    && rest.starts_with(&format!(
+                        "{donor_target}deps/{}",
+                        file.rsplit('/').next().unwrap()
+                    )))
+                || (bounded
+                    && (rest.starts_with(&format!("{donor_target}build/gate-outdir-"))
+                        || rest.starts_with(&format!("{donor_target}build/gate-git-"))
+                        || (file.contains("gate_dbg")
+                            && rest.starts_with(&format!("{donor_target}deps/")))));
+            assert!(allowed, "seeded file names the donor: {file}: {rest}");
         }
     }
 
@@ -509,18 +669,23 @@ fn registry_gate(toolchain: &str) {
     eprintln!("recipient build:\n{build}");
     assert!(
         fresh(&build, "gate-seed"),
-        "registry build-script crate must be Fresh"
+        "build-script crate must be Fresh"
     );
     assert!(fresh(&build, "gate-macro"), "proc macro must be Fresh");
     assert!(
-        compiled(&build, "gate-taint"),
-        "donor-path crate must recompile"
+        compiled(&build, "gate-root"),
+        "donor-root crate must recompile"
     );
     assert!(
         compiled(&build, "gate-taint-user"),
         "its dependent must recompile"
     );
     assert!(compiled(&build, "gate-app"), "workspace must recompile");
+    assert!(compiled(&build, "gate-runtime"), "workspace must recompile");
+    for name in ["gate-outdir", "gate-git", "gate-dbg"] {
+        let expect = bounded && (name != "gate-dbg" || mac);
+        assert_eq!(fresh(&build, name), expect, "{name} in {mode:?}");
+    }
     // Cargo remapped gate-seed's OUT_DIR from root-output: the link line
     // names the recipient's, and nothing names the donor.
     assert!(
@@ -537,7 +702,57 @@ fn registry_gate(toolchain: &str) {
     let baseline = results(&dest, &f.home);
     assert!(baseline.0, "recipient tests: {:?}", baseline.1);
     assert_eq!(baseline.1.len(), 6, "{:?}", baseline.1);
+    // Generated code that opens its own OUT_DIR at runtime: in bounded mode
+    // the seeded rlib still names the donor's (an identical copy, verified
+    // at seed time), so the recipient reads the donor's and fails once the
+    // donor is gone. Strict mode rebuilt it, so it reads its own.
+    let (path, data) = runtime(&dest, &f.home);
+    let donor_out = format!("{donor_target}build/gate-outdir-");
+    assert_eq!(path.starts_with(&donor_out), bounded, "{path}");
+    assert_eq!(
+        path.starts_with(&dest_target.to_string_lossy().into_owned()),
+        !bounded
+    );
+    if bounded {
+        assert!(data.starts_with("error:"), "donor target is hidden: {data}");
+    } else {
+        assert_eq!(data, "generated");
+    }
     fs::rename(&hidden, donor.join("target")).unwrap();
+    if bounded {
+        assert_eq!(runtime(&dest, &f.home).1, "generated");
+    }
+
+    // An unseeded third checkout compiles everything; the seed must save
+    // compilations (mbx's comparison).
+    let plain = f.path("plain");
+    worktree::worktree_add_with(
+        &donor,
+        &plain,
+        "HEAD",
+        &options("plain", false),
+        &f.seed_env(proven),
+    )
+    .unwrap();
+    let plain_build = ok(
+        cargo(
+            &plain,
+            &f.home,
+            &["build", "--workspace", "--all-targets", "--offline", "-v"],
+        ),
+        "plain build",
+    );
+    assert!(
+        compile_count(&build) < compile_count(&plain_build),
+        "seeded {} vs plain {}",
+        compile_count(&build),
+        compile_count(&plain_build)
+    );
+    eprintln!(
+        "compilations: seeded {}, plain {}",
+        compile_count(&build),
+        compile_count(&plain_build)
+    );
 
     // Late seed: the donor builds after the recipient's checkout, then seeds
     // it. No workspace unit may come out Fresh.
@@ -546,10 +761,7 @@ fn registry_gate(toolchain: &str) {
         &donor,
         &late,
         "HEAD",
-        &Options {
-            branch: Some("late".into()),
-            ..Default::default()
-        },
+        &options("late", false),
         &f.seed_env(proven),
     )
     .unwrap();
@@ -574,6 +786,7 @@ fn registry_gate(toolchain: &str) {
         &late.join("target"),
         &locks,
         &f.seed_env(proven),
+        mode,
     )
     .unwrap();
     assert!(late_seed.units_seeded > 0, "{late_seed:?}");
@@ -583,6 +796,7 @@ fn registry_gate(toolchain: &str) {
         &late.join("target"),
         &locks,
         &f.seed_env(proven),
+        mode,
     )
     .unwrap();
     assert_eq!(again.reason.as_deref(), Some("target-exists"));
@@ -597,7 +811,7 @@ fn registry_gate(toolchain: &str) {
         "late build",
     );
     for (name, is_fresh) in states(&late_build) {
-        if name == "gate-app" {
+        if name == "gate-app" || name == "gate-runtime" {
             assert!(
                 !is_fresh,
                 "workspace unit Fresh after a late seed:\n{late_build}"
@@ -609,6 +823,37 @@ fn registry_gate(toolchain: &str) {
         results(&late, &f.home),
         baseline,
         "late-seeded results differ"
+    );
+    // A Git dependency's build script reruns with a changed env var in the
+    // recipient; only the recipient's OUT_DIR changes, never the donor's
+    // outputs or fingerprints.
+    let spicy = ok(
+        cargo_env(
+            &late,
+            &f.home,
+            &["build", "-p", "gate-git", "--offline", "-v"],
+            &[("GATE_FLAVOR", "spicy")],
+        ),
+        "rerun gate-git",
+    );
+    assert!(compiled(&spicy, "gate-git"), "{spicy}");
+    let late_flavor =
+        fs::read_to_string(run_dir(&late.join("target"), "gate-git").join("out/flavor.rs"))
+            .unwrap();
+    assert!(late_flavor.contains("spicy"), "{late_flavor}");
+    assert_eq!(
+        (
+            snapshot(&run_dir(&donor.join("target"), "gate-git")),
+            snapshot(&donor.join("target/debug/.fingerprint"))
+        )
+            .0,
+        donor_snapshot.0,
+        "the donor's OUT_DIR changed"
+    );
+    assert!(
+        fs::read_to_string(donor_flavor.join("out/flavor.rs"))
+            .unwrap()
+            .contains("plain")
     );
 
     // Corrupt the donor's fixtures and binaries, then delete the donor. The
@@ -642,6 +887,8 @@ fn registry_gate(toolchain: &str) {
         baseline,
         "donor deletion changed results"
     );
+    let (_, data) = runtime(&dest, &f.home);
+    assert_eq!(data.starts_with("error:"), bounded, "{data}");
     // The registry units stay Fresh with no donor at all.
     let after = ok(
         cargo(
@@ -691,9 +938,7 @@ fn vendored_gate(toolchain: &str) {
         "fn main() { println!(\"{}\", gate_vendored::value()); }\n",
     );
     write(&w.join(".gitignore"), "target/\n");
-    git_s(&w, &["init", "-q", "-b", "main"], 1).unwrap();
-    git_s(&w, &["config", "user.email", "fixture@example.invalid"], 1).unwrap();
-    git_s(&w, &["config", "user.name", "Fixture"], 1).unwrap();
+    git_init(&w);
     ok(
         cargo(&w, &f.home, &["generate-lockfile", "--offline"]),
         "lock",

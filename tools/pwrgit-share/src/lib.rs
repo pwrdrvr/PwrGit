@@ -4,7 +4,7 @@ mod cow;
 mod target;
 mod worktree;
 pub use cow::{Probe, probe};
-pub use target::{SeedReport, target_seed};
+pub use target::{SeedMode, SeedReport, target_seed};
 pub use worktree::{Options, WorktreeReport, worktree_add};
 
 use serde::Serialize;

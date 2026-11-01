@@ -133,6 +133,7 @@ fn forced_none_is_an_ordinary_checkout() {
             branch: Some("fallback".into()),
             force_no_cow: true,
             seed_target: true,
+            seed_strict: false,
         },
     )
     .unwrap();
@@ -965,4 +966,67 @@ fn benchmark_reports_json_when_target_seeding_is_skipped() {
             .unwrap()["counts"]["registryGit"]["Compiling"],
         2
     );
+}
+
+#[test]
+#[cfg(unix)]
+fn seed_mode_flags_reach_the_report() {
+    // Bounded is the default; strict must be asked for, on both commands.
+    use std::os::fd::AsRawFd;
+    let f = Fixture::new();
+    let donor = f.repo();
+    fs::write(
+        donor.join("Cargo.toml"),
+        "[package]\nname='fixture'\nversion='0.1.0'\n",
+    )
+    .unwrap();
+    fs::create_dir_all(donor.join("target/debug")).unwrap();
+    let lock = fs::File::create(donor.join("target/debug/.cargo-lock")).unwrap();
+    assert_eq!(
+        unsafe { libc::flock(lock.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) },
+        0
+    );
+    for (flag, mode) in [
+        ("--seed-target", "bounded"),
+        ("--seed-target=strict", "strict"),
+    ] {
+        let dest = f.0.join(mode);
+        let o = cli(
+            &donor,
+            &[
+                "worktree",
+                "add",
+                flag,
+                "-b",
+                mode,
+                dest.to_str().unwrap(),
+                "HEAD",
+            ],
+        );
+        assert!(o.status.success(), "{}", String::from_utf8_lossy(&o.stderr));
+        let v: serde_json::Value = serde_json::from_slice(&o.stdout).unwrap();
+        if v["fallback"] == "none" {
+            assert_eq!(v["target"]["mode"], mode, "{v}");
+        }
+        let mut args = vec!["target", "seed"];
+        if mode == "strict" {
+            args.push("--strict");
+        }
+        let to = dest.join("target");
+        let from = donor.join("target");
+        args.extend([
+            "--from",
+            from.to_str().unwrap(),
+            "--to",
+            to.to_str().unwrap(),
+        ]);
+        let o = cli(&donor, &args);
+        let v: serde_json::Value = serde_json::from_slice(&o.stdout).unwrap();
+        assert_eq!(v["mode"], mode, "{v}");
+    }
+    let o = cli(
+        &donor,
+        &["worktree", "add", "--seed-target=loose", "x", "HEAD"],
+    );
+    assert_eq!(o.status.code(), Some(2));
 }

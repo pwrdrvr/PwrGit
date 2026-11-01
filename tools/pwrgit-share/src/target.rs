@@ -25,6 +25,15 @@ pub struct SeedReport {
     /// Rustc dep-info files rewritten to name the recipient's target, which is
     /// what a cold build in the recipient writes.
     pub rewritten_count: u64,
+    /// "bounded" (default) or "strict".
+    pub mode: SeedMode,
+    /// Seeded units whose artifacts still name a donor OUT_DIR of a seeded
+    /// build script (bounded mode only). Backtraces, panic locations and
+    /// debugger paths for that generated code point into the donor's target.
+    pub units_seeded_with_donor_out_dir_paths: u64,
+    /// Seeded build-script and proc-macro executables whose macOS debug map
+    /// (N_OSO) names donor objects (bounded mode only).
+    pub units_seeded_with_donor_debug_maps: u64,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub reason: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -38,6 +47,22 @@ impl SeedReport {
             ..Default::default()
         }
     }
+}
+
+/// How strictly seeded artifacts may name the donor.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum SeedMode {
+    /// Strict, plus two bounded exceptions: a seeded build script's OUT_DIR
+    /// (verified to be a copy of the donor's), and macOS debug maps inside
+    /// build-script and proc-macro executables, which never reach a final
+    /// binary.
+    #[default]
+    Bounded,
+    /// No donor path in any seeded artifact beyond what Cargo or rustc
+    /// rewrite (root-output, `output`'s own OUT_DIR, dep-info) and a proc
+    /// macro's own install name.
+    Strict,
 }
 
 /// Test-only inputs. Production always inherits CARGO_HOME and requires an
@@ -147,13 +172,17 @@ pub(crate) fn lock_skip(e: &Error) -> SeedReport {
     SeedReport::skipped(reason, Some(e.detail.clone()))
 }
 
-pub fn target_seed(from: &Path, to: &Path) -> Result<SeedReport> {
+pub fn target_seed(from: &Path, to: &Path, mode: SeedMode) -> Result<SeedReport> {
     let locks = match DonorLocks::acquire(from) {
         Ok(locks) => locks,
         Err(e) if e.code == 130 => return Err(e),
-        Err(e) => return Ok(lock_skip(&e)),
+        Err(e) => {
+            let mut r = lock_skip(&e);
+            r.mode = mode;
+            return Ok(r);
+        }
     };
-    seed_locked(from, to, &locks, &SeedEnv::default())
+    seed_locked(from, to, &locks, &SeedEnv::default(), mode)
 }
 
 // There is deliberately no public flag or environment variable that bypasses
@@ -163,6 +192,18 @@ pub(crate) fn seed_locked(
     to: &Path,
     locks: &DonorLocks,
     env: &SeedEnv,
+    mode: SeedMode,
+) -> Result<SeedReport> {
+    let mut report = seed_impl(from, to, locks, env, mode)?;
+    report.mode = mode;
+    Ok(report)
+}
+fn seed_impl(
+    from: &Path,
+    to: &Path,
+    locks: &DonorLocks,
+    env: &SeedEnv,
+    mode: SeedMode,
 ) -> Result<SeedReport> {
     check_cancel()?;
     if fs::symlink_metadata(to).is_ok() {
@@ -270,6 +311,7 @@ pub(crate) fn seed_locked(
         to: &to,
         graph: &graph,
         needles,
+        mode,
     };
     let units = discover(&ctx, locks)?;
     publish(&ctx, units)
@@ -621,6 +663,7 @@ struct Ctx<'a> {
     to: &'a Path,
     graph: &'a Graph,
     needles: Vec<Vec<u8>>,
+    mode: SeedMode,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -1066,12 +1109,25 @@ enum Scan {
     Reject(String),
 }
 
-fn scan_file(ctx: &Ctx, unit: &Unit, rel: &Path, staged: &Path) -> Result<Scan> {
+/// What a unit's staged files still say about the donor.
+#[derive(Default)]
+struct Notes {
+    /// `<pkg>-<hash>` build directories whose OUT_DIR the unit names. Each
+    /// must belong to a seeded build-script run.
+    out_dirs: HashSet<String>,
+    /// An artifact (not dep-info, which is rewritten) names a donor OUT_DIR.
+    artifact_out_dir: bool,
+    /// A Mach-O debug map names donor objects.
+    debug_map: bool,
+}
+
+fn scan_file(ctx: &Ctx, unit: &Unit, rel: &Path, staged: &Path, notes: &mut Notes) -> Result<Scan> {
     let g = ctx.graph;
     let name = rel.file_name().unwrap().to_string_lossy().into_owned();
     let profile = ctx.from.join(&unit.profile);
     let bytes_of = |p: &Path| p.as_os_str().as_encoded_bytes().to_vec();
     let out_dir = bytes_of(&profile.join("build").join(&unit.dir).join("out"));
+    let unit_dir = unit.profile.join("build").join(&unit.dir);
     let in_build = rel.starts_with(unit.profile.join("build"));
     let is_depinfo = name.ends_with(".d")
         && (rel.parent() == Some(&unit.profile.join("deps"))
@@ -1086,14 +1142,13 @@ fn scan_file(ctx: &Ctx, unit: &Unit, rel: &Path, staged: &Path) -> Result<Scan> 
     let is_own_dylib = unit.kind == Kind::Lib && g.pkgs[unit.pkg].proc_macro && rel == dylib;
     let mut own_dylib = bytes_of(&ctx.from.join(&dylib));
     own_dylib.push(0);
-    let root_output = unit.kind == Kind::BuildRun
-        && in_build
-        && name == "root-output"
-        && rel.parent() == Some(&unit.profile.join("build").join(&unit.dir));
-    let build_output = unit.kind == Kind::BuildRun
-        && in_build
-        && name == "output"
-        && rel.parent() == Some(&unit.profile.join("build").join(&unit.dir));
+    let is_build_exe = unit.kind == Kind::BuildCompile
+        && rel.parent() == Some(&unit_dir)
+        && (name == "build-script-build" || name == format!("build_script_build-{}", unit.hash));
+    let root_output =
+        unit.kind == Kind::BuildRun && name == "root-output" && rel.parent() == Some(&unit_dir);
+    let build_output =
+        unit.kind == Kind::BuildRun && name == "output" && rel.parent() == Some(&unit_dir);
     if root_output {
         // Cargo reads this to remap the old OUT_DIR in `output` to the new one.
         let b = fs::read(staged)?;
@@ -1104,10 +1159,21 @@ fn scan_file(ctx: &Ctx, unit: &Unit, rel: &Path, staged: &Path) -> Result<Scan> 
         });
     }
     if !(is_depinfo || is_own_dylib || build_output) {
-        // Stream: no occurrence of any donor path is allowed.
-        return scan_stream(ctx, staged, rel);
+        // Stream first: most files never name the donor.
+        match scan_stream(ctx, staged, rel)? {
+            Scan::Reject(why) if ctx.mode == SeedMode::Strict => return Ok(Scan::Reject(why)),
+            Scan::Reject(_) => {}
+            other => return Ok(other),
+        }
     }
     let bytes = fs::read(staged)?;
+    // Debug-map strings, only in executables that run during the build.
+    let oso = (ctx.mode == SeedMode::Bounded && (is_build_exe || is_own_dylib))
+        .then(|| macho_oso_strings(&bytes))
+        .flatten()
+        .unwrap_or_default();
+    let deps_dir = bytes_of(&profile.join("deps"));
+    let own_build = bytes_of(&ctx.from.join(&unit_dir));
     let from = bytes_of(ctx.from);
     let boundary = |b: Option<&u8>| {
         b.is_none_or(|c| {
@@ -1127,11 +1193,24 @@ fn scan_file(ctx: &Ctx, unit: &Unit, rel: &Path, staged: &Path) -> Result<Scan> 
                 // it reads `output` (the gate checks the recipient's link
                 // line). Nothing else may name the donor.
                 rest.starts_with(&out_dir) && boundary(rest.get(out_dir.len()))
-            } else if is_own_dylib {
+            } else if is_own_dylib && rest.starts_with(&own_dylib) {
                 // macOS records a dylib's own path as its install name.
-                rest.starts_with(&own_dylib)
+                true
+            } else if is_depinfo {
+                depinfo_path_ok(ctx, unit, lib, rest, notes)
+            } else if ctx.mode == SeedMode::Strict {
+                false
+            } else if let Some(dir) = out_dir_ref(ctx, unit, rest) {
+                notes.out_dirs.insert(dir);
+                notes.artifact_out_dir = true;
+                true
+            } else if oso.contains(&at)
+                && (rest.starts_with(&deps_dir) || rest.starts_with(&own_build))
+            {
+                notes.debug_map = true;
+                true
             } else {
-                depinfo_path_ok(ctx, unit, lib, rest)
+                false
             };
             if !ok {
                 return Ok(Scan::Reject(format!("{} names the donor", rel.display())));
@@ -1164,9 +1243,71 @@ fn scan_file(ctx: &Ctx, unit: &Unit, rel: &Path, staged: &Path) -> Result<Scan> 
     })
 }
 
+/// `<from>/<profile>/build/<pkg>-<hash>/out` at a path boundary: the
+/// `<pkg>-<hash>` directory, if `rest` starts with a donor OUT_DIR.
+fn out_dir_ref(ctx: &Ctx, unit: &Unit, rest: &[u8]) -> Option<String> {
+    let mut build = ctx
+        .from
+        .join(&unit.profile)
+        .join("build")
+        .as_os_str()
+        .as_encoded_bytes()
+        .to_vec();
+    build.push(b'/');
+    let tail = rest.strip_prefix(build.as_slice())?;
+    let end = tail.iter().position(|c| *c == b'/')?;
+    let dir = std::str::from_utf8(&tail[..end]).ok()?;
+    let (pkg, hash) = dir.rsplit_once('-')?;
+    let after = tail[end..].strip_prefix(b"/out")?;
+    let continues = after
+        .first()
+        .is_some_and(|c| c.is_ascii_alphanumeric() || matches!(c, b'.' | b'_' | b'-'));
+    (!pkg.is_empty() && hex16(hash) && !continues).then(|| dir.to_owned())
+}
+
+/// File offsets of the strings named by N_OSO (debug map) symbols in a thin
+/// 64-bit little-endian Mach-O image. None for anything else.
+fn macho_oso_strings(b: &[u8]) -> Option<HashSet<usize>> {
+    let u32_at = |o: usize| Some(u32::from_le_bytes(b.get(o..o + 4)?.try_into().ok()?));
+    if u32_at(0)? != 0xfeed_facf {
+        return None;
+    }
+    let ncmds = u32_at(16)? as usize;
+    let mut at = 32;
+    let mut out = HashSet::new();
+    for _ in 0..ncmds {
+        let (cmd, size) = (u32_at(at)?, u32_at(at + 4)? as usize);
+        if cmd == 0x2 {
+            // LC_SYMTAB: symoff, nsyms, stroff, strsize.
+            let (symoff, nsyms) = (u32_at(at + 8)? as usize, u32_at(at + 12)? as usize);
+            let (stroff, strsize) = (u32_at(at + 16)? as usize, u32_at(at + 20)? as usize);
+            for i in 0..nsyms {
+                let entry = symoff.checked_add(i.checked_mul(16)?)?;
+                let strx = u32_at(entry)? as usize;
+                // N_OSO: the object file a debug-map stab belongs to.
+                if *b.get(entry + 4)? == 0x66 && strx < strsize {
+                    out.insert(stroff.checked_add(strx)?);
+                }
+            }
+        }
+        if size < 8 {
+            return None;
+        }
+        at = at.checked_add(size)?;
+    }
+    Some(out)
+}
+
 /// A donor path in rustc dep-info may only be one of this unit's own outputs
-/// or a file in an OUT_DIR of the same package.
-fn depinfo_path_ok(ctx: &Ctx, unit: &Unit, lib: Option<&str>, rest: &[u8]) -> bool {
+/// or a file in an OUT_DIR (its package's, or in bounded mode any seeded
+/// one). Every OUT_DIR named is recorded and must end up seeded.
+fn depinfo_path_ok(
+    ctx: &Ctx,
+    unit: &Unit,
+    lib: Option<&str>,
+    rest: &[u8],
+    notes: &mut Notes,
+) -> bool {
     let profile = ctx.from.join(&unit.profile);
     let b = |p: PathBuf| p.as_os_str().as_encoded_bytes().to_vec();
     let mut own = Vec::new();
@@ -1187,19 +1328,19 @@ fn depinfo_path_ok(ctx: &Ctx, unit: &Unit, lib: Option<&str>, rest: &[u8]) -> bo
     if own.iter().any(|o| rest.starts_with(o)) {
         return true;
     }
-    let mut build = b(profile.join("build").join(&ctx.graph.pkgs[unit.pkg].name));
-    build.push(b'-');
-    let Some(tail) = rest.strip_prefix(build.as_slice()) else {
-        return false;
-    };
     // rustc names included OUT_DIR files and records OUT_DIR itself as an
     // env-dep; Cargo's own dep-info keeps both target-relative.
-    tail.len() >= 20
-        && std::str::from_utf8(&tail[..16]).is_ok_and(hex16)
-        && tail[16..].starts_with(b"/out")
-        && tail
-            .get(20)
-            .is_none_or(|c| matches!(c, b'/' | b'\n' | b'\r' | b' ' | b':'))
+    let Some(dir) = out_dir_ref(ctx, unit, rest) else {
+        return false;
+    };
+    let same_package = dir
+        .rsplit_once('-')
+        .is_some_and(|(pkg, _)| pkg == ctx.graph.pkgs[unit.pkg].name);
+    if ctx.mode == SeedMode::Strict && !same_package {
+        return false;
+    }
+    notes.out_dirs.insert(dir);
+    true
 }
 
 fn scan_stream(ctx: &Ctx, staged: &Path, rel: &Path) -> Result<Scan> {
@@ -1233,6 +1374,7 @@ struct UnitResult {
     clones: u64,
     rewritten: u64,
     reject: Option<String>,
+    notes: Notes,
 }
 
 fn stage_unit(ctx: &Ctx, stage: &Path, unit: &Unit) -> Result<UnitResult> {
@@ -1240,6 +1382,7 @@ fn stage_unit(ctx: &Ctx, stage: &Path, unit: &Unit) -> Result<UnitResult> {
         clones: 0,
         rewritten: 0,
         reject: None,
+        notes: Notes::default(),
     };
     for d in &unit.dirs {
         fs::create_dir_all(stage.join(d))?;
@@ -1264,7 +1407,7 @@ fn stage_unit(ctx: &Ctx, stage: &Path, unit: &Unit) -> Result<UnitResult> {
         r.clones += 1;
         // Scan the clone, not the donor: these are exactly the bytes that will
         // be published, whatever happens to the donor meanwhile.
-        match scan_file(ctx, unit, rel, &dest)? {
+        match scan_file(ctx, unit, rel, &dest, &mut r.notes)? {
             Scan::Clean => {}
             Scan::Reject(why) => {
                 r.reject = Some(why);
@@ -1284,7 +1427,68 @@ fn stage_unit(ctx: &Ctx, stage: &Path, unit: &Unit) -> Result<UnitResult> {
             }
         }
     }
+    if unit.kind == Kind::BuildRun {
+        r.reject = verify_out_dir(ctx, stage, unit)?;
+    }
     Ok(r)
+}
+
+/// The recipient's OUT_DIR must be an exact copy of the donor's: the same
+/// files with the same bytes. Bounded mode lets seeded artifacts keep naming
+/// the donor's OUT_DIR on the strength of this.
+fn verify_out_dir(ctx: &Ctx, stage: &Path, unit: &Unit) -> Result<Option<String>> {
+    use std::io::Read;
+    let out = unit.profile.join("build").join(&unit.dir).join("out");
+    let changed = || Ok(Some(format!("{}: OUT_DIR changed", out.display())));
+    let mut donor = Vec::new();
+    let mut dirs = Vec::new();
+    if fs::symlink_metadata(ctx.from.join(&out)).is_ok()
+        && tree(&ctx.from.join(&out), &mut donor, &mut dirs).is_none()
+    {
+        return changed();
+    }
+    let mut donor: Vec<PathBuf> = donor
+        .iter()
+        .map(|p| p.strip_prefix(ctx.from).unwrap().to_path_buf())
+        .collect();
+    let mut staged: Vec<PathBuf> = unit
+        .files
+        .iter()
+        .filter(|f| f.starts_with(&out))
+        .cloned()
+        .collect();
+    donor.sort();
+    staged.sort();
+    if donor != staged {
+        return changed();
+    }
+    let (mut a, mut b) = (vec![0u8; 1 << 20], vec![0u8; 1 << 20]);
+    for rel in &staged {
+        check_cancel()?;
+        let mut x = File::open(ctx.from.join(rel))?;
+        let mut y = File::open(stage.join(rel))?;
+        loop {
+            let n = x.read(&mut a)?;
+            let mut m = 0;
+            while m < n {
+                let k = y.read(&mut b[m..n])?;
+                if k == 0 {
+                    break;
+                }
+                m += k;
+            }
+            if m != n || a[..n] != b[..n] {
+                return Ok(Some(format!("{}: copy differs", rel.display())));
+            }
+            if n == 0 {
+                if y.read(&mut b[..1])? != 0 {
+                    return Ok(Some(format!("{}: copy differs", rel.display())));
+                }
+                break;
+            }
+        }
+    }
+    Ok(None)
 }
 
 fn publish(ctx: &Ctx, found: Discovery) -> Result<SeedReport> {
@@ -1354,28 +1558,46 @@ fn publish(ctx: &Ctx, found: Discovery) -> Result<SeedReport> {
             rejected.entry(i).or_insert_with(|| "not-built".into());
         }
     }
+    // Build-script runs by directory, for OUT_DIR references.
+    let runs: HashMap<(&Path, &str), usize> = staged
+        .iter()
+        .map(|(i, _)| (&found.units[*i], *i))
+        .filter(|(u, _)| u.kind == Kind::BuildRun)
+        .map(|(u, i)| ((u.profile.as_path(), u.dir.as_str()), i))
+        .collect();
+    let notes: HashMap<usize, &Notes> = staged.iter().map(|(i, r)| (*i, &r.notes)).collect();
     // R3 fixed point: a unit built against a rejected or unbuilt package
     // would meet different bytes in the recipient, so its whole package is
     // rejected too. Metadata's resolve over-approximates (optional and
     // platform edges the build never used), so an edge counts when the
     // unit's own fingerprint names it, or when Cargo gave no name.
+    // A named OUT_DIR must belong to a seeded build-script run, never a
+    // workspace or path package's.
     loop {
-        let more: Vec<usize> = staged
-            .iter()
-            .map(|(i, _)| &found.units[*i])
-            .filter(|u| !rejected.contains_key(&u.pkg))
-            .filter(|u| {
-                g.pkgs[u.pkg].deps.iter().any(|(d, name)| {
-                    rejected.contains_key(d) && name.as_ref().is_none_or(|n| u.uses.contains(n))
-                })
-            })
-            .map(|u| u.pkg)
-            .collect();
+        let mut more = Vec::new();
+        for (i, _) in &staged {
+            let u = &found.units[*i];
+            if rejected.contains_key(&u.pkg) {
+                continue;
+            }
+            let dep = g.pkgs[u.pkg].deps.iter().any(|(d, name)| {
+                rejected.contains_key(d) && name.as_ref().is_none_or(|n| u.uses.contains(n))
+            });
+            let out = notes[i].out_dirs.iter().any(|d| {
+                runs.get(&(u.profile.as_path(), d.as_str()))
+                    .is_none_or(|r| rejected.contains_key(&found.units[*r].pkg))
+            });
+            if dep {
+                more.push((u.pkg, "depends-on-rejected"));
+            } else if out {
+                more.push((u.pkg, "out-dir-not-seeded"));
+            }
+        }
         if more.is_empty() {
             break;
         }
-        for i in more {
-            rejected.insert(i, "depends-on-rejected".into());
+        for (i, why) in more {
+            rejected.entry(i).or_insert_with(|| why.into());
         }
     }
     for why in rejected.values() {
@@ -1405,6 +1627,8 @@ fn publish(ctx: &Ctx, found: Discovery) -> Result<SeedReport> {
             continue;
         }
         report.units_seeded += 1;
+        report.units_seeded_with_donor_out_dir_paths += r.notes.artifact_out_dir as u64;
+        report.units_seeded_with_donor_debug_maps += r.notes.debug_map as u64;
         report.clone_count += r.clones;
         report.rewritten_count += r.rewritten;
         seeded_pkgs.insert(unit.pkg);
@@ -1667,6 +1891,69 @@ mod tests {
             config_check(&donor, &recipient, &home, &[&donor, &recipient]).map_err(|e| e.0),
             Err("config-embeds-worktree-path")
         );
+    }
+    #[test]
+    fn out_dir_references_need_an_exact_build_dir_and_a_path_boundary() {
+        let graph = Graph {
+            pkgs: Vec::new(),
+            by_dir: Vec::new(),
+        };
+        let ctx = Ctx {
+            from: Path::new("/d/target"),
+            to: Path::new("/r/target"),
+            graph: &graph,
+            needles: vec![b"/d".to_vec()],
+            mode: SeedMode::Bounded,
+        };
+        let unit = Unit {
+            kind: Kind::Lib,
+            pkg: 0,
+            profile: PathBuf::from("debug"),
+            dir: "x-0123456789abcdef".into(),
+            hash: "0123456789abcdef".into(),
+            files: Vec::new(),
+            dirs: Vec::new(),
+            uses: HashSet::new(),
+        };
+        let r = |s: &str| out_dir_ref(&ctx, &unit, s.as_bytes());
+        let dir = Some("serde-0123456789abcdef".to_owned());
+        assert_eq!(
+            r("/d/target/debug/build/serde-0123456789abcdef/out/private.rs"),
+            dir
+        );
+        assert_eq!(r("/d/target/debug/build/serde-0123456789abcdef/out\0"), dir);
+        assert_eq!(
+            r("/d/target/debug/build/serde-0123456789abcdef/output"),
+            None
+        );
+        assert_eq!(
+            r("/d/target/debug/build/serde-0123456789abcdef/build-script-build"),
+            None
+        );
+        assert_eq!(r("/d/target/debug/build/serde-0123/out/x"), None);
+        assert_eq!(
+            r("/d/target/release/build/serde-0123456789abcdef/out/x"),
+            None
+        );
+        assert_eq!(
+            r("/d/target/debug/deps/libserde-0123456789abcdef.rlib"),
+            None
+        );
+        assert_eq!(r("/d/src/lib.rs"), None);
+    }
+    #[test]
+    #[cfg(target_os = "macos")]
+    fn debug_map_strings_come_from_the_mach_o_symbol_table() {
+        // This test binary is linked from unpacked objects: its debug map
+        // names them.
+        let me = fs::read(std::env::current_exe().unwrap()).unwrap();
+        let oso = macho_oso_strings(&me).expect("thin 64-bit Mach-O");
+        assert!(!oso.is_empty());
+        for at in oso {
+            assert!(me[at..].starts_with(b"/"), "debug-map paths are absolute");
+        }
+        assert_eq!(macho_oso_strings(b"\x7fELF not mach-o"), None);
+        assert_eq!(macho_oso_strings(&me[..40]), None);
     }
     #[test]
     fn dep_info_first_prerequisite_unescapes_and_checks_the_target() {
