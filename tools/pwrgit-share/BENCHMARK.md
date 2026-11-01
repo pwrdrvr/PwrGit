@@ -1,3 +1,28 @@
+# Registry-only target seeding on PwrRoute — 2026-11-01
+
+The sections below this one describe the earlier gate, which seeded nothing.
+
+The donor is a `git clone --local` of PwrRoute at `02bd47fc`, built once with `cargo build --workspace` and `cargo test --workspace --no-run`. The real checkout was never modified. Toolchain: `cargo 1.97.1 (c980f4866 2026-06-30)` from PwrRoute's `rust-toolchain.toml`, on macOS APFS, with the release CLI at this branch's head. Arms alternated plain/seeded, and each worktree was removed completely (`git worktree remove --force`, `rm -rf`, `prune`) before the next run. Each build is a cold `cargo build --workspace --locked --offline`. "Private" is APFS private data bytes per unique inode, measured after `sync`. On APFS, Cargo itself clones incremental output into `deps/`, so per-file private bytes can be 0 even for files built locally.
+
+| | crates compiled | create (incl. seed) | build | private disk |
+|---|---|---|---|---|
+| plain `git worktree add` | 549, 549, 549 | 0.15–0.64 s | 300, 332, 274 s | 3.31, 3.30, 3.30 GB |
+| `worktree add --seed-target` | 139, 139, 139 | 4.1–5.0 s | 692, 137, 197 s | 1.92, 1.95, 1.97 GB |
+
+Build times are unreliable here. The host's load average was 50–76 during these runs, from two VMs and other work, and the 692 s run overlapped the peak. Crate counts and private bytes do not depend on load. The seed published 521 units of 420 packages: 3,987 clones, 480 rewritten dep-info files, 0 copies.
+
+After run 3 of each arm, `cargo test --workspace --no-fail-fast` passed the same 1,283 tests in both worktrees, with an identical list of names and results. In an earlier run, one seeded `cargo test` failed in `singleton::tests::fake_browser`. Rerunning that test binary 200 times, interleaved, failed 3/200 in a seeded worktree and 3/200 in a plain one. These are timing-sensitive socket tests under load, unrelated to seeding.
+
+**Why 139, not the 9 the unscanned prototype reached.** The prototype cloned every non-workspace unit without looking inside. With the byte scan required, these are rejected:
+
+- Registry crates that `include!(concat!(env!("OUT_DIR"), …))`: serde, serde_core, thiserror, ref-cast, mime_guess, markup5ever/html5ever and others. They keep the donor's absolute OUT_DIR path in their rlib/rmeta (source map and debug info). The path also spreads into code inlined downstream: gpui_base's rlib names html5ever's OUT_DIR.
+- On macOS, build scripts and some proc macros (derive_more-impl, rust-embed-impl, proptest-macro, gpui-pre*) carry debug-map paths to donor `deps/*.rlib`.
+- rquickjs-sys's cc-built objects.
+
+The dependency fixed point then rejects 116 more packages. An uncommitted experiment that allowed OUT_DIR and donor `deps/` paths inside artifacts compiled 29 crates in 63 s, with 1.21 GB private. That would mean shipping registry rlibs whose source map and debug info name the donor. A generated file that uses `file!()` at runtime would then read the donor's OUT_DIR. That is the same hazard as `CARGO_MANIFEST_DIR`, so it is not enabled.
+
+Without the unit-level edge check, the fixed point also over-rejected. `cargo metadata`'s resolve lists optional edges the build never uses (cc → jobserver), and following them gave 193 crates compiled and 2.56 GB.
+
 # Local benchmark — 2026-10-27
 
 **Target result: `unitsSeeded: 0`, `cloneCount: 0`, `copyCount: 0`, `reason: fingerprint-unproven`.** Cargo 1.94.1 recompiles the registry dependency when the vendored source path moves with a worktree. Production seeding is deliberately disabled for every Cargo version until the complete gate passes. Source reflinking works independently.
