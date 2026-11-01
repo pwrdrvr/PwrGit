@@ -772,7 +772,7 @@ describe("combined maintenance workflow", () => {
     await click("Start");
     expect(actions()).toEqual(["gc"]);
   });
-  it.each(["cancelled", "failed", "partial"])("does not advance after a %s branch scan", async (outcome) => {
+  it.each(["cancelled"])("does not advance after a %s branch scan", async (outcome) => {
     await open("auto");
     const previous = dispatch.getMockImplementation()!;
     dispatch.mockImplementation(async (name, req) => name === "maintenance:run"
@@ -784,15 +784,129 @@ describe("combined maintenance workflow", () => {
     expect(container.textContent).toContain("Not started");
     expect(container.querySelector(".maintenance__receipt-step.is-failed")?.textContent).toContain("Local branches");
   });
-  it("does not garbage collect after a partial branch removal", async () => {
+  it.each(["failed", "partial"] as const)("continues to GC after a %s review and preserves its error", async (outcome) => {
+    await open("auto");
+    const previous = dispatch.getMockImplementation()!;
+    dispatch.mockImplementation(async (name, req) => name === "maintenance:run" && req.action.kind === "scan-branches"
+      ? { ok: true, value: summary([{ repo, outcome, message: "Cannot read branch references." }]) }
+      : previous(name, req));
+    await task(0);
+    await click("Start");
+    expect(actions()).toEqual(["scan-branches", "gc"]);
+    expect(container.textContent).toContain("Maintenance finished with errors");
+    expect(container.querySelector('[aria-label="Needs attention"]')?.textContent).toContain("Cannot read branch references.");
+    expect(container.querySelectorAll(".maintenance__receipt-step")[2]?.textContent).toContain("1 collected");
+  });
+  it.each(["auto", "review"] as const)("preserves failed reviews when %s deletes branches from successful reviews", async (mode) => {
+    await open(mode);
+    const previous = dispatch.getMockImplementation()!;
+    dispatch.mockImplementation(async (name, req) => name === "maintenance:run" && req.action.kind === "scan-branches"
+      ? { ok: true, value: summary([
+        { repo, outcome: "success", message: "Finished", candidates: [candidate] },
+        { repo: { ...repo, id: "other", name: "other-repo" }, outcome: "failed", message: "Reference lock unreadable." }
+      ]) }
+      : previous(name, req));
+    await task(0);
+    await click("Start");
+    if (mode === "review") await click("Delete 1 branch and continue");
+    expect(actions()).toEqual(["scan-branches", "delete-branches", "gc"]);
+    expect(container.querySelector('[aria-label="Needs attention"]')?.textContent).toContain("other-repoReference lock unreadable.");
+    expect(button("Restore")).toBeTruthy();
+  });
+  it.each(["failed", "partial"] as const)("runs GC after %s branch removal and exposes errors before the success slice", async (outcome) => {
     await open("auto");
     const previous = dispatch.getMockImplementation()!;
     dispatch.mockImplementation(async (name, req) => name === "maintenance:run" && req.action.kind === "delete-branches"
-      ? { ok: true, value: summary([{ repo, outcome: "partial", message: "Changed branch retained." }]) }
+      ? { ok: true, value: summary([{ repo, outcome, message: "Changed branch retained.", branches: [
+        ...Array.from({ length: 25 }, (_, index) => ({ branch: `done-${index}`, head: "abc123", deleted: true, message: "Deleted." })),
+        { branch: "changed-branch", head: "abc123", deleted: false, message: "The reviewed tip changed; retained." }
+      ] }]) }
+      : previous(name, req));
+    await task(0);
+    await click("Start");
+    expect(actions()).toEqual(["scan-branches", "delete-branches", "gc"]);
+    expect(container.textContent).toContain("Maintenance finished with errors");
+    expect(container.textContent).toContain("2 of 2 steps");
+    const issues = container.querySelector('[aria-label="Needs attention"]')!;
+    expect(issues.textContent).toContain("changed-branch: The reviewed tip changed; retained.");
+    expect(container.querySelectorAll(".maintenance__receipt-row")).toHaveLength(20);
+    expect(issues.compareDocumentPosition(container.querySelector(".maintenance__receipt-steps")!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    await click("Show all 25");
+    expect(container.querySelectorAll(".maintenance__receipt-row")).toHaveLength(25);
+    expect(container.querySelectorAll(".maintenance__restore")).toHaveLength(25);
+  });
+  it("shows a refresh failure even when all branch deletions succeeded", async () => {
+    await open("auto");
+    const previous = dispatch.getMockImplementation()!;
+    dispatch.mockImplementation(async (name, req) => {
+      const response = await previous(name, req);
+      if (name === "maintenance:run" && req.action.kind === "delete-branches") {
+        response.value.results[0].outcome = "partial";
+        response.value.results[0].message = "1 local branch deleted; 0 retained. Refresh failed: unavailable.";
+      }
+      return response;
+    });
+    await task(0);
+    await click("Start");
+    expect(actions()).toEqual(["scan-branches", "delete-branches", "gc"]);
+    expect(container.querySelector('[aria-label="Needs attention"]')?.textContent).toContain("Refresh failed: unavailable.");
+    expect(button("Restore")).toBeTruthy();
+  });
+  it("stops on cancelled deletion, preserving retained branch reasons", async () => {
+    await open("auto");
+    const previous = dispatch.getMockImplementation()!;
+    dispatch.mockImplementation(async (name, req) => name === "maintenance:run" && req.action.kind === "delete-branches"
+      ? { ok: true, value: { ...summary([{ repo, outcome: "cancelled", message: "Cancelled", branches: [
+        { branch: "finished", head: "abc123", deleted: false, message: "Cancelled; retained." }
+      ] }]), cancelled: true } }
       : previous(name, req));
     await task(0);
     await click("Start");
     expect(actions()).toEqual(["scan-branches", "delete-branches"]);
-    expect(container.textContent).toContain("Not started");
+    expect(container.textContent).toContain("Maintenance stopped");
+    expect(container.querySelector('[aria-label="Needs attention"]')?.textContent).toContain("finished: Cancelled; retained.");
+  });
+  it("shows the actual command error when no repository results are returned", async () => {
+    await open("auto");
+    const previous = dispatch.getMockImplementation()!;
+    dispatch.mockImplementation(async (name, req) => name === "maintenance:run"
+      ? { ok: false, error: { message: "Another maintenance run is active." } }
+      : previous(name, req));
+    await task(0);
+    await click("Start");
+    expect(actions()).toEqual(["scan-branches"]);
+    expect(container.querySelector('[aria-label="Needs attention"]')?.textContent).toContain("Another maintenance run is active.");
+  });
+  it("reports GC failures while preserving branch errors", async () => {
+    await open("auto");
+    const previous = dispatch.getMockImplementation()!;
+    dispatch.mockImplementation(async (name, req) => name === "maintenance:run" && req.action.kind !== "scan-branches"
+      ? { ok: true, value: summary([{ repo, outcome: "failed", message: req.action.kind === "gc" ? "Repack failed: disk full." : "Branch reference locked." }]) }
+      : previous(name, req));
+    await task(0);
+    await click("Start");
+    expect(actions()).toEqual(["scan-branches", "delete-branches", "gc"]);
+    const issues = container.querySelector('[aria-label="Needs attention"]')!;
+    expect(issues.textContent).toContain("Branch reference locked.");
+    expect(issues.textContent).toContain("Repack failed: disk full.");
+    expect(container.textContent).toContain("Maintenance finished with errors");
+  });
+  it("keeps branch failures visible while garbage collection is running", async () => {
+    await open("auto");
+    const previous = dispatch.getMockImplementation()!;
+    let finish!: () => void;
+    dispatch.mockImplementation(async (name, req) => {
+      if (name === "maintenance:run" && req.action.kind === "delete-branches")
+        return { ok: true, value: summary([{ repo, outcome: "failed", message: "Branch reference locked." }]) };
+      if (name === "maintenance:run" && req.action.kind === "gc")
+        await new Promise<void>((resolve) => { finish = resolve; });
+      return previous(name, req);
+    });
+    await task(0);
+    await click("Start");
+    expect(container.querySelector(".maintenance__step.is-on")?.textContent).toContain("Garbage collection");
+    expect(container.querySelector('[aria-label="Needs attention"]')?.textContent).toContain("Branch reference locked.");
+    await act(async () => finish());
+    expect(container.textContent).toContain("Maintenance finished with errors");
   });
 });

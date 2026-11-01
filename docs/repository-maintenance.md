@@ -28,6 +28,14 @@ repository does not stop the others. Another window cannot start an overlapping
 maintenance run. **Cancel** finishes active local operations and skips
 remaining work. Closing the owning window also requests cancellation.
 
+In **Combined** maintenance, a repository's branch review or deletion failure
+does not prevent other repositories or the garbage collection phase from
+running. Branches that cannot be safely deleted are retained. The final
+**Needs attention** list shows repository errors and retained branches with
+their reasons above the successful results; long error lists scroll separately.
+Cancellation, or a command that fails without returning repository results,
+stops the combined run.
+
 The before/after figures are the sizes of loose objects and packs reported by
 `git count-objects -v`, in KiB, MiB, or GiB. They do not measure free space on the
 volume. Filesystem snapshots and shared blocks can delay reclamation; repacking

@@ -12,10 +12,11 @@ import { StatusGlyph } from "./BulkSyncStatus";
 export type MaintenancePlan = { worktrees: boolean; branches: boolean; gc: boolean };
 export type StepKey = keyof MaintenancePlan;
 export type StepResult = {
-  state: "done" | "skipped" | "failed";
+  state: "done" | "partial" | "skipped" | "failed";
   summary: string;
   detail?: string;
   items?: { label: string; detail: string }[];
+  issues?: { label: string; detail: string }[];
 };
 
 const steps: { key: StepKey; title: string }[] = [
@@ -58,7 +59,7 @@ export function MaintenanceSteps({ plan, current, results, branchMode, gcMode, p
   return <div className="maintenance__steps" aria-label="Maintenance steps">
     {steps.map((step, index) => {
       const result = results[step.key];
-      const state = result?.state === "failed" ? "stop" : result?.state === "done" ? "done" :
+      const state = result?.state === "failed" || result?.state === "partial" ? "stop" : result?.state === "done" ? "done" :
         !plan[step.key] || result?.state === "skipped" ? "off" : current === step.key ? "on" :
           current === "done" || index < currentIndex ? "off" : "next";
       const detail = result?.summary ?? (state === "off" ? current === "done" && plan[step.key] ? "Not started" : "Skipped" :
