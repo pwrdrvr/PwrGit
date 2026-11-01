@@ -359,7 +359,7 @@ fn hash_mismatch_is_checked_out_and_hash_failure_falls_back() {
         let bin = git_wrapper(
             &f,
             if mismatch {
-                "case \"$*\" in *'hash-object'*) echo 0000000000000000000000000000000000000000; exit 0;; esac"
+                "case \"$*\" in *'hash-object'*) while read -r _; do echo 0000000000000000000000000000000000000000; done; exit 0;; esac"
             } else {
                 "case \"$*\" in *'hash-object'*) exit 1;; esac"
             },
@@ -705,6 +705,38 @@ fn target_attributes_and_autocrlf_match_an_ordinary_checkout() {
         );
         assert_eq!(fs::read(donor.join("dirty")).unwrap(), b"private edit\n");
     }
+}
+
+#[test]
+fn large_trees_clone_through_batched_git_calls() {
+    // More paths and hashes than a pipe buffer holds: Git is driven in a few
+    // batches, not once per file, and must not deadlock on full pipes.
+    let f = Fixture::new();
+    let donor = f.repo();
+    for d in 0..30 {
+        let dir = donor.join(format!("dir{d}"));
+        fs::create_dir_all(&dir).unwrap();
+        for n in 0..100 {
+            fs::write(
+                dir.join(format!("file-with-a-long-name-{n}.txt")),
+                format!("{d}/{n}\n"),
+            )
+            .unwrap();
+        }
+    }
+    git(&donor, &["add", "."]);
+    git(&donor, &["commit", "-m", "many files"]);
+    let head = String::from_utf8(git(&donor, &["rev-parse", "HEAD"]).stdout).unwrap();
+    let dest = f.0.join("many");
+    let report = worktree_add(&donor, &dest, head.trim(), &Options::default()).unwrap();
+    if probe(&f.0).unwrap().cow != "none" {
+        assert!(report.cloned_files >= 3000, "{report:?}");
+    }
+    assert_eq!(
+        fs::read(dest.join("dir29/file-with-a-long-name-99.txt")).unwrap(),
+        b"29/99\n"
+    );
+    assert!(git(&dest, &["status", "--porcelain"]).stdout.is_empty());
 }
 
 #[test]

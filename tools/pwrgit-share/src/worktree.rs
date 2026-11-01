@@ -99,16 +99,85 @@ fn dirty(root: &Path) -> Result<HashSet<PathBuf>> {
         .map(bytes_path)
         .collect()
 }
-fn ignored(root: &Path, path: &Path) -> Result<bool> {
-    let o = git_command(root)
-        .args(["check-ignore", "--no-index", "-q", "--"])
-        .arg(path)
-        .output()?;
-    match o.status.code() {
-        Some(0) => Ok(true),
-        Some(1) => Ok(false),
-        _ => Err(Error::new(1, "git check-ignore failed")),
+/// Run one Git process over a whole batch: stdin is fed from a thread so a
+/// large tree cannot deadlock on full pipes.
+fn git_batch(root: &Path, args: &[&str], input: Vec<u8>, ok: &[i32]) -> Result<Vec<u8>> {
+    use std::io::Write;
+    use std::process::Stdio;
+    check_cancel()?;
+    let mut child = git_command(root)
+        .args(args)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()?;
+    let mut stdin = child.stdin.take().unwrap();
+    let writer = std::thread::spawn(move || stdin.write_all(&input));
+    let out = child.wait_with_output()?;
+    let _ = writer.join();
+    check_cancel()?;
+    if !out.status.code().is_some_and(|c| ok.contains(&c)) {
+        return Err(Error::new(
+            1,
+            format!(
+                "git {}: {}",
+                args.join(" "),
+                String::from_utf8_lossy(&out.stderr).trim()
+            ),
+        ));
     }
+    Ok(out.stdout)
+}
+fn ignored_paths(root: &Path, entries: &[&Entry]) -> Result<HashSet<PathBuf>> {
+    if entries.is_empty() {
+        return Ok(HashSet::new());
+    }
+    let mut input = Vec::new();
+    for e in entries {
+        input.extend_from_slice(e.path.as_os_str().as_encoded_bytes());
+        input.push(0);
+    }
+    // Exit 1 means nothing matched.
+    let out = git_batch(
+        root,
+        &["check-ignore", "--no-index", "-z", "--stdin"],
+        input,
+        &[0, 1],
+    )?;
+    out.split(|b| *b == 0)
+        .filter(|r| !r.is_empty())
+        .map(bytes_path)
+        .collect()
+}
+/// Blob IDs of the given files, in order, from one `git hash-object`.
+fn hash_paths<'a>(root: &Path, paths: impl Iterator<Item = &'a Path>) -> Result<Vec<String>> {
+    let mut input = Vec::new();
+    let mut count = 0;
+    for p in paths {
+        input.extend_from_slice(p.as_os_str().as_encoded_bytes());
+        input.push(b'\n');
+        count += 1;
+    }
+    if count == 0 {
+        return Ok(Vec::new());
+    }
+    let out = git_batch(
+        root,
+        &["hash-object", "--no-filters", "--stdin-paths"],
+        input,
+        &[0],
+    )?;
+    let hashes: Vec<String> = String::from_utf8_lossy(&out)
+        .lines()
+        .map(|l| l.trim().to_owned())
+        .collect();
+    if hashes.len() != count {
+        return Err(Error::new(
+            1,
+            "git hash-object returned the wrong number of IDs",
+        ));
+    }
+    Ok(hashes)
 }
 fn checkout_conversions(root: &Path, tree: &[Entry]) -> Result<HashSet<PathBuf>> {
     check_cancel()?;
@@ -146,23 +215,26 @@ fn checkout_conversions(root: &Path, tree: &[Entry]) -> Result<HashSet<PathBuf>>
     };
     let mut attrs: std::collections::HashMap<PathBuf, Vec<Attr>> = std::collections::HashMap::new();
     // --cached reads the target's attributes from read-tree's index, even
-    // before .gitattributes has been checked out. Bound argv for large trees;
-    // NUL-delimited output preserves arbitrary Git path bytes.
-    for chunk in tree.chunks(128) {
-        let mut args = vec![
-            OsStr::new("check-attr"),
-            OsStr::new("--cached"),
-            OsStr::new("-z"),
-            OsStr::new("--all"),
-            OsStr::new("--"),
-        ];
-        args.extend(chunk.iter().map(|e| e.path.as_os_str()));
-        let out = git(root, &args, 1)?;
-        if out.stdout.is_empty() {
-            continue;
-        }
+    // before .gitattributes has been checked out. NUL-delimited input and
+    // output preserve arbitrary Git path bytes.
+    // One process for the whole tree: paths go in on stdin, NUL-delimited.
+    let mut input = Vec::new();
+    for e in tree {
+        input.extend_from_slice(e.path.as_os_str().as_encoded_bytes());
+        input.push(0);
+    }
+    let out = if tree.is_empty() {
+        Vec::new()
+    } else {
+        git_batch(
+            root,
+            &["check-attr", "--cached", "-z", "--all", "--stdin"],
+            input,
+            &[0],
+        )?
+    };
+    if !out.is_empty() {
         let bytes = out
-            .stdout
             .strip_suffix(b"\0")
             .ok_or_else(|| Error::new(1, "invalid Git attribute response"))?;
         let fields = bytes.split(|b| *b == 0).collect::<Vec<_>>();
@@ -185,6 +257,9 @@ fn checkout_conversions(root: &Path, tree: &[Entry]) -> Result<HashSet<PathBuf>>
     }
     Ok(conversions)
 }
+
+/// One clone worker's staged files and why it stopped early, if it did.
+type Staged<'a> = (Vec<(&'a Entry, PathBuf)>, Option<Error>);
 
 /// One `git check-attr` name/value pair.
 type Attr = (Vec<u8>, Vec<u8>);
@@ -341,16 +416,16 @@ pub fn worktree_add(
     let mut clones = Vec::new();
     if capability.cow != "none" {
         let conversions = checkout_conversions(&dest, &tree)?;
+        let mut candidates = Vec::new();
         for entry in &tree {
             check_cancel()?;
             if !["100644", "100755"].contains(&entry.mode.as_str())
                 || dirty.contains(&entry.path)
                 || conversions.contains(&entry.path)
                 || wanted.get(&entry.path) != Some(&(&entry.oid, &entry.mode))
+                // hash-object --stdin-paths is line-based; Git checks these out.
+                || entry.path.as_os_str().as_encoded_bytes().contains(&b'\n')
             {
-                continue;
-            }
-            if ignored(&donor, &entry.path)? {
                 continue;
             }
             let Ok(m) = regular(&donor, &entry.path) else {
@@ -367,52 +442,113 @@ pub fn worktree_add(
             }
             #[cfg(not(unix))]
             let _ = m;
-            let to = stage.path.join(&entry.path);
-            fs::create_dir_all(to.parent().unwrap())?;
-            if cow::clone_file(&donor.join(&entry.path), &to).is_err() {
-                // EXDEV or any partial clone failure: remove our clones, then
-                // perform one normal checkout. Never silently byte-copy.
-                let _ = fs::remove_file(&to);
-                for p in &clones {
-                    fs::remove_file(p)?;
+            candidates.push(entry);
+        }
+        // One check-ignore and one hash-object for the whole tree, not one
+        // Git process per file.
+        let ignored = ignored_paths(&donor, &candidates)?;
+        candidates.retain(|e| !ignored.contains(&e.path));
+        // Clone, hash and publish in parallel chunks: one hash-object process
+        // per chunk, never one Git process per file.
+        let workers = std::thread::available_parallelism()
+            .map_or(4, |n| n.get())
+            .clamp(1, 8);
+        let size = candidates.len().div_ceil(workers).max(1);
+        let chunks: Vec<&[&Entry]> = candidates.chunks(size).collect();
+        let stage_root = &stage.path;
+        let cloned: Vec<Staged> = std::thread::scope(|s| {
+            let handles: Vec<_> = chunks
+                .iter()
+                .map(|chunk| {
+                    let donor = &donor;
+                    s.spawn(move || {
+                        let mut staged = Vec::new();
+                        for entry in chunk.iter() {
+                            if let Err(e) = check_cancel() {
+                                return (staged, Some(e));
+                            }
+                            let to = stage_root.join(&entry.path);
+                            let ok = fs::create_dir_all(to.parent().unwrap()).is_ok()
+                                && cow::clone_file(&donor.join(&entry.path), &to).is_ok();
+                            if !ok {
+                                let _ = fs::remove_file(&to);
+                                return (staged, Some(Error::new(1, "clone failed")));
+                            }
+                            staged.push((*entry, to));
+                        }
+                        (staged, None)
+                    })
+                })
+                .collect();
+            handles.into_iter().map(|h| h.join().unwrap()).collect()
+        });
+        let stop = cloned.iter().find_map(|(_, e)| e.as_ref().map(|e| e.code));
+        if let Some(code) = stop {
+            // EXDEV or any partial clone failure: remove our clones, then
+            // perform one normal checkout. Never silently byte-copy.
+            for (staged, _) in &cloned {
+                for (_, to) in staged {
+                    let _ = fs::remove_file(to);
                 }
-                clones.clear();
+            }
+            if code == 130 {
+                return Err(Error::new(130, "cancelled"));
+            }
+            report.fallback = "git-checkout".into();
+        } else {
+            let dest_ref = &dest;
+            let hashed: Vec<Result<(Vec<PathBuf>, u64)>> = std::thread::scope(|s| {
+                let handles: Vec<_> = cloned
+                    .iter()
+                    .map(|(staged, _)| {
+                        s.spawn(move || -> Result<(Vec<PathBuf>, u64)> {
+                            let hashes = match hash_paths(
+                                dest_ref,
+                                staged.iter().map(|(_, to)| to.as_path()),
+                            ) {
+                                Ok(h) => h,
+                                Err(e) => {
+                                    for (_, to) in staged {
+                                        let _ = fs::remove_file(to);
+                                    }
+                                    return Err(e);
+                                }
+                            };
+                            let mut published = Vec::new();
+                            let mut mismatches = 0;
+                            for ((entry, to), hash) in staged.iter().zip(hashes) {
+                                if hash == entry.oid {
+                                    let target = dest_ref.join(&entry.path);
+                                    fs::create_dir_all(target.parent().unwrap())?;
+                                    cow::rename_new(to, &target)?;
+                                    published.push(target);
+                                } else {
+                                    fs::remove_file(to)?;
+                                    mismatches += 1;
+                                }
+                            }
+                            Ok((published, mismatches))
+                        })
+                    })
+                    .collect();
+                handles.into_iter().map(|h| h.join().unwrap()).collect()
+            });
+            if let Some(Err(e)) = hashed.iter().find(|r| r.is_err()) {
+                for (published, _) in hashed.iter().flatten() {
+                    for p in published {
+                        let _ = fs::remove_file(p);
+                    }
+                }
+                if e.code == 130 {
+                    return Err(Error::new(130, "cancelled"));
+                }
                 report.cloned_files = 0;
                 report.fallback = "git-checkout".into();
-                break;
-            }
-            let hash = git(
-                &dest,
-                &[
-                    OsStr::new("hash-object"),
-                    OsStr::new("--no-filters"),
-                    OsStr::new("--"),
-                    to.as_os_str(),
-                ],
-                1,
-            );
-            match hash {
-                Ok(hash) if String::from_utf8_lossy(&hash.stdout).trim() == entry.oid => {
-                    let published = dest.join(&entry.path);
-                    fs::create_dir_all(published.parent().unwrap())?;
-                    cow::rename_new(&to, &published)?;
-                    clones.push(published);
-                    report.cloned_files += 1;
-                }
-                Ok(_) => {
-                    fs::remove_file(to)?;
-                    report.hashed_mismatches += 1;
-                }
-                Err(e) if e.code == 130 => return Err(e),
-                Err(_) => {
-                    fs::remove_file(to)?;
-                    for p in &clones {
-                        fs::remove_file(p)?;
-                    }
-                    clones.clear();
-                    report.cloned_files = 0;
-                    report.fallback = "git-checkout".into();
-                    break;
+            } else {
+                for (published, mismatches) in hashed.into_iter().flatten() {
+                    report.cloned_files += published.len() as u64;
+                    report.hashed_mismatches += mismatches;
+                    clones.extend(published);
                 }
             }
         }
