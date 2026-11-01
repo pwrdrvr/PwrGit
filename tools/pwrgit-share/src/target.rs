@@ -476,7 +476,9 @@ struct Pkg {
     lib: Option<(String, PathBuf)>,
     proc_macro: bool,
     build_script: Option<PathBuf>,
-    deps: Vec<usize>,
+    /// Resolved dependencies and the extern crate name the dependent uses
+    /// for each (None when Cargo did not report one).
+    deps: Vec<(usize, Option<String>)>,
     /// Some(reason) when R1 excludes the package outright.
     excluded: Option<&'static str>,
 }
@@ -582,11 +584,19 @@ impl Graph {
             let Some(&i) = node["id"].as_str().and_then(|id| index.get(id)) else {
                 return Err(bad());
             };
+            // `deps` carries the extern name each dependent compiles against;
+            // without it every edge counts as used.
+            let mut named = HashMap::new();
+            for d in node["deps"].as_array().into_iter().flatten() {
+                if let (Some(pkg), Some(name)) = (d["pkg"].as_str(), d["name"].as_str()) {
+                    named.insert(pkg, name.to_owned());
+                }
+            }
             for d in node["dependencies"].as_array().ok_or_else(bad)? {
-                let Some(&j) = d.as_str().and_then(|id| index.get(id)) else {
+                let Some((id, &j)) = d.as_str().and_then(|id| index.get_key_value(id)) else {
                     return Err(bad());
                 };
-                pkgs[i].deps.push(j);
+                pkgs[i].deps.push((j, named.get(id).cloned()));
             }
         }
         Ok(Self { pkgs, by_dir })
@@ -631,6 +641,8 @@ struct Unit {
     files: Vec<PathBuf>,
     /// Directories that must exist in the stage, relative.
     dirs: Vec<PathBuf>,
+    /// Extern names of the dependencies this unit was compiled against.
+    uses: HashSet<String>,
 }
 impl Unit {
     fn display(&self, g: &Graph) -> String {
@@ -893,6 +905,7 @@ fn discover(ctx: &Ctx, locks: &DonorLocks) -> Result<Discovery> {
                         hash: hash.into(),
                         files: files.iter().map(|f| rel(f)).collect(),
                         dirs: vec![rel(&fp), rel(&deps)],
+                        uses: uses(&json),
                     });
                 }
                 Kind::BuildCompile => {
@@ -944,6 +957,7 @@ fn discover(ctx: &Ctx, locks: &DonorLocks) -> Result<Discovery> {
                         hash: hash.into(),
                         files: files.iter().map(|f| rel(f)).collect(),
                         dirs: dirs.iter().map(|d| rel(d)).collect(),
+                        uses: uses(&json),
                     });
                 }
                 Kind::BuildRun => runs.push((rel_profile.clone(), dir.clone(), fp, fp_files, json)),
@@ -1004,9 +1018,20 @@ fn discover(ctx: &Ctx, locks: &DonorLocks) -> Result<Discovery> {
             hash: hash.into(),
             files: files.iter().map(|f| rel(f)).collect(),
             dirs: dirs.iter().map(|d| rel(d)).collect(),
+            uses: uses(&json),
         });
     }
     Ok(out)
+}
+
+/// Dependency names recorded in a unit's fingerprint.
+fn uses(json: &serde_json::Value) -> HashSet<String> {
+    json["deps"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(|d| d[1].as_str().map(str::to_owned))
+        .collect()
 }
 
 /// The fingerprint shapes the gate covers: no RUSTFLAGS, and only the local
@@ -1329,12 +1354,22 @@ fn publish(ctx: &Ctx, found: Discovery) -> Result<SeedReport> {
             rejected.entry(i).or_insert_with(|| "not-built".into());
         }
     }
-    // R3 fixed point: a package that depends on a rejected or unbuilt one
-    // would be rebuilt against different bytes, so it is rejected too.
+    // R3 fixed point: a unit built against a rejected or unbuilt package
+    // would meet different bytes in the recipient, so its whole package is
+    // rejected too. Metadata's resolve over-approximates (optional and
+    // platform edges the build never used), so an edge counts when the
+    // unit's own fingerprint names it, or when Cargo gave no name.
     loop {
-        let more: Vec<usize> = (0..g.pkgs.len())
-            .filter(|i| !rejected.contains_key(i))
-            .filter(|i| g.pkgs[*i].deps.iter().any(|d| rejected.contains_key(d)))
+        let more: Vec<usize> = staged
+            .iter()
+            .map(|(i, _)| &found.units[*i])
+            .filter(|u| !rejected.contains_key(&u.pkg))
+            .filter(|u| {
+                g.pkgs[u.pkg].deps.iter().any(|(d, name)| {
+                    rejected.contains_key(d) && name.as_ref().is_none_or(|n| u.uses.contains(n))
+                })
+            })
+            .map(|u| u.pkg)
             .collect();
         if more.is_empty() {
             break;
@@ -1556,7 +1591,7 @@ mod tests {
                 {"id": "dep", "dependencies": []},
                 {"id": "vend", "dependencies": []},
                 {"id": "gitdep", "dependencies": []},
-                {"id": "uses", "dependencies": ["dep"]},
+                {"id": "uses", "dependencies": ["dep"], "deps": [{"name": "dep_renamed", "pkg": "dep"}]},
             ]},
         });
         let g = Graph::new(&meta, &fs::canonicalize(&home).unwrap()).unwrap();
@@ -1572,7 +1607,8 @@ mod tests {
                 None
             ]
         );
-        assert_eq!(g.pkgs[5].deps, [2]);
+        assert_eq!(g.pkgs[5].deps, [(2, Some("dep_renamed".into()))]);
+        assert_eq!(g.pkgs[0].deps[0], (1, None));
         let src = fs::canonicalize(reg.join("dep-1.0.0/src/lib.rs")).unwrap();
         assert_eq!(g.owner(&src), Some(2));
         let vendored = fs::canonicalize(t.path.join("ws/vendor/vend-1.0.0/src/lib.rs")).unwrap();
