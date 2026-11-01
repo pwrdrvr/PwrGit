@@ -23,6 +23,8 @@ jobs:
         run: echo "CARGO_HOME=${RUNNER_TEMP}/pwrgit-share-cargo" >> "$GITHUB_ENV"
       - name: Install pinned stable toolchain
         run: rustup toolchain install 1.94.1 --profile minimal --component rustfmt --component clippy
+      - name: Install the Cargo the seeding gate proves
+        run: rustup toolchain install 1.97.1 --profile minimal
       - run: cargo fmt --check
       - run: cargo test --locked -- --nocapture
       - run: cargo clippy --locked --all-targets -- -D warnings

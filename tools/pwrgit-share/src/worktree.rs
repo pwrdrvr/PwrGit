@@ -320,11 +320,22 @@ fn post_checkout(root: &Path) -> Result<()> {
 
 /// Register only through Git. Returns success after checkout and its hook.
 /// Donor is also the repository in which Git registers the destination.
+/// Target seeding never fails the worktree: a busy donor or a failed check
+/// is reported as a reason with zero units.
 pub fn worktree_add(
     donor: &Path,
     dest: &Path,
     commit: &str,
     opts: &Options,
+) -> Result<WorktreeReport> {
+    worktree_add_with(donor, dest, commit, opts, &target::SeedEnv::default())
+}
+pub(crate) fn worktree_add_with(
+    donor: &Path,
+    dest: &Path,
+    commit: &str,
+    opts: &Options,
+    seed: &target::SeedEnv,
 ) -> Result<WorktreeReport> {
     check_cancel()?;
     let donor = fs::canonicalize(donor)?;
@@ -348,8 +359,12 @@ pub fn worktree_add(
         return Err(Error::new(2, "commit-ish cannot be an option"));
     }
     // Hold the shared locks through checkout and seeding, including fallback.
+    // A donor that is building right now is skipped, not waited for.
     let locks = if opts.seed_target {
-        Some(target::DonorLocks::acquire(&donor.join("target"))?)
+        match target::DonorLocks::acquire(&donor.join("target")) {
+            Err(e) if e.code == 130 => return Err(e),
+            r => Some(r),
+        }
     } else {
         None
     };
@@ -589,11 +604,19 @@ pub fn worktree_add(
         } else if !donor.join("Cargo.toml").is_file() || !donor.join("target").is_dir() {
             report.target_skipped = Some("layout-unknown".into());
         } else {
-            report.target = Some(target::seed_locked(
-                &donor.join("target"),
-                &dest.join("target"),
-                locks.as_ref().unwrap(),
-            )?);
+            report.target = Some(match locks.as_ref().unwrap() {
+                Err(e) => target::lock_skip(e),
+                Ok(locks) => match target::seed_locked(
+                    &donor.join("target"),
+                    &dest.join("target"),
+                    locks,
+                    seed,
+                ) {
+                    Ok(r) => r,
+                    Err(e) if e.code == 130 => return Err(e),
+                    Err(e) => target::SeedReport::skipped("seed-error", Some(e.detail)),
+                },
+            });
         }
     }
     check_cancel()?;

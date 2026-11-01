@@ -97,6 +97,7 @@ name = "pwrgit-share"
 version = "0.1.0"
 dependencies = [
  "libc",
+ "memchr",
  "proptest",
  "serde",
  "serde_json",

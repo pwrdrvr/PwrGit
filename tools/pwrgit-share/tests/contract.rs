@@ -174,53 +174,90 @@ fn cli_shapes_errors_and_no_unknown_passthrough() {
 }
 #[test]
 #[cfg(unix)]
-fn donor_lock_exit_three_leaves_no_checkout() {
+fn busy_donor_is_a_skip_reason_and_the_worktree_still_succeeds() {
+    // R6: a donor that is building right now is never waited on and never
+    // fails the worktree. Legacy and Cargo 1.96+ lock layouts both count.
     use std::os::fd::AsRawFd;
-    let f = Fixture::new();
-    let donor = f.repo();
-    fs::create_dir_all(donor.join("target/debug")).unwrap();
-    let lock = fs::File::create(donor.join("target/debug/.cargo-lock")).unwrap();
-    assert_eq!(
-        unsafe { libc::flock(lock.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) },
-        0
-    );
-    let dest = f.0.join("locked");
-    let o = cli(
-        &donor,
-        &[
-            "worktree",
-            "add",
-            "--seed-target",
-            "-b",
-            "locked",
-            dest.to_str().unwrap(),
-            "HEAD",
-        ],
-    );
-    assert_eq!(
-        o.status.code(),
-        Some(3),
-        "{}",
-        String::from_utf8_lossy(&o.stderr)
-    );
-    assert!(!dest.exists());
-    assert!(
-        !String::from_utf8_lossy(&git(&donor, &["worktree", "list", "--porcelain"]).stdout)
-            .contains(dest.to_str().unwrap())
-    );
-    let o = cli(
-        &donor,
-        &[
-            "target",
-            "seed",
-            "--from",
-            donor.join("target").to_str().unwrap(),
-            "--to",
-            f.0.join("target").to_str().unwrap(),
-            "--json",
-        ],
-    );
-    assert_eq!(o.status.code(), Some(3));
+    for (name, mode) in [
+        (".cargo-lock", libc::LOCK_EX),
+        (".cargo-build-lock", libc::LOCK_EX),
+        (".cargo-artifact-lock", libc::LOCK_EX),
+    ] {
+        let f = Fixture::new();
+        let donor = f.repo();
+        fs::write(
+            donor.join("Cargo.toml"),
+            "[package]\nname='fixture'\nversion='0.1.0'\n",
+        )
+        .unwrap();
+        fs::create_dir_all(donor.join("target/debug")).unwrap();
+        // Cargo 1.96+ keeps the legacy lock shared while it builds.
+        let legacy = fs::File::create(donor.join("target/debug/.cargo-lock")).unwrap();
+        let legacy_mode = if name == ".cargo-lock" {
+            mode
+        } else {
+            libc::LOCK_SH
+        };
+        assert_eq!(
+            unsafe { libc::flock(legacy.as_raw_fd(), legacy_mode | libc::LOCK_NB) },
+            0
+        );
+        let _held = (name != ".cargo-lock").then(|| {
+            let current = fs::File::create(donor.join("target/debug").join(name)).unwrap();
+            assert_eq!(
+                unsafe { libc::flock(current.as_raw_fd(), mode | libc::LOCK_NB) },
+                0
+            );
+            current
+        });
+        let dest = f.0.join("busy");
+        let o = cli(
+            &donor,
+            &[
+                "worktree",
+                "add",
+                "--seed-target",
+                "-b",
+                "busy",
+                dest.to_str().unwrap(),
+                "HEAD",
+            ],
+        );
+        assert!(
+            o.status.success(),
+            "{name}: {}",
+            String::from_utf8_lossy(&o.stderr)
+        );
+        let v: serde_json::Value = serde_json::from_slice(&o.stdout).unwrap();
+        if v["fallback"] == "none" {
+            assert_eq!(v["target"]["reason"], "donor-busy", "{name}: {v}");
+            assert_eq!(v["target"]["unitsSeeded"], 0);
+        } else {
+            assert_eq!(v["targetSkipped"], "cow-unavailable");
+        }
+        assert_eq!(fs::read(dest.join("clean")).unwrap(), b"original\n");
+        assert!(!dest.join("target").exists());
+        assert!(
+            String::from_utf8_lossy(&git(&donor, &["worktree", "list", "--porcelain"]).stdout)
+                .contains(dest.to_str().unwrap())
+        );
+        let o = cli(
+            &donor,
+            &[
+                "target",
+                "seed",
+                "--from",
+                donor.join("target").to_str().unwrap(),
+                "--to",
+                dest.join("target").to_str().unwrap(),
+                "--json",
+            ],
+        );
+        assert!(o.status.success(), "{}", String::from_utf8_lossy(&o.stderr));
+        let v: serde_json::Value = serde_json::from_slice(&o.stdout).unwrap();
+        assert_eq!(v["reason"], "donor-busy");
+        assert!(!dest.join("target").exists());
+    }
 }
 #[cfg(unix)]
 fn git_wrapper(f: &Fixture, body: &str) -> PathBuf {
@@ -435,17 +472,26 @@ fn branch_argument_keeps_gits_branch_semantics() {
 }
 #[test]
 #[cfg(unix)]
-fn unproven_cargo_and_mismatched_toolchain_return_zero_without_target() {
+fn unproven_mismatched_and_overridden_toolchains_seed_nothing() {
     use std::os::unix::fs::PermissionsExt;
     let f = Fixture::new();
     let donor = f.repo();
-    fs::write(
-        donor.join("Cargo.toml"),
-        "[package]\nname='fixture'\nversion='0.1.0'\n",
-    )
-    .unwrap();
+    let manifest = "[package]\nname='fixture'\nversion='0.1.0'\n";
+    fs::write(donor.join("Cargo.toml"), manifest).unwrap();
     fs::create_dir_all(donor.join("target/debug")).unwrap();
-    let rustc = Command::new("rustc").arg("-vV").output().unwrap();
+    let recipient = f.0.join("recipient");
+    fs::create_dir(&recipient).unwrap();
+    fs::write(recipient.join("Cargo.toml"), manifest).unwrap();
+    let home = f.0.join("temp-cargo-home");
+    fs::create_dir(&home).unwrap();
+    // The rustc the seeder will see: the directory's toolchain, not the one
+    // rustup exported to this test process.
+    let rustc = Command::new("rustc")
+        .current_dir(&recipient)
+        .env_remove("RUSTUP_TOOLCHAIN")
+        .arg("-vV")
+        .output()
+        .unwrap();
     let rustc = String::from_utf8(rustc.stdout).unwrap();
     let commit = rustc
         .lines()
@@ -458,27 +504,26 @@ fn unproven_cargo_and_mismatched_toolchain_return_zero_without_target() {
     .unwrap();
     let bin = f.0.join("fake-cargo");
     fs::create_dir(&bin).unwrap();
-    let meta = serde_json::json!({"workspace_members":["fixture"],"packages":[{"id":"fixture","name":"fixture","source":null},{"id":"dep","name":"dep","source":"registry+fixture"}]});
+    // The recipient directory can pin a different Cargo than the donor's.
     fs::write(
         bin.join("cargo"),
-        format!(
-            r#"#!/bin/sh
+        r#"#!/bin/sh
 case "$1" in
-  --version) echo 'cargo 9.99.9 (unproven)';;
-  metadata) case "$*" in *--filter-platform*) echo '{}';; *) exit 91;; esac;;
-  *) exit 1;;
+  --version) case "$(pwd -P)" in
+      */recipient) echo "${FAKE_RECIPIENT_CARGO:-cargo 9.99.9 (unproven)}";;
+      *) echo 'cargo 9.99.9 (unproven)';;
+    esac;;
+  *) exit 91;;
 esac
 "#,
-            meta
-        ),
     )
     .unwrap();
     fs::set_permissions(bin.join("cargo"), fs::Permissions::from_mode(0o755)).unwrap();
-    let dest = f.0.join("unproven");
-    let invoke = || {
-        Command::new(env!("CARGO_BIN_EXE_pwrgit-share"))
-            .current_dir(&donor)
-            .env("CARGO_HOME", f.0.join("temp-cargo-home"))
+    let dest = recipient.join("target");
+    let invoke = |env: &[(&str, &str)]| {
+        let mut cmd = Command::new(env!("CARGO_BIN_EXE_pwrgit-share"));
+        cmd.current_dir(&donor)
+            .env("CARGO_HOME", &home)
             .env(
                 "PATH",
                 format!("{}:{}", bin.display(), std::env::var("PATH").unwrap()),
@@ -491,76 +536,57 @@ esac
                 "--to",
                 dest.to_str().unwrap(),
                 "--json",
-            ])
-            .output()
-            .unwrap()
+            ]);
+        for (k, v) in env {
+            cmd.env(k, v);
+        }
+        let o = cmd.output().unwrap();
+        assert!(o.status.success(), "{}", String::from_utf8_lossy(&o.stderr));
+        let v: serde_json::Value = serde_json::from_slice(&o.stdout).unwrap();
+        assert_eq!(v["unitsSeeded"], 0);
+        assert_eq!(v["copyCount"], 0);
+        assert!(!dest.exists());
+        v
     };
-    let o = invoke();
-    assert!(o.status.success(), "{}", String::from_utf8_lossy(&o.stderr));
-    let v: serde_json::Value = serde_json::from_slice(&o.stdout).unwrap();
-    assert_eq!(v["unitsSeeded"], 0);
-    assert_eq!(v["copyCount"], 0);
-    assert!(!dest.exists());
-    if probe(&f.0).unwrap().cow != "none" {
-        assert_eq!(v["reason"], "fingerprint-unproven");
-        assert_eq!(v["unitsSkipped"]["fingerprint-unproven"], 1);
+    let cow = probe(&f.0).unwrap().cow != "none";
+    let cases: [(&[(&str, &str)], &str); 3] = [
+        (&[], "fingerprint-unproven"),
+        (
+            &[("FAKE_RECIPIENT_CARGO", "cargo 9.99.8 (recipient pin)")],
+            "toolchain-mismatch",
+        ),
+        (&[("RUSTFLAGS", "--cfg pwrgit_share_probe")], "env-override"),
+    ];
+    for (env, reason) in cases {
+        let v = invoke(env);
+        if cow {
+            assert_eq!(v["reason"], reason, "{v}");
+        }
     }
     fs::write(donor.join("target/.rustc_info.json"), "{}").unwrap();
-    let o = invoke();
-    assert!(o.status.success());
-    let v: serde_json::Value = serde_json::from_slice(&o.stdout).unwrap();
-    assert_eq!(v["unitsSeeded"], 0);
-    assert!(!dest.exists());
-    if probe(&f.0).unwrap().cow != "none" {
+    let v = invoke(&[]);
+    if cow {
         assert_eq!(v["reason"], "toolchain-mismatch");
     }
+    // Never seed into, or merge with, an existing target.
+    fs::create_dir(&dest).unwrap();
+    fs::write(dest.join("keep"), "mine").unwrap();
+    let o = cli(
+        &donor,
+        &[
+            "target",
+            "seed",
+            "--from",
+            donor.join("target").to_str().unwrap(),
+            "--to",
+            dest.to_str().unwrap(),
+            "--json",
+        ],
+    );
+    let v: serde_json::Value = serde_json::from_slice(&o.stdout).unwrap();
+    assert_eq!(v["reason"], "target-exists");
+    assert_eq!(fs::read_dir(&dest).unwrap().count(), 1);
 }
-
-#[test]
-#[cfg(unix)]
-fn newer_cargo_exclusive_locks_are_checked_with_legacy_shared_lock() {
-    use std::os::fd::AsRawFd;
-    for name in [".cargo-build-lock", ".cargo-artifact-lock"] {
-        let f = Fixture::new();
-        let donor = f.repo();
-        fs::create_dir_all(donor.join("target/debug")).unwrap();
-        let legacy = fs::File::create(donor.join("target/debug/.cargo-lock")).unwrap();
-        assert_eq!(
-            unsafe { libc::flock(legacy.as_raw_fd(), libc::LOCK_SH | libc::LOCK_NB) },
-            0
-        );
-        let current = fs::File::create(donor.join("target/debug").join(name)).unwrap();
-        assert_eq!(
-            unsafe { libc::flock(current.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) },
-            0
-        );
-        let dest = f.0.join("newer-cargo");
-        let o = cli(
-            &donor,
-            &[
-                "worktree",
-                "add",
-                "--seed-target",
-                "-b",
-                "newer-cargo",
-                dest.to_str().unwrap(),
-                "HEAD",
-            ],
-        );
-        assert_eq!(
-            o.status.code(),
-            Some(3),
-            "{name}: {}",
-            String::from_utf8_lossy(&o.stderr)
-        );
-        assert!(!dest.exists());
-        assert!(
-            !String::from_utf8_lossy(&git(&donor, &["worktree", "list", "--porcelain"]).stdout)
-                .contains(dest.to_str().unwrap())
-        );
-    }
-}
-
 #[test]
 fn inherited_repository_overrides_never_select_the_donor_for_destination_commands() {
     for fallback in [false, true] {
