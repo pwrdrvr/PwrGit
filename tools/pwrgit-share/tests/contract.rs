@@ -708,6 +708,54 @@ fn target_attributes_and_autocrlf_match_an_ordinary_checkout() {
 }
 
 #[test]
+fn lf_line_ending_attributes_still_clone() {
+    // `* text=auto eol=lf` (PwrRoute's .gitattributes) and plain `text` with
+    // LF output leave checkout bytes equal to the blob, so they must clone.
+    for attr in [
+        "* text=auto eol=lf\n",
+        "* text\n",
+        "* eol=lf\n",
+        "* -text\n",
+    ] {
+        let f = Fixture::new();
+        let donor = f.repo();
+        git(&donor, &["config", "core.autocrlf", "false"]);
+        fs::write(donor.join(".gitattributes"), attr).unwrap();
+        fs::write(donor.join("clean"), "line one\nline two\n").unwrap();
+        git(&donor, &["add", ".gitattributes", "clean"]);
+        git(&donor, &["commit", "-m", "lf attributes"]);
+        let head = String::from_utf8(git(&donor, &["rev-parse", "HEAD"]).stdout).unwrap();
+        let plain = f.0.join("plain");
+        git(
+            &donor,
+            &[
+                "worktree",
+                "add",
+                "--detach",
+                plain.to_str().unwrap(),
+                head.trim(),
+            ],
+        );
+        let dest = f.0.join("shared");
+        let report = worktree_add(&donor, &dest, head.trim(), &Options::default()).unwrap();
+        if probe(&f.0).unwrap().cow != "none" {
+            assert!(report.cloned_files >= 2, "{attr:?}: {report:?}");
+        }
+        for name in ["clean", ".gitattributes"] {
+            assert_eq!(
+                fs::read(dest.join(name)).unwrap(),
+                fs::read(plain.join(name)).unwrap(),
+                "{attr:?} {name}"
+            );
+        }
+        assert!(
+            git(&dest, &["status", "--porcelain"]).stdout.is_empty(),
+            "{attr:?}"
+        );
+    }
+}
+
+#[test]
 #[cfg(unix)]
 fn post_checkout_matches_git_arguments_cwd_and_materialized_files() {
     use std::os::unix::fs::PermissionsExt;

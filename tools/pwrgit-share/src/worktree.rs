@@ -127,7 +127,24 @@ fn checkout_conversions(root: &Path, tree: &[Entry]) -> Result<HashSet<PathBuf>>
         // Git when automatic line-ending conversion is enabled.
         return Ok(tree.iter().map(|e| e.path.clone()).collect());
     }
-    let mut conversions = HashSet::new();
+    // Checkout only rewrites line endings when the output EOL is CRLF. With no
+    // eol attribute, text files take core.eol (native: LF except on Windows).
+    let core_eol = git_command(root)
+        .args(["config", "--get", "core.eol"])
+        .output()?;
+    check_cancel()?;
+    if !matches!(core_eol.status.code(), Some(0 | 1)) {
+        return Err(Error::new(1, "cannot read core.eol"));
+    }
+    let core_eol = String::from_utf8_lossy(&core_eol.stdout)
+        .trim()
+        .to_ascii_lowercase();
+    let native_lf = match core_eol.as_str() {
+        "lf" => true,
+        "" | "native" => !cfg!(windows),
+        _ => false,
+    };
+    let mut attrs: std::collections::HashMap<PathBuf, Vec<Attr>> = std::collections::HashMap::new();
     // --cached reads the target's attributes from read-tree's index, even
     // before .gitattributes has been checked out. Bound argv for large trees;
     // NUL-delimited output preserves arbitrary Git path bytes.
@@ -151,28 +168,55 @@ fn checkout_conversions(root: &Path, tree: &[Entry]) -> Result<HashSet<PathBuf>>
         let fields = bytes.split(|b| *b == 0).collect::<Vec<_>>();
         let mut triples = fields.chunks_exact(3);
         for triple in &mut triples {
-            // --all omits unspecified attributes. Skip even explicitly unset
-            // conversion attributes: the CLI renders -filter and a driver
-            // literally named "unset" identically, so values cannot prove it
-            // safe to bypass Git's conversion machinery.
-            if [
-                b"text".as_slice(),
-                b"eol".as_slice(),
-                b"filter".as_slice(),
-                b"ident".as_slice(),
-                b"working-tree-encoding".as_slice(),
-                b"crlf".as_slice(),
-            ]
-            .contains(&triple[1])
-            {
-                conversions.insert(bytes_path(triple[0])?);
-            }
+            attrs
+                .entry(bytes_path(triple[0])?)
+                .or_default()
+                .push((triple[1].to_vec(), triple[2].to_vec()));
         }
         if !triples.remainder().is_empty() {
             return Err(Error::new(1, "invalid Git attribute response"));
         }
     }
+    let mut conversions = HashSet::new();
+    for (path, list) in attrs {
+        if converts_on_checkout(&list, native_lf) {
+            conversions.insert(path);
+        }
+    }
     Ok(conversions)
+}
+
+/// One `git check-attr` name/value pair.
+type Attr = (Vec<u8>, Vec<u8>);
+
+/// Whether Git's checkout would write bytes other than the blob's. --all
+/// omits unspecified attributes. Any filter, ident, encoding or legacy crlf
+/// attribute stays with Git, even when unset: the CLI renders -filter and a
+/// driver literally named "unset" identically. Line endings are only
+/// rewritten when the output EOL is CRLF, so LF output keeps the clone.
+fn converts_on_checkout(list: &[Attr], native_lf: bool) -> bool {
+    let get = |name: &[u8]| {
+        list.iter()
+            .find(|(n, _)| n.as_slice() == name)
+            .map(|(_, v)| v.as_slice())
+    };
+    let always = [
+        b"filter".as_slice(),
+        b"ident".as_slice(),
+        b"working-tree-encoding".as_slice(),
+        b"crlf".as_slice(),
+    ];
+    if always.iter().any(|name| get(name).is_some()) {
+        return true;
+    }
+    match get(b"eol") {
+        Some(b"lf") => false,
+        Some(_) => true,
+        None => match get(b"text") {
+            None | Some(b"unset") => false,
+            Some(_) => !native_lf,
+        },
+    }
 }
 
 fn post_checkout(root: &Path) -> Result<()> {
