@@ -36,7 +36,12 @@ const bridge = {
 document.documentElement.dataset["theme"] = "light";
 document.documentElement.dataset["platform"] = "darwin";
 const ready = (async () => {
-  await Promise.all(['400 13px "Geist Sans"', '600 13px "Geist Sans"', '500 12px "Geist Mono"'].map((font) => document.fonts.load(font)));
+  // Every face the dialog's cards, receipt and status draw with: 650 sans
+  // resolves to the 700 face, and each weight is its own lazy face.
+  await Promise.all([
+    '400 13px "Geist Sans"', '500 11px "Geist Sans"', '600 13px "Geist Sans"', '700 12px "Geist Sans"',
+    '400 11px "Geist Mono"', '500 10px "Geist Mono"', '600 11px "Geist Mono"'
+  ].map((font) => document.fonts.load(font)));
   await document.fonts.ready;
   createRoot(document.getElementById("root")!).render(<MaintenanceDialog profileId="demo" platform="darwin"
     onClose={() => undefined} onRemoveWorktrees={async () => ({ removed: [], keptDirty: [], failed: [] })} />);

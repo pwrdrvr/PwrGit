@@ -3,8 +3,7 @@ import {
   useEffect,
   useMemo,
   useRef,
-  useState,
-  type ReactNode
+  useState
 } from "react";
 import {
   BRANCH_CLEANUP_KEEP_DAYS,
@@ -27,6 +26,7 @@ import {
 import { ReclaimDiskPanel } from "./ReclaimDiskPanel";
 import { daysLabel, FinishedAfterSelect, MaintenanceRulesApplied } from "./MaintenancePlan";
 import { StatusMark } from "./BulkSyncStatus";
+import { DetailsToggle, Icon, ProblemCard, Reason } from "./MaintenanceProblem";
 import {
   describeBytes,
   emptyReviewCopy,
@@ -703,24 +703,6 @@ type RemovalFailure = RemoveWorktreesOutcome["failed"][number] & {
   candidate: PruneCandidate;
 };
 
-/** Lucide icons, exact paths, drawn with currentColor. */
-function Icon({ name }: { name: "alert" | "info" | "log" | "folder" | "retry" | "chev" | "chevd" }) {
-  const paths: Record<typeof name, ReactNode> = {
-    alert: <><path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3" /><path d="M12 9v4" /><path d="M12 17h.01" /></>,
-    info: <><circle cx="12" cy="12" r="10" /><path d="M12 16v-4" /><path d="M12 8h.01" /></>,
-    log: <><path d="M15 12h-5" /><path d="M15 8h-5" /><path d="M19 17V5a2 2 0 0 0-2-2H4" /><path d="M8 21h12a2 2 0 0 0 2-2v-1a1 1 0 0 0-1-1H11a1 1 0 0 0-1 1v1a2 2 0 1 1-4 0V5a2 2 0 1 0-4 0v2a1 1 0 0 0 1 1h3" /></>,
-    folder: <path d="m6 14 1.5-2.9A2 2 0 0 1 9.24 10H20a2 2 0 0 1 1.94 2.5l-1.54 6a2 2 0 0 1-1.95 1.5H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h3.9a2 2 0 0 1 1.69.9l.81 1.2a2 2 0 0 0 1.67.9H18a2 2 0 0 1 2 2v2" />,
-    retry: <><path d="M21 12a9 9 0 1 1-9-9c2.52 0 4.93 1 6.74 2.74L21 8" /><path d="M21 3v5h-5" /></>,
-    chev: <path d="m9 18 6-6-6-6" />,
-    chevd: <path d="m6 9 6 6 6-6" />
-  };
-  return (
-    <svg className="maintenance__problem-icon" viewBox="0 0 24 24" aria-hidden="true">
-      {paths[name]}
-    </svg>
-  );
-}
-
 function RemovalActivity({
   removing,
   candidates
@@ -747,17 +729,6 @@ function RemovalActivity({
         </span>
       </div>
     </div>
-  );
-}
-
-/** The sentence, with the lead phrase main chose set in bold. */
-function Reason({ message, lead }: { message: string; lead: string | undefined }) {
-  if (lead === undefined || !message.startsWith(lead)) return <p>{message}</p>;
-  return (
-    <p>
-      <b>{lead}</b>
-      {message.slice(lead.length)}
-    </p>
   );
 }
 
@@ -792,15 +763,7 @@ function ProblemRow({
           </button>
         )}
         {failure.detail !== undefined && (
-          <button
-            type="button"
-            className="maintenance__problem-toggle"
-            aria-expanded={open}
-            onClick={() => setOpen((was) => !was)}
-          >
-            <Icon name={open ? "chevd" : "chev"} />
-            Details
-          </button>
+          <DetailsToggle open={open} onToggle={() => setOpen((was) => !was)} />
         )}
       </div>
       {open && failure.detail !== undefined && (
@@ -839,13 +802,10 @@ function RemovalFailures({
     ? `${one ? "Its folder is" : "Their folders are"} still on disk. The other ${removedCount} ${removedCount === 1 ? "was" : "were"} removed${canContinue ? ", and you can continue" : ""}.`
     : `Nothing was removed. You can retry${canContinue ? `, or continue without ${one ? "it" : "them"}` : ""}.`;
   return (
-    <section className="maintenance__problem" role="alert">
-      <div className="maintenance__problem-head">
-        <span className="maintenance__problem-mark"><Icon name="alert" /></span>
-        <div>
-          <strong>{one ? "1 worktree wasn’t removed" : `${count} worktrees weren’t removed`}</strong>
-          <span>{sub}</span>
-        </div>
+    <ProblemCard
+      headline={one ? "1 worktree wasn’t removed" : `${count} worktrees weren’t removed`}
+      sub={sub}
+      action={
         <button
           type="button"
           className="maintenance__problem-log"
@@ -854,17 +814,16 @@ function RemovalFailures({
           <Icon name="log" />
           View log
         </button>
-      </div>
-      <ul>
-        {failures.map((failure) => (
-          <ProblemRow
-            key={failure.candidate.worktreeId}
-            failure={failure}
-            onRetry={retryable(failure) ? () => onRetry([failure.candidate.worktreeId]) : null}
-          />
-        ))}
-      </ul>
-    </section>
+      }
+    >
+      {failures.map((failure) => (
+        <ProblemRow
+          key={failure.candidate.worktreeId}
+          failure={failure}
+          onRetry={retryable(failure) ? () => onRetry([failure.candidate.worktreeId]) : null}
+        />
+      ))}
+    </ProblemCard>
   );
 }
 
@@ -872,32 +831,23 @@ function RemovalFailures({
 function KeptForChanges({ kept }: { kept: PruneCandidate[] }) {
   const one = kept.length === 1;
   return (
-    <section className="maintenance__problem is-note" role="status">
-      <div className="maintenance__problem-head">
-        <span className="maintenance__problem-mark"><Icon name="info" /></span>
-        <div>
-          <strong>
-            {one ? "1 worktree kept: it has uncommitted changes" : `${kept.length} worktrees kept: they have uncommitted changes`}
-          </strong>
-          <span>
-            You chose to keep {one ? "it" : "them"} when asked. Nothing in {one ? "it was" : "them was"} deleted, and {one ? "it’s" : "they’re"} still in the sidebar.
-          </span>
-        </div>
-      </div>
-      <ul>
-        {kept.map((candidate) => (
-          <li className="maintenance__problem-row" key={candidate.worktreeId}>
-            <strong><span>{candidate.repoName}</span> · {candidate.branch}</strong>
-            <small className="selectable">{candidate.path}</small>
-            <div className="maintenance__problem-actions">
-              <button type="button" onClick={() => revealPath(candidate.path)}>
-                <Icon name="folder" />
-                {revealLabel(currentPlatform())}
-              </button>
-            </div>
-          </li>
-        ))}
-      </ul>
-    </section>
+    <ProblemCard
+      tone="note"
+      headline={one ? "1 worktree kept: it has uncommitted changes" : `${kept.length} worktrees kept: they have uncommitted changes`}
+      sub={<>You chose to keep {one ? "it" : "them"} when asked. Nothing in {one ? "it was" : "them was"} deleted, and {one ? "it’s" : "they’re"} still in the sidebar.</>}
+    >
+      {kept.map((candidate) => (
+        <li className="maintenance__problem-row" key={candidate.worktreeId}>
+          <strong><span>{candidate.repoName}</span> · {candidate.branch}</strong>
+          <small className="selectable">{candidate.path}</small>
+          <div className="maintenance__problem-actions">
+            <button type="button" onClick={() => revealPath(candidate.path)}>
+              <Icon name="folder" />
+              {revealLabel(currentPlatform())}
+            </button>
+          </div>
+        </li>
+      ))}
+    </ProblemCard>
   );
 }

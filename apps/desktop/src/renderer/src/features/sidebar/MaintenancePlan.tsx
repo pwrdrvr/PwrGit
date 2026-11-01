@@ -8,6 +8,8 @@ import {
   type WorktreeFinishedAfterDays
 } from "@pwrgit/shared";
 import { StatusGlyph } from "./BulkSyncStatus";
+import type { StepIssue } from "./maintenance-issues";
+import { StepLine } from "./MaintenanceProblem";
 
 export type MaintenancePlan = { worktrees: boolean; branches: boolean; gc: boolean };
 export type StepKey = keyof MaintenancePlan;
@@ -16,7 +18,9 @@ export type StepResult = {
   summary: string;
   detail?: string;
   items?: { label: string; detail: string }[];
-  issues?: { label: string; detail: string }[];
+  /** What the step left behind, one row per branch or repository. Carried
+   *  whatever the state: a skipped deletion can follow a failed review. */
+  issues?: StepIssue[];
 };
 
 const steps: { key: StepKey; title: string }[] = [
@@ -59,11 +63,14 @@ export function MaintenanceSteps({ plan, current, results, branchMode, gcMode, p
   return <div className="maintenance__steps" aria-label="Maintenance steps">
     {steps.map((step, index) => {
       const result = results[step.key];
-      const state = result?.state === "failed" || result?.state === "partial" ? "stop" : result?.state === "done" ? "done" :
-        !plan[step.key] || result?.state === "skipped" ? "off" : current === step.key ? "on" :
-          current === "done" || index < currentIndex ? "off" : "next";
-      const detail = result?.summary ?? (state === "off" ? current === "done" && plan[step.key] ? "Not started" : "Skipped" :
-        current === step.key ? progress ?? "Running" : step.key === "worktrees" ? "next · pauses for review" :
+      // The running step is live whatever an earlier attempt recorded, and
+      // shows its progress, not a stale summary.
+      const state = current === step.key ? "on" :
+        result?.state === "failed" || result?.state === "partial" || (result?.issues?.length ?? 0) > 0 ? "stop" :
+          result?.state === "done" ? "done" : !plan[step.key] || result?.state === "skipped" ? "off" :
+            current === "done" || index < currentIndex ? "off" : "next";
+      const detail = state === "on" ? progress ?? "Running" : result?.summary !== undefined ? <StepLine line={result.summary} /> : (state === "off" ? current === "done" && plan[step.key] ? "Not started" : "Skipped" :
+        step.key === "worktrees" ? "next · pauses for review" :
           step.key === "branches" ? `next · ${branchMode === "review" ? "pauses for review" : "deletes without asking"}` :
             `last · ${gcMode}`);
       return <div key={step.key} className={`maintenance__step is-${state}`}>
