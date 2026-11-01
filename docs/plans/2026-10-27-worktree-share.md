@@ -220,8 +220,8 @@ Commands:
 
 ```text
 pwrgit-share probe --json <directory>
-pwrgit-share worktree add [--seed-target] [--donor <worktree>] [--json] [--] <path> <commit-ish>
-pwrgit-share target seed --from <donor-target> --to <dest-target> --json
+pwrgit-share worktree add [--seed-cargo[=bounded|strict]] [--donor <worktree>] [--json] [--] <path> <commit-ish>
+pwrgit-share cargo seed [--strict] --from <donor-target> --to <dest-target> --json
 pwrgit-share measure --json <path>
 ```
 
@@ -229,9 +229,11 @@ pwrgit-share measure --json <path>
 
 `probe` prints `{"cow":"apfs"|"ficlone"|"none","detail":"..."}`.
 
-`worktree add` JSON includes `fallback` (`none` or `git-checkout`), `clonedFiles`, `checkoutFiles`, `hashedMismatches`, and, when `--seed-target` is set, a `target` object or a `targetSkipped` reason. Exit 0 means the worktree exists and is a valid checkout, even when sharing fell back. Exit 3 means the donor target was locked and `--seed-target` was requested; the worktree is removed if this command created it, so a locked donor does not leave a surprise checkout. Exit 4 is a Git failure before any private files were written. Exit 130 is cancellation; staging directories and a worktree this command registered are removed.
+The seeding commands are named for Cargo, not for `target/`: "target" is Cargo's folder name and collides with Cargo's own `--target`, and the rules are Cargo-specific. Another ecosystem would get its own seeder (for example `pnpm seed`). `tools/pwrgit-share/README.md` is the authoritative contract; this section records what PwrGit relies on.
 
-`target seed` takes a shared flock on each donor profile `.cargo-lock` it can see, and refuses with exit 3 if the lock is already exclusive. It does not wait. It writes `<dest>.partial` and renames onto `--to` only when the destination does not exist. It records `unitsSeeded`, `unitsSkipped` by reason (`workspace`, `path-dep`, `fingerprint-unproven`, `layout-unknown`, `toolchain-mismatch`), and `cloneCount` / `copyCount`. `copyCount` stays 0 unless a future explicit `--copy` exists. v1 has no `--copy`.
+`worktree add` JSON includes `fallback` (`none` or `git-checkout`), `clonedFiles`, `checkoutFiles`, `hashedMismatches`, and, when `--seed-cargo` is set, a `cargo` object or a `cargoSkipped` reason. It seeds only a Cargo workspace at the repository root. Exit 0 means the worktree exists and is a valid checkout, even when sharing fell back or seeding was skipped. A donor whose Cargo build holds a profile lock is not an error: the worktree is kept and the report says `cargo.reason: "donor-busy"`. Exit 2 is a usage error, including the pre-rename spellings `--seed-target` and `target seed`. Exit 4 is a Git failure before any private files were written. Exit 130 is cancellation; staging directories and a worktree this command registered are removed.
+
+`cargo seed` takes a nonblocking shared flock on each donor profile `.cargo-lock`, `.cargo-build-lock` and `.cargo-artifact-lock`. If one is held exclusively it seeds nothing and reports `donor-busy`; it does not wait. It writes `<dest>.partial` and renames onto `--to` only when the destination does not exist. It records `unitsSeeded`, `unitsSkipped` by reason (`workspace`, `path-dep`, `fingerprint-unproven`, `layout-unknown`, `toolchain-mismatch`), and `cloneCount` / `copyCount`. `copyCount` stays 0 unless a future explicit `--copy` exists. v1 has no `--copy`.
 
 Seeding rules:
 
@@ -240,7 +242,7 @@ Seeding rules:
 - Seed registry and git dependency units only. Never seed path or workspace units. Never seed `incremental/`. Never seed uplifted final binaries (`target/debug/<bin>` outside the unit directory).
 - On the classic layout, a unit is the hashed files under `deps/` whose filename hash matches a registry/git unit, plus the fingerprint directory for that unit only if the freshness test below has passed for this Cargo version. On the per-unit layout, a unit is `build/<pkg>/<hash>/` for those packages.
 - Preserve mode and mtime on cloned files.
-- The freshness test is part of the crate's tests, run against the Cargo on the builder: create a fixture with one registry dependency (a tiny crate from a local vendor directory using `[patch]` or a path registry stand-in that Cargo treats as non-path — vendoring into `vendor/` and using Cargo's vendored-source identity is the offline way). Build the donor. Seed a second worktree at the same commit. Rename the donor target out of the way. `cargo build -v` in the second worktree must report the dependency `Fresh` and must not read the renamed donor. Then change a workspace source file and confirm the workspace crate recompiles and the dependency stays fresh. Then rebuild the second tree with `RUSTFLAGS=--cfg pwrgit_share_probe` and confirm the dependency is not reused. If the freshness test cannot be made true for this Cargo, `target seed` still exists and still refuses: it returns `unitsSeeded: 0` and reason `fingerprint-unproven` rather than copying bytes that Cargo will ignore or, worse, trust.
+- The freshness test is part of the crate's tests, run against the Cargo on the builder: create a fixture with one registry dependency (a tiny crate from a local vendor directory using `[patch]` or a path registry stand-in that Cargo treats as non-path — vendoring into `vendor/` and using Cargo's vendored-source identity is the offline way). Build the donor. Seed a second worktree at the same commit. Rename the donor target out of the way. `cargo build -v` in the second worktree must report the dependency `Fresh` and must not read the renamed donor. Then change a workspace source file and confirm the workspace crate recompiles and the dependency stays fresh. Then rebuild the second tree with `RUSTFLAGS=--cfg pwrgit_share_probe` and confirm the dependency is not reused. If the freshness test cannot be made true for this Cargo, `cargo seed` still exists and still refuses: it returns `unitsSeeded: 0` and reason `fingerprint-unproven` rather than copying bytes that Cargo will ignore or, worse, trust.
 
 That last sentence is the gate. A seed that Cargo ignores is a disk loss. A seed that Cargo trusts incorrectly is a miscompile. Both fail the test. The command's success with zero units is an honest result, not a crash.
 
@@ -274,7 +276,7 @@ Default off. Two settings on the existing settings object in `apps/desktop/src/m
 
 No new dialog copy that claims a disk saving in gigabytes. The settings text says that supported filesystems share unchanged source files and, when seeding is on, unchanged dependency builds; other filesystems keep today's checkout; build outputs that are not safe to reuse are compiled again.
 
-Create path: `worktree-lifecycle-handlers.ts` calls `worktreeAdd`. When reflink is on, resolve `pwrgit-share` from `worktreeShareCommand` if set, otherwise from `PATH`. Invoke `worktree add` with `--seed-target` only when that second setting is on. The donor is the worktree the command was invoked from, which is the repo path the handler already has.
+Create path: `worktree-lifecycle-handlers.ts` calls `worktreeAdd`. When reflink is on, resolve `pwrgit-share` from `worktreeShareCommand` if set, otherwise from `PATH`. Invoke `worktree add` with `--seed-cargo` (bounded mode) only when that second setting is on. The donor is the worktree the command was invoked from, which is the repo path the handler already has.
 
 If the binary is missing, or probe says `none`, or the command exits 0 with `fallback: git-checkout`, the handler uses today's `worktreeAdd` when the share command did not itself create the worktree, and it records a one-line notice. A worktree that exists at the end of a fallback is the success case. Do not fail the user's create because sharing was unavailable.
 

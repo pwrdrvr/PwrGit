@@ -71,7 +71,7 @@ beforeAll(() => {
         while (fs.existsSync(spec.gate)) Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 10);
       }
       if (spec.create) {
-        const gitArgs = args.filter((arg, i) => arg !== '--json' && arg !== '--seed-target' && arg !== '--donor' && args[i - 1] !== '--donor');
+        const gitArgs = args.filter((arg, i) => arg !== '--json' && arg !== '--seed-cargo' && arg !== '--donor' && args[i - 1] !== '--donor');
         cp.execFileSync('git', ['-C', spec.repo, ...gitArgs], { cwd: require('node:os').tmpdir(), stdio: 'ignore' });
         if (spec.missingFolder) fs.rmSync(args[args.indexOf('--') + 1], { recursive: true, force: true });
       }
@@ -296,11 +296,11 @@ describe("opt-in worktree sharing through the create handler", () => {
 
   it.each([
     ["off", "off"], ["off", "on"], ["on", "off"], ["on", "on"]
-  ] as const)("passes --seed-target only with both settings on (%s, %s)", async (reflink, seed) => {
+  ] as const)("passes --seed-cargo only with both settings on (%s, %s)", async (reflink, seed) => {
     settings.update({ worktreeReflink: reflink, worktreeSeedCargoTarget: seed });
     expect((await create()).ok).toBe(true);
     if (reflink === "off") expect(existsSync(invocationFile)).toBe(false);
-    else expect(invocation().includes("--seed-target")).toBe(seed === "on");
+    else expect(invocation().includes("--seed-cargo")).toBe(seed === "on");
   });
 });
 
@@ -315,7 +315,7 @@ describe("branch-from-commit worktree sharing", () => {
         expect(normalAdds()).toHaveLength(1);
       } else {
         expect(invocation()).toContain("--json");
-        expect(invocation().includes("--seed-target")).toBe(seed === "on");
+        expect(invocation().includes("--seed-cargo")).toBe(seed === "on");
         expect(invocation().at(-1)).toBe("main");
         expect(normalAdds()).toHaveLength(0);
       }

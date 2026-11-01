@@ -67,7 +67,7 @@ export async function worktreeAddWithSharing(
 
   const args = [
     "worktree", "add", "--json", "--donor", repoPath,
-    ...(settings.worktreeSeedCargoTarget === "on" ? ["--seed-target"] : []),
+    ...(settings.worktreeSeedCargoTarget === "on" ? ["--seed-cargo"] : []),
     ...(options.newBranch ? ["-b", branch] : []),
     "--", worktreePath,
     ...(options.newBranch ? [options.startPoint ?? "HEAD"] : [branch])

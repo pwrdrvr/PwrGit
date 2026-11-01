@@ -222,7 +222,9 @@ describe.skipIf(binary === undefined || process.platform !== "darwin")("worktree
     useInstalledGit(wrapper);
     const pending = create("crashed");
     try {
-      await vi.waitFor(() => expect(existsSync(marker)).toBe(true));
+      // Every Git call goes through the Node wrapper; under load, reaching
+      // hash-object takes longer than waitFor's 1 s default.
+      await vi.waitFor(() => expect(existsSync(marker)).toBe(true), { timeout: 15_000 });
       const { cliPid } = JSON.parse(readFileSync(marker, "utf8")) as { cliPid: number };
       process.kill(cliPid, "SIGKILL");
     } finally {
@@ -236,29 +238,34 @@ describe.skipIf(binary === undefined || process.platform !== "darwin")("worktree
     expect(readFileSync(join(kept, "dirty.txt"), "utf8")).toBe("committed\n");
   });
 
-  it("forwards seeding to the real CLI and returns the safe zero-seed result", async () => {
+  // A workspace-only crate: no registry units exist, so every Cargo version
+  // seeds nothing. Whether a seed is attempted depends on the host Cargo.
+  const cargoFixture = () => {
     mkdirSync(join(donor, "src"));
     writeFileSync(join(donor, "Cargo.toml"), "[package]\nname='fixture'\nversion='0.1.0'\nedition='2024'\n");
     writeFileSync(join(donor, "src", "lib.rs"), "pub fn answer() -> u32 { 42 }\n");
     execFileSync("cargo", ["build", "--offline"], { cwd: donor, stdio: "pipe", env: { ...process.env, CARGO_TARGET_DIR: join(donor, "target") } });
     git(donor, ["add", "Cargo.toml", "Cargo.lock", "src"]);
     git(donor, ["commit", "-m", "cargo fixture"]);
+  };
+
+  it("forwards seeding to the real CLI and seeds nothing from a workspace-only donor", async () => {
+    cargoFixture();
     const donorArtifact = join(donor, "target", "debug", "libfixture.rlib");
     const before = readFileSync(donorArtifact);
     settings.update({ worktreeSeedCargoTarget: "on" });
     expect(await create()).toMatchObject({ ok: true });
     expect((await measure(destination())).cloneCount).toBeGreaterThan(0);
     expect(existsSync(join(destination(), "target"))).toBe(false);
-    const seed = JSON.parse((await run(binary!, ["target", "seed", "--from", join(donor, "target"), "--to", join(root, "standalone-target"), "--json"])).stdout);
-    expect(seed).toMatchObject({ unitsSeeded: 0, cloneCount: 0, copyCount: 0, reason: "fingerprint-unproven" });
+    const seed = JSON.parse((await run(binary!, ["cargo", "seed", "--from", join(donor, "target"), "--to", join(root, "standalone-target"), "--json"])).stdout);
+    expect(seed).toMatchObject({ unitsSeeded: 0, cloneCount: 0, copyCount: 0, reason: expect.any(String) });
     expect(readFileSync(donorArtifact)).toEqual(before);
     expect(existsSync(join(root, "standalone-target"))).toBe(false);
   });
 
-  it("fails cleanly for a locked donor only when seeding is enabled", async () => {
-    mkdirSync(join(donor, "target", "debug"), { recursive: true });
+  it("keeps the checkout and skips seeding while the donor's Cargo build holds its lock", async () => {
+    cargoFixture();
     const path = join(donor, "target", "debug", ".cargo-lock");
-    writeFileSync(path, "");
     lockHolder = spawn("python3", ["-c", "import fcntl,sys,time; f=open(sys.argv[1], 'r'); fcntl.flock(f, fcntl.LOCK_EX); print('locked', flush=True); time.sleep(300)", path], { stdio: ["ignore", "pipe", "pipe"] });
     await new Promise<void>((done, fail) => {
       lockHolder!.stdout!.once("data", () => done());
@@ -266,12 +273,13 @@ describe.skipIf(binary === undefined || process.platform !== "darwin")("worktree
       lockHolder!.once("exit", (code) => fail(new Error(`lock holder exited: ${code}`)));
     });
     settings.update({ worktreeSeedCargoTarget: "on" });
-    expect(await create("locked")).toMatchObject({ ok: false, error: { kind: "repo", code: "worktree_add_failed", message: expect.stringContaining("locked") } });
+    expect(await create("busy")).toMatchObject({ ok: true });
     const listed = await listWorktrees(systemGit, donor);
-    expect(listed.ok && listed.value).toHaveLength(1);
-    expect(existsSync(destination("locked"))).toBe(false);
-    settings.update({ worktreeSeedCargoTarget: "off" });
-    expect(await create("source-only")).toMatchObject({ ok: true });
-    expect((await measure(destination("source-only"))).cloneCount).toBeGreaterThan(0);
+    expect(listed.ok && listed.value.map((w) => w.branch).sort()).toEqual(["busy", "main"]);
+    expect((await measure(destination("busy"))).cloneCount).toBeGreaterThan(0);
+    expect(existsSync(join(destination("busy"), "target"))).toBe(false);
+    // The handler only sees exit 0; pin the reason it is built on.
+    const probe = JSON.parse((await run(binary!, ["worktree", "add", "--json", "--donor", donor, "--seed-cargo", "-b", "busy-probe", "--", join(root, "busy-probe"), "HEAD"], { cwd: donor })).stdout);
+    expect(probe).toMatchObject({ fallback: "none", cargo: { unitsSeeded: 0, reason: "donor-busy" } });
   });
 });
