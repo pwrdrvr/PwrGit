@@ -772,11 +772,11 @@ describe("combined maintenance workflow", () => {
     await click("Start");
     expect(actions()).toEqual(["gc"]);
   });
-  it.each(["cancelled", "failed", "partial"])("does not advance after a %s branch scan", async (outcome) => {
+  it("does not advance after a cancelled branch scan", async () => {
     await open("auto");
     const previous = dispatch.getMockImplementation()!;
     dispatch.mockImplementation(async (name, req) => name === "maintenance:run"
-      ? { ok: true, value: { ...summary([{ repo, outcome, message: "Stopped" } as MaintenanceRepoResult]), cancelled: outcome === "cancelled" } }
+      ? { ok: true, value: { ...summary([{ repo, outcome: "cancelled", message: "Stopped" }]), cancelled: true } }
       : previous(name, req));
     await task(0);
     await click("Start");
@@ -784,15 +784,258 @@ describe("combined maintenance workflow", () => {
     expect(container.textContent).toContain("Not started");
     expect(container.querySelector(".maintenance__receipt-step.is-failed")?.textContent).toContain("Local branches");
   });
-  it("does not garbage collect after a partial branch removal", async () => {
+
+  /** The step's outcome card, found as a reader would: an alert named by its
+   *  headline. */
+  const card = (name: string): HTMLElement | undefined =>
+    [...container.querySelectorAll<HTMLElement>("section[role='alert']")].find((node) =>
+      document.getElementById(node.getAttribute("aria-labelledby") ?? "")?.textContent === name);
+  const cards = () => [...container.querySelectorAll<HTMLElement>("section[role='alert']")]
+    .map((node) => document.getElementById(node.getAttribute("aria-labelledby") ?? "")?.textContent);
+  const rows = (node: HTMLElement | undefined) =>
+    [...node?.querySelectorAll(".maintenance__problem-row") ?? []].map((row) => row.textContent);
+  const stepLine = (index: number) =>
+    container.querySelectorAll(".maintenance__receipt-step")[index]?.querySelector(".maintenance__receipt-head > span:not(.maintenance__step-num)")?.textContent;
+  const other = { ...repo, id: "other", name: "other-repo", path: "/fixtures/other-repo" };
+  /** A review where `example` offers one branch and `other-repo` fails. */
+  const reviewWithFailure = (previous: (name: string, req: { action: { kind: string } }) => unknown) =>
+    async (name: string, req: { action: { kind: string } }) => name === "maintenance:run" && req.action.kind === "scan-branches"
+      ? { ok: true, value: summary([
+        { repo, outcome: "success", message: "Finished", candidates: [candidate] },
+        { repo: other, outcome: "failed", message: "Reference lock unreadable." }
+      ]) }
+      : previous(name, req);
+  const retained = (count: number, deleted: number, message = "The branch changed or is no longer eligible. Review it again; nothing was deleted.") =>
+    Array.from({ length: count }, (_, index) => index < deleted
+      ? { branch: `done-${index}`, head: "abc123def456", deleted: true, message: "Deleted local branch." }
+      : { branch: `kept-${index}`, head: "fedcba9876543210", deleted: false, message });
+
+  it.each(["failed", "partial"] as const)("continues to GC after a %s review and reports the repository", async (outcome) => {
+    await open("auto");
+    const previous = dispatch.getMockImplementation()!;
+    dispatch.mockImplementation(async (name, req) => name === "maintenance:run" && req.action.kind === "scan-branches"
+      ? { ok: true, value: summary([{ repo, outcome, message: "Cannot read branch references." }]) }
+      : previous(name, req));
+    await task(0);
+    await click("Start");
+    expect(actions()).toEqual(["scan-branches", "gc"]);
+    expect(container.textContent).toContain("Maintenance finished with errors");
+    expect(container.textContent).not.toContain("Needs attention");
+    const found = card("Local branches couldn’t be reviewed in 1 repository");
+    expect(found?.textContent).toContain("Nothing in it was deleted. Garbage collection still ran.");
+    // A repository-level row: the repository and its path, no branch.
+    expect(rows(found)).toEqual(["exampleCouldn’t review its branches. Cannot read branch references./fixtures/example"]);
+    expect(found?.querySelector(".maintenance__problem-row b")?.textContent).toBe("Couldn’t review its branches.");
+    expect(stepLine(1)).toBe("No branches deleted · 1 not reviewed");
+    expect(stepLine(2)).toContain("1 collected");
+  });
+  it.each(["auto", "review"] as const)("keeps failed reviews when %s deletes branches from successful ones", async (mode) => {
+    await open(mode);
+    dispatch.mockImplementation(reviewWithFailure(dispatch.getMockImplementation()!));
+    await task(0);
+    await click("Start");
+    if (mode === "review") await click("Delete 1 branch and continue");
+    expect(actions()).toEqual(["scan-branches", "delete-branches", "gc"]);
+    const found = card("Local branches couldn’t be reviewed in 1 repository");
+    expect(found?.textContent).toContain("Nothing in it was deleted. The other branch was deleted, and garbage collection still ran.");
+    expect(rows(found)).toEqual(["other-repoCouldn’t review its branches. Reference lock unreadable./fixtures/other-repo"]);
+    expect(stepLine(1)).toBe("1 deleted in 1 repository · 1 not reviewed");
+    expect(button("Restore")).toBeTruthy();
+  });
+  it("shows the live step's progress, not a stopped mark, while deleting after a failed review", async () => {
+    await open("auto");
+    const reviewed = reviewWithFailure(dispatch.getMockImplementation()!);
+    dispatch.mockImplementation((name, req) => name === "maintenance:run" && req.action.kind === "delete-branches"
+      ? new Promise(() => undefined)
+      : reviewed(name, req));
+    await task(0);
+    await click("Start");
+    expect(container.querySelector(".maintenance__step.is-on strong")?.textContent).toBe("Local branches");
+    expect(container.querySelector(".maintenance__step.is-on small")?.textContent).toMatch(/^deleting /);
+    expect(container.querySelector(".maintenance__step.is-stop")).toBeNull();
+  });
+  it.each(["failed", "partial"] as const)("runs GC after %s branch removal and puts the card above the receipt", async (outcome) => {
     await open("auto");
     const previous = dispatch.getMockImplementation()!;
     dispatch.mockImplementation(async (name, req) => name === "maintenance:run" && req.action.kind === "delete-branches"
-      ? { ok: true, value: summary([{ repo, outcome: "partial", message: "Changed branch retained." }]) }
+      ? { ok: true, value: summary([{ repo, outcome, message: "25 local branches deleted; 1 retained.", branches: retained(26, 25) }]) }
+      : previous(name, req));
+    await task(0);
+    await click("Start");
+    expect(actions()).toEqual(["scan-branches", "delete-branches", "gc"]);
+    expect(container.textContent).toContain("Maintenance finished with errors");
+    expect(container.textContent).toContain("2 of 2 steps");
+    const found = card("1 branch wasn’t deleted")!;
+    expect(found.textContent).toContain("It’s unchanged. The other 25 were deleted, and garbage collection still ran.");
+    // The row names the branch as its receipt row would, with the reviewed
+    // tip; the repository's count sentence is not a row.
+    expect(rows(found)).toEqual(["example · kept-25fedcba98The branch changed or is no longer eligible. Review it again; nothing was deleted."]);
+    expect(found.querySelector(".maintenance__problem-row b")?.textContent).toBe("The branch changed or is no longer eligible.");
+    expect(found.textContent).not.toContain("25 local branches deleted");
+    expect(stepLine(1)).toBe("25 deleted in 1 repository · 1 not deleted");
+    expect(found.compareDocumentPosition(container.querySelector(".maintenance__receipt-steps")!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(container.querySelector(".maintenance__done-status")!.compareDocumentPosition(found) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    const partial = container.querySelector<HTMLElement>(".maintenance__receipt-step.is-partial")!;
+    expect(partial.textContent).toContain("Local branches");
+    expect(container.querySelectorAll(".maintenance__receipt-row")).toHaveLength(20);
+    await click("Show all 25");
+    expect(container.querySelectorAll(".maintenance__restore")).toHaveLength(25);
+    await act(async () => [...partial.querySelectorAll("button")].find((node) => node.textContent === "Hide")!.click());
+    expect(partial.querySelectorAll(".maintenance__receipt-row")).toHaveLength(0);
+  });
+  it("scrolls a whole batch of retained branches inside the card, under a fixed head", async () => {
+    await open("auto");
+    const previous = dispatch.getMockImplementation()!;
+    dispatch.mockImplementation(async (name, req) => name === "maintenance:run" && req.action.kind === "delete-branches"
+      ? { ok: true, value: summary([{ repo, outcome: "failed", message: "0 local branches deleted; 27 retained.", branches: retained(27, 0) }]) }
+      : previous(name, req));
+    await task(0);
+    await click("Start");
+    const found = card("27 branches weren’t deleted")!;
+    expect(found.textContent).toContain("They’re unchanged. Garbage collection still ran.");
+    const list = found.querySelector<HTMLElement>("ul[aria-label='Branches not deleted']")!;
+    expect(list.tabIndex).toBe(0);
+    expect(list.querySelectorAll(".maintenance__problem-row")).toHaveLength(27);
+    expect(found.querySelector(".maintenance__problem-head")!.contains(list)).toBe(false);
+    expect(stepLine(1)).toBe("0 deleted · 27 not deleted");
+    // Nothing was deleted, so there is no receipt to show.
+    expect(container.querySelectorAll(".maintenance__receipt-step")[1]?.querySelector("button")).toBeNull();
+  });
+  it("puts Git's own words behind Details", async () => {
+    await open("auto");
+    const raw = "error: cannot delete branch 'finished' used by worktree at '/old/example/.git/worktrees/finished'";
+    const previous = dispatch.getMockImplementation()!;
+    dispatch.mockImplementation(async (name, req) => name === "maintenance:run" && req.action.kind === "delete-branches"
+      ? { ok: true, value: summary([{ repo, outcome: "failed", message: "0 local branches deleted; 1 retained.", branches: [
+        { branch: "finished", head: "abc123", deleted: false, message: raw }
+      ] }]) }
+      : previous(name, req));
+    await task(0);
+    await click("Start");
+    const found = card("1 branch wasn’t deleted")!;
+    expect(found.querySelector(".maintenance__problem-row > p")?.textContent).toBe("Git refused to delete it.");
+    expect(found.textContent).not.toContain(raw);
+    const toggle = found.querySelector<HTMLButtonElement>(".maintenance__problem-toggle")!;
+    expect(toggle.getAttribute("aria-expanded")).toBe("false");
+    await act(async () => toggle.click());
+    expect(found.querySelector(".maintenance__problem-raw")?.textContent).toBe(raw);
+  });
+  it("reports a refresh failure even when every deletion succeeded", async () => {
+    await open("auto");
+    const previous = dispatch.getMockImplementation()!;
+    dispatch.mockImplementation(async (name, req) => {
+      const response = await previous(name, req);
+      if (name === "maintenance:run" && req.action.kind === "delete-branches") {
+        response.value.results[0].outcome = "partial";
+        response.value.results[0].message = "1 local branch deleted; 0 retained. Refresh failed: unavailable.";
+      }
+      return response;
+    });
+    await task(0);
+    await click("Start");
+    expect(actions()).toEqual(["scan-branches", "delete-branches", "gc"]);
+    expect(rows(card("Local branches: 1 problem in 1 repository"))).toEqual(["exampleRefresh failed: unavailable./fixtures/example"]);
+    expect(stepLine(1)).toBe("1 deleted in 1 repository · 1 problem");
+    expect(button("Restore")).toBeTruthy();
+  });
+  it("stops on a cancelled deletion and keeps each retained branch's reason", async () => {
+    await open("auto");
+    const previous = dispatch.getMockImplementation()!;
+    dispatch.mockImplementation(async (name, req) => name === "maintenance:run" && req.action.kind === "delete-branches"
+      ? { ok: true, value: { ...summary([{ repo, outcome: "cancelled", message: "0 local branches deleted; 1 retained.", branches: [
+        { branch: "finished", head: "abc123", deleted: false, message: "Cancelled; retained." }
+      ] }]), cancelled: true } }
       : previous(name, req));
     await task(0);
     await click("Start");
     expect(actions()).toEqual(["scan-branches", "delete-branches"]);
-    expect(container.textContent).toContain("Not started");
+    expect(container.textContent).toContain("Maintenance stopped");
+    const found = card("1 branch wasn’t deleted");
+    // Collection never ran, so the sub-line does not claim it did.
+    expect(found?.querySelector(".maintenance__problem-head span:not(.maintenance__problem-mark)")?.textContent).toBe("It’s unchanged.");
+    expect(rows(found)).toEqual(["example · finishedabc123Cancelled; retained."]);
+  });
+  it.each([
+    ["cancelled", { ok: true, value: { ...summary([{ repo, outcome: "cancelled", message: "0 local branches deleted; 1 retained.", branches: [
+      { branch: "finished", head: "abc123", deleted: false, message: "Cancelled; retained." }
+    ] }]), cancelled: true } }, "Local branches: 2 problems in 2 repositories"],
+    ["refused", { ok: false, error: { message: "Another maintenance run is active." } }, "Local branches couldn’t be reviewed in 1 repository"]
+  ])("keeps a failed review when a %s deletion stops the run", async (_kind, response, headline) => {
+    await open("auto");
+    const reviewed = reviewWithFailure(dispatch.getMockImplementation()!);
+    dispatch.mockImplementation(async (name, req) => name === "maintenance:run" && req.action.kind === "delete-branches"
+      ? response
+      : reviewed(name, req));
+    await task(0);
+    await click("Start");
+    expect(actions()).toEqual(["scan-branches", "delete-branches"]);
+    expect(container.textContent).toContain("Maintenance stopped");
+    const found = card(headline);
+    expect(found?.textContent).toContain("Reference lock unreadable.");
+    expect(found?.textContent).toContain(_kind === "cancelled" ? "Cancelled; retained." : "Another maintenance run is active.");
+    // A command error is not a repository's problem, and says the run stopped.
+    if (_kind === "refused") expect(found?.textContent).toContain("Nothing in it was deleted. Maintenance stopped here.");
+  });
+  it.each([false, true])("counts a skipped deletion as skipped whether or not a review failed (failed: %s)", async (failed) => {
+    await open("review");
+    if (failed) dispatch.mockImplementation(reviewWithFailure(dispatch.getMockImplementation()!));
+    await task(0);
+    await click("Start");
+    await click("Skip branches");
+    expect(actions()).toEqual(["scan-branches", "gc"]);
+    expect(container.textContent).toContain("1 of 2 steps");
+    expect(container.textContent).toContain(failed ? "Maintenance finished with errors" : "Maintenance finished");
+    expect(stepLine(1)).toBe(failed ? "Skipped deletion · 1 not reviewed" : "Skipped deletion");
+    expect(cards()).toEqual(failed ? ["Local branches couldn’t be reviewed in 1 repository"] : []);
+    if (failed) expect(card("Local branches couldn’t be reviewed in 1 repository")?.textContent).toContain("Reference lock unreadable.");
+  });
+  it("names the command error when no repository results are returned", async () => {
+    await open("auto");
+    const previous = dispatch.getMockImplementation()!;
+    dispatch.mockImplementation(async (name, req) => name === "maintenance:run"
+      ? { ok: false, error: { message: "Another maintenance run is active." } }
+      : previous(name, req));
+    await task(0);
+    await click("Start");
+    expect(actions()).toEqual(["scan-branches"]);
+    expect(rows(card("Local branches couldn’t run"))).toEqual(["Another maintenance run is active."]);
+  });
+  it("reports GC failures in their own card, after the branch card", async () => {
+    await open("auto");
+    const previous = dispatch.getMockImplementation()!;
+    dispatch.mockImplementation(async (name, req) => name === "maintenance:run" && req.action.kind !== "scan-branches"
+      ? { ok: true, value: summary([{ repo, outcome: "failed", message: req.action.kind === "gc" ? "Repack failed. Disk full." : "Branch reference locked." }]) }
+      : previous(name, req));
+    await task(0);
+    await click("Start");
+    expect(actions()).toEqual(["scan-branches", "delete-branches", "gc"]);
+    expect(cards()).toEqual(["Local branches: 1 problem in 1 repository", "Garbage collection failed in 1 repository"]);
+    const gc = card("Garbage collection failed in 1 repository")!;
+    expect(gc.textContent).toContain("Its objects are unchanged.");
+    expect(gc.querySelector("ul")?.getAttribute("aria-label")).toBe("Repositories not collected");
+    expect(rows(gc)).toEqual(["exampleRepack failed. Disk full./fixtures/example"]);
+    expect(gc.querySelector(".maintenance__problem-row b")?.textContent).toBe("Repack failed.");
+    expect(stepLine(2)).toBe("0 collected · 1 failed");
+    expect(container.textContent).toContain("Maintenance finished with errors");
+  });
+  it("keeps branch failures on screen while garbage collection runs", async () => {
+    await open("auto");
+    const previous = dispatch.getMockImplementation()!;
+    let finish!: () => void;
+    dispatch.mockImplementation(async (name, req) => {
+      if (name === "maintenance:run" && req.action.kind === "delete-branches")
+        return { ok: true, value: summary([{ repo, outcome: "partial", message: "2 local branches deleted; 1 retained.", branches: retained(3, 2) }]) };
+      if (name === "maintenance:run" && req.action.kind === "gc")
+        await new Promise<void>((resolve) => { finish = resolve; });
+      return previous(name, req);
+    });
+    await task(0);
+    await click("Start");
+    expect(container.querySelector(".maintenance__step.is-on")?.textContent).toContain("Garbage collection");
+    expect(container.querySelector(".maintenance__step.is-stop")?.textContent).toContain("Local branches");
+    expect(card("1 branch wasn’t deleted")?.textContent).toContain("It’s unchanged. The other 2 were deleted; collection is still running.");
+    await act(async () => finish());
+    expect(container.textContent).toContain("Maintenance finished with errors");
+    expect(card("1 branch wasn’t deleted")?.textContent).toContain("The other 2 were deleted, and garbage collection still ran.");
   });
 });

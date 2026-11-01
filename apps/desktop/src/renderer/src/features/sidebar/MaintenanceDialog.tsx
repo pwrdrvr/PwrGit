@@ -27,6 +27,19 @@ import { MaintenancePlanForm, MaintenanceSteps, MaintenanceRulesApplied, type Ma
 import { PruneWorktreesPanel } from "./PruneWorktreesPanel";
 import { BulkSyncStatus, StatusMark } from "./BulkSyncStatus";
 import { countOutcomes } from "./bulk-sync-progress";
+import {
+  branchCardCopy,
+  branchStepLine,
+  deletedLead,
+  gcCardCopy,
+  gcStepLine,
+  runIssue,
+  stepIssues,
+  type GcAfter,
+  type IssueSource,
+  type StepIssue
+} from "./maintenance-issues";
+import { IssueRow, ProblemCard, StepLine } from "./MaintenanceProblem";
 
 const branchKey = (branch: StaleBranch): string =>
   `${branch.repoId}:${branch.branch}`;
@@ -183,6 +196,10 @@ export function MaintenanceDialog({
   const [error, setError] = useState<string | null>(null);
   const [startedAt, setStartedAt] = useState(0);
   const active = useRef<string | null>(null);
+  const runError = useRef<string | null>(null);
+  /** The Combined review's failed repositories, held until the branch step
+   *  finishes (deleted, skipped, or stopped) and records them. */
+  const scanIssues = useRef<StepIssue[]>([]);
   const live = useRef(true);
   const offProgress = useRef<(() => void) | null>(null);
   const footerFocus = useRef<HTMLButtonElement>(null);
@@ -305,6 +322,7 @@ export function MaintenanceDialog({
     setShowQuietRepos(false);
     setRestores(new Map());
     setError(null);
+    runError.current = null;
     setAction(null);
   };
 
@@ -321,6 +339,7 @@ export function MaintenanceDialog({
     setRepos([]);
     setCurrent(new Set());
     setError(null);
+    runError.current = null;
     setSelected(new Set());
     // Keyed by branch name, so a later receipt for the same name must not
     // inherit this one's "Restored".
@@ -380,11 +399,16 @@ export function MaintenanceDialog({
             )
           );
         return response.value;
-      } else setError(response.error.message);
+      } else {
+        runError.current = response.error.message;
+        setError(response.error.message);
+      }
       return null;
     } catch (cause) {
-      if (live.current)
-        setError(cause instanceof Error ? cause.message : String(cause));
+      if (live.current) {
+        runError.current = cause instanceof Error ? cause.message : String(cause);
+        setError(runError.current);
+      }
       return null;
     } finally {
       offProgress.current?.();
@@ -400,11 +424,17 @@ export function MaintenanceDialog({
   const recordStep = (key: StepKey, result: StepResult): void =>
     setStepResults((old) => ({ ...old, [key]: result }));
   const combinedOptions = (): BranchCleanupOptions => options;
-  const stopped = (result: MaintenanceSummary | null, task: StepKey): boolean => {
+  /** Records a step that cannot go on, with what it had already found
+   *  (`prior`: the review's failures, when deletion is what stopped). */
+  const stopped = (result: MaintenanceSummary | null, task: StepKey, source: IssueSource, prior: StepIssue[] = []): boolean => {
     if (!live.current) return true;
-    if (result === null || result.cancelled || result.results.some((row) =>
-      row.outcome === "failed" || row.outcome === "partial" || row.outcome === "cancelled")) {
-      recordStep(task, { state: "failed", summary: "Stopped · needs attention" });
+    // Per-repository failures are completed attempts, not a request to cancel
+    // independent later phases. Only cancellation or a failed command stops.
+    if (result === null || result.cancelled || result.results.some((row) => row.outcome === "cancelled")) {
+      recordStep(task, {
+        state: "failed", summary: result === null ? "Could not run" : "Cancelled",
+        issues: [...prior, ...(result === null ? [runIssue(runError.current ?? "No result received.")] : stepIssues(result, source))]
+      });
       setWorkflowStopped(true);
       setWorkflowDurationMs(Date.now() - workflowStartedAt.current);
       setWorkflowStep("done");
@@ -418,32 +448,46 @@ export function MaintenanceDialog({
       setWorkflowStep("gc");
       const result = await run({ kind: "gc", mode });
       setGcReceipt(result);
-      if (stopped(result, "gc")) return;
+      if (stopped(result, "gc", "gc")) return;
+      const issues = stepIssues(result!, "gc");
       const measured = result!.results.filter((row) => row.beforeBytes !== undefined && row.afterBytes !== undefined);
       const storage = measured.length > 0 ? ` · ${bytes(measured.reduce((sum, row) => sum + row.beforeBytes!, 0))} → ${bytes(measured.reduce((sum, row) => sum + row.afterBytes!, 0))}` : "";
-      recordStep("gc", { state: "done", summary: `${result!.results.filter((row) => row.outcome === "success").length} collected${storage}` });
+      const collected = result!.results.filter((row) => row.outcome === "success").length;
+      recordStep("gc", { state: issues.length > 0 ? "partial" : "done", summary: gcStepLine(collected, storage, issues), issues });
     }
     setWorkflowDurationMs(Date.now() - workflowStartedAt.current);
     setWorkflowStep("done");
   };
+  /** Ends the branch step without deleting: the reader skipped, or the
+   *  review offered nothing. The review's failures still count. */
+  const skipBranches = (lead: string): void => {
+    const issues = scanIssues.current;
+    recordStep("branches", { state: "skipped", summary: branchStepLine(lead, issues), issues });
+  };
   const removeBranchesAndContinue = async (branches: StaleBranch[]): Promise<void> => {
     if (!live.current || active.current !== null) return;
+    const reviewIssues = scanIssues.current;
     if (branches.length > 0) {
       const result = await run({ kind: "delete-branches", branches, options: combinedOptions() });
       if (live.current) setBranchReceipt(result);
-      if (stopped(result, "branches")) return;
+      if (stopped(result, "branches", "delete", reviewIssues)) return;
+      const issues = [...reviewIssues, ...stepIssues(result!, "delete")];
       const deleted = result!.results.flatMap((row) => row.branches ?? []).filter((branch) => branch.deleted).length;
       const touched = result!.results.filter((row) => (row.branches ?? []).some((branch) => branch.deleted)).length;
-      recordStep("branches", { state: "done", summary: `${deleted} deleted in ${touched} ${touched === 1 ? "repository" : "repositories"}` });
-    } else recordStep("branches", { state: "skipped", summary: "No branches deleted" });
+      recordStep("branches", { state: issues.length > 0 ? "partial" : "done", summary: branchStepLine(deletedLead(deleted, touched), issues), issues });
+    } else skipBranches("No branches deleted");
     await finishWorkflow();
   };
   const continueAfterWorktrees = async (): Promise<void> => {
     if (!live.current || active.current !== null) return;
     if (plan.branches) {
       setWorkflowStep("branches");
+      scanIssues.current = [];
       const result = await run({ kind: "scan-branches", options: combinedOptions() });
-      if (stopped(result, "branches")) return;
+      if (stopped(result, "branches", "review")) return;
+      // Held, not recorded: the step is still running (review or deletion),
+      // and the review list already shows each failed repository.
+      scanIssues.current = stepIssues(result!, "review");
       const branches = result!.results.flatMap((row) => row.candidates ?? []);
       if (branchMode === "review" && branches.length > 0) return;
       await removeBranchesAndContinue(branches);
@@ -456,6 +500,7 @@ export function MaintenanceDialog({
     reset();
     setWorktreeCandidateCount(null);
     setStepResults({});
+    scanIssues.current = [];
     setWorkflowStopped(false);
     setBranchReceipt(null);
     // The whole combined run stays in the profile named above, regardless of
@@ -475,6 +520,7 @@ export function MaintenanceDialog({
     setWorkflowDurationMs(0);
     setWorkflowStep("setup");
     setStepResults({});
+    scanIssues.current = [];
     setWorkflowStopped(false);
     setBranchReceipt(null);
     setGcReceipt(null);
@@ -599,6 +645,24 @@ export function MaintenanceDialog({
   const collectedBefore = gcReceipt?.results.reduce((sum, row) => sum + (row.beforeBytes ?? 0), 0) ?? 0;
   const collectedAfter = gcReceipt?.results.reduce((sum, row) => sum + (row.afterBytes ?? 0), 0) ?? 0;
   const deleting = action?.kind === "delete-branches";
+  const branchIssues = stepResults.branches?.issues ?? [];
+  const gcIssues = stepResults.gc?.issues ?? [];
+  const hasIssues = branchIssues.length > 0 || gcIssues.length > 0;
+  const gcAfter: GcAfter = workflowStep === "gc" ? "running"
+    : stepResults.gc !== undefined && stepResults.gc.state !== "failed" ? "ran" : "none";
+  const branchCard = branchCardCopy(branchIssues, deletedCount, gcAfter, gcIssues.length > 0);
+  const gcCard = gcCardCopy(gcIssues, gcReceipt?.results.filter((row) => row.outcome === "success").length ?? 0);
+  /** Each step that left something behind reports with the shared outcome
+   *  card, in step order, above the receipt (or under the live status card
+   *  while a later step runs). */
+  const problems = hasIssues && <div className="maintenance__problems">
+    {branchIssues.length > 0 && <ProblemCard headline={branchCard.headline} sub={branchCard.sub} listLabel={branchCard.listLabel}>
+      {branchIssues.map((issue, index) => <IssueRow key={`${issue.path ?? issue.repo}:${issue.branch ?? ""}:${index}`} issue={issue} />)}
+    </ProblemCard>}
+    {gcIssues.length > 0 && <ProblemCard headline={gcCard.headline} sub={gcCard.sub} listLabel={gcCard.listLabel}>
+      {gcIssues.map((issue, index) => <IssueRow key={`${issue.path ?? issue.repo}:${index}`} issue={issue} />)}
+    </ProblemCard>}
+  </div>;
   const receiptRows = (key: StepKey): number =>
     key === "branches" ? deletedCount : key === "gc" ? gcReceipt?.results.length ?? 0 : 0;
   /** A receipt step lists its first FINISHED_SLICE rows until "Show all":
@@ -720,17 +784,19 @@ export function MaintenanceDialog({
         ) : (
           <>
         {tab === "combined" && workflowStep === "done" ? <>
-          <div className={`maintenance__done-status${workflowStopped ? " is-stopped" : ""}`}><StatusMark mark={workflowStopped ? "failed" : "ok"} /><div><strong>{workflowStopped ? "Maintenance stopped" : "Maintenance finished"}</strong><small>{Object.values(stepResults).filter((result) => result?.state === "done").length} of {Object.values(plan).filter(Boolean).length} steps · {stepResults.worktrees?.items?.length ?? 0} {stepResults.worktrees?.items?.length === 1 ? "worktree" : "worktrees"}, {deletedCount} {deletedCount === 1 ? "branch" : "branches"}{collectedBefore > collectedAfter ? `, ${bytes(collectedBefore - collectedAfter)} of object storage` : ""}</small></div><time>took {workflowDurationMs >= 60_000 ? `${Math.floor(workflowDurationMs / 60_000)}m ` : ""}{Math.round(workflowDurationMs % 60_000 / 1000)}s</time></div>
+          <div className={`maintenance__done-status${workflowStopped || hasIssues ? " is-stopped" : ""}`}><StatusMark mark={workflowStopped || hasIssues ? "failed" : "ok"} /><div><strong>{workflowStopped ? "Maintenance stopped" : hasIssues ? "Maintenance finished with errors" : "Maintenance finished"}</strong><small>{Object.values(stepResults).filter((result) => result?.state === "done" || result?.state === "partial").length} of {Object.values(plan).filter(Boolean).length} steps · {stepResults.worktrees?.items?.length ?? 0} {stepResults.worktrees?.items?.length === 1 ? "worktree" : "worktrees"}, {deletedCount} {deletedCount === 1 ? "branch" : "branches"}{collectedBefore > collectedAfter ? `, ${bytes(collectedBefore - collectedAfter)} of object storage` : ""}</small></div><time>took {workflowDurationMs >= 60_000 ? `${Math.floor(workflowDurationMs / 60_000)}m ` : ""}{Math.round(workflowDurationMs % 60_000 / 1000)}s</time></div>
           <div className="maintenance__body">
+            {problems}
             <div className="maintenance__receipt-steps">
               {(["worktrees", "branches", "gc"] as StepKey[]).map((key, index) => {
                 const result = stepResults[key];
                 const state = result?.state ?? (plan[key] ? "not-started" : "skipped");
                 const title = key === "gc" ? "Garbage collection" : key === "branches" ? "Local branches" : "Worktrees";
                 const expandedNow = receiptExpanded.has(key);
-                return <article key={key} className={`maintenance__receipt-step is-${state}`}>
-                  <div className="maintenance__receipt-head"><span className="maintenance__step-num">{index + 1}</span><strong>{title}</strong><span>{result?.summary ?? (state === "not-started" ? "Not started" : "Skipped")}</span>
-                    {result !== undefined && result.state === "done" && <button onClick={() => setReceiptExpanded((old) => { const next = new Set(old); if (next.has(key)) next.delete(key); else next.add(key); return next; })}>{expandedNow ? "Hide" : "Show"}</button>}
+                const listed = key === "worktrees" ? result?.items?.length ?? 0 : receiptRows(key);
+                return <article key={key} className={`maintenance__receipt-step is-${state}${(result?.issues?.length ?? 0) > 0 ? " has-issues" : ""}`}>
+                  <div className="maintenance__receipt-head"><span className="maintenance__step-num">{index + 1}</span><strong>{title}</strong><span>{result?.summary !== undefined ? <StepLine line={result.summary} /> : state === "not-started" ? "Not started" : "Skipped"}</span>
+                    {result !== undefined && (result.state === "done" || result.state === "partial") && listed > 0 && <button onClick={() => setReceiptExpanded((old) => { const next = new Set(old); if (next.has(key)) next.delete(key); else next.add(key); return next; })}>{expandedNow ? "Hide" : "Show"}</button>}
                   </div>
                   {expandedNow && key === "branches" && sliceReceipt(key, branchReceipt?.results.flatMap((row) => (row.branches ?? []).filter((branch) => branch.deleted).map((branch) => ({ row, branch }))) ?? []).map(({ row, branch }) => {
                     const state = restores.get(`${row.repo.id}:${branch.branch}`);
@@ -805,6 +871,7 @@ export function MaintenanceDialog({
           />
         )}
         <div className="maintenance__body">
+          {tab === "combined" && problems}
           {tab !== "combined" && <>
           {repoScope === undefined ? (
             <>
@@ -1220,7 +1287,7 @@ export function MaintenanceDialog({
               {workflowStep === "branches" && scanComplete ? (
                 <>
                   <button className="modal__cancel" onClick={() => {
-                    recordStep("branches", { state: "skipped", summary: "Skipped" });
+                    skipBranches("Skipped deletion");
                     void finishWorkflow();
                   }}>Skip branches</button>
                   <button className="modal__create" disabled={selected.size === 0} onClick={() => void removeBranchesAndContinue(
