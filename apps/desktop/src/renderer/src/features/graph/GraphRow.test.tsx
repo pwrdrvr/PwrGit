@@ -37,7 +37,8 @@ describe("GraphRow remote ref chips", () => {
           arm: () => undefined,
           cancel: () => undefined,
           immediate: () => undefined,
-          cardClosed: () => undefined
+          cardClosed: () => undefined,
+          claimCard: () => undefined
         }}
         now={new Date("2026-08-06T12:01:00.000Z").getTime()}
         selected={false}
@@ -81,7 +82,8 @@ const props = (
     arm: () => undefined,
     cancel: () => undefined,
     immediate: () => undefined,
-    cardClosed: () => undefined
+    cardClosed: () => undefined,
+    claimCard: () => undefined
   },
   now: new Date("2026-08-06T12:01:00.000Z").getTime(),
   selected: false,
@@ -113,7 +115,8 @@ describe("GraphRow author", () => {
             arm: () => undefined,
             cancel: () => undefined,
             immediate: (open) => open(),
-            cardClosed: () => undefined
+            cardClosed: () => undefined,
+            claimCard: () => undefined
           }}
           onOpen={onOpen}
           onShowPerson={onShowPerson}

@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 import {
   ASSUMED_FORGE_KIND,
   changeRequestLabel,
@@ -36,7 +36,10 @@ export function PrChip({
   const {
     show: showTooltip,
     hide: hideTooltip,
+    hideFrom,
+    blurFrom,
     update: updateTooltip,
+    visible,
     tooltipNode
   } = useViewportTooltip("pr-status-card", {
     interactive: true,
@@ -73,8 +76,26 @@ export function PrChip({
   const hide = (): void => hideTooltip();
   // Sweeping the pointer past a row of chips must not leave popups in its
   // wake; keyboard focus still acts at once, and a click takes its tooltip
-  // with it on the way to the browser.
-  const chip = hoverIntentHandlers({ intent: hoverIntent, show, hide });
+  // with it on the way to the browser. Leaving waits, so the pointer can
+  // reach the card; the next chip's card closes this one if it is still
+  // waiting. See "Interactive cards must be reachable" in lib/AGENTS.md.
+  const chip = hoverIntentHandlers({
+    intent: hoverIntent,
+    show,
+    hide,
+    card: { hideFrom, blurFrom }
+  });
+
+  // The card outlives the hover that opened it, so the gate's "still
+  // browsing" window has to run from when it goes, not from the leave. The
+  // cleanup also runs when the chip unmounts with its card open, and passing
+  // the chip lets the gate drop it from `claimCard`.
+  const chipRef = useRef<HTMLSpanElement>(null);
+  useEffect(() => {
+    if (!visible) return;
+    const trigger = chipRef.current ?? undefined;
+    return () => hoverIntent.cardClosed(trigger);
+  }, [visible, hoverIntent]);
 
   // Keep an already-visible card accurate when a targeted PR refresh lands.
   // Depends on `pr`, not the element: a new element every render would make an
@@ -92,7 +113,15 @@ export function PrChip({
         aria-label={`${changeRequestLabel(
           pr.forge ?? ASSUMED_FORGE_KIND
         )} #${pr.number} (${status.label}) — Enter opens in browser`}
-        onMouseEnter={(e) => chip.onMouseEnter(e.currentTarget)}
+        ref={chipRef}
+        // Back onto the chip while its card waits out its grace: that card is
+        // this chip's (each chip owns its own), so keep it rather than let the
+        // timer take it from under the pointer while the gate re-decides.
+        onMouseEnter={(e) =>
+          visible
+            ? chip.showNow(e.currentTarget)
+            : chip.onMouseEnter(e.currentTarget)
+        }
         onMouseLeave={chip.onMouseLeave}
         onFocus={(e) => chip.onFocus(e.currentTarget)}
         onBlur={chip.onBlur}

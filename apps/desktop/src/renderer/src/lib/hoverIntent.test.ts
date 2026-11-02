@@ -360,8 +360,10 @@ describe("HoverIntentGate", () => {
 describe("hoverIntentHandlers", () => {
   // A stand-in gate that never decides on its own: the deferred open is kept
   // so a test can run it at the moment a real gate would have.
-  const setup = () => {
+  const setup = ({ lingers = false }: { lingers?: boolean } = {}) => {
     const calls: string[] = [];
+    /** Each `claimCard`, and whether it left a way to close this card. */
+    const claims: { trigger: HTMLElement; closeable: boolean }[] = [];
     const target = { id: "trigger" } as unknown as HTMLElement;
     let pendingOpen: (() => void) | undefined;
     const handlers = hoverIntentHandlers({
@@ -375,18 +377,30 @@ describe("hoverIntentHandlers", () => {
           open();
         },
         cancel: () => calls.push("cancel"),
-        cardClosed: () => calls.push("cardClosed")
+        cardClosed: () => calls.push("cardClosed"),
+        claimCard: (trigger, close) =>
+          claims.push({ trigger, closeable: close !== undefined })
       },
       show: () => calls.push("show"),
-      hide: () => calls.push("hide")
+      hide: () => calls.push("hide"),
+      ...(lingers
+        ? {
+            card: {
+              hideFrom: () => calls.push("hideFrom"),
+              blurFrom: () => calls.push("blurFrom")
+            }
+          }
+        : {})
     });
     return {
       calls,
+      claims,
       handlers,
       target,
       runPendingOpen: (): void => pendingOpen?.()
     };
   };
+  const away = { relatedTarget: null };
 
   it("defers a hover instead of showing straight away", () => {
     const { calls, handlers, target, runPendingOpen } = setup();
@@ -414,11 +428,11 @@ describe("hoverIntentHandlers", () => {
     const { calls, handlers, target } = setup();
     handlers.onMouseEnter(target);
     calls.length = 0;
-    handlers.onMouseLeave();
+    handlers.onMouseLeave(away);
     expect(calls).toEqual(["cancel", "hide"]);
 
     calls.length = 0;
-    handlers.onBlur();
+    handlers.onBlur(away);
     expect(calls).toEqual(["cancel", "hide"]);
   });
 
@@ -426,5 +440,105 @@ describe("hoverIntentHandlers", () => {
     const { calls, handlers } = setup();
     handlers.leave();
     expect(calls).toEqual(["cancel", "hide"]);
+  });
+
+  it("leaves an interactive card through its grace path, not at once", () => {
+    // The PR chip's card closed on the chip's first `mouseleave`, so the
+    // pointer could never reach it.
+    const { calls, handlers, target, runPendingOpen } = setup({ lingers: true });
+    handlers.onMouseEnter(target);
+    runPendingOpen();
+    calls.length = 0;
+    handlers.onMouseLeave(away);
+    expect(calls).toEqual(["cancel", "hideFrom"]);
+
+    calls.length = 0;
+    handlers.onBlur(away);
+    expect(calls).toEqual(["cancel", "blurFrom"]);
+
+    // A click still closes it straight away.
+    calls.length = 0;
+    handlers.leave();
+    expect(calls).toEqual(["cancel", "hide"]);
+  });
+
+  it("claims the card on every open, and leaves a close only if it lingers", () => {
+    const plain = setup();
+    plain.handlers.onFocus(plain.target);
+    plain.handlers.onMouseEnter(plain.target);
+    plain.runPendingOpen();
+    expect(plain.claims).toEqual([
+      { trigger: plain.target, closeable: false },
+      { trigger: plain.target, closeable: false }
+    ]);
+
+    const lingering = setup({ lingers: true });
+    lingering.handlers.showNow(lingering.target);
+    expect(lingering.claims).toEqual([
+      { trigger: lingering.target, closeable: true }
+    ]);
+  });
+
+  it("claims nothing for a hover that never opened", () => {
+    const { claims, handlers, target } = setup({ lingers: true });
+    handlers.onMouseEnter(target);
+    handlers.onMouseLeave(away);
+    expect(claims).toEqual([]);
+  });
+});
+
+describe("HoverIntentGate.claimCard", () => {
+  const a = { id: "a" };
+  const b = { id: "b" };
+
+  it("closes the card another trigger left lingering", () => {
+    const gate = new HoverIntentGate();
+    const closed: string[] = [];
+    gate.claimCard(a, () => closed.push("a"));
+    gate.claimCard(b, () => closed.push("b"));
+    expect(closed).toEqual(["a"]);
+  });
+
+  it("does not close a trigger's own card when it reopens", () => {
+    const gate = new HoverIntentGate();
+    const closed: string[] = [];
+    gate.claimCard(a, () => closed.push("a"));
+    gate.claimCard(a, () => closed.push("a again"));
+    expect(closed).toEqual([]);
+  });
+
+  it("closes a lingering card for a trigger that leaves nothing to close", () => {
+    // A SHA chip's card does not linger through this path, but opening it
+    // must still take a waiting PR card away.
+    const gate = new HoverIntentGate();
+    const closed: string[] = [];
+    gate.claimCard(a, () => closed.push("a"));
+    gate.claimCard(b);
+    expect(closed).toEqual(["a"]);
+    // And nothing is left to close after that.
+    gate.claimCard(a);
+    expect(closed).toEqual(["a"]);
+  });
+
+  it("forgets a card its owner reports closed", () => {
+    // A card that went by its own timer, or with its unmounted chip, has
+    // nothing left to close, and holding its closer keeps the chip alive.
+    const gate = new HoverIntentGate();
+    const closed: string[] = [];
+    gate.claimCard(a, () => closed.push("a"));
+    gate.markCardClosed(0, b);
+    gate.markCardClosed(0, a);
+    gate.claimCard(b, () => closed.push("b"));
+    expect(closed).toEqual([]);
+  });
+
+  it("closes each card at most once", () => {
+    const gate = new HoverIntentGate();
+    const closed: string[] = [];
+    gate.claimCard(a, () => closed.push("a"));
+    gate.claimCard(b, () => closed.push("b"));
+    gate.claimCard(a, () => closed.push("a"));
+    gate.claimCard(b);
+    expect(closed).toEqual(["a", "b", "a"]);
   });
 });
