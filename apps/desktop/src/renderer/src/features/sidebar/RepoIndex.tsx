@@ -23,6 +23,7 @@ import {
   type RepoBlockBox,
   type RepoSpy
 } from "./repo-index";
+import type { ListReorder, ReorderTarget } from "./useListReorder";
 
 export type RepoIndexEntry = {
   id: string;
@@ -36,6 +37,23 @@ export type RepoIndexGroup = {
   /** The folder label, or null when the tree is not grouped. */
   label: string | null;
   entries: RepoIndexEntry[];
+};
+
+/**
+ * Moving names, as the tree's repo rows move: the same drag (one
+ * `useListReorder`, so held and aimed state shows in both views and a name
+ * can land on a tree row) and the same ⌘⇧↑/↓. Passed only while the lens is
+ * arranged by hand. Design: `design/Repo Index Reorder - UX Review.dc.html`.
+ */
+export type RepoIndexReorder = {
+  rowProps: (id: string) => ReturnType<ListReorder["rowProps"]>;
+  dragId: string | null;
+  target: ReorderTarget | null;
+  isPostDragClick: () => boolean;
+  /** The move a key asks for (⌘⇧↑/↓, Ctrl off the Mac), or null. */
+  moveKey: (event: ReactKeyboardEvent) => "up" | "down" | null;
+  /** Move one step inside its folder group. False when it cannot move. */
+  onMove: (id: string, direction: "up" | "down") => boolean;
 };
 
 const NO_SPY: RepoSpy = { current: null, inView: [] };
@@ -75,13 +93,15 @@ export function RepoIndex({
   groups,
   listRef,
   treeId,
-  onJump
+  onJump,
+  reorder
 }: {
   groups: RepoIndexGroup[];
   /** The tree's scrollport. */
   listRef: RefObject<HTMLDivElement | null>;
   treeId: string;
   onJump: (repoId: string) => void;
+  reorder?: RepoIndexReorder;
 }) {
   const tip = useViewportTooltip();
   const navRef = useRef<HTMLElement | null>(null);
@@ -89,6 +109,9 @@ export function RepoIndex({
   const [focusedId, setFocusedId] = useState<string | null>(null);
   const pointerInside = useRef(false);
   const typed = useRef<{ query: string; at: number }>({ query: "", at: 0 });
+  // A name moved by ⌘⇧↑/↓, until its new place renders. React reorders by
+  // moving <li>s, and Chromium drops focus from a node it moves.
+  const movedRef = useRef<string | null>(null);
 
   // ---- Width: natural until dragged ----
   // The grip is the shell's own PaneResizer. Its bounds are read back from
@@ -198,6 +221,16 @@ export function RepoIndex({
   // And when the lens or the folder groups change what is listed.
   useLayoutEffect(measure, [measure, idsKey]);
 
+  // Focus follows a name moved from the keyboard.
+  useLayoutEffect(() => {
+    const moved = movedRef.current;
+    const nav = navRef.current;
+    if (moved === null || nav === null) return;
+    movedRef.current = null;
+    const item = findItem(nav, moved);
+    if (item !== null && document.activeElement !== item) item.focus();
+  }, [idsKey]);
+
   // Keep the current repository in view in the index — but never while the
   // reader is in it: an item must not move under the pointer, and a keyboard
   // walk owns the index's scroll.
@@ -231,6 +264,13 @@ export function RepoIndex({
     const target = event.target as HTMLElement;
     const at = ids.indexOf(target.dataset["indexId"] ?? "");
     if (at === -1) return;
+    const direction = reorder?.moveKey(event) ?? null;
+    if (direction !== null) {
+      event.preventDefault();
+      const id = ids[at] as string;
+      if (reorder?.onMove(id, direction)) movedRef.current = id;
+      return;
+    }
     if (event.key === "ArrowDown") {
       event.preventDefault();
       focusAt(Math.min(at + 1, ids.length - 1));
@@ -284,6 +324,18 @@ export function RepoIndex({
       onPointerLeave={() => {
         pointerInside.current = false;
       }}
+      // An HTML drag fires no pointer events, so a drag over the column
+      // counts as the pointer being in it: the column must not scroll to
+      // follow the tree under a held name.
+      onDragOver={() => {
+        pointerInside.current = true;
+      }}
+      onDragLeave={(event) => {
+        if (!event.currentTarget.contains(event.relatedTarget as Node | null)) {
+          pointerInside.current = false;
+        }
+      }}
+      onDragStartCapture={tip.hide}
     >
       {groups.map((group) => (
         <div className="repo-index__group" key={group.key}>
@@ -299,18 +351,30 @@ export function RepoIndex({
             {group.entries.map((entry) => {
               const current = entry.id === spy.current;
               const cut = truncatedTooltip(tip, entry.name);
+              const drop =
+                reorder?.target?.id === entry.id ? reorder.target.position : null;
               return (
-                <li key={entry.id}>
+                <li
+                  key={entry.id}
+                  {...(drop === null ? {} : { className: `is-drop-${drop}` })}
+                >
                   <button
                     type="button"
+                    {...reorder?.rowProps(entry.id)}
                     className={`repo-index__item${current ? " is-current" : ""}${
                       !current && inView.has(entry.id) ? " is-in-view" : ""
-                    }${entry.containsSelection ? " is-selected" : ""}`}
+                    }${entry.containsSelection ? " is-selected" : ""}${
+                      reorder?.dragId === entry.id ? " is-dragging" : ""
+                    }`}
                     data-index-id={entry.id}
                     tabIndex={entry.id === tabStop ? 0 : -1}
                     aria-controls={treeId}
                     {...(current ? { "aria-current": "location" as const } : {})}
-                    onClick={() => onJump(entry.id)}
+                    onClick={() => {
+                      // The click a drag release fires is not a jump.
+                      if (reorder?.isPostDragClick()) return;
+                      onJump(entry.id);
+                    }}
                     onMouseEnter={cut.onMouseEnter}
                     onMouseLeave={cut.onMouseLeave}
                     onFocus={(event) => {
