@@ -1,0 +1,375 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <script src="./support.js"></script>
+  </head>
+  <body>
+    <x-dc>
+      <helmet data-dc-atomics>
+        <meta name="design_doc_mode" content="canvas" />
+        <link href="https://fonts.googleapis.com/css2?family=Geist:wght@400..700&amp;family=Geist+Mono:wght@400..700&amp;display=swap" rel="stylesheet" />
+        <style>
+          :root {
+            --rv-bg: #050505; --rv-line: rgba(247, 243, 235, 0.1);
+            --rv-t1: #f7f3eb; --rv-t2: #b8b0a5; --rv-t3: #8c857a; --rv-tsub: rgba(247, 243, 235, 0.54);
+            --rv-acc: #ff8a1f; --rv-accb: #ffb35c;
+            --rv-bad: #b94232; --rv-ok: #5fa969;
+            --font-sans: "Geist", "SF Pro Text", "Inter", system-ui, sans-serif;
+            --font-mono: "Geist Mono", "SF Mono", "JetBrains Mono", Consolas, monospace;
+
+            /* The app's own dark tokens (styles/tokens.css). */
+            --bg-stage: #000000; --bg-panel: #0a0a0a; --bg-panel-elevated: #101010;
+            --bg-panel-hover: #151515; --bg-hover-strong: #1f1a12;
+            --border-subtle: rgba(247, 243, 235, 0.1); --border-strong: rgba(247, 243, 235, 0.2);
+            --text-primary: #f7f3eb; --text-secondary: #b8b0a5; --text-muted: #8c857a; --text-subtle: rgba(247, 243, 235, 0.54);
+            --accent: #ff8a1f; --accent-bright: #ffb35c;
+            --focus-ring: #ff8a1f;
+          }
+          *, *::before, *::after { box-sizing: border-box; }
+          html { background: var(--rv-bg); }
+          body { margin: 0; background: var(--rv-bg); font-family: var(--font-sans); }
+
+          /* ---- review chrome (house convention) ---- */
+          .dv-turn { padding: 40px 44px 32px; background: var(--rv-bg); border-bottom: 1px solid var(--rv-line); }
+          .dv-thd { display: flex; align-items: baseline; gap: 10px; margin: 0 0 6px; }
+          .dv-tid { font: 600 10px var(--font-mono); padding: 3px 7px; background: var(--rv-t1); color: var(--rv-bg); border-radius: 4px; }
+          .dv-tname { font: 600 13px/1.2 var(--font-sans); color: var(--rv-t1); }
+          .dv-sub { margin: 0 0 22px; font: 400 11.5px/1.5 var(--font-sans); color: var(--rv-t3); max-width: 860px; text-wrap: pretty; }
+          .dv-sub b { color: var(--rv-t2); font-weight: 600; }
+          .dv-sub code, .note code, .fitem code, td code { font: 500 10px/1.4 var(--font-mono); color: var(--rv-t2); }
+          .dv-opts { display: flex; flex-wrap: wrap; gap: 28px; align-items: flex-start; }
+          .dv-opt { flex: none; display: flex; flex-direction: column; gap: 9px; width: 340px; }
+          .dv-oid { font: 600 10.5px var(--font-mono); padding: 3px 7px; background: rgba(247, 243, 235, 0.08); color: var(--rv-t1); border-radius: 5px; }
+          .dv-olabel { display: flex; align-items: baseline; gap: 8px; font: 400 11px/1.3 var(--font-sans); color: var(--rv-tsub); }
+          .dv-olabel b { color: var(--rv-accb); font-weight: 600; }
+          .dv-opt.rec .dv-oid { background: var(--rv-acc); color: #160a00; }
+          .dv-opt.no { opacity: 0.72; }
+          .note { margin: 0; font: 400 10.5px/1.5 var(--font-sans); color: var(--rv-t3); text-wrap: pretty; }
+          .note b { color: var(--rv-t2); font-weight: 600; }
+          .pin { display: inline-flex; align-items: center; justify-content: center; flex: none; width: 15px; height: 15px; border-radius: 999px; background: var(--rv-bad); color: #fff; font: 700 9px/1 var(--font-mono); }
+          .pin.ok { background: var(--rv-ok); color: #050505; }
+          .find { width: 440px; display: flex; flex-direction: column; gap: 14px; padding: 16px; border: 1px solid var(--rv-line); border-radius: 9px; background: #0a0a0a; }
+          .fitem { display: grid; grid-template-columns: 15px minmax(0, 1fr); gap: 9px; align-items: start; }
+          .fitem h4 { margin: 0 0 3px; font: 650 11.5px/1.3 var(--font-sans); color: var(--rv-t1); }
+          .fitem p { margin: 0; font: 400 10.5px/1.5 var(--font-sans); color: var(--rv-t3); }
+          .fitem b { color: var(--rv-t2); font-weight: 600; }
+          .dv-next { margin: 22px 0 0; font: 400 11px/1.5 var(--font-sans); color: var(--rv-tsub); }
+          .dv-next b { color: var(--rv-accb); font-weight: 600; }
+          table.cmp { border-collapse: collapse; width: 820px; font: 400 10.5px/1.45 var(--font-sans); color: var(--rv-t3); }
+          table.cmp th { text-align: left; font: 600 10px var(--font-mono); color: var(--rv-t2); padding: 6px 10px; border-bottom: 1px solid var(--rv-line); }
+          table.cmp td { vertical-align: top; padding: 7px 10px; border-bottom: 1px solid var(--rv-line); }
+          table.cmp td:first-child { color: var(--rv-t1); font-weight: 600; width: 150px; }
+          table.cmp b { color: var(--rv-t2); font-weight: 600; }
+
+          /* ---- the sidebar specimen: index column + tree ---- */
+          .stage { position: relative; padding: 14px; border-radius: 10px; background: var(--bg-stage); }
+          .sb { position: relative; display: flex; width: 312px; height: 248px; overflow: hidden; border: 1px solid var(--border-subtle); border-radius: 8px; background: var(--bg-panel); font: 500 11.5px/1.25 var(--font-sans); }
+          .lens { display: flex; gap: 2px; padding: 6px 8px; border-bottom: 1px solid var(--border-subtle); font: 600 9.5px/1 var(--font-sans); color: var(--text-muted); }
+          .lens span { padding: 4px 6px; border-radius: 5px; }
+          .lens .on { background: var(--bg-hover-strong); color: var(--accent); }
+          .col { display: flex; flex-direction: column; min-width: 0; }
+          .ix { flex: none; width: 96px; padding: 2px 0 10px; border-right: 1px solid var(--border-subtle); font: 500 10.5px/1.25 var(--font-sans); }
+          .ixl { padding: 9px 8px 3px 11px; font: 700 8.5px/1 var(--font-sans); letter-spacing: 0.07em; text-transform: uppercase; color: var(--text-muted); }
+          .ixi { position: relative; padding: 4px 8px 4px 11px; border-radius: 0 6px 6px 0; color: var(--text-secondary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+          .ixi::before { content: ""; position: absolute; left: 3px; top: 0; bottom: 0; width: 2px; }
+          .ixi.inv::before { background: var(--border-strong); }
+          .ixi.cur { color: var(--text-primary); }
+          .ixi.cur::before { background: var(--accent); }
+          .ixi.sel { background: var(--bg-hover-strong); color: var(--accent); }
+          .ixi.hov { background: var(--bg-panel-hover); color: var(--text-primary); }
+          .ixi.ring { outline: 2px solid var(--focus-ring); outline-offset: -2px; }
+          .ixw { position: relative; }
+          .ixw.drag .ixi, .rr.drag { background: var(--bg-hover-strong); }
+          .ixw.drag .ixi { opacity: 0.45; }
+          .lb::after, .la::after { content: ""; position: absolute; left: 0; right: 0; height: 2px; border-radius: 999px; background: var(--accent); z-index: 4; }
+          .lb::after { top: -1px; }
+          .la::after { bottom: -1px; }
+          .ixw.lb::after, .ixw.la::after { left: 6px; right: 4px; }
+          .tr { flex: 1; min-width: 0; }
+          .gh { padding: 7px 10px 4px; font: 700 8.5px/1 var(--font-sans); letter-spacing: 0.07em; text-transform: uppercase; color: var(--text-muted); background: var(--bg-panel); }
+          .rr { position: relative; display: flex; align-items: center; gap: 6px; height: 26px; padding: 0 8px 0 14px; color: var(--text-primary); font-weight: 600; }
+          .rr .h { position: absolute; left: 3px; color: var(--text-subtle); font-size: 9px; letter-spacing: -1px; }
+          .rr .n { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+          .rr .c { color: var(--text-muted); font: 500 9.5px/1 var(--font-mono); }
+          .rr .s { color: var(--accent); font-size: 10px; }
+          .rr.sel .n { color: var(--accent); }
+          .rr.drag { opacity: 0.6; }
+          .ghost { position: absolute; z-index: 9; padding: 4px 8px; border-radius: 4px; border: 1px solid var(--border-strong); background: rgba(31, 26, 18, 0.94); box-shadow: 0 6px 18px rgba(0,0,0,0.55); color: var(--accent); font: 500 10.5px/1.25 var(--font-sans); white-space: nowrap; pointer-events: none; }
+          .cursor { position: absolute; z-index: 10; width: 14px; height: 18px; pointer-events: none; }
+          .toast { position: absolute; left: 8px; right: 8px; bottom: 8px; padding: 6px 8px; border-radius: 6px; border: 1px dashed var(--border-strong); color: var(--text-muted); font: 400 9.5px/1.35 var(--font-sans); }
+          .toast b { color: var(--text-secondary); font-weight: 600; }
+
+          /* PwrAgnt specimen (2b): the hairline seam and the tilted card */
+          .seam { height: 9px; position: relative; }
+          .seam::after { content: ""; position: absolute; top: 4px; right: 8px; left: 11px; height: 1px; background: var(--border-strong); }
+          .card { position: absolute; z-index: 9; padding: 4px 8px; border: 1px solid var(--border-strong); border-radius: 6px; background: var(--bg-panel-elevated); color: var(--text-primary); font: 500 10.5px/1.25 var(--font-sans); transform: rotate(-1.2deg); box-shadow: 0 18px 44px rgba(0,0,0,0.6); }
+          .card i { font-style: normal; margin-left: 6px; color: var(--accent-bright); font: 600 8.5px/1 var(--font-sans); text-transform: uppercase; }
+        </style>
+      </helmet>
+
+      <!-- ================================================================ -->
+      <section class="dv-turn" id="t1" data-screen-label="Turn 1 What carries over">
+        <div class="dv-thd"><span class="dv-tid">1</span><span class="dv-tname">What PwrAgnt shipped, and what carries over</span></div>
+        <p class="dv-sub">PwrAgnt #3260 lets you drag names in its <b>project index</b> to reorder the pinned projects, through the same rules as the Directories list&#8217;s folder drag (<code>directory-pin-drop.ts</code>), so the two can never disagree. PwrGit&#8217;s <b>repository index</b> (<code>RepoIndex.tsx</code>) is the same column, but the ordering model underneath differs. The port keeps PwrAgnt&#8217;s principle (<b>the index applies the tree&#8217;s own drop</b>) and PwrGit&#8217;s model.</p>
+        <div class="dv-opts">
+          <table class="cmp">
+            <tr><th></th><th>PwrAgnt project index</th><th>PwrGit repository index (proposed)</th></tr>
+            <tr><td>What a hand order is</td><td>Pins sit above a hairline, in the operator&#8217;s order; the rest follow by name. Every view shows both.</td><td>Only the <b>Pinned</b> lens is hand-ordered (<code>lensIsArrangeable</code>). Focused, Behind and Stale answer a question; All is A&#8211;Z. A hand order there would fight the answer.</td></tr>
+            <tr><td>What a drag can do</td><td>Move a pin, pin an unpinned project (drop above the hairline), unpin (drop on or below it), ghost Pin slot when nothing is pinned.</td><td><b>Move only</b>, in the Pinned lens. Pinning stays the star. Every name in that lens is already pinned, so there is no seam to cross.</td></tr>
+            <tr><td>Boundaries</td><td>One flat list.</td><td>Grouped by folder: a name moves <b>inside its folder group</b>, as tree rows do (<code>canDrop</code>).</td></tr>
+            <tr><td>Gesture</td><td>Pointer drag (<code>beginPointerReorderDrag</code>): 4px lift, tilted held card, dimmed source, 3px line, Escape cancels.</td><td>The tree&#8217;s own drag (<code>useListReorder</code>, HTML drag and drop): browser lift threshold, dimmed source, 2px accent line, Escape cancels. <b>Same hook instance as the tree</b>.</td></tr>
+            <tr><td>Keyboard</td><td>&#8984;&#8679;&#8593;/&#8595; on a pinned name.</td><td>&#8984;&#8679;&#8593;/&#8595; on a name in the Pinned lens, the tree row&#8217;s move, announced the same way; focus stays on the moved name.</td></tr>
+            <tr><td>After the drop</td><td>The name flashes an outline for 1.2s.</td><td>No flash: the tree&#8217;s drop has none, and the selection tint already marks a moved repository you are in.</td></tr>
+          </table>
+        </div>
+      </section>
+
+      <!-- ================================================================ -->
+      <section class="dv-turn" id="t2" data-screen-label="Turn 2 Options">
+        <div class="dv-thd"><span class="dv-tid">2</span><span class="dv-tname">Three ways to port it</span></div>
+        <p class="dv-sub">Each specimen is the sidebar at 312px with the index drawn, mid-drag: <b>ui-kit</b> held, aimed between <b>api-gateway</b> and <b>billing</b>.</p>
+        <div class="dv-opts">
+
+          <div class="dv-opt rec" id="2a">
+            <div class="dv-olabel"><span class="dv-oid">2a</span><b>Recommended</b> &#183; Pinned lens only, one drag shared with the tree</div>
+            <div class="stage">
+              <div class="sb">
+                <div class="col" style="width:100%">
+                  <div class="lens"><span>Focused</span><span class="on">Pinned 5</span><span>Behind</span><span>Stale</span><span>All</span></div>
+                  <div style="display:flex;flex:1;min-height:0">
+                    <nav class="ix">
+                      <div class="ixw"><div class="ixi cur">atlas</div></div>
+                      <div class="ixw"><div class="ixi inv sel">api-gateway</div></div>
+                      <div class="ixw lb"><div class="ixi inv">billing</div></div>
+                      <div class="ixw"><div class="ixi inv">docs-site</div></div>
+                      <div class="ixw drag"><div class="ixi inv">ui-kit</div></div>
+                    </nav>
+                    <div class="tr">
+                      <div class="rr"><span class="h">&#8942;&#8942;</span><span class="s">&#9733;</span><span class="n">atlas</span><span class="c">3 wts</span></div>
+                      <div class="rr sel"><span class="h">&#8942;&#8942;</span><span class="s">&#9733;</span><span class="n">api-gateway</span><span class="c">7 wts</span></div>
+                      <div class="rr lb"><span class="h">&#8942;&#8942;</span><span class="s">&#9733;</span><span class="n">billing</span><span class="c">2 wts</span></div>
+                      <div class="rr"><span class="h">&#8942;&#8942;</span><span class="s">&#9733;</span><span class="n">docs-site</span><span class="c">1 wt</span></div>
+                      <div class="rr drag"><span class="h">&#8942;&#8942;</span><span class="s">&#9733;</span><span class="n">ui-kit</span><span class="c">4 wts</span></div>
+                    </div>
+                  </div>
+                </div>
+                <div class="ghost" style="left:18px;top:86px">ui-kit</div>
+                <svg class="cursor" style="left:56px;top:96px" viewBox="0 0 14 18"><path d="M1 1l11 9-5 .6 3 6-2 1-3-6-4 3z" fill="#fff" stroke="#000" stroke-width="1"/></svg>
+              </div>
+            </div>
+            <p class="note"><b>One object, one drag.</b> The index passes its names the tree&#8217;s <code>repoDrag.rowProps</code>, so a drop commits through the same <code>reorder(filteredIds, …)</code> and <code>onPersistRepoOrder</code>. Held and aimed state is shared too: the tree row dims and draws the line beside the index (a map shows where the move lands, even off screen in the tree). A name can be dropped on a tree row and a tree row on a name. Other lenses: names do not drag, exactly where tree rows do not.</p>
+          </div>
+
+          <div class="dv-opt no" id="2b">
+            <div class="dv-olabel"><span class="dv-oid">2b</span>PwrAgnt&#8217;s pin seam, in every lens</div>
+            <div class="stage">
+              <div class="sb">
+                <div class="col" style="width:100%">
+                  <div class="lens"><span class="on">Focused 9</span><span>Pinned</span><span>Behind</span><span>Stale</span><span>All</span></div>
+                  <div style="display:flex;flex:1;min-height:0">
+                    <nav class="ix">
+                      <div class="ixw"><div class="ixi cur">atlas</div></div>
+                      <div class="ixw"><div class="ixi inv sel">api-gateway</div></div>
+                      <div class="seam"></div>
+                      <div class="ixw"><div class="ixi inv">billing</div></div>
+                      <div class="ixw"><div class="ixi inv">cinder</div></div>
+                      <div class="ixw"><div class="ixi inv" style="opacity:.38">ui-kit</div></div>
+                      <div class="ixw"><div class="ixi inv">zephyr</div></div>
+                    </nav>
+                    <div class="tr">
+                      <div class="rr"><span class="s">&#9733;</span><span class="n">atlas</span><span class="c">3 wts</span></div>
+                      <div class="rr sel"><span class="s">&#9733;</span><span class="n">api-gateway</span><span class="c">7 wts</span></div>
+                      <div class="rr"><span class="n">billing</span><span class="c">2 wts</span></div>
+                      <div class="rr"><span class="n">cinder</span><span class="c">1 wt</span></div>
+                      <div class="rr"><span class="n">ui-kit</span><span class="c">4 wts</span></div>
+                      <div class="rr"><span class="n">zephyr</span><span class="c">5 wts</span></div>
+                    </div>
+                  </div>
+                </div>
+                <div class="card" style="left:44px;top:70px">ui-kit<i>Pin</i></div>
+              </div>
+            </div>
+            <p class="note"><b>Not recommended.</b> Focused re-sorts by activity and All by name, so a dropped position would be overridden on the next refresh; only the pin would stick, and the star already does that in one click. It would also add a second drag style (tilted card, 3px line) beside the tree&#8217;s, in one sidebar.</p>
+          </div>
+
+          <div class="dv-opt no" id="2c">
+            <div class="dv-olabel"><span class="dv-oid">2c</span>Index-only drag, separate from the tree</div>
+            <div class="stage">
+              <div class="sb">
+                <div class="col" style="width:100%">
+                  <div class="lens"><span>Focused</span><span class="on">Pinned 5</span><span>Behind</span><span>Stale</span><span>All</span></div>
+                  <div style="display:flex;flex:1;min-height:0">
+                    <nav class="ix">
+                      <div class="ixw"><div class="ixi cur">atlas</div></div>
+                      <div class="ixw"><div class="ixi inv sel">api-gateway</div></div>
+                      <div class="ixw lb"><div class="ixi inv">billing</div></div>
+                      <div class="ixw"><div class="ixi inv">docs-site</div></div>
+                      <div class="ixw drag"><div class="ixi inv">ui-kit</div></div>
+                    </nav>
+                    <div class="tr">
+                      <div class="rr"><span class="h">&#8942;&#8942;</span><span class="s">&#9733;</span><span class="n">atlas</span><span class="c">3 wts</span></div>
+                      <div class="rr sel"><span class="h">&#8942;&#8942;</span><span class="s">&#9733;</span><span class="n">api-gateway</span><span class="c">7 wts</span></div>
+                      <div class="rr"><span class="h">&#8942;&#8942;</span><span class="s">&#9733;</span><span class="n">billing</span><span class="c">2 wts</span></div>
+                      <div class="rr"><span class="h">&#8942;&#8942;</span><span class="s">&#9733;</span><span class="n">docs-site</span><span class="c">1 wt</span></div>
+                      <div class="rr"><span class="h">&#8942;&#8942;</span><span class="s">&#9733;</span><span class="n">ui-kit</span><span class="c">4 wts</span></div>
+                    </div>
+                  </div>
+                </div>
+                <div class="ghost" style="left:18px;top:86px">ui-kit</div>
+              </div>
+            </div>
+            <p class="note"><b>Works, but quieter than it should be.</b> Its own hook and drag type: the tree does not react, and a name dropped on the tree is refused. Two lists of the same repositories that ignore each other mid-drag read as two objects. No less code than 2a.</p>
+          </div>
+
+        </div>
+      </section>
+
+      <!-- ================================================================ -->
+      <section class="dv-turn" id="t3" data-screen-label="Turn 3 States of 2a">
+        <div class="dv-thd"><span class="dv-tid">3</span><span class="dv-tname">2a, state by state</span></div>
+        <p class="dv-sub">Grouped by folder (two profile roots). Values are the tree&#8217;s: the source on <code>--bg-hover-strong</code>, a 2px <code>--accent</code> line drawn as a pseudo-element so nothing reflows mid-drag. In the index the line is inset 6px/4px so it clears the scroll rail.</p>
+        <div class="dv-opts">
+
+          <div class="dv-opt" id="3a">
+            <div class="dv-olabel"><span class="dv-oid">3a</span>Rest: a name looks as it does today</div>
+            <div class="stage"><div class="sb" style="height:220px">
+              <nav class="ix">
+                <div class="ixl">code</div>
+                <div class="ixw"><div class="ixi cur">atlas</div></div>
+                <div class="ixw"><div class="ixi inv sel">api-gateway</div></div>
+                <div class="ixw"><div class="ixi inv hov">billing</div></div>
+                <div class="ixl">oss</div>
+                <div class="ixw"><div class="ixi inv">ui-kit</div></div>
+                <div class="ixw"><div class="ixi">zephyr</div></div>
+              </nav>
+              <div class="tr">
+                <div class="gh">code</div>
+                <div class="rr"><span class="s">&#9733;</span><span class="n">atlas</span><span class="c">3 wts</span></div>
+                <div class="rr sel"><span class="s">&#9733;</span><span class="n">api-gateway</span><span class="c">7 wts</span></div>
+                <div class="rr"><span class="s">&#9733;</span><span class="n">billing</span><span class="c">2 wts</span></div>
+                <div class="gh">oss</div>
+                <div class="rr"><span class="s">&#9733;</span><span class="n">ui-kit</span><span class="c">4 wts</span></div>
+                <div class="rr"><span class="s">&#9733;</span><span class="n">zephyr</span><span class="c">5 wts</span></div>
+              </div>
+            </div></div>
+            <p class="note">No handle: the column is 7ch at its narrowest and a grip would eat a name. A click still jumps (the click a drag release fires is swallowed by <code>isPostDragClick</code>). Hover is the existing <code>--bg-panel-hover</code>.</p>
+          </div>
+
+          <div class="dv-opt" id="3b">
+            <div class="dv-olabel"><span class="dv-oid">3b</span>Held and aimed: both views answer</div>
+            <div class="stage"><div class="sb" style="height:220px">
+              <nav class="ix">
+                <div class="ixl">code</div>
+                <div class="ixw"><div class="ixi cur">atlas</div></div>
+                <div class="ixw la"><div class="ixi inv sel">api-gateway</div></div>
+                <div class="ixw drag"><div class="ixi inv">billing</div></div>
+                <div class="ixl">oss</div>
+                <div class="ixw"><div class="ixi inv">ui-kit</div></div>
+                <div class="ixw"><div class="ixi">zephyr</div></div>
+              </nav>
+              <div class="tr">
+                <div class="gh">code</div>
+                <div class="rr"><span class="s">&#9733;</span><span class="n">atlas</span><span class="c">3 wts</span></div>
+                <div class="rr sel la"><span class="s">&#9733;</span><span class="n">api-gateway</span><span class="c">7 wts</span></div>
+                <div class="rr drag"><span class="s">&#9733;</span><span class="n">billing</span><span class="c">2 wts</span></div>
+                <div class="gh">oss</div>
+                <div class="rr"><span class="s">&#9733;</span><span class="n">ui-kit</span><span class="c">4 wts</span></div>
+                <div class="rr"><span class="s">&#9733;</span><span class="n">zephyr</span><span class="c">5 wts</span></div>
+              </div>
+              <div class="ghost" style="left:16px;top:44px">billing</div>
+              <svg class="cursor" style="left:54px;top:54px" viewBox="0 0 14 18"><path d="M1 1l11 9-5 .6 3 6-2 1-3-6-4 3z" fill="#fff" stroke="#000" stroke-width="1"/></svg>
+            </div></div>
+            <p class="note"><b>billing</b> aimed at the lower half of api-gateway: the line goes after it in the index and on the same edge in the tree. Its own edges are no move (no line). The tooltip for a cut-off name hides at lift.</p>
+          </div>
+
+          <div class="dv-opt" id="3c">
+            <div class="dv-olabel"><span class="dv-oid">3c</span>Across a folder label: no line, no drop</div>
+            <div class="stage"><div class="sb" style="height:220px">
+              <nav class="ix">
+                <div class="ixl">code</div>
+                <div class="ixw"><div class="ixi cur">atlas</div></div>
+                <div class="ixw"><div class="ixi inv sel">api-gateway</div></div>
+                <div class="ixw drag"><div class="ixi inv">billing</div></div>
+                <div class="ixl">oss</div>
+                <div class="ixw"><div class="ixi inv hov">ui-kit</div></div>
+                <div class="ixw"><div class="ixi">zephyr</div></div>
+              </nav>
+              <div class="tr">
+                <div class="gh">code</div>
+                <div class="rr"><span class="s">&#9733;</span><span class="n">atlas</span><span class="c">3 wts</span></div>
+                <div class="rr sel"><span class="s">&#9733;</span><span class="n">api-gateway</span><span class="c">7 wts</span></div>
+                <div class="rr drag"><span class="s">&#9733;</span><span class="n">billing</span><span class="c">2 wts</span></div>
+                <div class="gh">oss</div>
+                <div class="rr"><span class="s">&#9733;</span><span class="n">ui-kit</span><span class="c">4 wts</span></div>
+                <div class="rr"><span class="s">&#9733;</span><span class="n">zephyr</span><span class="c">5 wts</span></div>
+              </div>
+              <div class="ghost" style="left:16px;top:116px">billing</div>
+              <svg class="cursor" style="left:54px;top:126px;width:16px;height:16px" viewBox="0 0 16 16"><circle cx="8" cy="8" r="6.5" fill="#fff" stroke="#000"/><circle cx="8" cy="8" r="4.2" fill="none" stroke="#c45a3a" stroke-width="1.6"/><path d="M5 11 11 5" stroke="#c45a3a" stroke-width="1.6"/></svg>
+            </div></div>
+            <p class="note">A folder group is a view of where a repository lives on disk; dropping billing among the <b>oss</b> repos would reorder the flat list while the row snapped back under <b>code</b>. The shared <code>canDrop</code> refuses before a line is drawn, and the cursor shows no-drop.</p>
+          </div>
+
+          <div class="dv-opt" id="3d">
+            <div class="dv-olabel"><span class="dv-oid">3d</span>Any other lens: names don&#8217;t drag</div>
+            <div class="stage"><div class="sb" style="height:220px">
+              <div class="col" style="width:100%">
+                <div class="lens"><span class="on">Focused 6</span><span>Pinned</span><span>Behind</span><span>Stale</span><span>All</span></div>
+                <div style="display:flex;flex:1;min-height:0">
+                  <nav class="ix">
+                    <div class="ixw"><div class="ixi cur">api-gateway</div></div>
+                    <div class="ixw"><div class="ixi inv hov">atlas</div></div>
+                    <div class="ixw"><div class="ixi inv">cinder</div></div>
+                    <div class="ixw"><div class="ixi inv">billing</div></div>
+                  </nav>
+                  <div class="tr">
+                    <div class="rr"><span class="s">&#9733;</span><span class="n">api-gateway</span><span class="c">7 wts</span></div>
+                    <div class="rr"><span class="s">&#9733;</span><span class="n">atlas</span><span class="c">3 wts</span></div>
+                    <div class="rr"><span class="n">cinder</span><span class="c">1 wt</span></div>
+                    <div class="rr"><span class="s">&#9733;</span><span class="n">billing</span><span class="c">2 wts</span></div>
+                  </div>
+                </div>
+              </div>
+            </div></div>
+            <p class="note">Same rule as the tree (no handle there either): <code>draggable</code> is false, a press-and-move does nothing, a click jumps. &#8984;&#8679;&#8593;/&#8595; is not claimed. No hint is drawn: the tree&#8217;s rows have never explained this either, and the Pinned lens is where people arrange.</p>
+          </div>
+
+          <div class="dv-opt" id="3e">
+            <div class="dv-olabel"><span class="dv-oid">3e</span>&#8984;&#8679;&#8595; on a focused name</div>
+            <div class="stage"><div class="sb" style="height:220px">
+              <nav class="ix">
+                <div class="ixl">code</div>
+                <div class="ixw"><div class="ixi cur">atlas</div></div>
+                <div class="ixw"><div class="ixi inv">billing</div></div>
+                <div class="ixw"><div class="ixi inv sel ring">api-gateway</div></div>
+                <div class="ixl">oss</div>
+                <div class="ixw"><div class="ixi inv">ui-kit</div></div>
+                <div class="ixw"><div class="ixi">zephyr</div></div>
+              </nav>
+              <div class="tr">
+                <div class="gh">code</div>
+                <div class="rr"><span class="s">&#9733;</span><span class="n">atlas</span><span class="c">3 wts</span></div>
+                <div class="rr"><span class="s">&#9733;</span><span class="n">billing</span><span class="c">2 wts</span></div>
+                <div class="rr sel"><span class="s">&#9733;</span><span class="n">api-gateway</span><span class="c">7 wts</span></div>
+                <div class="gh">oss</div>
+                <div class="rr"><span class="s">&#9733;</span><span class="n">ui-kit</span><span class="c">4 wts</span></div>
+              </div>
+              <div class="toast">Screen reader: <b>&#8220;api-gateway moved to position 3 of 3&#8221;</b></div>
+            </div></div>
+            <p class="note">The tree row&#8217;s move: one step to the nearest neighbour in the same group, stops at the group&#8217;s edge, persists, announces through the shared live region, and focus stays on the moved name (React moves the <code>&lt;li&gt;</code>, which can drop focus, so it is put back).</p>
+          </div>
+
+          <div class="find">
+            <div class="fitem"><span class="pin ok">1</span><div><h4>No new visual language</h4><p>Line, dim and drag image are the tree&#8217;s. PwrAgnt&#8217;s tilted card belongs to its pointer drag; mixing both styles in one sidebar would make the index feel like a different app.</p></div></div>
+            <div class="fitem"><span class="pin ok">2</span><div><h4>The hover hold is released on drop</h4><p>As the tree&#8217;s drop does (<code>held.release()</code>), so the move shows even with the pointer parked on the column.</p></div></div>
+            <div class="fitem"><span class="pin ok">3</span><div><h4>The index never scrolls itself mid-drag</h4><p>Scroll-spy follow already waits while the pointer is inside; a drag marks the pointer inside too, since HTML drag fires no pointer events.</p></div></div>
+            <div class="fitem"><span class="pin">?</span><div><h4>Left out on purpose</h4><p>Drag-to-pin from other lenses (2b) and PwrAgnt&#8217;s 1.2s drop flash. Either can follow if the plain move feels too quiet.</p></div></div>
+          </div>
+
+        </div>
+        <p class="dv-next">Next: <b>build 2a</b> &#183; add the drop flash to both views &#183; revisit drag-to-pin if the Focused lens gains a pinned band</p>
+      </section>
+    </x-dc>
+  </body>
+</html>
