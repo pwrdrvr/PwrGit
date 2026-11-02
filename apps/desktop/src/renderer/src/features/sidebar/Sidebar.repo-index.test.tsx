@@ -87,7 +87,14 @@ afterEach(() => {
   window.localStorage.clear();
 });
 
-function render(selected: string, onSelect: (repo: Repo, w: Worktree) => void): void {
+function render(
+  selected: string,
+  onSelect: (repo: Repo, w: Worktree) => void,
+  { repos = REPOS, onPersistRepoOrder = () => undefined }: {
+    repos?: Repo[];
+    onPersistRepoOrder?: (ids: string[]) => void;
+  } = {}
+): void {
   const noop = () => undefined;
   act(() => {
     root.render(
@@ -97,7 +104,7 @@ function render(selected: string, onSelect: (repo: Repo, w: Worktree) => void): 
         profileLoadState={{ status: "ready" }}
         onRetryProfiles={noop}
         onSwitchProfile={noop}
-        repos={REPOS}
+        repos={repos}
         repoLoadState={{ status: "ready" }}
         onRetryRepos={noop}
         selectedWorktreeId={selected}
@@ -109,7 +116,7 @@ function render(selected: string, onSelect: (repo: Repo, w: Worktree) => void): 
         onRemoveWorktrees={() => Promise.resolve({ removed: [], failed: [] } as never)}
         onCreateWorktree={() => Promise.resolve(null)}
         onPersistOrder={noop}
-        onPersistRepoOrder={noop}
+        onPersistRepoOrder={onPersistRepoOrder}
         refreshingRepoIds={new Set()}
         onRefreshRepo={noop}
         onRefreshPullRequest={noop}
@@ -163,3 +170,168 @@ describe("Sidebar's repository index", () => {
     expect(onSelect).not.toHaveBeenCalled();
   });
 });
+
+describe("Moving repositories from the index", () => {
+  const PINNED = REPOS.map((repo) => ({ ...repo, pinned: true }));
+
+  /** jsdom has no DragEvent; the hook reads only these fields. */
+  function dragger() {
+    const store = new Map<string, string>();
+    const dataTransfer = {
+      effectAllowed: "",
+      dropEffect: "",
+      get types() {
+        return [...store.keys()];
+      },
+      setData: (type: string, value: string) => store.set(type, value),
+      getData: (type: string) => store.get(type) ?? ""
+    };
+    return (target: Element, type: string): void => {
+      const event = new Event(type, { bubbles: true, cancelable: true });
+      Object.assign(event, { dataTransfer, clientY: 0 });
+      act(() => {
+        target.dispatchEvent(event);
+      });
+    };
+  }
+
+  it("drags names only in the Pinned lens, where tree rows drag", () => {
+    render("atlas:wt0", () => undefined, { repos: PINNED });
+    expect(indexItem("atlas").getAttribute("draggable")).toBeNull();
+
+    window.localStorage.setItem("pwrgit.lens", "Pinned");
+    act(() => root.unmount());
+    root = createRoot(container);
+    render("atlas:wt0", () => undefined, { repos: PINNED });
+    expect(indexItem("atlas").getAttribute("draggable")).toBe("true");
+  });
+
+  it("drops a name through the tree's own reorder, and the tree shows the aim", () => {
+    window.localStorage.setItem("pwrgit.lens", "Pinned");
+    const persist = vi.fn();
+    render("beacon:wt0", () => undefined, { repos: PINNED, onPersistRepoOrder: persist });
+    const fire = dragger();
+    const treeRow = (id: string) =>
+      container.querySelector(`.repo-row[data-repo-id="${id}"]`)!;
+
+    fire(indexItem("atlas"), "dragstart");
+    expect(indexItem("atlas").className).toContain("is-dragging");
+    expect(treeRow("atlas").className).toContain("is-dragging");
+
+    // jsdom lays nothing out, so every pointer is in a box's lower half.
+    fire(indexItem("cinder"), "dragover");
+    expect(indexItem("cinder").parentElement!.className).toBe("is-drop-after");
+    expect(treeRow("cinder").className).toContain("is-drop-after");
+
+    fire(indexItem("cinder"), "drop");
+    expect(persist).toHaveBeenCalledExactlyOnceWith(["beacon", "cinder", "atlas"]);
+  });
+
+  it("takes a name dropped on a tree row, as one drag", () => {
+    window.localStorage.setItem("pwrgit.lens", "Pinned");
+    const persist = vi.fn();
+    render("beacon:wt0", () => undefined, { repos: PINNED, onPersistRepoOrder: persist });
+    const fire = dragger();
+    fire(indexItem("cinder"), "dragstart");
+    const row = container.querySelector('.repo-row[data-repo-id="beacon"]')!;
+    fire(row, "dragover");
+    fire(row, "drop");
+    expect(persist).toHaveBeenCalledExactlyOnceWith(["atlas", "beacon", "cinder"]);
+  });
+
+  it("moves a name with ⌘⇧↓, as its tree row moves", () => {
+    window.localStorage.setItem("pwrgit.lens", "Pinned");
+    const persist = vi.fn();
+    render("beacon:wt0", () => undefined, { repos: PINNED, onPersistRepoOrder: persist });
+    // The announcement lands a frame after the clear (lib/announce).
+    vi.spyOn(window, "requestAnimationFrame").mockImplementation((cb) => {
+      cb(0);
+      return 1;
+    });
+    act(() => indexItem("atlas").focus());
+    act(() => {
+      indexItem("atlas").dispatchEvent(
+        new KeyboardEvent("keydown", {
+          key: "ArrowDown",
+          metaKey: true,
+          shiftKey: true,
+          bubbles: true
+        })
+      );
+    });
+    expect(persist).toHaveBeenCalledExactlyOnceWith(["beacon", "atlas", "cinder"]);
+    expect(document.getElementById("pwrgit-live-region")?.textContent).toBe(
+      "atlas moved to 2 of 3."
+    );
+  });
+
+  describe("grouped by folder", () => {
+    const TWO_ROOTS = { ...PROFILE, roots: ["/code", "/oss"] } as Profile;
+    // atlas, beacon under /code; cinder under /oss.
+    const GROUPED = PINNED.map((repo) =>
+      repo.id === "cinder" ? { ...repo, path: "/oss/cinder" } : repo
+    );
+    function renderGrouped(persist: (ids: string[]) => void): void {
+      window.localStorage.setItem("pwrgit.lens", "Pinned");
+      act(() => {
+        root.render(
+          <Sidebar
+            profiles={[TWO_ROOTS]}
+            activeProfile={TWO_ROOTS}
+            profileLoadState={{ status: "ready" }}
+            onRetryProfiles={() => undefined}
+            onSwitchProfile={() => undefined}
+            repos={GROUPED}
+            repoLoadState={{ status: "ready" }}
+            onRetryRepos={() => undefined}
+            selectedWorktreeId="atlas:wt0"
+            onSelectWorktree={() => undefined}
+            onSetRepoPin={() => undefined}
+            onSetWorktreePin={() => undefined}
+            onSetBranchPin={() => undefined}
+            onRemoveWorktree={() => undefined}
+            onRemoveWorktrees={() => Promise.resolve({ removed: [], failed: [] } as never)}
+            onCreateWorktree={() => Promise.resolve(null)}
+            onPersistOrder={() => undefined}
+            onPersistRepoOrder={persist}
+            refreshingRepoIds={new Set()}
+            onRefreshRepo={() => undefined}
+            onRefreshPullRequest={() => undefined}
+            onCloneRepo={() => undefined}
+            onForkRepo={() => undefined}
+            onForkCheckout={() => undefined}
+            onAddFolder={() => undefined}
+            onExpandRepo={() => undefined}
+            onNewProfile={() => undefined}
+            onManageProfile={() => undefined}
+            platform="darwin"
+          />
+        );
+      });
+    }
+    const chord = (target: Element, key: string): void => {
+      act(() => {
+        target.dispatchEvent(
+          new KeyboardEvent("keydown", { key, metaKey: true, shiftKey: true, bubbles: true })
+        );
+      });
+    };
+
+    it("stops a key move at its folder's edge, from the index and the tree", () => {
+      const persist = vi.fn();
+      renderGrouped(persist);
+      chord(indexItem("beacon"), "ArrowDown");
+      chord(container.querySelector('.repo-row[data-repo-id="beacon"]')!, "ArrowDown");
+      chord(indexItem("cinder"), "ArrowUp");
+      expect(persist).not.toHaveBeenCalled();
+    });
+
+    it("moves a tree row inside its folder, as before the index could", () => {
+      const persist = vi.fn();
+      renderGrouped(persist);
+      chord(container.querySelector('.repo-row[data-repo-id="beacon"]')!, "ArrowUp");
+      expect(persist).toHaveBeenCalledExactlyOnceWith(["beacon", "atlas", "cinder"]);
+    });
+  });
+});
+

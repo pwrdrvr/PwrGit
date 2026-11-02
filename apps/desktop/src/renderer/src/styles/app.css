@@ -1346,6 +1346,37 @@ textarea,
 :root[data-density="compact"] .repo-index__item {
   padding-block: 3px;
 }
+/* Names move as the tree's rows do, in the Pinned lens, with the tree's own
+   drag (one `useListReorder`): the held name dims, and the tree's 2px accent
+   line marks the gap, inset to clear the scroll rail. The line hangs off the
+   <li> because the button clips its overflow, and is a pseudo-element so
+   nothing reflows mid-drag. Design: Repo Index Reorder - UX Review, 2a. */
+.repo-index__list > li {
+  position: relative;
+}
+/* Dimmed by colour, not opacity, which would dim a focus ring too. */
+.repo-index__item.is-dragging {
+  background: var(--bg-hover-strong);
+  color: var(--text-subtle);
+}
+.repo-index__list > li.is-drop-before::after,
+.repo-index__list > li.is-drop-after::after {
+  content: "";
+  position: absolute;
+  left: 6px;
+  right: 4px;
+  z-index: 1;
+  height: 2px;
+  border-radius: 999px;
+  background: var(--accent);
+  pointer-events: none;
+}
+.repo-index__list > li.is-drop-before::after {
+  top: -1px;
+}
+.repo-index__list > li.is-drop-after::after {
+  bottom: -1px;
+}
 /* ---------------------------------------------------------------------------
    Density axis — `data-density="compact"` on <html> (Settings → Appearance).
 

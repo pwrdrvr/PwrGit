@@ -60,7 +60,12 @@ import {
   sidebarAnchorHeld,
   trackSidebarAnchors
 } from "./sidebar-anchor";
-import { RepoIndex, stickyLineOf, type RepoIndexGroup } from "./RepoIndex";
+import {
+  RepoIndex,
+  stickyLineOf,
+  type RepoIndexGroup,
+  type RepoIndexReorder
+} from "./RepoIndex";
 import {
   jumpScrollPlan,
   readRepoIndexEnabled,
@@ -909,6 +914,67 @@ export function Sidebar({
     settleSidebarReveal(pending.seq);
   });
 
+  const moveKeyDirection = (event: ReactKeyboardEvent): "up" | "down" | null => {
+    if (!hasPrimaryModifier(event, platform) || !event.shiftKey) return null;
+    if (event.key === "ArrowUp") return "up";
+    if (event.key === "ArrowDown") return "down";
+    return null;
+  };
+
+  /**
+   * ⌘⇧↑/↓ on a repository, from its tree row or its index name: one step to
+   * the nearest neighbour in its own folder group, so a key move obeys the
+   * boundary the drag does. False when there is nowhere to go.
+   */
+  const moveRepo = (repoId: string, direction: "up" | "down"): boolean => {
+    const index = filteredIds.indexOf(repoId);
+    if (index === -1) return false;
+    const step = direction === "up" ? -1 : 1;
+    let to = index + step;
+    if (grouped) {
+      while (
+        filteredIds[to] !== undefined &&
+        groupOfRepo.get(filteredIds[to] as string) !== groupOfRepo.get(repoId)
+      ) {
+        to += step;
+      }
+    }
+    const neighbor = filteredIds[to];
+    if (neighbor === undefined) return false;
+    const moved = reorder(
+      filteredIds,
+      repoId,
+      neighbor,
+      direction === "up" ? "before" : "after"
+    );
+    // Same reason as the drag's onCommit: the move is the user's, so it is
+    // shown even if the pointer happens to be parked on the list.
+    held.release();
+    onPersistRepoOrder(moved);
+    // Focus stays on what moved, so nothing is re-announced on its own — see
+    // lib/announce (SC 4.1.3). Announce against the group the repository is
+    // actually listed in, which is what its posinset counts within.
+    const siblings = grouped
+      ? moved.filter((id) => groupOfRepo.get(id) === groupOfRepo.get(repoId))
+      : moved;
+    const name = filtered.find((r) => r.id === repoId)?.name ?? repoId;
+    announce(movedMessage(name, siblings.indexOf(repoId) + 1, siblings.length));
+    return true;
+  };
+
+  // The index moves names with the tree's own drag and key move, only where
+  // the tree's rows move (the Pinned lens).
+  const indexReorder: RepoIndexReorder | undefined = arrangeable
+    ? {
+        rowProps: (id) => repoDrag.rowProps(id, true),
+        dragId: repoDrag.dragId,
+        target: repoDrag.target,
+        isPostDragClick: repoDrag.isPostDragClick,
+        moveKey: moveKeyDirection,
+        onMove: moveRepo
+      }
+    : undefined;
+
   const handleRepoKeyDown = (repo: Repo, event: ReactKeyboardEvent): void => {
     // Keydown from the pin button (or anything else focusable inside the row)
     // bubbles to here. Acting on it swallowed the button: a `<button>` fires
@@ -920,44 +986,10 @@ export function Sidebar({
     const index = filteredIds.indexOf(repo.id);
     if (index === -1) return;
     if (hasPrimaryModifier(event, platform) && event.shiftKey) {
-      if (event.key !== "ArrowUp" && event.key !== "ArrowDown") return;
-      if (!arrangeable) return;
-      const step = event.key === "ArrowUp" ? -1 : 1;
-      // Step to the nearest neighbor in the SAME group, so keyboard moves obey
-      // the boundary the drag does.
-      let to = index + step;
-      if (grouped) {
-        while (
-          filteredIds[to] !== undefined &&
-          groupOfRepo.get(filteredIds[to] as string) !== groupOfRepo.get(repo.id)
-        ) {
-          to += step;
-        }
-      }
-      const neighbor = filteredIds[to];
-      if (neighbor === undefined) return;
+      const direction = moveKeyDirection(event);
+      if (direction === null || !arrangeable) return;
+      if (!moveRepo(repo.id, direction)) return;
       event.preventDefault();
-      const moved = reorder(
-        filteredIds,
-        repo.id,
-        neighbor,
-        event.key === "ArrowUp" ? "before" : "after"
-      );
-      // Same reason as the drag's onCommit: the move is the user's, so it is
-      // shown even if the pointer happens to be parked on the list.
-      held.release();
-      onPersistRepoOrder(moved);
-      // Focus stays on the row that moved, so nothing is re-announced on its
-      // own — see lib/announce (SC 4.1.3). Announce against the group the row
-      // is actually listed in, which is what its posinset counts within.
-      const siblings = grouped
-        ? moved.filter(
-            (id) => groupOfRepo.get(id) === groupOfRepo.get(repo.id)
-          )
-        : moved;
-      announce(
-        movedMessage(repo.name, siblings.indexOf(repo.id) + 1, siblings.length)
-      );
       // Keep focus on the row that moved, not the slot it left.
       window.requestAnimationFrame(() => {
         document
@@ -1405,6 +1437,7 @@ export function Sidebar({
             listRef={listRef}
             treeId={REPO_TREE_ID}
             onJump={jumpToRepo}
+            {...(indexReorder === undefined ? {} : { reorder: indexReorder })}
           />
         )}
         <div className="sidebar__tree-pane">
