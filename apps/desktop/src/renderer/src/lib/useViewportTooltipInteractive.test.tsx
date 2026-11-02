@@ -190,7 +190,9 @@ it("bridges the gap between a card and its trigger", async () => {
   // Hangs off the card's bottom edge down to the trigger's top, and is part of
   // the card, so a pointer on it is a pointer on the card.
   expect(bridge!.style.top).toBe("100%");
-  expect(parseFloat(bridge!.style.height)).toBeGreaterThanOrEqual(8);
+  // Exactly the gap: ending inside the trigger would make a trigger that
+  // hides on leave (PrChip) flicker with the pointer resting on the overlap.
+  expect(bridge!.style.height).toBe("8px");
   expect(bridge!.style.pointerEvents).toBe("auto");
   expect(bridge!.getAttribute("aria-hidden")).toBe("true");
 
@@ -231,12 +233,51 @@ it("pins a clicked card until the user dismisses it", async () => {
   expect(card()).toBeNull();
 });
 
-it("closes a pinned card on Escape", async () => {
+const escape = async (): Promise<KeyboardEvent> => {
+  const event = new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true });
+  await act(async () => {
+    window.dispatchEvent(event);
+  });
+  return event;
+};
+
+it("closes a pinned card on Escape, and claims the key", async () => {
   const trigger = await mount({ pinnable: true });
   await act(async () => trigger.click());
   expect(card()).not.toBeNull();
+  const event = await escape();
+  expect(card()).toBeNull();
+  // A pinned card is a click-opened overlay: the diff pane under it must not
+  // also close on the same press.
+  expect(event.defaultPrevented).toBe(true);
+});
+
+it("pins again after Escape dismissed the trigger's card", async () => {
+  const trigger = await mount({ pinnable: true });
+  await act(async () => trigger.focus());
+  await act(async () => document.querySelector<HTMLElement>("#inside")!.focus());
+  await escape();
+  expect(card()).toBeNull();
+  expect(document.activeElement).toBe(trigger);
+  // The focus restore latched the trigger; a click is a new request.
+  await act(async () => trigger.click());
+  expect(card()).not.toBeNull();
+});
+
+it("closes a pinned card when its trigger scrolls away", async () => {
+  const trigger = await mount({ pinnable: true });
+  await act(async () => trigger.click());
+  // Something else scrolling is not a dismissal.
+  const other = document.createElement("div");
+  document.body.append(other);
   await act(async () => {
-    window.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true }));
+    other.dispatchEvent(new Event("scroll"));
+  });
+  expect(card()).not.toBeNull();
+  other.remove();
+  // The container the trigger sits in is.
+  await act(async () => {
+    trigger.parentElement!.dispatchEvent(new Event("scroll"));
   });
   expect(card()).toBeNull();
 });
@@ -249,4 +290,35 @@ it("takes a keyboard user into the card they pinned", async () => {
     trigger.dispatchEvent(new MouseEvent("click", { bubbles: true, detail: 0 }));
   });
   expect(document.activeElement?.id).toBe("inside");
+});
+
+function TwoTriggers() {
+  const tip = useViewportTooltip("commit-context-card", { interactive: true, label: "Explain" });
+  return (
+    <>
+      <button id="a" {...pinnableTooltip(tip, <button key="a" id="in-a">Copy rule details</button>)}>Why?</button>
+      <button id="b" {...pinnableTooltip(tip, <button key="b" id="in-b">Copy hook path</button>)}>pre-commit</button>
+      {tip.tooltipNode}
+    </>
+  );
+}
+
+it("moves Enter's focus into the card it just pinned, not the one it replaced", async () => {
+  const container = document.createElement("div");
+  document.body.append(container);
+  const root = createRoot(container);
+  await act(async () => root.render(<TwoTriggers />));
+  cleanup = async () => {
+    await act(async () => root.unmount());
+    container.remove();
+  };
+  const a = container.querySelector<HTMLElement>("#a")!;
+  const b = container.querySelector<HTMLElement>("#b")!;
+  await act(async () => a.click());
+  expect(card()?.textContent).toBe("Copy rule details");
+  await act(async () => {
+    b.dispatchEvent(new MouseEvent("click", { bubbles: true, detail: 0 }));
+  });
+  expect(card()?.textContent).toBe("Copy hook path");
+  expect(document.activeElement?.id).toBe("in-b");
 });

@@ -1003,14 +1003,22 @@ describe("ChangesTab hidden-by-ignore-rules card", () => {
   });
 
   it("keeps a clicked Why? card open after the pointer wanders off", async () => {
-    await act(async () => why().click());
-    await act(async () => {
-      why().dispatchEvent(
-        new MouseEvent("mouseout", { bubbles: true, relatedTarget: container })
-      );
-    });
-    await act(async () => new Promise((resolve) => setTimeout(resolve, 500)));
-    expect(card()).not.toBeNull();
+    vi.useFakeTimers();
+    try {
+      await act(async () => why().click());
+      await act(async () => {
+        why().dispatchEvent(
+          new MouseEvent("mouseout", { bubbles: true, relatedTarget: container })
+        );
+      });
+      // Past the 400ms grace an unpinned card gets.
+      await act(async () => {
+        vi.advanceTimersByTime(1_000);
+      });
+      expect(card()).not.toBeNull();
+    } finally {
+      vi.useRealTimers();
+    }
 
     await act(async () => {
       container.dispatchEvent(new MouseEvent("mousedown", { bubbles: true }));

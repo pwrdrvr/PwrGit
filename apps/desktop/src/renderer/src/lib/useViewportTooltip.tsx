@@ -8,14 +8,12 @@ import {
   type MouseEvent as ReactMouseEvent,
   type ReactNode
 } from "react";
-import { createPortal } from "react-dom";
+import { createPortal, flushSync } from "react-dom";
+import { useDismissable } from "./useDismissable";
 
 const VIEWPORT_PADDING = 12;
 const TOOLTIP_GAP = 8;
 const INTERACTIVE_DISMISS_DELAY_MS = 400;
-/** How far a card's bridge overlaps the trigger, so no sub-pixel seam is left
- *  between the two for the pointer to fall through. */
-const BRIDGE_OVERLAP = 2;
 /** When a pointer is near a graph edge, spill the card into its adjacent pane
  * instead of covering the commit list. */
 const EDGE_SPILL_ZONE = 160;
@@ -57,23 +55,31 @@ type TooltipState = {
 /**
  * Where an interactive card's bridge goes, or nothing when the card touches
  * or overlaps its trigger.
+ *
+ * The strip ends exactly at the trigger's edge and never overlaps it. A
+ * caller whose trigger hides its card on `mouseleave` at once (`PrChip`) would
+ * otherwise flicker: a pointer resting on the overlap is on the card, so the
+ * trigger hides it, which uncovers the trigger, which opens it again. The
+ * strip is positioned from the card's padding edge, so `border` (the card's
+ * own border on that side) is added back to reach the trigger.
  */
-export function bridgeBetween(
+function bridgeBetween(
   card: TooltipRect,
-  target: TooltipRect
+  target: TooltipRect,
+  border: { top: number; bottom: number }
 ): TooltipBridge | undefined {
   const left = Math.min(0, target.left - card.left);
   const right = Math.min(0, card.right - target.right);
   if (card.bottom <= target.top) {
     const gap = target.top - card.bottom;
     return gap > 0
-      ? { side: "below", height: gap + BRIDGE_OVERLAP, left, right }
+      ? { side: "below", height: gap + border.bottom, left, right }
       : undefined;
   }
   if (card.top >= target.bottom) {
     const gap = card.top - target.bottom;
     return gap > 0
-      ? { side: "above", height: gap + BRIDGE_OVERLAP, left, right }
+      ? { side: "above", height: gap + border.top, left, right }
       : undefined;
   }
   return undefined;
@@ -232,7 +238,15 @@ export function pinnableTooltip(
   return {
     ...hoverTooltip(tip, content),
     onClick: (event) => {
-      if (!tip.pin(event.currentTarget, content)) return;
+      const target = event.currentTarget;
+      // Committed before `focusFirst` reads the card: the pin may open it, or
+      // swap another trigger's card for this one, and focusing the card still
+      // on screen would land on a control about to be replaced.
+      let pinned = false;
+      flushSync(() => {
+        pinned = tip.pin(target, content);
+      });
+      if (!pinned) return;
       // A click from Enter or Space carries no pointer, so `detail` is 0.
       if (event.detail === 0) tip.focusFirst();
     }
@@ -464,18 +478,26 @@ export function useViewportTooltip(
       // Only a card placed against its trigger gets a bridge. A
       // pointer-anchored card opens beside the cursor, over the trigger's own
       // row, so there is no gap between the two to cross.
-      const bridge =
+      const style =
         interactive && state.anchor === undefined
-          ? bridgeBetween(
+          ? getComputedStyle(el)
+          : undefined;
+      const bridge =
+        style === undefined
+          ? undefined
+          : bridgeBetween(
               {
                 left,
                 top,
                 right: left + rect.width,
                 bottom: top + rect.height
               },
-              state.targetRect
-            )
-          : undefined;
+              state.targetRect,
+              {
+                top: parseFloat(style.borderTopWidth) || 0,
+                bottom: parseFloat(style.borderBottomWidth) || 0
+              }
+            );
       setState({
         ...state,
         left,
@@ -621,6 +643,10 @@ export function useViewportTooltip(
   const pin = useCallback((target: HTMLElement, content: ReactNode): boolean => {
     // Re-pinning from a new trigger is a new request; let `show` take it.
     pinnedTargetRef.current = null;
+    // So is a click on a trigger whose card Escape just dismissed: the latch
+    // only stops a focus restore from reopening it. `setSticky` clears it
+    // too, but only after `show`, which would already have refused.
+    dismissedTargetRef.current = null;
     if (!show(target, content)) return false;
     pinnedTargetRef.current = target;
     setPinned(true);
@@ -635,7 +661,7 @@ export function useViewportTooltip(
   const visible = state !== undefined;
   useEffect(() => {
     if (!visible) return;
-    const onScroll = (): void => {
+    const onScroll = (event: Event): void => {
       // Playwright and browsers can emit a scroll while bringing a control in
       // this card into view. Once the user has reached an interactive card,
       // that mechanical scroll must not make the card run away from its own
@@ -646,9 +672,23 @@ export function useViewportTooltip(
       // `WorktreeHeader`) and never sets the pointer flag, so without this
       // any scroll anywhere — the graph adjusting scrollTop as commits stream
       // in — would take the card away with their focus still inside it.
-      // A pinned card is anchored to a control that does not scroll, and the
-      // user asked for it — scrolling the graph underneath is not a dismissal.
-      if (stickyRef.current) return;
+      // A pinned card is the user's; scrolling the graph underneath is not a
+      // dismissal. Scrolling the trigger itself away is: the card is fixed in
+      // the viewport, so it would stay put with nothing beside it. "Why?"
+      // sits at the foot of the scrolling Changes list.
+      if (stickyRef.current) {
+        const pinnedOn = pinnedTargetRef.current;
+        const scroller = event.target;
+        if (
+          pinnedOn !== null &&
+          scroller instanceof Node &&
+          scroller !== document &&
+          scroller.contains(pinnedOn)
+        ) {
+          hide();
+        }
+        return;
+      }
       if (interactive && pointerInInteractiveTooltipRef.current) return;
       if (
         interactive &&
@@ -728,6 +768,16 @@ export function useViewportTooltip(
       window.removeEventListener("keydown", onKeyDown);
     };
   }, [visible, hide, interactive]);
+
+  // A pinned card is a click-opened overlay, so Escape on it goes through the
+  // same owner as every menu and dialog: claimed, so the diff pane under it
+  // does not close too, and focus handed back to the trigger.
+  useDismissable({
+    open: pinned,
+    onDismiss: hide,
+    triggerRef: pinnedTargetRef,
+    surfaceRef: tooltipRef
+  });
 
   // A pinned card closes on a press anywhere but itself and its trigger. The
   // press still lands where it was aimed; capture phase so a surface that
