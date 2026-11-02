@@ -298,6 +298,28 @@
           .srow .v.rec { color: var(--okt); }
           .srow .h { font: 400 11px/1.45 var(--mono); color: var(--tsub); overflow-wrap: anywhere; }
           .srow .a { display: flex; justify-content: flex-end; }
+
+          /* ---- turn 6: reaching the L1 popover ---- */
+          .reach { position: relative; width: 420px; height: 330px; border: 1px solid var(--line); border-radius: 9px; background: var(--bg-side); overflow: hidden; }
+          .reach .rail-tabs { border-bottom: 1px solid var(--line); }
+          .reach .ffoot { position: absolute; left: 0; right: 0; bottom: 0; background: var(--bg-side); }
+          .reach .why { margin-left: auto; padding: 2px 0; border: 0; background: none; color: var(--accb); font: 600 10.5px/1 var(--sans); cursor: pointer; }
+          .reach .why.pinned { color: var(--acc); text-decoration: underline; text-underline-offset: 2px; }
+          .reach .pop { position: absolute; right: 10px; bottom: 41px; width: 360px; }
+          .reach .pop.inert { pointer-events: none; }
+          .reach .pop .btn { cursor: pointer; }
+          .reach .pop .lnk { cursor: pointer; }
+          .bridge { position: absolute; left: -1px; right: -1px; top: 100%; height: 10px; }
+          .bridge.show { background: repeating-linear-gradient(135deg, var(--asoft) 0 4px, transparent 4px 8px); outline: 1px dashed var(--abord); }
+          .dead { position: absolute; right: 10px; bottom: 33px; width: 360px; height: 8px; background: repeating-linear-gradient(135deg, var(--badsoft) 0 4px, transparent 4px 8px); outline: 1px dashed var(--badbord); }
+          .callout { position: absolute; font: 600 9px/1.3 var(--mono); color: var(--accb); white-space: nowrap; }
+          .callout.bad { color: var(--badt); }
+          .fault { display: grid; grid-template-columns: 18px minmax(0, 1fr); gap: 4px 8px; align-items: baseline; font: 400 10.5px/1.5 var(--sans); color: var(--t3); }
+          .fault b { color: var(--t2); font-weight: 600; }
+          .fault .n { font: 700 10px/1.5 var(--mono); color: var(--badt); }
+          .fault .n.ok { color: var(--okt); }
+          .plog { min-height: 52px; margin: 0; padding: 7px 9px; background: #050505; border: 1px solid var(--line); border-radius: 6px; font: 400 10px/1.55 var(--mono); color: var(--t2); }
+          .plog .bad { color: var(--badt); } .plog .ok { color: var(--okt); }
         </style>
       </helmet>
 
@@ -305,7 +327,7 @@
       <header class="dv-hero">
         <div class="dv-eyebrow">PwrGit &#183; UX review &#183; proposal</div>
         <h1 class="dv-h1">Git discovery &#8212; hooks, excludes, and the rest of the iceberg</h1>
-        <p class="dv-lede">Git already has answers to problems PwrGit users hit every week &#8212; a personal folder that keeps showing up as untracked, a commit that silently will not land, a conflict resolved for the third time. Most people never learn those answers exist, because Git keeps them in files nobody opens. This board designs <b>one discovery system</b>: Git speaks up only at the moment it has done something, every surface names the file and the scope, and the inventory lives one click away instead of in the main path. Turns 1&#8211;2 are the diagnosis and the system; <b>3</b> is hooks, <b>4</b> is ignore rules and <code>.git/info/exclude</code>, <b>5</b> is everything else Git can do that people should use and do not. Nothing here is built. Repository names, paths and output are invented.</p>
+        <p class="dv-lede">Git already has answers to problems PwrGit users hit every week &#8212; a personal folder that keeps showing up as untracked, a commit that silently will not land, a conflict resolved for the third time. Most people never learn those answers exist, because Git keeps them in files nobody opens. This board designs <b>one discovery system</b>: Git speaks up only at the moment it has done something, every surface names the file and the scope, and the inventory lives one click away instead of in the main path. Turns 1&#8211;2 are the diagnosis and the system; <b>3</b> is hooks, <b>4</b> is ignore rules and <code>.git/info/exclude</code>, <b>5</b> is everything else Git can do that people should use and do not. The ignore footer, the hook receipts and the L1 popover shipped in #354; <b>6</b> fixes reaching that popover's buttons. Repository names, paths and output are invented.</p>
       </header>
 
       <!-- ============================ TURN 1 ============================ -->
@@ -427,7 +449,7 @@
             <div class="pair">
               <div class="ladder">
                 <div class="rung"><span class="lv">L0</span><span class="nm">Receipt<small>inline, after Git acts</small></span><span class="ds">An 18&#8239;px chip on the surface where it happened: under the Commit button, in the push popover, on the conflict banner. <b>Exists only for the operation that produced it.</b></span><span class="fp">0&#8239;px resting</span></div>
-                <div class="rung"><span class="lv">L1</span><span class="nm">Explain<small>hover or click a receipt</small></span><span class="ds">One popover template: what Git did, where the rule lives, the scope badge, the command, and one or two actions. Links to the Git manual page.</span><span class="fp">on demand</span></div>
+                <div class="rung"><span class="lv">L1</span><span class="nm">Explain<small>hover or click a receipt</small></span><span class="ds">One popover template: what Git did, where the rule lives, the scope badge, the command, and one or two actions. Links to the Git manual page. <b>Hover opens it, a click pins it, and a bridge joins it to its trigger so the actions can be reached.</b> <a class="dv-oid" href="#6b">6b</a></span><span class="fp">on demand</span></div>
                 <div class="rung"><span class="lv">L2</span><span class="nm">Repository setup<small>per repo, one sheet</small></span><span class="ds">The inventory: hooks, ignore rules, identity and signing, suggestions. Reached from every L1 and from the repo menu. <a class="dv-oid" href="#2d">2d</a></span><span class="fp">modal</span></div>
                 <div class="rung"><span class="lv">L3</span><span class="nm">Settings &#8250; Git<small>this Mac</small></span><span class="ds">Global excludes, global hooks path, recommended defaults &#8212; each showing the <code>git config --global</code> line it would write. <a class="dv-oid" href="#5c">5c</a></span><span class="fp">window</span></div>
               </div>
@@ -728,7 +750,7 @@
                 <div class="pop-a"><span class="btn sm">Open info/exclude</span><span class="btn sm ghost">All rules&#8230;</span><span class="lnk">gitignore(5) &#8599;</span></div>
               </div>
             </div>
-            <p class="note" style="max-width:740px">The footer line is L0: it exists only when a <b>personal</b> rule (info/exclude or global) is hiding something, because <code>.gitignore</code> hiding <code>node_modules/</code> surprises no one. Its count is the untracked-and-ignored set from <code>git status --ignored</code>, attributed per file with one batched <code>git check-ignore -v --stdin</code>. The same popover answers from the <code>&#8984;K</code> file search when a query matches an ignored path.</p>
+            <p class="note" style="max-width:740px">The footer line is L0: it exists only when a <b>personal</b> rule (info/exclude or global) is hiding something, because <code>.gitignore</code> hiding <code>node_modules/</code> surprises no one. Its count is the untracked-and-ignored set from <code>git status --ignored</code>, attributed per file with one batched <code>git check-ignore -v --stdin</code>. The same popover answers from the <code>&#8984;K</code> file search when a query matches an ignored path. Reaching its buttons follows <a class="dv-oid" href="#6b">6b</a>: a bridge across the gap above "Why?", and a click on "Why?" pins the card.</p>
           </div>
 
           <div class="dv-opt" id="4d" data-screen-label="4d Ignore layers">
@@ -877,14 +899,194 @@
           </div>
 
         </div>
-        <p class="dv-next">Try next &#8212; "build <a class="dv-oid" href="#3a">3a</a>'s rejected-commit panel first; it fixes a real bug" &#183; "draft the Identity &amp; signing page" &#183; "draw the push popover with a <code>pre-push</code> phase"</p>
+        <p class="dv-next">Next &#8212; <a class="dv-oid" href="#6a">6a</a> why the built L1 popover could not be used &#183; <a class="dv-oid" href="#6b">6b</a> the reach rule &#183; <a class="dv-oid" href="#6c">6c</a> try it &#183; Try next &#8212; "build <a class="dv-oid" href="#3a">3a</a>'s rejected-commit panel first; it fixes a real bug" &#183; "draft the Identity &amp; signing page" &#183; "draw the push popover with a <code>pre-push</code> phase"</p>
+      </section>
+
+      <!-- ============================ TURN 6 ============================ -->
+      <section class="dv-turn" id="t6">
+        <div class="dv-thd">
+          <a class="dv-tid" href="#t6">6</a>
+          <span class="dv-tname">Reaching the L1 popover &#8212; "Why?" closed before the pointer got there</span>
+        </div>
+        <p class="dv-sub">Reported against the build of <a class="dv-oid" href="#4c">4c</a>: <b>none of the popover's buttons can be pressed.</b> It closes the moment the pointer leaves "Why?", and clicking "Why?" first changes nothing. <a class="dv-oid" href="#2b">2b</a> drew the popover's anatomy but never said how a pointer gets onto it, so the build used the plain-tooltip leave. This turn adds that missing rule, which covers every L1 trigger (the hook receipts under Commit use the same card), and the as-built fix.</p>
+        <div class="dv-opts">
+
+          <div class="dv-opt" id="6a" data-screen-label="6a Findings">
+            <div class="dv-olabel"><a class="dv-oid" href="#6a">6a</a>As built &#8212; three faults stacked on one gesture</div>
+            <div class="pair">
+              <div class="reach">
+                <div class="rail-tabs"><span class="rtab on">Changes</span><span class="rtab">Stashes</span><span class="rtab">Rebase</span></div>
+                <div class="pop inert">
+                  <div class="pop-t">Hidden by ignore rules</div>
+                  <p class="pop-p">Git hid these untracked files using personal rules outside the team's .gitignore.</p>
+                  <div class="pop-kv">
+                    <span>Where</span><span class="mono">~/.gitignore_global:4 &#160;**/.claude/settings.local.json &#183; 1 file</span>
+                    <span>Scope</span><span><span class="sc mach">this Mac</span></span>
+                    <span>Command</span><span class="mono">git check-ignore -v --stdin</span>
+                  </div>
+                  <div class="pop-a"><span class="btn sm">Copy rule details</span><span class="lnk">gitignore(5) &#8599;</span></div>
+                </div>
+                <div class="dead"></div>
+                <span class="callout bad" style="left:50px; top:58px">The hatched 8&#8239;px under the card belongs to neither.<br />The pointer crosses it first, and mouseleave &#8594; hide().</span>
+                <div class="ffoot"><span>1 untracked file hidden by ignore rules</span><span class="why">Why?</span></div>
+              </div>
+              <div class="stage" style="width:400px">
+                <div class="stage-h">What the pointer meets <em>useViewportTooltip @ main</em></div>
+                <div class="fault">
+                  <span class="n">1</span><span><b>No grace period on the way out.</b> <code>hoverTooltip</code> leaves through <code>hideFrom</code>, which calls <code>hide()</code> at once. The 400&#8239;ms that interactive cards promise lives in <code>scheduleHide</code>, and nothing on this path called it. The card sits 8&#8239;px above the trigger, so the first pixel of travel lands in a gap that belongs to neither.</span>
+                  <span class="n">2</span><span><b>The card lets clicks through.</b> It carries <code>.viewport-tooltip</code>, which is <code>pointer-events: none</code> so that plain tooltips never catch the pointer. Nothing turned pointer events back on. Even with the pointer resting on <i>Copy rule details</i>, the click goes to the commit list underneath.</span>
+                  <span class="n">3</span><span><b>Pressing a card button blurs "Why?"</b> Chromium focuses a button on mousedown. The trigger's blur called <code>hide()</code>, which unmounted the button before its click arrived. That is why a keyboard user who tabbed in got further than anyone with a mouse.</span>
+                </div>
+                <p class="note">Clicking "Why?" first did nothing because the click had no meaning. Hover and focus had already opened the card, and nothing held it open. <a class="dv-oid" href="#2b">2b</a> says L1 opens on <b>hover or click</b>, but the build only did hover.</p>
+              </div>
+            </div>
+          </div>
+
+          <div class="dv-opt" id="6b" data-screen-label="6b The reach rule">
+            <div class="dv-olabel"><a class="dv-oid" href="#6b">6b</a>The rule &#8212; <b>a card with controls is joined to its trigger, and a click keeps it</b></div>
+            <div class="pair">
+              <div class="reach">
+                <div class="rail-tabs"><span class="rtab on">Changes</span><span class="rtab">Stashes</span><span class="rtab">Rebase</span></div>
+                <div class="pop">
+                  <div class="pop-t">Hidden by ignore rules</div>
+                  <p class="pop-p">Git hid these untracked files using personal rules outside the team's .gitignore.</p>
+                  <div class="pop-kv">
+                    <span>Where</span><span class="mono">~/.gitignore_global:4 &#160;**/.claude/settings.local.json &#183; 1 file</span>
+                    <span>Scope</span><span><span class="sc mach">this Mac</span></span>
+                    <span>Command</span><span class="mono">git check-ignore -v --stdin</span>
+                  </div>
+                  <div class="pop-a"><span class="btn sm">Copy rule details</span><span class="lnk">gitignore(5) &#8599;</span></div>
+                  <div class="bridge show"></div>
+                </div>
+                <span class="callout" style="left:50px; top:58px">Hatched: the bridge. Part of the card, so the pointer<br />never leaves it. Transparent in the app.</span>
+                <div class="ffoot"><span>1 untracked file hidden by ignore rules</span><span class="why pinned">Why?</span></div>
+              </div>
+              <div class="stage" style="width:400px">
+                <div class="stage-h">Five behaviours <em>every L1 trigger</em></div>
+                <div class="fault">
+                  <span class="n ok">1</span><span><b>A bridge spans the gap.</b> It is a transparent strip inside the card, covering the card's width plus the trigger's, from the card's edge 2&#8239;px into the trigger. A pointer moving straight from "Why?" to a button never leaves the card. PwrAgnt's messaging-status popover does the same with padding. Pointer-anchored cards (commit, person) open beside the cursor and need none.</span>
+                  <span class="n ok">2</span><span><b>400&#8239;ms of grace for any other path.</b> Leaving the trigger anywhere other than onto the card schedules the hide instead of running it, so a diagonal path that misses the bridge still arrives in time. A pointer that never reaches the card loses it after 400&#8239;ms. Plain tooltips still close at once.</span>
+                  <span class="n ok">3</span><span><b>The card takes the pointer.</b> <code>pointer-events: auto</code>, stated with two classes so it outranks <code>.viewport-tooltip</code>. A unit test resolves the cascade for every interactive card, so a future card cannot inherit <code>none</code> unnoticed.</span>
+                  <span class="n ok">4</span><span><b>Click or Enter pins it.</b> A pinned card ignores the pointer and closes on Escape or on a press anywhere outside it and its trigger. Hovering another receipt does not replace it. Enter and Space also move focus to the first action.</span>
+                  <span class="n ok">5</span><span><b>Focus moving into the card is not a blur.</b> Pressing a card button keeps the card until the click lands.</span>
+                </div>
+                <p class="note">The hatched strip is drawn for review only; in the app it is invisible. It is the one new piece. The grace period, <code>setSticky</code> and the Escape handling were already in <code>useViewportTooltip</code>, but this trigger never used them.</p>
+              </div>
+            </div>
+          </div>
+
+          <div class="dv-opt" id="6c" data-screen-label="6c Live prototype">
+            <div class="dv-olabel"><a class="dv-oid" href="#6c">6c</a>Interactive &#8212; try to press <i>Copy rule details</i>, as built and fixed</div>
+            <div class="pair">
+              <div class="reach" onClick="{{ onStageClick }}">
+                <div class="rail-tabs"><span class="rtab on">Changes</span><span class="rtab">Stashes</span><span class="rtab">Rebase</span></div>
+                <sc-if value="{{ open }}" hint-placeholder-val="{{ true }}">
+                  <div class="{{ popCls }}" onMouseEnter="{{ onCardEnter }}" onMouseLeave="{{ onCardLeave }}" onClick="{{ onCardClick }}">
+                    <div class="pop-t">Hidden by ignore rules</div>
+                  <p class="pop-p">Git hid these untracked files using personal rules outside the team's .gitignore.</p>
+                  <div class="pop-kv">
+                    <span>Where</span><span class="mono">~/.gitignore_global:4 &#160;**/.claude/settings.local.json &#183; 1 file</span>
+                    <span>Scope</span><span><span class="sc mach">this Mac</span></span>
+                    <span>Command</span><span class="mono">git check-ignore -v --stdin</span>
+                  </div>
+                    <div class="pop-a"><span class="btn sm" onClick="{{ onCopy }}">Copy rule details</span><span class="lnk" onClick="{{ onManual }}">gitignore(5) &#8599;</span></div>
+                    <sc-if value="{{ fixed }}" hint-placeholder-val="{{ true }}"><div class="{{ bridgeCls }}"></div></sc-if>
+                  </div>
+                </sc-if>
+                <div class="ffoot"><span>1 untracked file hidden by ignore rules</span><span class="{{ whyCls }}" onMouseEnter="{{ onWhyEnter }}" onMouseLeave="{{ onWhyLeave }}" onClick="{{ onWhyClick }}">Why?</span></div>
+              </div>
+              <div class="stage" style="width:400px">
+                <div class="stage-h">Controls <em>{{ modeLabel }}</em></div>
+                <div class="seg">
+                  <sc-for list="{{ modes }}" as="m" hint-placeholder-count="2"><span class="{{ m.cls }}" onClick="{{ m.onClick }}">{{ m.label }}</span></sc-for>
+                </div>
+                <div class="seg">
+                  <span class="{{ showBridgeCls }}" onClick="{{ onToggleBridge }}">Show the bridge</span>
+                </div>
+                <div class="plog">
+                  <sc-for list="{{ log }}" as="l" hint-placeholder-count="3"><div class="{{ l.cls }}">{{ l.text }}</div></sc-for>
+                </div>
+                <p class="note"><b>As built:</b> move from "Why?" up to the button and the card is gone before you arrive. <b>Fixed:</b> the same move lands on the button. Click "Why?" and wander off; the card stays until you click outside it.</p>
+              </div>
+            </div>
+          </div>
+
+        </div>
+        <p class="dv-next">Built in the fix for this report &#8212; <code>pinnableTooltip</code> on "Why?" and the hook receipts, with the bridge in <code>useViewportTooltip</code> &#183; Try next &#8212; "give a pinned trigger a pressed state" &#183; "check the PR chip's card: its leave also hides at once"</p>
       </section>
     </x-dc>
     <script type="text/x-dc" data-dc-script data-props='{}'>
       class Component extends DCLogic {
         constructor(props) {
           super(props);
-          this.state = { hook: "pre-push", pat: "dir", dest: "exclude", testPath: ".local/shots/after.png" };
+          this.state = { hook: "pre-push", pat: "dir", dest: "exclude", testPath: ".local/shots/after.png", rMode: "built", rOpen: false, rPinned: false, rBridge: true, rLog: [] };
+          this.rTimer = null;
+        }
+
+        rSay(text, cls) {
+          const next = this.state.rLog.concat([{ text: text, cls: cls || "" }]);
+          this.setState({ rLog: next.slice(-4) });
+        }
+
+        rCancel() {
+          if (this.rTimer !== null) { clearTimeout(this.rTimer); this.rTimer = null; }
+        }
+
+        rLater(why) {
+          this.rCancel();
+          this.rTimer = setTimeout(() => {
+            this.rTimer = null;
+            this.setState({ rOpen: false });
+            this.rSay(why + " → closed after 400 ms");
+          }, 400);
+        }
+
+        reachVals() {
+          const fixed = this.state.rMode === "fixed";
+          const st = this.state;
+          return {
+            open: st.rOpen,
+            fixed: fixed,
+            modeLabel: fixed ? "bridge + grace + pin" : "main before the fix",
+            popCls: "pop" + (fixed ? "" : " inert"),
+            bridgeCls: "bridge" + (st.rBridge ? " show" : ""),
+            whyCls: "why" + (st.rPinned ? " pinned" : ""),
+            showBridgeCls: "segb" + (st.rBridge ? " on" : ""),
+            modes: [
+              { id: "built", label: "As built" },
+              { id: "fixed", label: "Fixed" }
+            ].map((m) => ({
+              label: m.label,
+              cls: "segb" + (st.rMode === m.id ? " on" : ""),
+              onClick: () => { this.rCancel(); this.setState({ rMode: m.id, rOpen: false, rPinned: false, rLog: [] }); }
+            })),
+            log: st.rLog.length === 0 ? [{ text: "Hover “Why?”, then head for the button.", cls: "" }] : st.rLog,
+            onToggleBridge: () => this.setState({ rBridge: !st.rBridge }),
+            onWhyEnter: () => {
+              this.rCancel();
+              if (!this.state.rOpen) { this.setState({ rOpen: true }); this.rSay("mouseenter Why? → card opens"); }
+            },
+            onWhyLeave: () => {
+              if (!fixed) { this.setState({ rOpen: false }); this.rSay("mouseleave Why? → hide() at once", "bad"); return; }
+              if (this.state.rPinned) return;
+              this.rLater("mouseleave Why?");
+            },
+            onWhyClick: (e) => {
+              e.stopPropagation();
+              if (!fixed) { this.rSay("click Why? → nothing holds the card", "bad"); return; }
+              this.rCancel();
+              this.setState({ rOpen: true, rPinned: true });
+              this.rSay("click Why? → pinned", "ok");
+            },
+            onCardEnter: () => { this.rCancel(); },
+            onCardLeave: () => { if (!this.state.rPinned) this.rLater("mouseleave card"); },
+            onCardClick: (e) => { e.stopPropagation(); },
+            onCopy: () => { this.rSay("Copy rule details → copied", "ok"); },
+            onManual: () => { this.rSay("gitignore(5) → opens git-scm.com", "ok"); },
+            onStageClick: () => {
+              if (this.state.rPinned) { this.setState({ rOpen: false, rPinned: false }); this.rSay("press outside → pinned card closes"); }
+            }
+          };
         }
 
         hookFacts() {
@@ -1016,7 +1218,7 @@
         }
 
         renderVals() {
-          return Object.assign({}, this.hookVals(), this.ignoreVals(), this.testerVals());
+          return Object.assign({}, this.hookVals(), this.ignoreVals(), this.testerVals(), this.reachVals());
         }
       }
     </script>

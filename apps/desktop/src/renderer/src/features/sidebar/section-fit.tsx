@@ -4,7 +4,7 @@ import { ChangeRequestGlyph } from "../../lib/ChangeRequestGlyph";
 import { RemoteGlyph } from "../../lib/RemoteGlyph";
 import { TagGlyph } from "../../lib/TagGlyph";
 import { WorktreeGlyph } from "../../lib/WorktreeGlyph";
-import { gatedTooltip, type ViewportTooltip } from "../../lib/useViewportTooltip";
+import { gatedTooltip, type TooltipHandle } from "../../lib/useViewportTooltip";
 
 /**
  * The section headings' ladder, one per repository block (`.repo-sections`
@@ -115,7 +115,7 @@ export function SectionGlyph({ kind }: { kind: SectionKind }): ReactElement {
  * taken `step` — while the words are on screen the card would repeat them.
  */
 export function steppedTooltip(
-  tip: Pick<ViewportTooltip, "show" | "hide" | "hideFrom">,
+  tip: TooltipHandle,
   text: string,
   step: (typeof SECTION_FIT_STEPS)[number] = "fit-glyphs"
 ): ReturnType<typeof gatedTooltip> {

@@ -1561,7 +1561,7 @@ export function WorktreeHeader({
         trigger.onFocus?.(event);
       },
       onBlur: () => {
-        own.onBlur();
+        tip.hide();
         trigger.onBlur?.();
       }
     };

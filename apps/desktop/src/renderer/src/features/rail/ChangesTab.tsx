@@ -25,6 +25,7 @@ import { openAiSettings, useAgent } from "../agent/agent-store";
 import { useMessageDraft, type DraftSource } from "../agent/useMessageDraft";
 import {
   hoverTooltip,
+  pinnableTooltip,
   useViewportTooltip
 } from "../../lib/useViewportTooltip";
 import {
@@ -597,7 +598,7 @@ export function ChangesTab({
   const ignoredFooter = ignored !== null && ignored.count > 0 ? (
     <div className="discovery-ignored-footer">
       <span>{ignored.count} untracked file{ignored.count === 1 ? "" : "s"} hidden by ignore rules</span>
-      <button {...hoverTooltip(explainTip, <DiscoveryExplainPopover
+      <button {...pinnableTooltip(explainTip, <DiscoveryExplainPopover
         title="Hidden by ignore rules"
         sentence="Git hid these untracked files using personal rules outside the team's .gitignore."
         where={<div className="discovery-explain__rules">{ignored.rules.map((rule) => <div key={`${rule.source}:${rule.line}:${rule.pattern}`}><code>{rule.source}:{rule.line}</code><code>{rule.pattern}</code><span>{rule.count} file{rule.count === 1 ? "" : "s"}</span></div>)}</div>}
@@ -611,7 +612,7 @@ export function ChangesTab({
   const hookReceipts = commitOutcome !== null && "hooks" in commitOutcome && commitOutcome.hooks.length > 0 ? (
     <div className="discovery-commit-receipts" aria-label="Hooks run by the commit">
       {commitOutcome.hooks.map((hook, index) => (
-        <button key={`${hook.name}:${index}`} className="discovery-receipt" {...hoverTooltip(explainTip, <DiscoveryExplainPopover
+        <button key={`${hook.name}:${index}`} className="discovery-receipt" {...pinnableTooltip(explainTip, <DiscoveryExplainPopover
           title={`${hook.name} ${hook.exitCode === 0 ? "passed" : "finished"}`}
           sentence={`Git ran this hook before or after recording the commit. It exited ${hook.exitCode} in ${(hook.elapsedMs / 1000).toFixed(1)} s.`}
           where={<code>{hook.path}</code>}

@@ -57,7 +57,7 @@ describe("headingRowFits", () => {
 
 describe("steppedTooltip", () => {
   it("opens only once the block has taken the step", () => {
-    const tip = { show: vi.fn(), hide: vi.fn(), hideFrom: vi.fn() };
+    const tip = { show: vi.fn(), hide: vi.fn(), hideFrom: vi.fn(), blurFrom: vi.fn() };
     const block = document.createElement("div");
     const head = document.createElement("button");
     block.append(head);

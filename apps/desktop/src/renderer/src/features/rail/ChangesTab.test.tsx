@@ -3,7 +3,7 @@
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { ok, type ChangeSet, type Worktree } from "@pwrgit/shared";
+import { ok, type ChangeSet, type IgnoredSummary, type Worktree } from "@pwrgit/shared";
 
 const mocks = vi.hoisted(() => ({
   confirmDialog: vi.fn(),
@@ -914,5 +914,107 @@ describe("ChangesTab conflict marker guard", () => {
       worktreeId: "worktree-1",
       paths: ["src/app.ts", "src/util.ts"]
     });
+  });
+});
+
+describe("ChangesTab hidden-by-ignore-rules card", () => {
+  let container: HTMLDivElement;
+  let root: Root;
+
+  const worktree = { id: "worktree-1" } as Worktree;
+  const ignored: IgnoredSummary = {
+    count: 1,
+    worktreeCount: 1,
+    rules: [
+      {
+        source: "/Users/me/.gitignore_global",
+        line: 4,
+        pattern: "**/.claude/settings.local.json",
+        count: 1,
+        destination: "global"
+      }
+    ]
+  };
+
+  beforeEach(async () => {
+    vi.clearAllMocks();
+    mocks.subscribe.mockReturnValue(() => undefined);
+    mocks.dispatch.mockImplementation(async (command: string) =>
+      command === "changes:list"
+        ? ok({ staged: [], unstaged: [] } satisfies ChangeSet)
+        : command === "changes:ignoredSummary"
+          ? ok(ignored)
+          : ok(null)
+    );
+    container = document.createElement("div");
+    document.body.append(container);
+    root = createRoot(container);
+    await act(async () => {
+      root.render(
+        <ChangesTab
+          worktree={worktree}
+          activeEmail="a@b.c"
+          onOpenDiff={vi.fn()}
+          onOpenFileInsight={vi.fn()}
+          activeFile={null}
+        />
+      );
+    });
+  });
+
+  afterEach(async () => {
+    await act(async () => root.unmount());
+    container.remove();
+  });
+
+  const why = (): HTMLButtonElement =>
+    [...container.querySelectorAll("button")].find((b) => b.textContent === "Why?")!;
+  const card = (): HTMLElement | null =>
+    document.querySelector<HTMLElement>('[role="dialog"][aria-label="Git discovery"]');
+
+  it("lets the pointer leave Why? and still press the card's buttons", async () => {
+    expect(why()).toBeDefined();
+    await act(async () => {
+      why().dispatchEvent(new MouseEvent("mouseover", { bubbles: true }));
+    });
+    expect(card()?.textContent).toContain("Hidden by ignore rules");
+
+    // The pointer leaves for the gap above the button. This closed the card.
+    await act(async () => {
+      why().dispatchEvent(
+        new MouseEvent("mouseout", { bubbles: true, relatedTarget: document.body })
+      );
+    });
+    expect(card()).not.toBeNull();
+    await act(async () => {
+      document.body.dispatchEvent(
+        new MouseEvent("mouseout", { bubbles: true, relatedTarget: card() })
+      );
+    });
+
+    const copy = [...card()!.querySelectorAll("button")].find(
+      (b) => b.textContent === "Copy rule details"
+    )!;
+    await act(async () => copy.focus());
+    await act(async () => copy.click());
+    expect(mocks.copyText).toHaveBeenCalledWith(
+      "/Users/me/.gitignore_global:4 **/.claude/settings.local.json (1)"
+    );
+  });
+
+  it("keeps a clicked Why? card open after the pointer wanders off", async () => {
+    await act(async () => why().click());
+    await act(async () => {
+      why().dispatchEvent(
+        new MouseEvent("mouseout", { bubbles: true, relatedTarget: container })
+      );
+    });
+    await act(async () => new Promise((resolve) => setTimeout(resolve, 500)));
+    expect(card()).not.toBeNull();
+
+    await act(async () => {
+      container.dispatchEvent(new MouseEvent("mousedown", { bubbles: true }));
+    });
+    expect(card()).toBeNull();
   });
 });
