@@ -385,8 +385,10 @@ describe("hoverIntentHandlers", () => {
       hide: () => calls.push("hide"),
       ...(lingers
         ? {
-            hideFrom: () => calls.push("hideFrom"),
-            blurFrom: () => calls.push("blurFrom")
+            card: {
+              hideFrom: () => calls.push("hideFrom"),
+              blurFrom: () => calls.push("blurFrom")
+            }
           }
         : {})
     });
@@ -516,6 +518,18 @@ describe("HoverIntentGate.claimCard", () => {
     // And nothing is left to close after that.
     gate.claimCard(a);
     expect(closed).toEqual(["a"]);
+  });
+
+  it("forgets a card its owner reports closed", () => {
+    // A card that went by its own timer, or with its unmounted chip, has
+    // nothing left to close, and holding its closer keeps the chip alive.
+    const gate = new HoverIntentGate();
+    const closed: string[] = [];
+    gate.claimCard(a, () => closed.push("a"));
+    gate.markCardClosed(0, b);
+    gate.markCardClosed(0, a);
+    gate.claimCard(b, () => closed.push("b"));
+    expect(closed).toEqual([]);
   });
 
   it("closes each card at most once", () => {

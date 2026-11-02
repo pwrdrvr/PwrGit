@@ -35,17 +35,18 @@ const chip = hoverIntentHandlers({ intent: hoverIntent, show, hide });
 - If a card stays open after its hover (an interactive card the pointer moves
   into), call `cardClosed()` when it leaves the screen. Otherwise the gate's
   "user is browsing" warm window expires while the user reads the card.
-- **An interactive card passes its tooltip's `hideFrom` and `blurFrom`** to
-  `hoverIntentHandlers` (`PrChip`). Leaving then takes the grace path below,
-  and `hide` stays the immediate close for a click. Without them, leave calls
-  `hide`. `GraphRow` passes `scheduleHide` as `hide` instead, because one card
-  serves every row.
+- **An interactive card passes its tooltip as `card`** to
+  `hoverIntentHandlers` (`PrChip`). Leaving then takes the grace path below
+  (`hideFrom`/`blurFrom`), and `hide` stays the immediate close for a click.
+  Without `card`, leave calls `hide`. `GraphRow` passes `scheduleHide` as
+  `hide` instead, because one card serves every row.
 - **One lingering card at a time.** Each `PrChip` owns its card, so a card
   waiting out its grace could sit beside the next chip's. Every gated open
   calls the gate's `claimCard`, which closes a card that another trigger left
-  waiting. Only callers with `hideFrom` register to be closed. The commit card
-  must not register: it holds a `PrChip`, and opening that chip's card would
-  close the commit card around it.
+  waiting. Only callers with `card` register to be closed, and they pass
+  their trigger to `cardClosed` so the gate lets go. The commit card must not
+  register: it holds a `PrChip`, and opening that chip's card would close the
+  commit card around it.
 
 ## Which hover popups are gated
 

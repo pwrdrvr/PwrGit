@@ -159,6 +159,32 @@ it("closes the card after the grace when the pointer goes anywhere else", async 
   expect(cardFor(1)).toBeUndefined();
 });
 
+it("keeps the card when the pointer comes back onto its chip mid-grace", async () => {
+  // Back on the chip but still moving, so the gate alone would not reopen it
+  // before the grace ran out: the card blinked off under the pointer.
+  const [chip] = await mount();
+  await dwellOn(chip!);
+  await move(chip!, document.body);
+  await advance(GRACE_MS - 100);
+  // Where the pointer came back in, so the gate measures drift from here.
+  await act(async () => {
+    window.dispatchEvent(new MouseEvent("mousemove", { clientX: 0, clientY: 0 }));
+  });
+  await enter(chip!);
+  for (let x = 30; x < 300; x += 30) {
+    await act(async () => {
+      window.dispatchEvent(new MouseEvent("mousemove", { clientX: x, clientY: 0 }));
+    });
+    await advance(10);
+  }
+  // Just past the grace, with the pointer still on the move: the moment it
+  // used to vanish.
+  await advance(20);
+  expect(cardFor(1)).toBeDefined();
+  await advance(GRACE_MS);
+  expect(cardFor(1)).toBeDefined();
+});
+
 it("still takes the card with it at once on a click", async () => {
   // A click opens the PR in the browser; the card has nothing left to say.
   const [chip] = await mount();

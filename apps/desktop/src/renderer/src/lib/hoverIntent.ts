@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef } from "react";
+import type { TooltipHandle } from "./useViewportTooltip";
 
 /** A cold trigger must be dwelled on before its card appears. */
 export const HOVER_INTENT_DWELL_MS = 300;
@@ -160,8 +161,13 @@ export class HoverIntentGate {
   /** A card left the screen. An interactive card outlives the hover that
    * opened it — the user is still browsing while they read it, so warmth runs
    * from here, not from the moment the pointer left the trigger. */
-  markCardClosed(now: number): void {
+  markCardClosed(now: number, trigger?: object): void {
     this.wentColdAt = now;
+    // Gone already, so nothing is left for the next card to close, and the
+    // gate should not keep the closer (and its trigger) alive until then.
+    if (trigger !== undefined && this.card?.trigger === trigger) {
+      this.card = undefined;
+    }
   }
 
   /** A card is opening on `trigger`. Close the one another trigger left in
@@ -207,23 +213,24 @@ export type HoverIntent = {
   cancel: () => void;
   /** Open right now (focus, click) and keep the gate warm. */
   immediate: (open: () => void) => void;
-  /** Report that a card left the screen, so warmth measures from there. */
-  cardClosed: () => void;
+  /** Report that a card left the screen, so warmth measures from there.
+   * Pass the trigger of a card registered through `claimCard` to drop it. */
+  cardClosed: (trigger?: HTMLElement) => void;
   /** A card is opening on `trigger`: close the card another trigger left
    * lingering. `hoverIntentHandlers` calls this; see `HoverIntentGate`. */
   claimCard: (trigger: HTMLElement, close?: () => void) => void;
 };
 
 /** Where the pointer or focus went when it left a trigger. */
-type LeaveEvent = { relatedTarget: EventTarget | null };
+type LeaveEvent = Parameters<TooltipHandle["hideFrom"]>[0];
 
 /** The pointer/keyboard handlers a gated hover trigger needs. The SHA chip,
  * the byline and the PR chip wire exactly this, so the routing — hover
  * defers, focus and click do not, leaving always cancels — is written and
  * tested once.
  *
- * An interactive card the pointer has to reach passes its tooltip's
- * `hideFrom` and `blurFrom`. Leaving then waits: the card stays if the
+ * An interactive card the pointer has to reach passes its tooltip as
+ * `card`. Leaving then goes through its `hideFrom` and `blurFrom`, and waits: the card stays if the
  * pointer or focus went into it, and otherwise closes after its grace period
  * rather than at once. `hide` is still the immediate close, for a click
  * (`leave`) and for another trigger opening its card while this one waits.
@@ -232,14 +239,12 @@ export function hoverIntentHandlers({
   intent,
   show,
   hide,
-  hideFrom,
-  blurFrom
+  card
 }: {
   intent: HoverIntent;
   show: (target: HTMLElement) => void;
   hide: () => void;
-  hideFrom?: (event: LeaveEvent) => void;
-  blurFrom?: (event: LeaveEvent) => void;
+  card?: Pick<TooltipHandle, "hideFrom" | "blurFrom">;
 }): {
   onMouseEnter: (target: HTMLElement) => void;
   onMouseLeave: (event: LeaveEvent) => void;
@@ -253,10 +258,10 @@ export function hoverIntentHandlers({
 } {
   // Only a card that waits on leave can outlive its hover, so only it is
   // registered to be closed by the next one. Every open still claims, so a
-  // card that does not linger still closes one that does.
-  const lingers = hideFrom !== undefined || blurFrom !== undefined;
+  // card that does not linger still closes one that does. The owner reports
+  // `cardClosed(trigger)` when its card goes, which drops the registration.
   const open = (target: HTMLElement): void => {
-    intent.claimCard(target, lingers ? hide : undefined);
+    intent.claimCard(target, card === undefined ? undefined : hide);
     show(target);
   };
   const showNow = (target: HTMLElement): void =>
@@ -269,14 +274,14 @@ export function hoverIntentHandlers({
     onMouseEnter: (target) => intent.arm(() => open(target)),
     onMouseLeave: (event) => {
       intent.cancel();
-      if (hideFrom === undefined) hide();
-      else hideFrom(event);
+      if (card === undefined) hide();
+      else card.hideFrom(event);
     },
     onFocus: showNow,
     onBlur: (event) => {
       intent.cancel();
-      if (blurFrom === undefined) hide();
-      else blurFrom(event);
+      if (card === undefined) hide();
+      else card.blurFrom(event);
     },
     showNow,
     leave
@@ -318,8 +323,8 @@ export function useHoverIntent(gate: HoverIntentGate = sharedGate): HoverIntent 
     open();
   }, [gate, stopPolling]);
 
-  const cardClosed = useCallback((): void => {
-    gate.markCardClosed(Date.now());
+  const cardClosed = useCallback((trigger?: HTMLElement): void => {
+    gate.markCardClosed(Date.now(), trigger);
   }, [gate]);
 
   const claimCard = useCallback(
