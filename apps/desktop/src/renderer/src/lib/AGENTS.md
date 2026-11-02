@@ -35,6 +35,17 @@ const chip = hoverIntentHandlers({ intent: hoverIntent, show, hide });
 - If a card stays open after its hover (an interactive card the pointer moves
   into), call `cardClosed()` when it leaves the screen. Otherwise the gate's
   "user is browsing" warm window expires while the user reads the card.
+- **An interactive card passes its tooltip's `hideFrom` and `blurFrom`** to
+  `hoverIntentHandlers` (`PrChip`). Leaving then takes the grace path below,
+  and `hide` stays the immediate close for a click. Without them, leave calls
+  `hide`. `GraphRow` passes `scheduleHide` as `hide` instead, because one card
+  serves every row.
+- **One lingering card at a time.** Each `PrChip` owns its card, so a card
+  waiting out its grace could sit beside the next chip's. Every gated open
+  calls the gate's `claimCard`, which closes a card that another trigger left
+  waiting. Only callers with `hideFrom` register to be closed. The commit card
+  must not register: it holds a `PrChip`, and opening that chip's card would
+  close the commit card around it.
 
 ## Which hover popups are gated
 
@@ -189,8 +200,9 @@ of these checks, so none of its buttons could be pressed:
 - **The gap is bridged.** A trigger-anchored interactive card draws a
   transparent `[data-tooltip-bridge]` strip across the gap to its trigger
   (PwrAgnt's messaging-status popover uses padding for the same thing).
-- **The bridge ends at the trigger's edge, never inside it.** An overlap makes
-  a trigger that hides on leave (`PrChip`) flicker under a resting pointer.
+- **The bridge ends at the trigger's edge, never inside it.** An overlap
+  covers the trigger, so a click there lands on the card. It also makes a
+  trigger that hides on leave flicker under a resting pointer.
 
 Use `pinnableTooltip` for a trigger whose only job is to open the card ("Why?",
 the hook receipts): a click or Enter pins it until Escape, a press outside, or

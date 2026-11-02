@@ -88,6 +88,9 @@ export class HoverIntentGate {
   private opened = false;
   /** When a card last stopped being on screen. */
   private wentColdAt = Number.NEGATIVE_INFINITY;
+  /** The card a trigger opened that may still be on screen after the pointer
+   * left it, and how to close it. */
+  private card: { trigger: object; close: () => void } | undefined;
 
   track(sample: PointerSample): void {
     this.prev = this.last;
@@ -160,6 +163,16 @@ export class HoverIntentGate {
   markCardClosed(now: number): void {
     this.wentColdAt = now;
   }
+
+  /** A card is opening on `trigger`. Close the one another trigger left in
+   * its grace period, so browsing chip to chip shows one card, not a trail.
+   * `close` is how to close this one in turn; a caller whose card does not
+   * linger, or that shares one card across its triggers, passes nothing. */
+  claimCard(trigger: object, close?: () => void): void {
+    const previous = this.card;
+    this.card = close === undefined ? undefined : { trigger, close };
+    if (previous !== undefined && previous.trigger !== trigger) previous.close();
+  }
 }
 
 /** One gate for the whole window: warmth is a property of the user's pass
@@ -196,41 +209,75 @@ export type HoverIntent = {
   immediate: (open: () => void) => void;
   /** Report that a card left the screen, so warmth measures from there. */
   cardClosed: () => void;
+  /** A card is opening on `trigger`: close the card another trigger left
+   * lingering. `hoverIntentHandlers` calls this; see `HoverIntentGate`. */
+  claimCard: (trigger: HTMLElement, close?: () => void) => void;
 };
 
-/** The pointer/keyboard handlers a gated hover trigger needs. Both the SHA
- * chip and the PR chip wire exactly this, so the routing — hover defers, focus
- * and click do not, leaving always cancels — is written and tested once. */
+/** Where the pointer or focus went when it left a trigger. */
+type LeaveEvent = { relatedTarget: EventTarget | null };
+
+/** The pointer/keyboard handlers a gated hover trigger needs. The SHA chip,
+ * the byline and the PR chip wire exactly this, so the routing — hover
+ * defers, focus and click do not, leaving always cancels — is written and
+ * tested once.
+ *
+ * An interactive card the pointer has to reach passes its tooltip's
+ * `hideFrom` and `blurFrom`. Leaving then waits: the card stays if the
+ * pointer or focus went into it, and otherwise closes after its grace period
+ * rather than at once. `hide` is still the immediate close, for a click
+ * (`leave`) and for another trigger opening its card while this one waits.
+ * Without them, leaving calls `hide`. */
 export function hoverIntentHandlers({
   intent,
   show,
-  hide
+  hide,
+  hideFrom,
+  blurFrom
 }: {
   intent: HoverIntent;
   show: (target: HTMLElement) => void;
   hide: () => void;
+  hideFrom?: (event: LeaveEvent) => void;
+  blurFrom?: (event: LeaveEvent) => void;
 }): {
   onMouseEnter: (target: HTMLElement) => void;
-  onMouseLeave: () => void;
+  onMouseLeave: (event: LeaveEvent) => void;
   onFocus: (target: HTMLElement) => void;
-  onBlur: () => void;
+  onBlur: (event: LeaveEvent) => void;
   /** Bypass the gate — for a click whose own action is to reveal the popup. */
   showNow: (target: HTMLElement) => void;
   /** Drop any pending open and dismiss — for a click that does something else
    *  (opening a PR in the browser) and should take its tooltip with it. */
   leave: () => void;
 } {
+  // Only a card that waits on leave can outlive its hover, so only it is
+  // registered to be closed by the next one. Every open still claims, so a
+  // card that does not linger still closes one that does.
+  const lingers = hideFrom !== undefined || blurFrom !== undefined;
+  const open = (target: HTMLElement): void => {
+    intent.claimCard(target, lingers ? hide : undefined);
+    show(target);
+  };
   const showNow = (target: HTMLElement): void =>
-    intent.immediate(() => show(target));
+    intent.immediate(() => open(target));
   const leave = (): void => {
     intent.cancel();
     hide();
   };
   return {
-    onMouseEnter: (target) => intent.arm(() => show(target)),
-    onMouseLeave: leave,
+    onMouseEnter: (target) => intent.arm(() => open(target)),
+    onMouseLeave: (event) => {
+      intent.cancel();
+      if (hideFrom === undefined) hide();
+      else hideFrom(event);
+    },
     onFocus: showNow,
-    onBlur: leave,
+    onBlur: (event) => {
+      intent.cancel();
+      if (blurFrom === undefined) hide();
+      else blurFrom(event);
+    },
     showNow,
     leave
   };
@@ -275,6 +322,12 @@ export function useHoverIntent(gate: HoverIntentGate = sharedGate): HoverIntent 
     gate.markCardClosed(Date.now());
   }, [gate]);
 
+  const claimCard = useCallback(
+    (trigger: HTMLElement, close?: () => void): void =>
+      gate.claimCard(trigger, close),
+    [gate]
+  );
+
   useEffect(() => {
     const untrack = trackPointer();
     return () => {
@@ -286,7 +339,7 @@ export function useHoverIntent(gate: HoverIntentGate = sharedGate): HoverIntent 
   // Stable identity: callers put this in effect dependencies, and a fresh
   // object each render would re-run those effects on every clock tick.
   return useMemo(
-    () => ({ arm, cancel, immediate, cardClosed }),
-    [arm, cancel, immediate, cardClosed]
+    () => ({ arm, cancel, immediate, cardClosed, claimCard }),
+    [arm, cancel, immediate, cardClosed, claimCard]
   );
 }

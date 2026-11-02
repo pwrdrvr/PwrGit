@@ -56,10 +56,11 @@ type TooltipState = {
  * Where an interactive card's bridge goes, or nothing when the card touches
  * or overlaps its trigger.
  *
- * The strip ends exactly at the trigger's edge and never overlaps it. A
- * caller whose trigger hides its card on `mouseleave` at once (`PrChip`) would
- * otherwise flicker: a pointer resting on the overlap is on the card, so the
- * trigger hides it, which uncovers the trigger, which opens it again. The
+ * The strip ends exactly at the trigger's edge and never overlaps it. An
+ * overlap would cover the trigger, so a click there would land on the card.
+ * A trigger that hides its card on `mouseleave` at once would also flicker: a
+ * pointer resting on the overlap is on the card, so the trigger hides it,
+ * which uncovers the trigger, which opens it again. The
  * strip is positioned from the card's padding edge, so `border` (the card's
  * own border on that side) is added back to reach the trigger.
  */

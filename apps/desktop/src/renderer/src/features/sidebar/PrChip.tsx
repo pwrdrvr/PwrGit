@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 import {
   ASSUMED_FORGE_KIND,
   changeRequestLabel,
@@ -36,7 +36,10 @@ export function PrChip({
   const {
     show: showTooltip,
     hide: hideTooltip,
+    hideFrom,
+    blurFrom,
     update: updateTooltip,
+    visible,
     tooltipNode
   } = useViewportTooltip("pr-status-card", {
     interactive: true,
@@ -73,8 +76,29 @@ export function PrChip({
   const hide = (): void => hideTooltip();
   // Sweeping the pointer past a row of chips must not leave popups in its
   // wake; keyboard focus still acts at once, and a click takes its tooltip
-  // with it on the way to the browser.
-  const chip = hoverIntentHandlers({ intent: hoverIntent, show, hide });
+  // with it on the way to the browser. Leaving waits, so the pointer can
+  // reach the card; the next chip's card closes this one if it is still
+  // waiting. See "Interactive cards must be reachable" in lib/AGENTS.md.
+  const chip = hoverIntentHandlers({
+    intent: hoverIntent,
+    show,
+    hide,
+    hideFrom,
+    blurFrom
+  });
+
+  // The card outlives the hover that opened it, so the gate's "still
+  // browsing" window has to run from when it goes, not from the leave.
+  const wasVisible = useRef(false);
+  useEffect(() => {
+    if (visible) {
+      wasVisible.current = true;
+      return;
+    }
+    if (!wasVisible.current) return;
+    wasVisible.current = false;
+    hoverIntent.cardClosed();
+  }, [visible, hoverIntent]);
 
   // Keep an already-visible card accurate when a targeted PR refresh lands.
   // Depends on `pr`, not the element: a new element every render would make an
