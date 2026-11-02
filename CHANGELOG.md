@@ -1,5 +1,12 @@
 # Changelog
 
+## v0.50.0 - 2026-11-02
+
+- Maintenance - Fixed Combined maintenance stopping before garbage collection when a repository's branch review or deletion has errors. Independent steps now continue, retained branches stay untouched, and outcome cards show each problem and its reason. Cancellation and command-level failures still stop the run.
+- Menus - Made the current repository's menu visible without hovering and aligned worktree actions across the sidebar, right-click menus, graph header, and branch browser. Fork and Reset to remote branch are available where applicable, and unavailable actions explain why they are disabled.
+- Hover cards - Fixed the Changes pane's Why? card and pull-request status cards closing before the pointer could reach their controls. Why? and commit-hook receipts can now stay open with a click or Enter, and moving between request chips no longer leaves multiple status cards behind.
+- Branch actions - Made Copy branch name on remote branch chips copy the unqualified name, with a separate action for the remote-qualified name. Request menus now use pull-request or merge-request wording for the repository's forge.
+
 ## v0.49.0 - 2026-10-30
 
 - Fork pulls - Fixed conflicting default labels in the Pull menu while a moved-on fork's pull preference is still unanswered. The menu now explains that Pull temporarily reads the fork's tracked branch and asks you to choose, without presenting upstream sync as a saved default.
