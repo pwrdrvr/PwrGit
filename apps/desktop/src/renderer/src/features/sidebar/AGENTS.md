@@ -508,6 +508,12 @@ pages").
   `RepoIndex`, so a scroll re-renders only the column.
 - **The hover hold spans index and tree** (`held.containerProps` on
   `.sidebar__body`), so Focused cannot re-sort under a moving pointer.
+- **Names move only where tree rows move** (the Pinned lens), by drag and
+  ⌘⇧↑/↓, inside their folder group. The index gets the tree's own
+  `repoDrag` instance and `moveRepo`, never a second hook: held and aimed
+  state shows in both views, a name drops on a tree row, and the two can
+  never order repositories differently. Design:
+  `design/Repo Index Reorder - UX Review.dc.html`, 2a.
 - **Accessibility:** a `nav` named "Repository index", outside `role="tree"`,
   with a list per folder and a button per repository. The spy item has
   `aria-current="location"`. One roving tab stop: ↑/↓, Home/End, typeahead,

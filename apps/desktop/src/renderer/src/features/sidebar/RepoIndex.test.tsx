@@ -3,7 +3,7 @@
 import { act, createRef } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { RepoIndex, type RepoIndexGroup } from "./RepoIndex";
+import { RepoIndex, type RepoIndexGroup, type RepoIndexReorder } from "./RepoIndex";
 
 let container: HTMLDivElement;
 let root: Root;
@@ -89,18 +89,50 @@ afterEach(() => {
   document.head.querySelector("style[data-test]")?.remove();
 });
 
-function render(onJump: (id: string) => void = () => undefined): HTMLElement {
+function render(
+  onJump: (id: string) => void = () => undefined,
+  reorder?: RepoIndexReorder,
+  groups: RepoIndexGroup[] = GROUPS
+): HTMLElement {
   const listRef = createRef<HTMLDivElement>();
   (listRef as { current: HTMLDivElement | null }).current = list;
-  const host = document.createElement("div");
-  container.prepend(host);
-  root = createRoot(host);
+  let host = container.querySelector<HTMLElement>("[data-index-host]");
+  if (host === null) {
+    host = document.createElement("div");
+    host.dataset["indexHost"] = "";
+    container.prepend(host);
+    root = createRoot(host);
+  }
   act(() => {
     root.render(
-      <RepoIndex groups={GROUPS} listRef={listRef} treeId="tree" onJump={onJump} />
+      <RepoIndex
+        groups={groups}
+        listRef={listRef}
+        treeId="tree"
+        onJump={onJump}
+        {...(reorder === undefined ? {} : { reorder })}
+      />
     );
   });
   return host.querySelector("nav")!;
+}
+
+/** A reorder the parent would pass in the Pinned lens. */
+function reorderProps(over: Partial<RepoIndexReorder> = {}): RepoIndexReorder {
+  return {
+    rowProps: () => ({ draggable: true }),
+    dragId: null,
+    target: null,
+    isPostDragClick: () => false,
+    moveKey: (event) =>
+      event.metaKey && event.shiftKey && event.key === "ArrowDown"
+        ? "down"
+        : event.metaKey && event.shiftKey && event.key === "ArrowUp"
+          ? "up"
+          : null,
+    onMove: () => true,
+    ...over
+  };
 }
 
 const item = (nav: HTMLElement, name: string): HTMLButtonElement =>
@@ -257,5 +289,98 @@ describe("RepoIndex", () => {
     expect(document.body.classList.contains("is-col-resizing")).toBe(false);
     fire(document, "pointermove", 160);
     expect(nav.style.width).toBe("130px");
+  });
+
+  describe("moving names", () => {
+    it("does not drag a name unless the parent arranges the list", () => {
+      const nav = render();
+      expect(item(nav, "atlas-api").getAttribute("draggable")).toBeNull();
+      render(() => undefined, reorderProps());
+      expect(item(nav, "atlas-api").getAttribute("draggable")).toBe("true");
+    });
+
+    it("draws the held name and the gap it would land in", () => {
+      const nav = render(
+        () => undefined,
+        reorderProps({ dragId: "beacon", target: { id: "atlas", position: "after" } })
+      );
+      expect(item(nav, "beacon-web").className).toContain("is-dragging");
+      expect(item(nav, "atlas-api").className).not.toContain("is-dragging");
+      expect(item(nav, "atlas-api").parentElement!.className).toBe("is-drop-after");
+      expect(nav.querySelectorAll("li[class]")).toHaveLength(1);
+    });
+
+    it("does not jump on the click a drag release fires", () => {
+      const onJump = vi.fn();
+      const nav = render(onJump, reorderProps({ isPostDragClick: () => true }));
+      act(() => item(nav, "delta-svc").click());
+      expect(onJump).not.toHaveBeenCalled();
+    });
+
+    it("moves a name with ⌘⇧↓ and keeps focus on it in its new place", () => {
+      const onMove = vi.fn(() => true);
+      const reorder = reorderProps({ onMove });
+      const nav = render(() => undefined, reorder);
+      act(() => item(nav, "atlas-api").focus());
+      act(() => {
+        item(nav, "atlas-api").dispatchEvent(
+          new KeyboardEvent("keydown", {
+            key: "ArrowDown",
+            metaKey: true,
+            shiftKey: true,
+            bubbles: true
+          })
+        );
+      });
+      expect(onMove).toHaveBeenCalledExactlyOnceWith("atlas", "down");
+      // A plain arrow still walks; the move did not.
+      expect(document.activeElement).toBe(item(nav, "atlas-api"));
+
+      // The parent's new order arrives; React moves the <li>.
+      const [code, oss] = GROUPS as [RepoIndexGroup, RepoIndexGroup];
+      const moved = [{ ...code, entries: [...code.entries].reverse() }, oss];
+      act(() => (document.activeElement as HTMLElement).blur());
+      render(() => undefined, reorder, moved);
+      expect(document.activeElement).toBe(item(nav, "atlas-api"));
+    });
+
+    it("ignores the move chord where names don't move", () => {
+      const nav = render();
+      act(() => item(nav, "atlas-api").focus());
+      act(() => {
+        item(nav, "atlas-api").dispatchEvent(
+          new KeyboardEvent("keydown", {
+            key: "ArrowDown",
+            metaKey: true,
+            shiftKey: true,
+            bubbles: true
+          })
+        );
+      });
+      expect(document.activeElement).toBe(item(nav, "atlas-api"));
+    });
+
+    it("leaves focus alone when a move is refused", () => {
+      const nav = render(() => undefined, reorderProps({ onMove: () => false }));
+      act(() => item(nav, "delta-svc").focus());
+      act(() => {
+        item(nav, "delta-svc").dispatchEvent(
+          new KeyboardEvent("keydown", {
+            key: "ArrowDown",
+            metaKey: true,
+            shiftKey: true,
+            bubbles: true
+          })
+        );
+      });
+      act(() => item(nav, "cinder").focus());
+      // An unrelated reorder later must not pull focus back to delta-svc.
+      const [code, oss] = GROUPS as [RepoIndexGroup, RepoIndexGroup];
+      render(() => undefined, reorderProps(), [
+        { ...code, entries: [...code.entries].reverse() },
+        oss
+      ]);
+      expect(document.activeElement).toBe(item(nav, "cinder"));
+    });
   });
 });
