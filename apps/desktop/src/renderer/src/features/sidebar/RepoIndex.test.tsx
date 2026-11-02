@@ -344,6 +344,22 @@ describe("RepoIndex", () => {
       expect(document.activeElement).toBe(item(nav, "atlas-api"));
     });
 
+    it("ignores the move chord where names don't move", () => {
+      const nav = render();
+      act(() => item(nav, "atlas-api").focus());
+      act(() => {
+        item(nav, "atlas-api").dispatchEvent(
+          new KeyboardEvent("keydown", {
+            key: "ArrowDown",
+            metaKey: true,
+            shiftKey: true,
+            bubbles: true
+          })
+        );
+      });
+      expect(document.activeElement).toBe(item(nav, "atlas-api"));
+    });
+
     it("leaves focus alone when a move is refused", () => {
       const nav = render(() => undefined, reorderProps({ onMove: () => false }));
       act(() => item(nav, "delta-svc").focus());

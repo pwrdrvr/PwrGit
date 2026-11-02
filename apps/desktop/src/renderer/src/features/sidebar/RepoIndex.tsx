@@ -271,6 +271,9 @@ export function RepoIndex({
       if (reorder?.onMove(id, direction)) movedRef.current = id;
       return;
     }
+    // The move chord where names don't move: unclaimed, as on the tree's
+    // rows, not a plain arrow walk.
+    if (event.shiftKey && (event.metaKey || event.ctrlKey)) return;
     if (event.key === "ArrowDown") {
       event.preventDefault();
       focusAt(Math.min(at + 1, ids.length - 1));

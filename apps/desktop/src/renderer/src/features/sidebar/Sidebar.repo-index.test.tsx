@@ -264,5 +264,74 @@ describe("Moving repositories from the index", () => {
       "atlas moved to 2 of 3."
     );
   });
+
+  describe("grouped by folder", () => {
+    const TWO_ROOTS = { ...PROFILE, roots: ["/code", "/oss"] } as Profile;
+    // atlas, beacon under /code; cinder under /oss.
+    const GROUPED = PINNED.map((repo) =>
+      repo.id === "cinder" ? { ...repo, path: "/oss/cinder" } : repo
+    );
+    function renderGrouped(persist: (ids: string[]) => void): void {
+      window.localStorage.setItem("pwrgit.lens", "Pinned");
+      act(() => {
+        root.render(
+          <Sidebar
+            profiles={[TWO_ROOTS]}
+            activeProfile={TWO_ROOTS}
+            profileLoadState={{ status: "ready" }}
+            onRetryProfiles={() => undefined}
+            onSwitchProfile={() => undefined}
+            repos={GROUPED}
+            repoLoadState={{ status: "ready" }}
+            onRetryRepos={() => undefined}
+            selectedWorktreeId="atlas:wt0"
+            onSelectWorktree={() => undefined}
+            onSetRepoPin={() => undefined}
+            onSetWorktreePin={() => undefined}
+            onSetBranchPin={() => undefined}
+            onRemoveWorktree={() => undefined}
+            onRemoveWorktrees={() => Promise.resolve({ removed: [], failed: [] } as never)}
+            onCreateWorktree={() => Promise.resolve(null)}
+            onPersistOrder={() => undefined}
+            onPersistRepoOrder={persist}
+            refreshingRepoIds={new Set()}
+            onRefreshRepo={() => undefined}
+            onRefreshPullRequest={() => undefined}
+            onCloneRepo={() => undefined}
+            onForkRepo={() => undefined}
+            onForkCheckout={() => undefined}
+            onAddFolder={() => undefined}
+            onExpandRepo={() => undefined}
+            onNewProfile={() => undefined}
+            onManageProfile={() => undefined}
+            platform="darwin"
+          />
+        );
+      });
+    }
+    const chord = (target: Element, key: string): void => {
+      act(() => {
+        target.dispatchEvent(
+          new KeyboardEvent("keydown", { key, metaKey: true, shiftKey: true, bubbles: true })
+        );
+      });
+    };
+
+    it("stops a key move at its folder's edge, from the index and the tree", () => {
+      const persist = vi.fn();
+      renderGrouped(persist);
+      chord(indexItem("beacon"), "ArrowDown");
+      chord(container.querySelector('.repo-row[data-repo-id="beacon"]')!, "ArrowDown");
+      chord(indexItem("cinder"), "ArrowUp");
+      expect(persist).not.toHaveBeenCalled();
+    });
+
+    it("moves a tree row inside its folder, as before the index could", () => {
+      const persist = vi.fn();
+      renderGrouped(persist);
+      chord(container.querySelector('.repo-row[data-repo-id="beacon"]')!, "ArrowUp");
+      expect(persist).toHaveBeenCalledExactlyOnceWith(["beacon", "atlas", "cinder"]);
+    });
+  });
 });
 
