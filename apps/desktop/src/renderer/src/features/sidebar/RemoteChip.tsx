@@ -1,5 +1,5 @@
 import { forgeLabel, type ForgeKind } from "@pwrgit/shared";
-import { hoverTooltip, type ViewportTooltip } from "../../lib/useViewportTooltip";
+import { hoverTooltip, type TooltipHandle } from "../../lib/useViewportTooltip";
 import { ForgeMark } from "./ForgeMark";
 
 /**
@@ -16,7 +16,7 @@ export function RemoteChip({
 }: {
   remote: string;
   forge: ForgeKind;
-  tip: Pick<ViewportTooltip, "show" | "hide" | "hideFrom">;
+  tip: TooltipHandle;
 }) {
   return (
     <span

@@ -1,6 +1,6 @@
 import type { Worktree } from "@pwrgit/shared";
 import { CheckoutGlyph } from "../../lib/CheckoutGlyph";
-import { hoverTooltip, type ViewportTooltip } from "../../lib/useViewportTooltip";
+import { hoverTooltip, type TooltipHandle } from "../../lib/useViewportTooltip";
 import { WorktreeGlyph } from "../../lib/WorktreeGlyph";
 import { lastSegment, worktreeFolderLabel } from "./repo-view";
 
@@ -15,7 +15,7 @@ export function ShowWorktreeButton({
   onClick
 }: {
   holder: Worktree | undefined;
-  tip: Pick<ViewportTooltip, "show" | "hide" | "hideFrom">;
+  tip: TooltipHandle;
   onClick: () => void;
 }) {
   return (
@@ -70,7 +70,7 @@ export function WorktreeHolderChip({
   repoName: string;
   /** Spell the folder even where it repeats the branch or the repository. */
   alwaysNameFolder?: boolean;
-  tip: Pick<ViewportTooltip, "show" | "hide" | "hideFrom">;
+  tip: TooltipHandle;
   onReveal: (worktreeId: string) => void;
 }) {
   const folder = alwaysNameFolder

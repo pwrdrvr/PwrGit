@@ -173,6 +173,31 @@ Why: a refresh can unmount a graph row under the pointer, and React sends no
 the card appeared at the viewport origin, over the traffic lights, with no way
 to dismiss it.
 
+### Interactive cards must be reachable
+
+A card with controls in it (`interactive: true`) has to survive the trip from
+its trigger to those controls. The Changes rail's "Why?" card failed all three
+of these checks, so none of its buttons could be pressed:
+
+- **The card takes the pointer.** `.viewport-tooltip` is
+  `pointer-events: none`. A card that keeps that class needs a two-class rule
+  that sets `auto`. `styles/interactive-card-pointer-events.test.ts` checks
+  every interactive card.
+- **Leaving the trigger waits.** `hideFrom` and `blurFrom` keep the card when
+  the pointer or focus moves into it, and otherwise give it the 400ms grace
+  period. Plain tooltips still close at once.
+- **The gap is bridged.** A trigger-anchored interactive card draws a
+  transparent `[data-tooltip-bridge]` strip across the gap to its trigger
+  (PwrAgnt's messaging-status popover uses padding for the same thing).
+- **The bridge ends at the trigger's edge, never inside it.** An overlap makes
+  a trigger that hides on leave (`PrChip`) flicker under a resting pointer.
+
+Use `pinnableTooltip` for a trigger whose only job is to open the card ("Why?",
+the hook receipts): a click or Enter pins it until Escape, a press outside, or
+a scroll that moves the trigger. A pinned card is a click-opened overlay, so it
+registers with `useDismissable` and claims Escape.
+Design: turn 6 of `design/Git Discovery - UX Review.dc.html`.
+
 ### Nested triggers restore, they don't just hide
 
 A row has a card, and a path inside it has another. React fires no
