@@ -6,6 +6,7 @@ import {
   statSync
 } from "node:fs";
 import { realpath } from "node:fs/promises";
+import { randomUUID } from "node:crypto";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { nestedWorktreePathspec } from "@pwrgit/mcp-server/nested-worktrees";
@@ -1650,6 +1651,8 @@ export type PullOutcome = {
   stashed: boolean;
   /** Reapplying the stash after the pull hit conflicts (markers left in-tree). */
   reappliedWithConflicts: boolean;
+  /** Verified commit retained in Stashes as a recovery copy. */
+  recoveryStash?: string;
 };
 
 /**
@@ -3021,11 +3024,76 @@ export async function rebaseOntoUpstream(
   });
 }
 
+/** Find Pull's unique reflog message, never the current top of the shared stack.
+ * Duplicate occurrences are ambiguous even if their commit hashes match. */
+async function ownedPullStash(
+  git: GitExec,
+  cwd: string,
+  message: string
+): Promise<Result<string>> {
+  const args = ["stash", "list", "--format=%H%x00%gs"];
+  const raw = await git(args, cwd);
+  if (!raw.ok) return raw;
+  const checked = requireExit0(raw.value, args);
+  if (!checked.ok) return checked;
+  const matches = checked.value.stdout.split("\n").filter((line) =>
+    line.trimEnd().endsWith(`: ${message}`)
+  );
+  const sha = matches[0]?.split("\0")[0] ?? "";
+  if (matches.length !== 1 || !/^[0-9a-f]{40,64}$/.test(sha)) {
+    return err({
+      kind: "remote",
+      code: "pull_stash_ownership",
+      message: `PwrGit cannot identify Pull's saved changes${matches.length > 1 ? " because the recovery marker appears more than once" : " because the recovery entry is missing"}. No stash was applied or removed. Check Stashes for "${message}" before retrying.`
+    });
+  }
+  return ok(sha);
+}
+
+/** Apply an immutable commit. Git's pop/drop take shifting reflog positions,
+ * so Pull deliberately retains its recovery copy, including after success. */
+async function applyPullStash(
+  git: GitExec,
+  cwd: string,
+  sha: string,
+  allowConflicts: boolean
+): Promise<Result<{ conflicts: boolean }>> {
+  let applied = await git(["stash", "apply", "--index", sha], cwd);
+  if (!applied.ok) return applied;
+  if (applied.value.exitCode !== 0 && allowConflicts) {
+    const args = ["status", "--porcelain"];
+    const raw = await git(args, cwd);
+    if (!raw.ok) return raw;
+    const status = requireExit0(raw.value, args);
+    if (!status.ok) return status;
+    // --index can refuse before touching the checkout. Only then try plain
+    // apply, using the SAME commit even if a sibling just pushed a stash.
+    if (status.value.stdout.trim() === "") {
+      applied = await git(["stash", "apply", sha], cwd);
+      if (!applied.ok) return applied;
+    }
+  }
+  if (applied.value.exitCode === 0) return ok({ conflicts: false });
+  if (allowConflicts) {
+    const args = ["diff", "--name-only", "--diff-filter=U", "-z"];
+    const raw = await git(args, cwd);
+    if (!raw.ok) return raw;
+    const conflicts = requireExit0(raw.value, args);
+    if (!conflicts.ok) return conflicts;
+    if (conflicts.value.stdout !== "") return ok({ conflicts: true });
+  }
+  return err({
+    kind: "remote",
+    code: "stash_reapply_failed",
+    message: `${applied.value.stderr}\n${applied.value.stdout}`.trim() || "Git could not restore the saved changes.",
+    cause: applied.value
+  });
+}
+
 /**
- * Pull = fetch + fast-forward-only merge of the tracked upstream. When the
- * working tree is dirty, local work (tracked + untracked) is auto-stashed so a
- * fast-forward that touches those files isn't blocked, then reapplied — the
- * GitHub-Desktop behavior. A conflicting reapply is reported, not hidden.
+ * Fetch and fast-forward, saving dirty tracked/untracked work first. Restore
+ * only the verified recovery commit and retain it in Stashes; never consume a
+ * moving reflog position. Conflicts and failed restoration remain recoverable.
  */
 export async function pullFastForward(
   git: GitExec,
@@ -3124,19 +3192,29 @@ export async function pullFastForward(
   const dirty = status.value.stdout.trim() !== "";
 
   let stashed = false;
+  let stashSha: string | undefined;
+  let stashFailure: PwrGitError | undefined;
+  const stashMessage = `${PWRGIT_PULL_STASH_MESSAGE} [${randomUUID()}]`;
+  const recoveryNote = () => `Recovery stash kept in Stashes as "${stashMessage}"${stashSha === undefined ? "" : ` (${stashSha})`}.`;
   if (dirty) {
     const stashArgs = [
       "stash",
       "push",
       "--include-untracked",
       "-m",
-      PWRGIT_PULL_STASH_MESSAGE
+      stashMessage
     ];
-    const stashRaw = await pullGit(stashArgs, cwd);
-    if (!stashRaw.ok) return stashRaw;
-    const stash = requireExit0(stashRaw.value, stashArgs);
-    if (!stash.ok) return stash;
-    stashed = !/no local changes to save/i.test(stash.value.stdout);
+    const stashRaw = await pullGit(stashArgs, cwd, PARSEABLE_SWITCH);
+    if (!stashRaw.ok) {
+      // Cancellation can arrive after Git has saved and cleaned the checkout.
+      // Discover ownership and recover with a fresh signal before returning it.
+      stashFailure = stashRaw.error;
+      stashed = true;
+    } else {
+      const stash = requireExit0(stashRaw.value, stashArgs);
+      if (!stash.ok) stashFailure = stash.error;
+      stashed = !stash.ok || !/no local changes to save/i.test(stash.value.stdout);
+    }
   }
 
   const rollbackFailedMerge = async (): Promise<Result<void>> => {
@@ -3153,13 +3231,25 @@ export async function pullFastForward(
         kind: "remote",
         code: "pull_rollback_failed",
         message: `Pull failed, and PwrGit could not restore the original checkout.${
-          stashed ? " Your local changes remain in the stash." : ""
+          stashed ? ` Your local changes remain in the stash. ${recoveryNote()}` : ""
         }${detail !== "" ? ` ${detail}` : ` git ${args.join(" ")} failed.`}`,
         cause: raw.ok ? raw.value : raw.error
       });
     };
 
     const run = async (): Promise<Result<void>> => {
+      if (stashed && stashSha === undefined) {
+        const owned = await ownedPullStash(recoveryGit, cwd, stashMessage);
+        if (!owned.ok) {
+          // A failed push may not have saved anything. Never reset the dirty
+          // checkout, or apply somebody else's entry, without proven ownership.
+          return stashFailure === undefined ? owned : err({
+            ...stashFailure,
+            message: `${stashFailure.message} ${owned.error.message}`
+          });
+        }
+        stashSha = owned.value;
+      }
       if (originalHeadOid !== undefined) {
         const reset = await rollbackStep(["reset", "--hard", originalHeadOid]);
         if (!reset.ok) return reset;
@@ -3202,21 +3292,16 @@ export async function pullFastForward(
       const cleaned = await flushClean();
       if (!cleaned.ok) return cleaned;
 
-      if (!stashed) return ok(undefined);
+      if (stashSha === undefined) return ok(undefined);
       onProgress("reapply");
-      const pop = await recoveryGit(["stash", "pop", "--index"], cwd);
-      if (!pop.ok && isPullTimeout(pop.error)) return pop;
-      if (!pop.ok || pop.value.exitCode !== 0) {
-        const detail = pop.ok
-          ? `${pop.value.stderr}\n${pop.value.stdout}`.trim()
-          : pop.error.message;
+      const restored = await applyPullStash(recoveryGit, cwd, stashSha, false);
+      if (!restored.ok) {
+        if (isPullTimeout(restored.error)) return restored;
         return err({
           kind: "remote",
           code: "stash_reapply_failed",
-          message: `Pull failed and PwrGit restored the original commit, but your stashed changes could not be reapplied. The stash was kept.${
-            detail !== "" ? ` ${detail}` : ""
-          }`,
-          cause: pop.ok ? pop.value : pop.error
+          message: `Pull failed and PwrGit restored the original commit, but your saved changes could not be reapplied. ${recoveryNote()} ${restored.error.message}`,
+          cause: restored.error
         });
       }
       return ok(undefined);
@@ -3232,6 +3317,22 @@ export async function pullFastForward(
     }
   };
 
+  if (stashFailure !== undefined) {
+    const rollback = await rollbackFailedMerge();
+    if (!rollback.ok) return rollback;
+    return err({ ...stashFailure, message: `${stashFailure.message} Local changes restored. ${recoveryNote()}` });
+  }
+  if (stashed) {
+    const owned = await ownedPullStash(pullGit, cwd, stashMessage);
+    if (!owned.ok) {
+      if (owned.error.code === "pull_stash_ownership") return owned;
+      const rollback = await rollbackFailedMerge();
+      if (!rollback.ok) return rollback;
+      return err({ ...owned.error, message: `${owned.error.message} Local changes restored. ${recoveryNote()}` });
+    }
+    stashSha = owned.value;
+  }
+
   onProgress("fast_forward");
   const merge = await pullGit(
     ["merge", "--ff-only", "--progress", upstream.value.head],
@@ -3240,7 +3341,7 @@ export async function pullFastForward(
   if (!merge.ok) {
     const rollback = await rollbackFailedMerge();
     if (!rollback.ok) return rollback;
-    return merge;
+    return stashed ? err({ ...merge.error, message: `${merge.error.message} Local changes restored. ${recoveryNote()}` }) : merge;
   }
   if (merge.value.exitCode !== 0) {
     const rollback = await rollbackFailedMerge();
@@ -3251,47 +3352,44 @@ export async function pullFastForward(
       : /upstream|tracking/i.test(message)
         ? "no_upstream"
         : "merge_failed";
+    const reason = code === "not_fast_forward"
+      ? target.kind === "upstream"
+        ? "Your local branch and its upstream have diverged."
+        : `This branch has commits ${target.label} doesn't, so it can't fast-forward to it.`
+      : message !== "" ? message : "Pull could not fast-forward.";
     return err({
       kind: "remote",
       code,
-      message:
-        code === "not_fast_forward"
-          ? target.kind === "upstream"
-            ? "Your local branch and its upstream have diverged."
-            : `This branch has commits ${target.label} doesn't, so it can't fast-forward to it.`
-          : message !== ""
-            ? message
-            : "pull could not fast-forward"
+      message: stashed ? `${reason} Local changes restored. ${recoveryNote()}` : reason
     });
   }
 
-  if (!stashed) {
+  if (stashSha === undefined) {
     return ok({ fastForwarded: true, stashed: false, reappliedWithConflicts: false });
   }
-  // Reapply the stashed work, including its staged state. When an indexed pop
-  // rejects a conflict before changing the tree, retry without --index so Git
-  // can leave the usual conflict markers. Never retry over partial changes.
+  // Restoring saved work is recovery: cancellation must not strand it after a
+  // successful merge. Use the fresh bounded recovery signal, as rollback does.
   onProgress("reapply");
-  let pop = await pullGit(["stash", "pop", "--index"], cwd);
-  if (!pop.ok) return pop;
-  if (pop.value.exitCode !== 0) {
-    const statusAfterPopRaw = await pullGit(["status", "--porcelain"], cwd);
-    if (!statusAfterPopRaw.ok) return statusAfterPopRaw;
-    const statusAfterPop = requireExit0(statusAfterPopRaw.value, [
-      "status",
-      "--porcelain"
-    ]);
-    if (!statusAfterPop.ok) return statusAfterPop;
-    if (statusAfterPop.value.stdout.trim() === "") {
-      pop = await pullGit(["stash", "pop"], cwd);
-      if (!pop.ok) return pop;
-    }
+  const recoveryControl = control.startRecovery?.();
+  const recoveryGit = controlledGit(git, recoveryControl ?? {});
+  let succeeded = false;
+  try {
+    const restored = await applyPullStash(recoveryGit, cwd, stashSha, true);
+    if (!restored.ok) return err({
+      ...restored.error,
+      code: isPullTimeout(restored.error) ? restored.error.code : "stash_reapply_failed",
+      message: `Pull fast-forwarded, but your saved changes could not be fully restored. ${recoveryNote()} ${restored.error.message}`
+    });
+    succeeded = true;
+    return ok({
+      fastForwarded: true,
+      stashed: true,
+      reappliedWithConflicts: restored.value.conflicts,
+      recoveryStash: stashSha
+    });
+  } finally {
+    recoveryControl?.finish?.(succeeded);
   }
-  return ok({
-    fastForwarded: true,
-    stashed: true,
-    reappliedWithConflicts: pop.value.exitCode !== 0
-  });
 }
 
 /**

@@ -105,6 +105,45 @@ describe("branch handlers", () => {
     vi.mocked(deleteLocalBranch).mockResolvedValue(ok(undefined));
   });
 
+  it.each(["merge", "leave"] as const)("takes the repository lock before the worktree for a %s switch", async (changes) => {
+    const { bus, operations } = harness();
+    vi.mocked(switchBranchCarryingChanges).mockResolvedValue(ok({ carried: true }));
+    vi.mocked(switchBranchLeavingChanges).mockResolvedValue(ok({ left: true }));
+    let release!: () => void;
+    const held = operations.runRepository("repo-1", () => new Promise<void>((resolve) => { release = resolve; }));
+    await vi.waitFor(() => expect(release).toBeTypeOf("function"));
+    const switching = bus.dispatch("branch:switch", { worktreeId: "worktree-1", branch: "feature", changes });
+    // A pending repository lock must not occupy this worktree first.
+    let worktreeRead = false;
+    await operations.run("worktree-1", async () => { worktreeRead = true; });
+    expect(worktreeRead).toBe(true);
+    const started = vi.mocked(changes === "merge" ? switchBranchCarryingChanges : switchBranchLeavingChanges);
+    expect(started).not.toHaveBeenCalled();
+    release();
+    await held;
+    expect((await switching).ok).toBe(true);
+  });
+
+  it.each(["merge", "leave"] as const)("excludes a sibling stash producer for the complete %s switch", async (changes) => {
+    const { bus, operations } = harness();
+    let release!: () => void;
+    if (changes === "merge") {
+      vi.mocked(switchBranchCarryingChanges).mockImplementationOnce(() => new Promise((resolve) => { release = () => resolve(ok({ carried: true })); }));
+    } else {
+      vi.mocked(switchBranchLeavingChanges).mockImplementationOnce(() => new Promise((resolve) => { release = () => resolve(ok({ left: true })); }));
+    }
+    const switching = bus.dispatch("branch:switch", { worktreeId: "worktree-1", branch: "feature", changes });
+    await vi.waitFor(() => expect(release).toBeTypeOf("function"));
+    let siblingStarted = false;
+    const sibling = operations.runRepository("repo-1", () => operations.run("worktree-2", async () => { siblingStarted = true; }));
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    expect(siblingStarted).toBe(false);
+    release();
+    await switching;
+    await sibling;
+    expect(siblingStarted).toBe(true);
+  });
+
   it("serves a live child-aware dirty probe for switch confirmation", async () => {
     const { bus } = harness();
     vi.mocked(readCheckoutDirtyCount).mockResolvedValueOnce(ok(2));

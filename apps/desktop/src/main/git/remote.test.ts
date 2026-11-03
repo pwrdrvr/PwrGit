@@ -733,7 +733,7 @@ describe("remote ops (bare-remote fixture)", () => {
     const originalStagedDiff = gitOut(local, ["diff", "--cached"]);
     const originalUnstagedDiff = gitOut(local, ["diff"]);
     let sawPartialMutation = false;
-    let restoredBeforePop = false;
+    let restoredBeforeApply = false;
     let reappliedWithIndex = false;
 
     const failAfterPartialCheckout: GitExec = async (args, cwd, options) => {
@@ -749,9 +749,9 @@ describe("remote ops (bare-remote fixture)", () => {
           exitCode: 128
         });
       }
-      if (args[0] === "stash" && args[1] === "pop") {
+      if (args[0] === "stash" && args[1] === "apply") {
         reappliedWithIndex = args.includes("--index");
-        restoredBeforePop =
+        restoredBeforeApply =
           gitOut(cwd, ["rev-parse", "HEAD"]) === originalHead &&
           gitOut(cwd, ["status", "--porcelain"]) === "" &&
           fileText(cwd, "base.txt") === "base.txt\n" &&
@@ -764,7 +764,7 @@ describe("remote ops (bare-remote fixture)", () => {
     expect(result.ok).toBe(false);
     if (!result.ok) expect(result.error.code).toBe("merge_failed");
     expect(sawPartialMutation).toBe(true);
-    expect(restoredBeforePop).toBe(true);
+    expect(restoredBeforeApply).toBe(true);
     expect(reappliedWithIndex).toBe(true);
     expect(gitOut(local, ["rev-parse", "HEAD"])).toBe(originalHead);
     expect(fileText(local, "base.txt")).toBe(
@@ -775,7 +775,7 @@ describe("remote ops (bare-remote fixture)", () => {
     expect(gitOut(local, ["status", "--porcelain"])).toBe(originalStatus);
     expect(gitOut(local, ["diff", "--cached"])).toBe(originalStagedDiff);
     expect(gitOut(local, ["diff"])).toBe(originalUnstagedDiff);
-    expect(gitOut(local, ["stash", "list"])).toBe("");
+    expect(gitOut(local, ["stash", "list"])).toContain("pwrgit: auto-stash before pull");
   });
 
   it("removes partial untracked checkout artifacts before restoring a clean checkout", async () => {
@@ -879,7 +879,7 @@ describe("remote ops (bare-remote fixture)", () => {
     writeFileSync(join(local, "upstream.txt"), "local untracked work\n");
     const originalStatus = gitOut(local, ["status", "--porcelain"]);
     let sawPartialArtifact = false;
-    let cleanBeforePop = false;
+    let cleanBeforeApply = false;
     const failAfterUntrackedCheckout: GitExec = async (args, cwd, options) => {
       if (args[0] === "merge") {
         writeFileSync(join(cwd, "upstream.txt"), "partial upstream checkout\n");
@@ -891,8 +891,8 @@ describe("remote ops (bare-remote fixture)", () => {
           exitCode: 128
         });
       }
-      if (args[0] === "stash" && args[1] === "pop") {
-        cleanBeforePop = !existsSync(join(cwd, "upstream.txt"));
+      if (args[0] === "stash" && args[1] === "apply") {
+        cleanBeforeApply = !existsSync(join(cwd, "upstream.txt"));
       }
       return systemGit(args, cwd, options);
     };
@@ -904,11 +904,11 @@ describe("remote ops (bare-remote fixture)", () => {
       expect(result.error.message).toContain("terminal prompts disabled");
     }
     expect(sawPartialArtifact).toBe(true);
-    expect(cleanBeforePop).toBe(true);
+    expect(cleanBeforeApply).toBe(true);
     expect(gitOut(local, ["rev-parse", "HEAD"])).toBe(originalHead);
     expect(gitOut(local, ["status", "--porcelain"])).toBe(originalStatus);
     expect(fileText(local, "upstream.txt")).toBe("local untracked work\n");
-    expect(gitOut(local, ["stash", "list"])).toBe("");
+    expect(gitOut(local, ["stash", "list"])).toContain("pwrgit: auto-stash before pull");
   });
 
   it("preserves staged and unstaged state when reapplying work after a successful pull", async () => {
@@ -933,7 +933,8 @@ describe("remote ops (bare-remote fixture)", () => {
       expect(result.value).toEqual({
         fastForwarded: true,
         stashed: true,
-        reappliedWithConflicts: false
+        reappliedWithConflicts: false,
+        recoveryStash: expect.any(String)
       });
     }
     expect(phases).toEqual([
@@ -947,7 +948,7 @@ describe("remote ops (bare-remote fixture)", () => {
     expect(gitOut(local, ["diff", "--cached"])).toBe(originalStagedDiff);
     expect(gitOut(local, ["diff"])).toBe(originalUnstagedDiff);
     expect(fileText(local, "untracked.txt")).toBe("keep me\n");
-    expect(gitOut(local, ["stash", "list"])).toBe("");
+    expect(gitOut(local, ["stash", "list"])).toContain("pwrgit: auto-stash before pull");
   });
 
   it("keeps a conflicting indexed stash recoverable after a successful pull", async () => {
@@ -966,7 +967,8 @@ describe("remote ops (bare-remote fixture)", () => {
       expect(result.value).toEqual({
         fastForwarded: true,
         stashed: true,
-        reappliedWithConflicts: true
+        reappliedWithConflicts: true,
+        recoveryStash: expect.any(String)
       });
     }
     expect(gitOut(local, ["status", "--porcelain"])).toContain("UU base.txt");
@@ -1019,7 +1021,7 @@ describe("remote ops (bare-remote fixture)", () => {
   it("keeps the stash and reports when failed-pull rollback cannot complete", async () => {
     const { local } = makeDivergedFixture();
     writeFileSync(join(local, "base.txt"), "local work\n");
-    let popCalled = false;
+    let applyCalled = false;
     const failingRollbackGit: GitExec = async (args, cwd, options) => {
       if (args[0] === "merge") {
         return ok({ stdout: "", stderr: "merge failed", exitCode: 128 });
@@ -1027,7 +1029,7 @@ describe("remote ops (bare-remote fixture)", () => {
       if (args[0] === "reset") {
         return ok({ stdout: "", stderr: "reset failed", exitCode: 128 });
       }
-      if (args[0] === "stash" && args[1] === "pop") popCalled = true;
+      if (args[0] === "stash" && args[1] === "apply") applyCalled = true;
       return systemGit(args, cwd, options);
     };
 
@@ -1037,7 +1039,7 @@ describe("remote ops (bare-remote fixture)", () => {
       expect(result.error.code).toBe("pull_rollback_failed");
       expect(result.error.message).toContain("local changes remain in the stash");
     }
-    expect(popCalled).toBe(false);
+    expect(applyCalled).toBe(false);
     expect(gitOut(local, ["stash", "list"])).toContain(
       "pwrgit: auto-stash before pull"
     );
@@ -1047,17 +1049,17 @@ describe("remote ops (bare-remote fixture)", () => {
     const { local } = makeDivergedFixture();
     const originalHead = gitOut(local, ["rev-parse", "HEAD"]);
     writeFileSync(join(local, "base.txt"), "local work\n");
-    const failingPopGit: GitExec = async (args, cwd, options) => {
+    const failingApplyGit: GitExec = async (args, cwd, options) => {
       if (args[0] === "merge") {
         return ok({ stdout: "", stderr: "merge failed", exitCode: 128 });
       }
-      if (args[0] === "stash" && args[1] === "pop") {
-        return ok({ stdout: "", stderr: "stash pop failed", exitCode: 1 });
+      if (args[0] === "stash" && args[1] === "apply") {
+        return ok({ stdout: "", stderr: "stash apply failed", exitCode: 1 });
       }
       return systemGit(args, cwd, options);
     };
 
-    const result = await pullFastForward(failingPopGit, local);
+    const result = await pullFastForward(failingApplyGit, local);
     expect(result.ok).toBe(false);
     if (!result.ok) expect(result.error.code).toBe("stash_reapply_failed");
     expect(gitOut(local, ["rev-parse", "HEAD"])).toBe(originalHead);
@@ -2601,7 +2603,7 @@ describe("reset targets on a fork", () => {
     });
     expect(pulled).toEqual({
       ok: true,
-      value: { fastForwarded: true, stashed: true, reappliedWithConflicts: false }
+      value: { fastForwarded: true, stashed: true, reappliedWithConflicts: false, recoveryStash: expect.any(String) }
     });
     expect(gitOut(local, ["rev-parse", "HEAD"])).toBe(
       gitOut(source, ["rev-parse", "main"])

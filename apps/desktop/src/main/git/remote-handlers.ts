@@ -102,6 +102,9 @@ function safePullError(
     };
   }
   if (error.code === "not_fast_forward") return error;
+  // Entirely app-authored: preserve the recovery name and missing/duplicate
+  // marker guidance. Git-derived failure text still goes through the cases below.
+  if (error.code === "pull_stash_ownership") return error;
   const base = { kind: error.kind, code: error.code };
   const elapsed = formatPullDuration(elapsedMs);
   switch (error.code) {
@@ -1037,7 +1040,7 @@ export function registerRemoteHandlers(
         );
       }
 
-      const { stashed, reappliedWithConflicts } = result.value;
+      const { stashed, reappliedWithConflicts, recoveryStash } = result.value;
       const outcome = reappliedWithConflicts
         ? "fast-forwarded, stash reapplied WITH CONFLICTS"
         : stashed
@@ -1073,12 +1076,12 @@ export function registerRemoteHandlers(
       logMain(
         "info",
         "remote",
-        `pull finished ${path}: ${outcome} (${seconds(startedAt)})`
+        `pull finished ${path}: ${outcome}${recoveryStash === undefined ? "" : ", recovery stash kept in Stashes"} (${seconds(startedAt)})`
       );
       return result;
     } finally {
       activity.finish();
-      // Pull may leave an ordinary recovery stash after a failed reapply.
+      // Pull retains its recovery copy after successful and failed restoration.
       emitEvent("stash:changed", { repoId: worktree.repoId });
     }
   };
@@ -1342,7 +1345,8 @@ export function registerRemoteHandlers(
       source: source.label,
       arrived,
       stashed: pulled.value.stashed,
-      reappliedWithConflicts: pulled.value.reappliedWithConflicts
+      reappliedWithConflicts: pulled.value.reappliedWithConflicts,
+      ...(pulled.value.recoveryStash === undefined ? {} : { recoveryStash: pulled.value.recoveryStash })
     };
     const now = after.ok ? after.value : null;
     if (now === null || now.tracked === null || now.source === null) {

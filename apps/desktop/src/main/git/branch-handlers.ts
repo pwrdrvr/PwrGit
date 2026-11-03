@@ -320,13 +320,12 @@ export function registerBranchHandlers(
     const live = rowOf(req.worktreeId);
     if (!live.ok) return live;
     const row = live.value;
-    // Every half runs inside ONE queued operation. The merging and leaving
-    // switches are several git commands with a rollback hanging off each, and a
-    // second operation landing between the stash and the reapply — a pull's own
-    // auto-stash, say — would leave the two reaching for each other's entry.
+    // Stashes are shared by linked worktrees. Multi-step switches acquire the
+    // repository first, then the worktree, just like Pull. Holding only this
+    // worktree would let a sibling's stash producer interleave with recovery.
     // A plain switch (no `changes`) is the "bring my changes" answer: Git
     // carries what it can and refuses, touching nothing, when it cannot.
-    const result = await operations.run(
+    const switchWorktree = () => operations.run(
       req.worktreeId,
       (): Promise<Result<{ carried: boolean; left: boolean }>> =>
         req.changes === "merge"
@@ -341,6 +340,9 @@ export function registerBranchHandlers(
                 r.ok ? ok({ carried: false, left: false }) : r
               )
     );
+    const result = await (req.changes === "merge" || req.changes === "leave"
+      ? operations.runRepository(row.repo_id, switchWorktree)
+      : switchWorktree());
     if (!result.ok) {
       // A leave whose rollback failed kept the work in a stash entry the
       // message names; the Stashes tab has to show it.
