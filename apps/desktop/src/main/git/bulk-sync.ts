@@ -11,6 +11,7 @@ import {
 } from "@pwrgit/shared";
 import { access } from "node:fs/promises";
 import { resolve } from "node:path";
+import { mapLimit } from "../util/map-limit";
 import { nestedWorktreePathspec } from "@pwrgit/mcp-server/nested-worktrees";
 import {
   NO_OPTIONAL_LOCKS,
@@ -20,6 +21,8 @@ import {
 } from "./dugite";
 
 export const BULK_SYNC_CONCURRENCY = 3;
+/** Each repository worker runs at most four independent checkout operations. */
+export const BULK_WORKTREE_CONCURRENCY = 4;
 
 export type BulkSyncRepoInput = {
   id: string;
@@ -675,23 +678,20 @@ async function syncRepo(
       message: "Git could not read or fetch the repository's remotes."
     };
   }
-  const worktrees: BulkSyncWorktreeResult[] = [];
+  let worktrees: BulkSyncWorktreeResult[] = [];
   if (options.mode === "soft-pull") {
     const fetchedByName = new Map(
       fetched.value.map((result) => [result.remote, result])
     );
     const runWorktree: LockRunner =
       options.runWorktree ?? ((_id, operation) => operation());
-    for (const worktree of repo.worktrees) {
+    worktrees = await mapLimit(repo.worktrees, BULK_WORKTREE_CONCURRENCY, async (worktree) => {
       if (isAborted(options.signal)) {
-        worktrees.push(
-          worktreeResult(worktree, {
-            outcome: "cancelled",
-            reason: "cancelled",
-            message: "Cancelled before this worktree was checked."
-          })
-        );
-        continue;
+        return worktreeResult(worktree, {
+          outcome: "cancelled",
+          reason: "cancelled",
+          message: "Cancelled before this worktree was checked."
+        });
       }
       const reportWorktree = (detail: string): void => report({
         detail: `${worktree.branch || "(detached)"}: ${detail}`,
@@ -701,9 +701,9 @@ async function syncRepo(
       const result = await runWorktree(worktree.id, () =>
         softPullWorktree(git, worktree, fetchedByName, options.signal, reportWorktree)
       );
-      worktrees.push(result);
       report({ worktreeResult: result });
-    }
+      return result;
+    });
   }
   return {
     repoId: repo.id,

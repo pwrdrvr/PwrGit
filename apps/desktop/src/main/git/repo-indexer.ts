@@ -64,6 +64,7 @@ const GIT_CONCURRENCY = 12;
 const HYDRATION_GIT_CONCURRENCY = 4;
 const BRANCH_WRITE_CHUNK_SIZE = 100;
 const DISCOVERY_YIELD_EVERY = 32;
+const DISCOVERY_CONCURRENCY = 4;
 const PROFILE_RESCAN_INTERVAL_MS = 24 * 60 * 60 * 1000;
 const HYDRATION_RETRY_INTERVAL_MS = 24 * 60 * 60 * 1000;
 const SKIP_DIRS = new Set([
@@ -353,11 +354,13 @@ export class RepoIndexer {
     const { signal } = options;
     const found = new Set<string>();
     let everyRootReadable = true;
-    for (const root of profile.roots) {
-      const scan = await scanRepoRoot(root, MAX_SCAN_DEPTH, {
+    const scans = await mapLimit(profile.roots, DISCOVERY_CONCURRENCY, (root) =>
+      scanRepoRoot(root, MAX_SCAN_DEPTH, {
         yieldEvery: this.discoveryYieldEvery,
         yieldToEventLoop: this.yieldToEventLoop
-      });
+      })
+    );
+    for (const scan of scans) {
       if (!scan.rootReadable) everyRootReadable = false;
       for (const dir of scan.dirs) found.add(dir);
     }
@@ -2023,34 +2026,35 @@ export async function scanRepoRoot(
   let rootReadable = true;
 
   while (pending.length > 0) {
-    const current = pending.pop();
-    if (current === undefined) break;
-
-    let entries: Dirent[];
-    try {
-      entries = await readdir(current.dir, { withFileTypes: true });
-    } catch {
-      // Only the root is queued at depth 0, so this identifies it without
-      // re-comparing paths the filesystem may normalise differently.
-      if (current.depth === 0) rootReadable = false;
-      continue;
-    }
-
-    visited += 1;
-    if (entries.some((entry) => entry.name === ".git")) {
-      results.push(current.dir);
-    } else if (current.depth < maxDepth) {
-      for (const entry of entries) {
-        if (!entry.isDirectory()) continue;
-        if (SKIP_DIRS.has(entry.name) || entry.name.startsWith(".")) continue;
-        pending.push({
-          dir: join(current.dir, entry.name),
-          depth: current.depth + 1
-        });
+    const batch = pending.splice(-DISCOVERY_CONCURRENCY);
+    const reads = await mapLimit(batch, DISCOVERY_CONCURRENCY, async (current) => {
+      const entries = await readdir(current.dir, { withFileTypes: true }).catch(() => null);
+      return { current, entries };
+    });
+    for (const { current, entries } of reads) {
+      if (entries === null) {
+        // Only the root is queued at depth 0, so this identifies it without
+        // re-comparing paths the filesystem may normalise differently.
+        if (current.depth === 0) rootReadable = false;
+        continue;
       }
-    }
 
-    if (visited % yieldEvery === 0) await yieldToEventLoop();
+      visited += 1;
+      if (entries.some((entry) => entry.name === ".git")) {
+        results.push(current.dir);
+      } else if (current.depth < maxDepth) {
+        for (const entry of entries) {
+          if (!entry.isDirectory()) continue;
+          if (SKIP_DIRS.has(entry.name) || entry.name.startsWith(".")) continue;
+          pending.push({
+            dir: join(current.dir, entry.name),
+            depth: current.depth + 1
+          });
+        }
+      }
+
+      if (visited % yieldEvery === 0) await yieldToEventLoop();
+    }
   }
 
   return { dirs: results, rootReadable };

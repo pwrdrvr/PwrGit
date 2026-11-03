@@ -4,7 +4,7 @@ import {
   type WorktreeState
 } from "@pwrgit/shared";
 import type { DB } from "../persistence/db";
-import { mapLimit } from "../util/map-limit";
+import { limitConcurrency, mapLimit } from "../util/map-limit";
 import { NO_OPTIONAL_LOCKS, requireExit0, type GitExec } from "./dugite";
 import { checkoutExists } from "./worktree-liveness";
 import { nestedWorktreePathspec } from "@pwrgit/mcp-server/nested-worktrees";
@@ -174,7 +174,9 @@ export function forkSourceFromRow(r: {
 export type ForkSourceProbe = (
   repoId: string,
   repoPath: string,
-  worktreePath: string
+  worktreePath: string,
+  /** Use the state service's shared subprocess ceiling when supplied. */
+  git?: GitExec
 ) => Promise<WorktreeForkSource | null>;
 
 /** Did anything a surface draws move between two snapshots? */
@@ -225,12 +227,17 @@ export class WorktreeStateService {
 
   /** Worktrees whose removal is underway; counted so overlapping batches nest. */
   private readonly removalLocks = new Map<string, number>();
+  private readonly git: GitExec;
 
   constructor(
     private readonly db: DB,
-    private readonly git: GitExec,
+    git: GitExec,
     private readonly operations = new WorktreeOperationQueue()
-  ) {}
+  ) {
+    // Independent reads overlap without multiplying refreshMany's eight slots
+    // into eight subprocesses per worktree.
+    this.git = limitConcurrency(git, 8);
+  }
 
   private repoPathMissing: ((repoId: string) => void) | null = null;
   private worktreePathMissing:
@@ -561,12 +568,15 @@ export class WorktreeStateService {
     }
 
     let lastActivityAt: string | undefined;
-    const logRaw = await this.git(["log", "-1", "--format=%cI"], wt.path);
+    const [logRaw, lastAuthoredAt, def] = await Promise.all([
+      this.git(["log", "-1", "--format=%cI"], wt.path),
+      this.readLastAuthoredAt(wt.path),
+      this.resolveDefaultBranch(wt.repo_id, wt.repo_path)
+    ]);
     if (logRaw.ok && logRaw.value.exitCode === 0) {
       const iso = logRaw.value.stdout.trim();
       if (iso !== "") lastActivityAt = iso;
     }
-    const lastAuthoredAt = await this.readLastAuthoredAt(wt.path);
 
     // Agents and terminal git switch branches without going through PwrGit,
     // and only a full rescan rewrites the worktrees.branch column the sidebar
@@ -585,7 +595,6 @@ export class WorktreeStateService {
 
     // Staleness vs the repo's default branch.
     const branchName = liveBranch !== "" ? liveBranch : wt.branch;
-    const def = await this.resolveDefaultBranch(wt.repo_id, wt.repo_path);
     const isDefaultBranch = branchName === def.name;
     let behindDefault = 0;
     let mergedIntoDefault = false;
@@ -599,17 +608,13 @@ export class WorktreeStateService {
       if (!hasMergeBase) {
         divergedFromDefault = true;
       } else {
-        const bd = await this.git(
-          ["rev-list", "--count", `HEAD..${def.ref}`],
-          wt.path
-        );
+        const [bd, anc] = await Promise.all([
+          this.git(["rev-list", "--count", `HEAD..${def.ref}`], wt.path),
+          this.git(["merge-base", "--is-ancestor", "HEAD", def.ref], wt.path)
+        ]);
         if (bd.ok && bd.value.exitCode === 0) {
           behindDefault = Number(bd.value.stdout.trim()) || 0;
         }
-        const anc = await this.git(
-          ["merge-base", "--is-ancestor", "HEAD", def.ref],
-          wt.path
-        );
         mergedIntoDefault = anc.ok && anc.value.exitCode === 0;
       }
     }
@@ -619,7 +624,7 @@ export class WorktreeStateService {
     const source =
       this.forkSource === null
         ? null
-        : await this.forkSource(wt.repo_id, wt.repo_path, wt.path).catch(
+        : await this.forkSource(wt.repo_id, wt.repo_path, wt.path, this.git).catch(
             () => null
           );
 

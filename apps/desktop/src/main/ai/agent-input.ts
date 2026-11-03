@@ -5,6 +5,7 @@ import type {
   RebaseCommitRef
 } from "@pwrgit/shared";
 import type { GitExec } from "../git/dugite";
+import { mapLimit } from "../util/map-limit";
 
 /**
  * Builds what a local agent is allowed to see: commit subjects and bodies,
@@ -285,16 +286,27 @@ export async function collectCommitsInput(
   const budget: Budget = { used: 0, limit: budgetLines };
   const files = new Map<string, AgentInputFile>();
   const out: CommitInput[] = [];
-  for (const commit of [...commits].reverse()) {
-    const body = await readLines(git, cwd, ["log", "-1", "--format=%b", commit.hash]);
-    const numstat = await readLines(git, cwd, [
-      ...QUOTE_PATH,
-      "show",
-      "--format=",
-      "--numstat",
-      "--no-renames",
-      commit.hash
-    ]);
+  const oldest = commits[commits.length - 1]?.hash;
+  const [metadata, { style, subjects }] = await Promise.all([
+    mapLimit([...commits].reverse(), 4, async (commit) => {
+      const [body, numstat] = await Promise.all([
+        readLines(git, cwd, ["log", "-1", "--format=%b", commit.hash]),
+        readLines(git, cwd, [
+          ...QUOTE_PATH,
+          "show",
+          "--format=",
+          "--numstat",
+          "--no-renames",
+          commit.hash
+        ])
+      ]);
+      return { commit, body, numstat };
+    }),
+    readMessageStyle(git, cwd, oldest === undefined ? "HEAD" : `${oldest}^`)
+  ]);
+  // Budget consumption and manifest aggregation stay oldest-first. Prefetching
+  // patches here would read excluded or already-over-budget content for nothing.
+  for (const { commit, body, numstat } of metadata) {
     if (body === null || numstat === null) return null;
     const diff = await readUnit(
       {
@@ -324,12 +336,6 @@ export async function collectCommitsInput(
       diff
     });
   }
-  const oldest = commits[commits.length - 1]?.hash;
-  const { style, subjects } = await readMessageStyle(
-    git,
-    cwd,
-    oldest === undefined ? "HEAD" : `${oldest}^`
-  );
   return {
     commits: out,
     styleSubjects: subjects,
@@ -353,12 +359,15 @@ export async function collectStagedInput(
 ): Promise<StagedInput | null> {
   const budget: Budget = { used: 0, limit: budgetLines };
   const files = new Map<string, AgentInputFile>();
-  const numstat = await readLines(git, cwd, [
-    ...QUOTE_PATH,
-    "diff",
-    "--cached",
-    "--numstat",
-    "--no-renames"
+  const [numstat, { style, subjects }] = await Promise.all([
+    readLines(git, cwd, [
+      ...QUOTE_PATH,
+      "diff",
+      "--cached",
+      "--numstat",
+      "--no-renames"
+    ]),
+    readMessageStyle(git, cwd, "HEAD")
   ]);
   if (numstat === null) return null;
   const diff = await readUnit(
@@ -381,7 +390,6 @@ export async function collectStagedInput(
     budget,
     files
   );
-  const { style, subjects } = await readMessageStyle(git, cwd, "HEAD");
   return {
     diff,
     styleSubjects: subjects,
