@@ -351,6 +351,9 @@ export function RebaseTab({
   const choiceRef = useRef(choice);
   choiceRef.current = choice;
   const checkGeneration = useRef(0);
+  // A new selection, a later Apply, or unmount invalidates both the response
+  // and its delayed Clear. An old completion must never unlock a newer Apply.
+  const applyAttempt = useRef(0);
   const tidyRequest = useRef<{ id: string; startedAt: number } | null>(null);
   const clearTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   // Read after an await: the revision that triggered a re-check has landed by
@@ -375,15 +378,35 @@ export function RebaseTab({
     void dispatch("agent:cancel", { requestId: active.id });
   };
 
-  const key = selectedHashes.join(",");
-  useEffect(() => {
+  const cancelTidy = (): void => {
+    const active = tidyRequest.current;
+    if (active === null) return;
     cancelTidyRequest();
+    // Explicit cancel is terminal and retryable. Lifecycle invalidation uses
+    // cancelTidyRequest alone so it cannot resurrect an abandoned selection.
+    setTidy({
+      kind: "failed",
+      code: "cancelled",
+      message: "Cancelled. Nothing changed.",
+      afterMs: Date.now() - active.startedAt
+    });
+  };
+
+  const invalidateApply = (): void => {
+    applyAttempt.current += 1;
     if (clearTimer.current !== null) {
       clearTimeout(clearTimer.current);
       clearTimer.current = null;
     }
+  };
+
+  const key = selectedHashes.join(",");
+  useEffect(() => {
+    cancelTidyRequest();
+    invalidateApply();
     checkGeneration.current += 1;
     setCheck({ kind: "idle" });
+    setApplying(false);
     setApplied(false);
     setPlan(null);
     setCommits([]);
@@ -411,7 +434,8 @@ export function RebaseTab({
   useEffect(
     () => () => {
       cancelTidyRequest();
-      if (clearTimer.current !== null) clearTimeout(clearTimer.current);
+      checkGeneration.current += 1;
+      invalidateApply();
     },
     []
   );
@@ -546,7 +570,7 @@ export function RebaseTab({
   }, [op, plan?.valid, agent.ready, key]);
 
   const apply = async (unsigned = false): Promise<void> => {
-    if (worktreeId === null || op === null || plan === null || !plan.valid) return;
+    if (worktreeId === null || op === null || plan === null || !plan.valid || applying || applied) return;
     const approvalToken =
       check.kind === "clean"
         ? check.approvalToken
@@ -555,6 +579,7 @@ export function RebaseTab({
           : undefined;
     if (approvalToken === undefined) return;
     if (op !== "reorder" && program === null) return;
+    const attempt = ++applyAttempt.current;
     setApplying(true);
     const result = await dispatch("rebase:apply", {
       worktreeId,
@@ -564,12 +589,17 @@ export function RebaseTab({
       ...(program !== null ? { program } : {}),
       ...(unsigned ? { unsigned: true } : {})
     });
+    if (attempt !== applyAttempt.current) return;
     setApplying(false);
     if (result.ok) {
       setApplied(true);
       // Held so it can be cancelled: firing after a new selection was made
       // would clear that one instead of this finished rebase.
-      clearTimer.current = setTimeout(onClear, 900);
+      clearTimer.current = setTimeout(() => {
+        if (attempt !== applyAttempt.current) return;
+        clearTimer.current = null;
+        onClear();
+      }, 900);
     } else {
       setCheck({
         kind: "snag",
@@ -732,7 +762,7 @@ export function RebaseTab({
               agent={agent}
               locked={applying || applied || check.kind === "checking"}
               onRequest={() => requestTidy()}
-              onCancel={cancelTidyRequest}
+              onCancel={cancelTidy}
               onToggle={(hash) =>
                 setEdits((current) => {
                   const separated = new Set(current.separated);
