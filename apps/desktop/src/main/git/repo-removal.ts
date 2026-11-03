@@ -405,7 +405,7 @@ export type RemovalExecuteDeps = RemovalReviewDeps & {
   remove?: (path: string) => Promise<void>;
   /** Drain state probes for a checkout; resolves to its release. */
   lockForRemoval: (worktreeId: string) => Promise<() => void>;
-  /** Serialize with other Git work on the checkout, then the repository. */
+  /** Serialize checkout work; when nesting, take runRepository first. */
   runWorktree: <T>(worktreeId: string, op: () => Promise<T>) => Promise<T>;
   runRepository: <T>(repoId: string, op: () => Promise<T>) => Promise<T>;
   refreshRepo: (repoId: string) => Promise<void>;
@@ -552,8 +552,8 @@ export async function executeRepoRemoval(
     } else if (primaryStep !== undefined) {
       update(primaryIndex, { status: "running" });
       releases.push(await deps.lockForRemoval(primaryStep.worktreeId));
-      const outcome = await deps.runWorktree(primaryStep.worktreeId, () =>
-        deps.runRepository(review.repoId, async () => {
+      const outcome = await deps.runRepository(review.repoId, () =>
+        deps.runWorktree(primaryStep.worktreeId, async () => {
           try {
             await removeFolder(primaryStep);
             return { ok: true as const };

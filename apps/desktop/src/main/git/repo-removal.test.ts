@@ -68,6 +68,12 @@ type Fixture = {
 };
 
 const roots: string[] = [];
+function deferred(): { promise: Promise<void>; resolve: () => void } {
+  let resolve!: () => void;
+  const promise = new Promise<void>((done) => { resolve = done; });
+  return { promise, resolve };
+}
+
 afterEach(() => {
   for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
 });
@@ -354,6 +360,53 @@ describe("reviewRepoRemoval", () => {
 });
 
 describe("executeRepoRemoval", () => {
+  it("lets a repository owner finish its worktree operation before primary removal", async () => {
+    const f = await fixture();
+    const r = await review(f);
+    const primary = byBranch(r, "main");
+    const operations = new WorktreeOperationQueue();
+    const continuePull = deferred();
+    const removalQueued = deferred();
+    const stateGit = vi.fn(systemGit);
+    const state = new WorktreeStateService(f.db, stateGit, operations);
+    const entered: string[] = [];
+    const pull = operations.runRepository(f.repoId, async () => {
+      await continuePull.promise;
+      return operations.run(primary.worktreeId, async () => { entered.push("pull"); });
+    });
+    const { deps, trashed } = executeDeps(f, {
+      lockForRemoval: (id) => state.lockForRemoval(id),
+      runWorktree: (id, op) => {
+        const pending = operations.run(id, op);
+        removalQueued.resolve();
+        return pending;
+      },
+      runRepository: (id, op) => {
+        const pending = operations.runRepository(id, op);
+        removalQueued.resolve();
+        return pending;
+      }
+    });
+    const removal = executeRepoRemoval(deps, {
+      repoId: f.repoId, decisions: { checkouts: {}, branches: {} }
+    });
+    // Observe rejection too, so a lock-order guard cannot hide an unfixed
+    // removal path by releasing the worktree after refusing its inner lock.
+    void removal.catch(() => undefined);
+    await removalQueued.promise;
+    // Probes stay blocked even while removal is waiting for the repository.
+    expect(await state.compute(primary.worktreeId)).toBeNull();
+    expect(stateGit).not.toHaveBeenCalled();
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    continuePull.resolve();
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    expect(entered).toEqual(["pull"]);
+    await pull;
+    const result = await removal;
+    expect(result.ok && result.value.outcome).toBe("removed");
+    expect(trashed).toEqual([f.repo]);
+  });
+
   it.each([false, true])("does not deadlock with a status probe queued behind removal (linked: %s)", async (linked) => {
     const f = await fixture(({ repo, root }) => {
       if (linked) pushedWorktree(repo, root, "done");
