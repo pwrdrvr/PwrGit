@@ -73,3 +73,38 @@ it("shares a ceiling across callers and continues after rejected work", async ()
   await new Promise<void>((resolve) => setImmediate(resolve));
   expect(await run(5)).toBe(5);
 });
+
+it.each([6, 8])("hands released permits to waiting callers before newcomers at limit %i", async (limit) => {
+  const gates = Array.from({ length: limit + 2 }, gate);
+  const started: number[] = [];
+  let active = 0;
+  let peak = 0;
+  const run = limitConcurrency(async (id: number) => {
+    started.push(id);
+    peak = Math.max(peak, ++active);
+    await gates[id]!.ready;
+    active -= 1;
+    return id;
+  }, limit);
+  const initial = Promise.allSettled(Array.from({ length: limit + 1 }, (_, id) => run(id)));
+  let newcomer: Promise<PromiseSettledResult<number>[]> | undefined;
+  let afterRelease: number[] = [];
+  try {
+    await vi.waitFor(() => expect(started).toHaveLength(limit));
+    gates[0]!.release();
+    // Race a new caller against the queued caller resuming after permit release.
+    await Promise.resolve();
+    await Promise.resolve();
+    newcomer = Promise.allSettled([run(limit + 1)]);
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    afterRelease = [...started];
+  } finally {
+    for (const held of gates) held.release();
+  }
+  const results = [...await initial, ...await newcomer!];
+  expect({ started: afterRelease, peak, results }).toEqual({
+    started: Array.from({ length: limit + 1 }, (_, id) => id),
+    peak: limit,
+    results: Array.from({ length: limit + 2 }, (_, value) => ({ status: "fulfilled", value }))
+  });
+});

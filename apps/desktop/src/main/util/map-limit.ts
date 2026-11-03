@@ -1,4 +1,4 @@
-import { BlockingQueue, IterableQueueMapperSimple } from "@shutterstock/p-map-iterable";
+import { IterableQueueMapperSimple, Queue } from "@shutterstock/p-map-iterable";
 
 /**
  * Run `fn` over `items` with bounded concurrency + backpressure via
@@ -32,13 +32,18 @@ export function limitConcurrency<A extends unknown[], R>(
   limit: number
 ): (...args: A) => Promise<R> {
   const ceiling = Math.max(1, limit);
-  // A reusable pool owns permits rather than a finite mapper's input stream.
-  const permits = new BlockingQueue<number>({ maxUnread: ceiling });
-  const ready = Promise.all(Array.from({ length: ceiling }, (_, i) => permits.enqueue(i)));
+  if (!Number.isSafeInteger(ceiling)) throw new TypeError("Expected a finite integer concurrency limit");
+  let available = ceiling;
+  const waiting = new Queue<() => void>();
   return async (...args) => {
-    await ready;
-    const permit = await permits.dequeue();
+    if (available > 0) available -= 1;
+    else await new Promise<void>((resolve) => { waiting.enqueue(resolve); });
     try { return await fn(...args); }
-    finally { await permits.enqueue(permit!); }
+    finally {
+      const next = waiting.dequeue();
+      // Reserve the permit for the oldest waiter before its continuation runs.
+      if (next) next();
+      else available += 1;
+    }
   };
 }
