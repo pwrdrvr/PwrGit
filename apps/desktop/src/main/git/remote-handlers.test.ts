@@ -106,6 +106,12 @@ vi.mock("./ssh-remote-recovery", () => ({
   testSshRemoteRecovery: vi.fn()
 }));
 
+function deferred(): { promise: Promise<void>; resolve: () => void } {
+  let resolve!: () => void;
+  const promise = new Promise<void>((done) => { resolve = done; });
+  return { promise, resolve };
+}
+
 /** Distinct phases one worktree's activity passed through, in order. */
 function phasesFrom(
   emit: ReturnType<typeof vi.mocked<typeof emitEvent>>,
@@ -195,8 +201,8 @@ describe("remote handlers", () => {
         : { path: "/repos/project", profileId: "profile", name: "project" }
       }) } as unknown as DB;
       const operations = new WorktreeOperationQueue();
-      const repositoryGate = Promise.withResolvers<void>();
-      const worktreeGate = Promise.withResolvers<void>();
+      const repositoryGate = deferred();
+      const worktreeGate = deferred();
       const repository = operations.runRepository("repo", () => repositoryGate.promise);
       const worktree = operations.run("worktree", () => worktreeGate.promise);
       const bus = new CommandBus();

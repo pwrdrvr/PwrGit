@@ -68,6 +68,12 @@ type Fixture = {
 };
 
 const roots: string[] = [];
+function deferred(): { promise: Promise<void>; resolve: () => void } {
+  let resolve!: () => void;
+  const promise = new Promise<void>((done) => { resolve = done; });
+  return { promise, resolve };
+}
+
 afterEach(() => {
   for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
 });
@@ -359,14 +365,17 @@ describe("executeRepoRemoval", () => {
     const r = await review(f);
     const primary = byBranch(r, "main");
     const operations = new WorktreeOperationQueue();
-    const continuePull = Promise.withResolvers<void>();
-    const removalQueued = Promise.withResolvers<void>();
+    const continuePull = deferred();
+    const removalQueued = deferred();
+    const stateGit = vi.fn(systemGit);
+    const state = new WorktreeStateService(f.db, stateGit, operations);
     const entered: string[] = [];
     const pull = operations.runRepository(f.repoId, async () => {
       await continuePull.promise;
       return operations.run(primary.worktreeId, async () => { entered.push("pull"); });
     });
     const { deps, trashed } = executeDeps(f, {
+      lockForRemoval: (id) => state.lockForRemoval(id),
       runWorktree: (id, op) => {
         const pending = operations.run(id, op);
         removalQueued.resolve();
@@ -385,6 +394,9 @@ describe("executeRepoRemoval", () => {
     // removal path by releasing the worktree after refusing its inner lock.
     void removal.catch(() => undefined);
     await removalQueued.promise;
+    // Probes stay blocked even while removal is waiting for the repository.
+    expect(await state.compute(primary.worktreeId)).toBeNull();
+    expect(stateGit).not.toHaveBeenCalled();
     await new Promise<void>((resolve) => setImmediate(resolve));
     continuePull.resolve();
     await new Promise<void>((resolve) => setImmediate(resolve));

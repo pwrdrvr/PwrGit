@@ -2,6 +2,16 @@
 
 Notes for the git layer. See `apps/desktop/AGENTS.md` for app-wide facts.
 
+## Git queue locks have one order
+
+Acquire repository -> worktree when both scopes are needed. Prefer
+`WorktreeOperationQueue.runRepositoryWorktree(repoId, worktreeId, op)` for a
+combined operation. Explicit nesting follows the same order. The queue rejects
+reversed acquisition and same-scope reentry before enqueueing.
+
+Drain `WorktreeStateService.lockForRemoval` probes before taking either queue
+lock: a pending probe can itself be waiting on the worktree queue.
+
 ## Real-git tests run on Windows CI too
 
 Many suites here run a real Git against temp repos. Some hazards fail only on
@@ -761,7 +771,7 @@ old path failed at 33s.
   `lockForRemoval` held: the folder goes to the Trash, then
   `git worktree remove --force <path>` clears that record.
 - Removes the main checkout last, only if every worktree went and nothing in
-  `.git` was kept, inside the worktree lock and then the repository lock.
+  `.git` was kept, inside the repository lock and then the worktree lock.
 - "Push first" is the renderer's job, through the tracked push commands,
   before `repo:remove`. Main refuses a decision set that still has one.
 - E2E replaces the Trash with a directory through `PWRGIT_E2E_TRASH_DIR`.

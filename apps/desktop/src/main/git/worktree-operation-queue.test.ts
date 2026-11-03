@@ -12,6 +12,75 @@ function deferred(): { promise: Promise<void>; resolve: () => void } {
 }
 
 describe("WorktreeOperationQueue", () => {
+  it("takes the repository first without reserving a worktree while queued", async () => {
+    const queue = new WorktreeOperationQueue();
+    const repositoryGate = deferred();
+    const repository = queue.runRepository("repo", () => repositoryGate.promise);
+    const started: string[] = [];
+    const combined = queue.runRepositoryWorktree("repo", "worktree", async () => {
+      started.push("combined");
+      return "done";
+    });
+    await expect(queue.run("worktree", async () => "probe")).resolves.toBe("probe");
+    expect(started).toEqual([]);
+    repositoryGate.resolve();
+    await repository;
+    await expect(combined).resolves.toBe("done");
+    expect(started).toEqual(["combined"]);
+  });
+
+  it("holds both scopes while allowing other repositories and worktrees to run", async () => {
+    const queue = new WorktreeOperationQueue();
+    const entered = deferred();
+    const finish = deferred();
+    const started: string[] = [];
+    const combined = queue.runRepositoryWorktree("repo", "worktree", async () => {
+      entered.resolve();
+      await finish.promise;
+    });
+    await entered.promise;
+    const repository = queue.runRepository("repo", async () => { started.push("repository"); });
+    const worktree = queue.run("worktree", async () => { started.push("worktree"); });
+    await expect(queue.runRepositoryWorktree("other", "other", async () => "independent"))
+      .resolves.toBe("independent");
+    expect(started).toEqual([]);
+    finish.resolve();
+    await Promise.all([combined, repository, worktree]);
+    expect(started.sort()).toEqual(["repository", "worktree"]);
+  });
+
+  it("releases both scopes after a callback throws", async () => {
+    const queue = new WorktreeOperationQueue();
+    const failed = queue.runRepositoryWorktree("repo", "worktree", () => {
+      throw new Error("checkout failed");
+    });
+    await expect(failed).rejects.toThrow("checkout failed");
+    await expect(queue.runRepositoryWorktree("repo", "worktree", async () => "recovered"))
+      .resolves.toBe("recovered");
+  });
+
+  it("ignores released locks inherited by a gated async descendant", async () => {
+    const queue = new WorktreeOperationQueue();
+    const resume = deferred();
+    let descendant!: Promise<string>;
+    await queue.runRepositoryWorktree("repo", "worktree", async () => {
+      descendant = (async () => {
+        await resume.promise;
+        return queue.runRepositoryWorktree("repo", "worktree", async () => "later");
+      })();
+    });
+    resume.resolve();
+    await expect(descendant).resolves.toBe("later");
+  });
+
+  it("keeps lock contexts independent between queue instances", async () => {
+    const first = new WorktreeOperationQueue();
+    const second = new WorktreeOperationQueue();
+    await expect(first.run("worktree", () =>
+      second.runRepositoryWorktree("repo", "worktree", async () => "independent")
+    )).resolves.toBe("independent");
+  });
+
   it("breaks an inverted repository/worktree cycle before enqueueing it", async () => {
     const queue = new WorktreeOperationQueue();
     const repositoryHeld = deferred();
@@ -28,7 +97,7 @@ describe("WorktreeOperationQueue", () => {
       await acquireOther.promise;
       return queue.runRepository("repo", async () => "retracked");
     });
-    void repository.then(() => settled.push("pulled"));
+    void repository.then(() => settled.push("pulled"), () => settled.push("pull failed"));
     void worktree.then(
       () => settled.push("retracked"),
       () => settled.push("inversion rejected")
