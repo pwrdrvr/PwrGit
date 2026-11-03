@@ -1181,11 +1181,11 @@ export function registerRemoteHandlers(
     const worktree = live.value;
     const identity = readIdentity?.(worktree.repoId);
     const read = (async (): Promise<Result<ForkTrackingOffer | null>> => {
-      const inspected = await operations.run(req.worktreeId, () => operations.runRepository(
-        worktree.repoId, () => inspectForkTracking(
+      const inspected = await operations.runRepositoryWorktree(
+        worktree.repoId, req.worktreeId, () => inspectForkTracking(
           execGit, worktree.path, identity, hostsForRemotes?.()
         )
-      ));
+      );
       if (!inspected.ok || inspected.value === null) return inspected.ok ? ok(null) : inspected;
       const { offer, candidates } = inspected.value;
       if (identity === undefined || viewForgeRepo === undefined || candidates.length === 0) {
@@ -1224,11 +1224,11 @@ export function registerRemoteHandlers(
     const live = worktreeOf(req.worktreeId);
     if (!live.ok) return live;
     const worktree = live.value;
-    const result = await operations.run(req.worktreeId, () => operations.runRepository(
-      worktree.repoId, () => repairForkTracking(
+    const result = await operations.runRepositoryWorktree(
+      worktree.repoId, req.worktreeId, () => repairForkTracking(
         execGit, worktree.path, readIdentity?.(worktree.repoId), req, hostsForRemotes?.()
       )
-    ));
+    );
     if (!result.ok) return result;
     refresher.refreshRepoWorktrees(worktree.repoId);
     return ok(null);
@@ -1260,10 +1260,8 @@ export function registerRemoteHandlers(
     if (!live.ok) return live;
     const worktree = live.value;
     const { worktreeId: _worktreeId, ...change } = req;
-    const result = await operations.run(req.worktreeId, () =>
-      operations.runRepository(worktree.repoId, () =>
-        retrackBranch(execGit, worktree.path, change)
-      )
+    const result = await operations.runRepositoryWorktree(
+      worktree.repoId, req.worktreeId, () => retrackBranch(execGit, worktree.path, change)
     );
     // A refused move changes nothing, but a failed upstream write after a
     // move does; refresh either way.

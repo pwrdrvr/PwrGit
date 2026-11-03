@@ -52,8 +52,13 @@ import { WorktreeOperationQueue } from "./worktree-operation-queue";
 import { checkRemoteTips, ensureForkParentRemote } from "./auto-remote-check";
 import { execGit } from "./dugite";
 import { inspectForkTracking, repairForkTracking } from "./fork-tracking";
+import { retrackBranch } from "./branch-tracking";
 
 vi.mock("./fork-tracking", () => ({ inspectForkTracking: vi.fn(), repairForkTracking: vi.fn() }));
+vi.mock("./branch-tracking", async (importOriginal) => ({
+  ...await importOriginal<typeof import("./branch-tracking")>(),
+  retrackBranch: vi.fn()
+}));
 
 vi.mock("./git-service", async (importOriginal) => {
   const actual = await importOriginal<typeof import("./git-service")>();
@@ -101,6 +106,12 @@ vi.mock("./ssh-remote-recovery", () => ({
   testSshRemoteRecovery: vi.fn()
 }));
 
+function deferred(): { promise: Promise<void>; resolve: () => void } {
+  let resolve!: () => void;
+  const promise = new Promise<void>((done) => { resolve = done; });
+  return { promise, resolve };
+}
+
 /** Distinct phases one worktree's activity passed through, in order. */
 function phasesFrom(
   emit: ReturnType<typeof vi.mocked<typeof emitEvent>>,
@@ -135,6 +146,7 @@ describe("remote handlers", () => {
     vi.clearAllMocks();
     vi.mocked(repairForkTracking).mockResolvedValue(ok(null));
     vi.mocked(inspectForkTracking).mockResolvedValue(ok(null));
+    vi.mocked(retrackBranch).mockResolvedValue(ok({ moved: false, copied: null }));
     vi.mocked(checkSelectedRemoteTips).mockResolvedValue(ok("checked"));
     vi.mocked(ensureForkParentRemote).mockResolvedValue(ok(undefined));
     vi.mocked(fetchAllRemotes).mockResolvedValue(ok(undefined));
@@ -179,6 +191,52 @@ describe("remote handlers", () => {
   });
 
   afterEach(() => vi.useRealTimers());
+
+  it.each(["inspectForkTracking", "repairForkTracking", "retrack"] as const)(
+    "finishes Pull and %s when both arrive behind occupied scopes",
+    async (command) => {
+      vi.useFakeTimers();
+      const db = { prepare: (sql: string) => ({ get: () => sql.includes("FROM worktrees")
+        ? { path: "/repos/project", repoId: "repo", branch: "main" }
+        : { path: "/repos/project", profileId: "profile", name: "project" }
+      }) } as unknown as DB;
+      const operations = new WorktreeOperationQueue();
+      const repositoryGate = deferred();
+      const worktreeGate = deferred();
+      const repository = operations.runRepository("repo", () => repositoryGate.promise);
+      const worktree = operations.run("worktree", () => worktreeGate.promise);
+      const bus = new CommandBus();
+      registerRemoteHandlers(bus, db, {
+        refreshWorktree: vi.fn(), refreshRepoWorktrees: vi.fn()
+      }, operations);
+
+      // Pull queues repository -> worktree. The tracking handler must join
+      // the repository queue without reserving the worktree ahead of Pull.
+      const pull = bus.dispatch("remote:pull", { worktreeId: "worktree" });
+      const tracking = command === "inspectForkTracking"
+        ? bus.dispatch("remote:inspectForkTracking", { worktreeId: "worktree" })
+        : command === "repairForkTracking"
+          ? bus.dispatch("remote:repairForkTracking", { worktreeId: "worktree", branch: "main", upstream: "upstream/main" })
+          : bus.dispatch("remote:retrack", {
+            worktreeId: "worktree", branch: "main", remote: "origin", remoteBranch: "main",
+            head: "1".repeat(40), targetHead: "1".repeat(40), upstreamRef: null, move: "none"
+          });
+      worktreeGate.resolve();
+      await worktree;
+      await vi.advanceTimersByTimeAsync(0);
+      repositoryGate.resolve();
+      await repository;
+      await vi.advanceTimersByTimeAsync(0);
+
+      expect(pullFastForward).toHaveBeenCalledTimes(1);
+      const service = command === "inspectForkTracking" ? inspectForkTracking
+        : command === "repairForkTracking" ? repairForkTracking : retrackBranch;
+      expect(service).toHaveBeenCalledTimes(1);
+      expect((await pull).ok).toBe(true);
+      expect((await tracking).ok).toBe(true);
+      expect(liveActivities(vi.mocked(emitEvent))).toEqual([]);
+    }
+  );
 
   const trackingOffer = {
     branch: "main", upstream: "upstream/main", upstreamRemote: "upstream", target: "origin/main",
