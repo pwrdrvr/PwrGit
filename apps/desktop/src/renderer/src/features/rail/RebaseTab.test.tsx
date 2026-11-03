@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { act } from "react";
+import { act, type ComponentProps } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -19,6 +19,7 @@ import {
 
 const mocks = vi.hoisted(() => ({
   dispatch: vi.fn(),
+  clear: vi.fn(),
   events: new Map<string, (payload: unknown) => void>()
 }));
 vi.mock("../../lib/pwrgit", () => ({
@@ -150,7 +151,8 @@ let root: Root;
 
 async function render(
   op: "squash" | "reorder" | "tidy",
-  selectedHashes = log.map((c) => c.hash)
+  selectedHashes = log.map((c) => c.hash),
+  props: Partial<ComponentProps<typeof RebaseTab>> = {}
 ): Promise<void> {
   await act(async () => {
     root.render(
@@ -160,13 +162,23 @@ async function render(
         selectedHashes={selectedHashes}
         op={op}
         branch="feat/csv-export"
-        onClear={() => undefined}
+        onClear={mocks.clear}
+        {...props}
       />
     );
   });
   // Let the selection, plan and agent requests settle.
   for (let i = 0; i < 5; i++) await act(async () => undefined);
 }
+
+function deferred() {
+  let resolve!: (value: unknown) => void;
+  const promise = new Promise<unknown>((r) => { resolve = r; });
+  return { promise, resolve };
+}
+
+const cleanCheck = () =>
+  ok({ status: "clean", approvalToken: "token-1", sourceHead: "head", message: "ok", proof });
 
 function button(name: string): HTMLButtonElement {
   const found = [...container.querySelectorAll("button")].find(
@@ -236,6 +248,7 @@ beforeEach(() => {
 afterEach(async () => {
   await act(async () => root.unmount());
   container.remove();
+  vi.useRealTimers();
 });
 
 describe("rebase tool copy", () => {
@@ -486,6 +499,80 @@ describe("Tidy", () => {
     commits: [{ members: [h("a"), h("b"), h("c")], message: "feat(export): add CSV exporter" }]
   };
 
+  it("finishes an explicit cancel, ignores the late proposal, and retries only on Tidy", async () => {
+    const pending = deferred();
+    route({
+      "agent:tidyPlan": (req) => calls("agent:tidyPlan").length === 1
+        ? pending.promise
+        : ok(tidyProposal(String(req["requestId"]), first, null))
+    });
+    await render("tidy");
+    const requestId = String(calls("agent:tidyPlan")[0]?.["requestId"]);
+    expect(container.textContent).toContain("Codex is reading 3 diffs…");
+
+    await act(async () => button("Cancel").click());
+    expect(calls("agent:cancel")).toEqual([{ requestId }]);
+    expect(container.textContent).toContain("Cancelled. Nothing changed.");
+    expect(container.textContent).not.toContain("Codex is reading");
+    expect(button("Tidy").disabled).toBe(false);
+
+    await act(async () => pending.resolve(ok(tidyProposal(requestId, revised, null))));
+    await render("tidy");
+    expect(container.textContent).toContain("Cancelled. Nothing changed.");
+    expect(calls("agent:tidyPlan")).toHaveLength(1);
+    expect(calls("rebase:check")).toHaveLength(0);
+
+    await act(async () => button("Tidy").click());
+    expect(calls("agent:tidyPlan")).toHaveLength(2);
+    expect(calls("agent:tidyPlan")[1]?.["requestId"]).not.toBe(requestId);
+    expect(container.textContent).toContain("Proposed history");
+    expect(container.textContent).toContain("3 → 2");
+    expect(button("Check in isolated copy").disabled).toBe(false);
+  });
+
+  it("cancels an automatic revision without re-checking or restarting it", async () => {
+    const pending = deferred();
+    route({
+      "agent:tidyPlan": (req) => req["revision"] === undefined
+        ? ok(tidyProposal(String(req["requestId"]), first, null))
+        : pending.promise,
+      "rebase:check": () => ok({ status: "snag", code: "conflict", message: "Conflict.", detail: {
+        kind: "conflict", step: 2, total: 3, hash: h("c"), subject: "fix lint", files: ["src/export.ts"]
+      } })
+    });
+    await render("tidy");
+    await act(async () => button("Check in isolated copy").click());
+    expect(container.textContent).toContain("Codex is revising the plan…");
+    const requestId = String(calls("agent:tidyPlan")[1]?.["requestId"]);
+    await act(async () => button("Cancel").click());
+    await act(async () => pending.resolve(ok(tidyProposal(requestId, revised, null))));
+    expect(container.textContent).toContain("Cancelled. Nothing changed.");
+    expect(calls("rebase:check")).toHaveLength(1);
+    expect(calls("agent:tidyPlan")).toHaveLength(2);
+    await act(async () => button("Tidy").click());
+    expect(calls("agent:tidyPlan")).toHaveLength(3);
+    expect(calls("agent:tidyPlan")[2]?.["revision"]).toBeUndefined();
+    expect(button("Check in isolated copy").disabled).toBe(false);
+  });
+
+  it("invalidates a Tidy request on worktree change and on unmount", async () => {
+    const old = deferred();
+    const current = deferred();
+    route({ "agent:tidyPlan": () => calls("agent:tidyPlan").length === 1 ? old.promise : current.promise });
+    await render("tidy");
+    const oldId = String(calls("agent:tidyPlan")[0]?.["requestId"]);
+    await render("tidy", log.slice(0, 2).map((c) => c.hash), { worktreeId: "wt-2" });
+    expect(calls("agent:cancel")).toEqual([{ requestId: oldId }]);
+    expect(container.textContent).toContain("Codex is reading 2 diffs…");
+    await act(async () => old.resolve(ok(tidyProposal(oldId, first, null))));
+    expect(container.textContent).toContain("Codex is reading 2 diffs…");
+    const currentId = String(calls("agent:tidyPlan")[1]?.["requestId"]);
+    await act(async () => root.unmount());
+    expect(calls("agent:cancel").at(-1)).toEqual({ requestId: currentId });
+    await act(async () => current.resolve(ok(tidyProposal(currentId, revised, null))));
+    expect(calls("rebase:check")).toHaveLength(0);
+  });
+
   it("asks on entry, revises after a conflict, and re-checks on its own", async () => {
     const conflict = {
       kind: "conflict" as const,
@@ -619,6 +706,116 @@ describe("Tidy", () => {
   });
 });
 
+
+describe("Apply lifecycle", () => {
+  const nextSelection = log.slice(0, 2).map((c) => c.hash);
+
+  it.each([
+    ["selection", nextSelection, {}],
+    ["worktree", log.map((c) => c.hash), { worktreeId: "wt-2" }],
+    ["HEAD", log.map((c) => c.hash), { sourceHead: "new-head" }]
+  ] as const)("ignores an Apply success after the %s changes", async (_label, hashes, props) => {
+    vi.useFakeTimers();
+    const pending = deferred();
+    route({ "rebase:check": cleanCheck, "rebase:apply": () => pending.promise });
+    await render("reorder");
+    await act(async () => button("Check in isolated copy").click());
+    await act(async () => button("Apply rebase").click());
+    expect(button("Applying…").disabled).toBe(true);
+    await render("reorder", [...hashes], props);
+    await act(async () => pending.resolve(ok({})));
+
+    expect(container.textContent).not.toContain("Applied locally");
+    expect(button("Apply rebase").disabled).toBe(true);
+    expect(button("Check in isolated copy").disabled).toBe(false);
+    await act(async () => vi.advanceTimersByTime(1000));
+    expect(mocks.clear).not.toHaveBeenCalled();
+    await act(async () => button("Check in isolated copy").click());
+    expect(button("Apply rebase").disabled).toBe(false);
+  });
+
+  it.each(["git_failed", "signing_failed"])("drops an old %s error without replacing the new check", async (code) => {
+    const pending = deferred();
+    route({ "rebase:check": cleanCheck, "rebase:apply": () => pending.promise });
+    await render("reorder");
+    await act(async () => button("Check in isolated copy").click());
+    await act(async () => button("Apply rebase").click());
+    await render("reorder", nextSelection);
+    expect(button("Check in isolated copy").disabled).toBe(false);
+    await act(async () => button("Check in isolated copy").click());
+    await act(async () => pending.resolve(err({ kind: "git", code, message: "Old apply failed." })));
+    expect(container.textContent).not.toContain("Old apply failed.");
+    expect(container.textContent).not.toContain("Apply without signing");
+    expect(button("Apply rebase").disabled).toBe(false);
+  });
+
+  it("keeps a new Apply pending when an old unsigned retry finishes", async () => {
+    vi.useFakeTimers();
+    const unsigned = deferred();
+    const current = deferred();
+    route({
+      "rebase:check": (req) => ok({ status: "clean", approvalToken: `token-${req["worktreeId"]}`, sourceHead: "head", message: "ok", proof }),
+      "rebase:apply": () => {
+        const count = calls("rebase:apply").length;
+        if (count === 1) return err({ kind: "git", code: "signing_failed", message: "Signing failed." });
+        if (count === 2) return unsigned.promise;
+        return current.promise;
+      }
+    });
+    await render("reorder");
+    await act(async () => button("Check in isolated copy").click());
+    await act(async () => button("Apply rebase").click());
+    await act(async () => button("Apply without signing, this once").click());
+    expect(calls("rebase:apply")[1]).toEqual(expect.objectContaining({ unsigned: true, approvalToken: "token-wt-1" }));
+
+    await render("reorder", nextSelection, { worktreeId: "wt-2" });
+    expect(button("Check in isolated copy").disabled).toBe(false);
+    await act(async () => button("Check in isolated copy").click());
+    await act(async () => button("Apply rebase").click());
+    await act(async () => unsigned.resolve(ok({})));
+    expect(button("Applying…").disabled).toBe(true);
+    expect(container.textContent).not.toContain("Applied locally");
+    await act(async () => vi.advanceTimersByTime(1000));
+    expect(mocks.clear).not.toHaveBeenCalled();
+
+    await act(async () => current.resolve(ok({})));
+    expect(calls("rebase:apply")[2]).toEqual(expect.objectContaining({ worktreeId: "wt-2", approvalToken: "token-wt-2", commits: log.slice(0, 2) }));
+    expect(calls("rebase:apply")[2]?.["unsigned"]).toBeUndefined();
+    expect(container.textContent).toContain("Applied locally · 2 commits");
+    await act(async () => vi.advanceTimersByTime(899));
+    expect(mocks.clear).not.toHaveBeenCalled();
+    await act(async () => vi.advanceTimersByTime(1));
+    expect(mocks.clear).toHaveBeenCalledTimes(1);
+  });
+
+  it.each([false, true])("does not clear after unmount (Apply already completed: %s)", async (completed) => {
+    vi.useFakeTimers();
+    const pending = deferred();
+    route({ "rebase:check": cleanCheck, "rebase:apply": () => pending.promise });
+    await render("reorder");
+    await act(async () => button("Check in isolated copy").click());
+    await act(async () => button("Apply rebase").click());
+    if (completed) await act(async () => pending.resolve(ok({})));
+    await act(async () => root.unmount());
+    if (!completed) await act(async () => pending.resolve(ok({})));
+    await act(async () => vi.advanceTimersByTime(1000));
+    expect(mocks.clear).not.toHaveBeenCalled();
+  });
+
+  it("cancels a completed Apply's delayed clear when a new selection arrives", async () => {
+    vi.useFakeTimers();
+    route({ "rebase:check": cleanCheck, "rebase:apply": () => ok({}) });
+    await render("reorder");
+    await act(async () => button("Check in isolated copy").click());
+    await act(async () => button("Apply rebase").click());
+    expect(container.textContent).toContain("Applied locally · 3 commits");
+    await act(async () => vi.advanceTimersByTime(899));
+    await render("reorder", nextSelection);
+    await act(async () => vi.advanceTimersByTime(1000));
+    expect(mocks.clear).not.toHaveBeenCalled();
+    expect(button("Check in isolated copy").disabled).toBe(false);
+  });
+});
 
 describe("agent configuration diagnostics", () => {
   it.each(["squash", "tidy"] as const)("shows the explanation and raw diagnostic on hover for %s", async (op) => {
