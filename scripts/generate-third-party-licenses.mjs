@@ -618,7 +618,7 @@ function main() {
     lines.push("-------------------");
     lines.push("");
     lines.push(
-      "PwrGit invokes the components below as separate executables over a process boundary and links no code from them. PwrGit redistributes them as built and published upstream and applies no changes of its own. Their corresponding source, and the build scripts and patches used to produce the shipped binaries, are published at:",
+      "PwrGit invokes the components below as separate executables over a process boundary and links no code from them. PwrGit redistributes the pinned artifacts identified below without modifying their code. Their corresponding source, and the build scripts and patches used to produce the shipped binaries, are published at:",
     );
     for (const notice of copyleftNotices) {
       lines.push(

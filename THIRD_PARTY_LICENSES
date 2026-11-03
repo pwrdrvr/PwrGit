@@ -16,7 +16,7 @@ PwrGit bundles the pinned custom Git runtime with Git LFS on macOS/Linux and ret
 Source Availability
 -------------------
 
-PwrGit invokes the components below as separate executables over a process boundary and links no code from them. PwrGit redistributes them as built and published upstream and applies no changes of its own. Their corresponding source, and the build scripts and patches used to produce the shipped binaries, are published at:
+PwrGit invokes the components below as separate executables over a process boundary and links no code from them. PwrGit redistributes the pinned artifacts identified below without modifying their code. Their corresponding source, and the build scripts and patches used to produce the shipped binaries, are published at:
 - Custom Git embedded runtime (macOS/Linux) 2.56.0-dev-pwrgit.1 (GPL-2.0-only): https://github.com/huntharo/git/tree/d5db8771ce659822bd9fbb0911b600de1339fea3, built by the scripts and patches at https://github.com/huntharo/git/releases/tag/v2.56.0-dev-pwrgit.1
 - Git embedded runtime 2.53.0 (GPL-2.0-only): https://github.com/git/git/tree/v2.53.0, built by the scripts and patches at https://github.com/desktop/dugite-native/tree/v2.53.0-4
 
