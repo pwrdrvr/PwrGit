@@ -2,8 +2,8 @@ import { execFileSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { describe, expect, it } from "vitest";
-import type { RebaseCommitRef } from "@pwrgit/shared";
+import { describe, expect, it, vi } from "vitest";
+import { ok, type RebaseCommitRef } from "@pwrgit/shared";
 import { createSystemGit } from "../git/test-support/system-git";
 import {
   collectCommitsInput,
@@ -113,6 +113,32 @@ describe("patch parsing", () => {
 });
 
 describe("collectCommitsInput (system git)", () => {
+  it("prefetches metadata with a ceiling and keeps commits oldest-first", async () => {
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => { release = resolve; });
+    let started = 0;
+    let active = 0;
+    let peak = 0;
+    const counted: typeof systemGit = async (args) => {
+      if (args.includes("--numstat") || args.includes("--format=%b")) {
+        started += 1;
+        peak = Math.max(peak, ++active);
+        await gate;
+        active -= 1;
+      }
+      return ok({ stdout: args.includes("--format=%b") ? args.at(-1)! : "", stderr: "", exitCode: 0 });
+    };
+    const commits = Array.from({ length: 12 }, (_, i) => ({ hash: String(i), subject: `Commit ${i}` }));
+    const collecting = collectCommitsInput(counted, tmpdir(), commits);
+    try {
+      await vi.waitFor(() => expect(started).toBe(8));
+      expect(peak).toBe(8);
+    } finally { release(); }
+    const result = await collecting;
+    expect(result!.commits.map((commit) => commit.hash)).toEqual([...commits].reverse().map((commit) => commit.hash));
+    expect(result!.commits.every((commit) => commit.body === commit.hash)).toBe(true);
+    expect(peak).toBe(8);
+  });
   it("sends diffs oldest first, holds back lockfiles and secrets, and lists them", async () => {
     const dir = repo();
     commit(dir, { "README.md": "hi\n" }, "chore: init");
