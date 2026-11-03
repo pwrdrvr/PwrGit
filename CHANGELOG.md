@@ -1,5 +1,13 @@
 # Changelog
 
+## v0.51.0 - 2026-11-03
+
+- Pull safety - Fixed Pull restoring another linked worktree's stash when entries are added concurrently. Pull now restores only its own verified saved changes and keeps a recovery copy in Stashes after restoration or rollback. Missing or ambiguous recovery entries stop the operation with guidance instead of applying another entry; inspect and remove retained copies from Stashes when no longer needed.
+- Git operations - Fixed overlapping Pull, fork-tracking, branch-switch, and primary-checkout removal requests getting stuck waiting on each other. Multi-step switches also keep sibling app operations from interleaving their stash work.
+- Rebase - Fixed cancelling Tidy leaving it stuck on Codex is reading with no retry. Cancel now offers an explicit retry, and late Apply responses or delayed clearing cannot overwrite a newer selection, worktree, or HEAD context.
+- Repository index - Added drag-to-reorder for names in the Pinned lens, within each folder group. The index and repository tree share the same order and drop targets; Command-Shift-Up/Down on macOS or Ctrl-Shift-Up/Down on Windows and Linux moves a focused name one place while keeping focus on it.
+- Minor - Updated the MCP SDK and development tooling.
+
 ## v0.50.0 - 2026-11-02
 
 - Maintenance - Fixed Combined maintenance stopping before garbage collection when a repository's branch review or deletion has errors. Independent steps now continue, retained branches stay untouched, and outcome cards show each problem and its reason. Cancellation and command-level failures still stop the run.
