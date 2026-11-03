@@ -5,6 +5,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import { dirname, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { readRuntimeManifest, verifyRuntime } from "./stage-runtime.mjs";
 
 const desktopRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 // The protected Windows signing job receives a prepared release-stage rather
@@ -30,6 +31,14 @@ function resolveGitRuntimeDir(appPath) {
 export function verifyEmbeddedGitNotices(appPath) {
   const runtimeDir = resolveGitRuntimeDir(resolve(appPath));
   const failures = [];
+  if (process.platform !== "win32") {
+    try {
+      verifyRuntime(runtimeDir, readRuntimeManifest(join(desktopRoot, "custom-git-runtime.json"), process.platform, process.arch));
+    } catch (error) {
+      failures.push(error.message);
+    }
+    return failures;
+  }
 
   for (const file of requiredNotices) {
     const sourcePath = join(noticeSourceDir, file);
