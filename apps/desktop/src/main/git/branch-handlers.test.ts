@@ -15,11 +15,22 @@ import {
 } from "./git-service";
 import { deleteLocalBranch, renameLocalBranch } from "./branch-lifecycle";
 import { registerBranchHandlers } from "./branch-handlers";
+import { registerRemoteHandlers } from "./remote-handlers";
+import { inspectForkTracking, repairForkTracking } from "./fork-tracking";
+import { retrackBranch } from "./branch-tracking";
 import type { RepoIndexer } from "./repo-indexer";
 import type { WorktreeRefresher } from "./worktree-handlers";
 import { WorktreeOperationQueue } from "./worktree-operation-queue";
 
 vi.mock("../ipc", () => ({ emitEvent: vi.fn() }));
+vi.mock("./fork-tracking", () => ({
+  inspectForkTracking: vi.fn(),
+  repairForkTracking: vi.fn()
+}));
+vi.mock("./branch-tracking", async (importOriginal) => ({
+  ...await importOriginal<typeof import("./branch-tracking")>(),
+  retrackBranch: vi.fn()
+}));
 vi.mock("./branch-lifecycle", () => ({
   renameLocalBranch: vi.fn(),
   deleteLocalBranch: vi.fn()
@@ -103,6 +114,109 @@ describe("branch handlers", () => {
     vi.mocked(readCheckoutDirtyCount).mockResolvedValue(clean);
     vi.mocked(renameLocalBranch).mockResolvedValue(ok(undefined));
     vi.mocked(deleteLocalBranch).mockResolvedValue(ok(undefined));
+  });
+
+  describe.each(["merge", "leave"] as const)("%s switch lock ordering", (changes) => {
+    it.each([
+      "remote:inspectForkTracking",
+      "remote:repairForkTracking",
+      "remote:retrack"
+    ] as const)("completes with %s queued behind a worktree read", async (command) => {
+      // Both handler families share the production queue. A worktree-first
+      // tracking request would hold this worktree while the switch holds the
+      // repository, leaving both unable to enter their service callbacks.
+      const db = {
+        prepare: () => ({
+          get: () => ({ ...worktreeRow, repoId: worktreeRow.repo_id })
+        })
+      } as unknown as DB;
+      const { bus, operations, refresher } = harness(db);
+      registerRemoteHandlers(bus, db, refresher, operations);
+      vi.mocked(inspectForkTracking).mockResolvedValue(ok(null));
+      vi.mocked(repairForkTracking).mockResolvedValue(ok(null));
+      vi.mocked(retrackBranch).mockResolvedValue(ok({ moved: false, copied: null }));
+      vi.mocked(switchBranchCarryingChanges).mockResolvedValue(ok({ carried: true }));
+      vi.mocked(switchBranchLeavingChanges).mockResolvedValue(ok({ left: true }));
+
+      let releaseRead!: () => void;
+      const reading = operations.run("worktree-1", () => new Promise<void>((resolve) => {
+        releaseRead = resolve;
+      }));
+      await Promise.resolve();
+      const tracking = command === "remote:inspectForkTracking"
+        ? bus.dispatch(command, { worktreeId: "worktree-1" })
+        : command === "remote:repairForkTracking"
+          ? bus.dispatch(command, { worktreeId: "worktree-1", branch: "main", upstream: "upstream/main" })
+          : bus.dispatch(command, {
+              worktreeId: "worktree-1", branch: "main", remote: "origin",
+              remoteBranch: "main", head: "1".repeat(40), targetHead: "2".repeat(40),
+              upstreamRef: "refs/remotes/upstream/main", move: "none"
+            });
+      const switching = bus.dispatch("branch:switch", {
+        worktreeId: "worktree-1", branch: "feature", changes
+      });
+      let trackingFinished = false;
+      let switchFinished = false;
+      void tracking.then(() => { trackingFinished = true; });
+      void switching.then(() => { switchFinished = true; });
+      await new Promise<void>((resolve) => setImmediate(resolve));
+      expect(trackingFinished).toBe(false);
+      expect(switchFinished).toBe(false);
+      await expect(operations.runRepository("repo-unrelated", async () => "ready"))
+        .resolves.toBe("ready");
+
+      releaseRead();
+      // Drain runnable promise continuations without waiting for the test's
+      // timeout to detect a queue cycle. All service mocks resolve immediately.
+      await new Promise<void>((resolve) => setImmediate(resolve));
+      expect(trackingFinished).toBe(true);
+      expect(switchFinished).toBe(true);
+      const [tracked, switched] = await Promise.all([tracking, switching, reading]);
+      expect(tracked.ok).toBe(true);
+      expect(switched.ok).toBe(true);
+      await expect(operations.runRepository("repo-1", () =>
+        operations.run("worktree-1", async () => "ready")
+      )).resolves.toBe("ready");
+    });
+  });
+
+  it.each(["merge", "leave"] as const)("takes the repository lock before the worktree for a %s switch", async (changes) => {
+    const { bus, operations } = harness();
+    vi.mocked(switchBranchCarryingChanges).mockResolvedValue(ok({ carried: true }));
+    vi.mocked(switchBranchLeavingChanges).mockResolvedValue(ok({ left: true }));
+    let release!: () => void;
+    const held = operations.runRepository("repo-1", () => new Promise<void>((resolve) => { release = resolve; }));
+    await vi.waitFor(() => expect(release).toBeTypeOf("function"));
+    const switching = bus.dispatch("branch:switch", { worktreeId: "worktree-1", branch: "feature", changes });
+    // A pending repository lock must not occupy this worktree first.
+    let worktreeRead = false;
+    await operations.run("worktree-1", async () => { worktreeRead = true; });
+    expect(worktreeRead).toBe(true);
+    const started = vi.mocked(changes === "merge" ? switchBranchCarryingChanges : switchBranchLeavingChanges);
+    expect(started).not.toHaveBeenCalled();
+    release();
+    await held;
+    expect((await switching).ok).toBe(true);
+  });
+
+  it.each(["merge", "leave"] as const)("excludes a sibling stash producer for the complete %s switch", async (changes) => {
+    const { bus, operations } = harness();
+    let release!: () => void;
+    if (changes === "merge") {
+      vi.mocked(switchBranchCarryingChanges).mockImplementationOnce(() => new Promise((resolve) => { release = () => resolve(ok({ carried: true })); }));
+    } else {
+      vi.mocked(switchBranchLeavingChanges).mockImplementationOnce(() => new Promise((resolve) => { release = () => resolve(ok({ left: true })); }));
+    }
+    const switching = bus.dispatch("branch:switch", { worktreeId: "worktree-1", branch: "feature", changes });
+    await vi.waitFor(() => expect(release).toBeTypeOf("function"));
+    let siblingStarted = false;
+    const sibling = operations.runRepository("repo-1", () => operations.run("worktree-2", async () => { siblingStarted = true; }));
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    expect(siblingStarted).toBe(false);
+    release();
+    await switching;
+    await sibling;
+    expect(siblingStarted).toBe(true);
   });
 
   it("serves a live child-aware dirty probe for switch confirmation", async () => {

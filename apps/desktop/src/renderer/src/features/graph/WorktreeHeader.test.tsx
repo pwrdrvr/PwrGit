@@ -1827,6 +1827,16 @@ describe("WorktreeHeader settled status card", () => {
     expect(card()?.textContent).not.toContain("Fetched");
   });
 
+  it("reports a restored Pull's retained recovery stash as success", async () => {
+    await press("Pull", ok({
+      fastForwarded: true, stashed: true, reappliedWithConflicts: false,
+      recoveryStash: "a".repeat(40)
+    }));
+    expect(card()?.textContent).toContain("local changes restored · recovery stash kept in Stashes");
+    expect(card()?.textContent).not.toContain("conflicts");
+    expect(card()?.querySelector(".remote-activity__rail")).not.toBeNull();
+  });
+
   // There is work left in the checkout. A receipt that takes itself away in
   // four seconds is the wrong shape for something the user has to act on.
   it("keeps a pull whose stash came back with conflicts up until dismissed", async () => {
@@ -2721,6 +2731,19 @@ describe("WorktreeHeader keeps a fork up with its source", () => {
       "main is up to date with upstream/main · origin/main has 7 commits it doesn't"
     );
     expect(card()?.textContent).not.toContain("was not pushed");
+  });
+
+  it.each([0, 10])("reports retained recovery work when fork sync brings %i commits", async (arrived) => {
+    answer(behindSource(), {
+      "remote:syncFork": ok({
+        ...synced, arrived, stashed: true, recoveryStash: "a".repeat(40),
+        ...(arrived === 0 ? { push: { outcome: "diverged", remote: "origin", branch: "main", overwrites: 7 } } : {})
+      })
+    });
+    await remount();
+    await act(async () => { pull()?.click(); await settle(); });
+    expect(card()?.textContent).toContain("local changes restored · recovery stash kept in Stashes");
+    expect(card()?.querySelector(".remote-activity__rail")).not.toBeNull();
   });
 
   it("pulls a fork that moved on from itself, and asks once whether to stop syncing", async () => {

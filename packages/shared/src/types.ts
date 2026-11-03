@@ -443,6 +443,8 @@ export type ForkSyncOutcome = {
   stashed: boolean;
   /** Reapplying the stashed work after the fast-forward hit conflicts. */
   reappliedWithConflicts: boolean;
+  /** Verified recovery commit retained in Stashes after restoring local work. */
+  recoveryStash?: string;
   push: ForkSyncPush;
 };
 
@@ -1726,8 +1728,8 @@ export type PartialFileDiff = {
   counterpartChanges: boolean;
 };
 
-/** The name pull gives the stash it makes before a fast-forward. The stash
- *  list recognizes it by this exact text; nothing else marks the entry. */
+/** Pull's recovery stash name prefix. New entries append ` [<UUID>]` to prove
+ *  transaction ownership; the stash list also recognizes the exact legacy name. */
 export const PWRGIT_PULL_STASH_MESSAGE = "pwrgit: auto-stash before pull";
 
 /**

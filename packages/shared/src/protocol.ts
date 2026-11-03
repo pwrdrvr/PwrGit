@@ -1944,6 +1944,8 @@ export interface Commands {
       stashed: boolean;
       /** Reapplying the stashed work after the pull hit conflicts. */
       reappliedWithConflicts: boolean;
+      /** Verified recovery commit retained in Stashes. */
+      recoveryStash?: string;
     };
   };
   /**

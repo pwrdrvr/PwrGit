@@ -21,6 +21,7 @@ import {
   createStash,
   dropStash,
   listStashes,
+  parseStashList,
   parseStashNumstat,
   popStash,
   readStashDetails,
@@ -28,6 +29,26 @@ import {
 } from "./stash-service";
 
 const systemGit = createSystemGit();
+
+describe("Pull recovery stash metadata", () => {
+  const token = "1068b16d-af82-47a9-85bc-a37a73ac310b";
+  it.each([
+    [PWRGIT_PULL_STASH_MESSAGE, "pwrgit-pull-recovery"],
+    [`${PWRGIT_PULL_STASH_MESSAGE} [${token}]`, "pwrgit-pull-recovery"],
+    ["ordinary user work", "ordinary"],
+    [`${PWRGIT_PULL_STASH_MESSAGE}-mine`, "ordinary"],
+    [`prefix ${PWRGIT_PULL_STASH_MESSAGE}`, "ordinary"],
+    [`${PWRGIT_PULL_STASH_MESSAGE} [${token}] extra`, "ordinary"],
+    [`${PWRGIT_PULL_STASH_MESSAGE} [${token}] [${token}]`, "ordinary"],
+    [`${PWRGIT_PULL_STASH_MESSAGE} [${token.slice(1)}]`, "ordinary"],
+    [`${PWRGIT_PULL_STASH_MESSAGE} [not-a-uuid]`, "ordinary"],
+    [`${PWRGIT_PULL_STASH_MESSAGE}[${token}]`, "ordinary"],
+    [`${PWRGIT_PULL_STASH_MESSAGE} [${token}`, "ordinary"]
+  ])("classifies only complete recovery names: %s", (name, kind) => {
+    const [entry] = parseStashList(["a".repeat(40), "aaaaaaa", "b".repeat(40), "2026-11-03T12:00:00Z", `On main: ${name}`].join("\x1f") + "\x1e");
+    expect(entry).toMatchObject({ name, kind });
+  });
+});
 
 function git(repo: string, args: string[]): string {
   const invocation = gitProcessInvocation(args, repo);

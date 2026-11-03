@@ -1388,6 +1388,26 @@ describe("remote handlers", () => {
     );
   });
 
+  it.each(["the recovery entry is missing", "the recovery marker appears more than once"])("preserves actionable Pull ownership guidance when %s", async (reason) => {
+    const db = { prepare: vi.fn(() => ({ get: vi.fn(() => ({ path: "/repos/project", repoId: "repo-1" })) })) } as unknown as DB;
+    const name = "pwrgit: auto-stash before pull [1068b16d-af82-47a9-85bc-a37a73ac310b]";
+    const error = { kind: "remote" as const, code: "pull_stash_ownership", message: `PwrGit cannot identify Pull's saved changes because ${reason}. No stash was applied or removed. Check Stashes for "${name}" before retrying.` };
+    vi.mocked(pullFastForward).mockResolvedValueOnce(err(error));
+    const bus = new CommandBus();
+    registerRemoteHandlers(bus, db, { refreshWorktree: vi.fn(), refreshRepoWorktrees: vi.fn() }, new WorktreeOperationQueue());
+    expect(await bus.dispatch("remote:pull", { worktreeId: "worktree-1" })).toEqual(err(error));
+  });
+
+  it("logs the retained recovery copy on a successful Pull", async () => {
+    const db = { prepare: vi.fn(() => ({ get: vi.fn(() => ({ path: "/repos/project", repoId: "repo-1" })) })) } as unknown as DB;
+    const outcome = { fastForwarded: true, stashed: true, reappliedWithConflicts: false, recoveryStash: "a".repeat(40) };
+    vi.mocked(pullFastForward).mockResolvedValueOnce(ok(outcome));
+    const bus = new CommandBus();
+    registerRemoteHandlers(bus, db, { refreshWorktree: vi.fn(), refreshRepoWorktrees: vi.fn() }, new WorktreeOperationQueue());
+    expect(await bus.dispatch("remote:pull", { worktreeId: "worktree-1" })).toEqual(ok(outcome));
+    expect(logMain).toHaveBeenCalledWith("info", "remote", expect.stringContaining("recovery stash kept in Stashes"));
+  });
+
   it("refreshes repo worktree state after repo-scoped ref operations", async () => {
     const db = {
       prepare: vi.fn(() => ({ get: vi.fn(() => ({ path: "/repos/project" })) }))
@@ -2048,6 +2068,22 @@ describe("remote handlers", () => {
         if (refused.ok) return;
         expect(refused.error.code).toBe("fork_sync_stale");
         expect(pullFastForward).not.toHaveBeenCalled();
+      });
+
+      it("carries Pull's retained recovery identity through fork sync even without push tracking", async () => {
+        const recoveryStash = "a".repeat(40);
+        vi.mocked(pullFastForward).mockResolvedValueOnce(ok({
+          fastForwarded: true, stashed: true, reappliedWithConflicts: false, recoveryStash
+        }));
+        vi.mocked(resolveForkStatus)
+          .mockResolvedValueOnce(ok(behindSource()))
+          .mockResolvedValueOnce(ok({ ...behindSource(), tracked: null }));
+        const bus = new CommandBus();
+        registerRemoteHandlers(bus, db, refresher(), new WorktreeOperationQueue());
+        expect(await bus.dispatch("remote:syncFork", request)).toMatchObject({
+          ok: true, value: { stashed: true, reappliedWithConflicts: false, recoveryStash, push: { outcome: "no_tracking" } }
+        });
+        expect(pushBranchWithLease).not.toHaveBeenCalled();
       });
 
       it("never forces the fork: a diverged one is reported, not pushed", async () => {

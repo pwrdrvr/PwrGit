@@ -561,6 +561,9 @@ function forkSyncReceipt(
 ): { summary: string; flash: Chip; stands: boolean } {
   const moved = `Fast-forwarded ${branch} to ${outcome.source} · ${commits(outcome.arrived)}`;
   const { push } = outcome;
+  const restored = outcome.recoveryStash === undefined
+    ? outcome.stashed ? " · local changes stashed and reapplied" : ""
+    : " · local changes restored · recovery stash kept in Stashes";
   // Nothing arrived and the fork's branch is ahead of the source: the sync had
   // nothing to do, and holding back a push it never had a reason to make is
   // not a problem to stand a red card over. A fork that moved on looks like
@@ -571,7 +574,7 @@ function forkSyncReceipt(
     !outcome.reappliedWithConflicts
   ) {
     return {
-      summary: `${branch} is up to date with ${outcome.source} · ${push.remote}/${push.branch} has ${commits(push.overwrites)} it doesn't`,
+      summary: `${branch} is up to date with ${outcome.source} · ${push.remote}/${push.branch} has ${commits(push.overwrites)} it doesn't${restored}`,
       flash: { text: "up to date", tone: "ok" },
       stands: false
     };
@@ -592,12 +595,12 @@ function forkSyncReceipt(
   }
   if (outcome.reappliedWithConflicts) {
     return {
-      summary: `${summary} · your stashed changes came back with conflicts`,
+      summary: `${summary} · your stashed changes came back with conflicts${outcome.recoveryStash === undefined ? "" : " · recovery stash kept in Stashes"}`,
       flash: { text: "synced · resolve stash conflicts", tone: "warn" },
       stands: true
     };
   }
-  if (outcome.stashed) summary = `${summary} · local changes stashed and reapplied`;
+  summary += restored;
   return {
     summary,
     flash: pushFailed
@@ -1096,7 +1099,7 @@ export function WorktreeHeader({
       }
       if (!current()) return;
       setBusy(null);
-      const { stashed, reappliedWithConflicts } = result.value;
+      const { stashed, reappliedWithConflicts, recoveryStash } = result.value;
       if (reappliedWithConflicts) {
         showFlash(
           { text: "pulled · resolve stash conflicts", tone: "warn" },
@@ -1107,13 +1110,15 @@ export function WorktreeHeader({
         // away in four seconds is the wrong shape for that.
         status.settle({
           status: "error",
-          summary: "Pulled — your stashed changes came back with conflicts"
+          summary: `Pulled — your stashed changes came back with conflicts${recoveryStash === undefined ? "" : " · recovery stash kept in Stashes"}`
         });
       } else if (stashed) {
         showFlash({ text: "pulled · changes reapplied", tone: "ok" }, 2400);
         status.settle({
           status: "ok",
-          summary: "Fast-forwarded · local changes stashed and reapplied"
+          summary: recoveryStash === undefined
+            ? "Fast-forwarded · local changes stashed and reapplied"
+            : "Fast-forwarded · local changes restored · recovery stash kept in Stashes"
         });
       } else {
         showFlash({ text: "fast-forwarded", tone: "ok" }, 1600);
