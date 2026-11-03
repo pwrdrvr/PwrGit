@@ -28,7 +28,7 @@
     "typecheck": "node ../../scripts/resource-run.mjs node ../../scripts/typecheck.mjs --noEmit -p tsconfig.json"
   },
   "dependencies": {
-    "@modelcontextprotocol/sdk": "1.32.1",
+    "@modelcontextprotocol/sdk": "1.32.2",
     "ws": "^8.22.0",
     "dugite": "^3.2.3",
     "zod": "^4.6.7"
