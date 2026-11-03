@@ -55,6 +55,24 @@ repositories after rotation. See the distribution runbook for exact checks.
 | `preview-build.yml` | `build-preview` PR label | Unsigned macOS universal + arm64 DMGs and updater ZIPs (macOS 26/Xcode 26) + Windows NSIS installer, uploaded as workflow artifacts. |
 | `release.yml` | `v*` tag push, manual dispatch with a tag, or `ci:linux-packages` / `ci:windows-signing` PR label | Tests and stages via `apps/desktop/scripts/release.mjs`. Tagged runs gate GitHub Pre-release creation on native Linux package/runtime validation, signed/notarized macOS (macOS 26/Xcode 26), and Azure-signed Windows. On same-repo PRs every job skips unless a label opts in: `ci:linux-packages` validates Linux packages on both CPUs and `ci:windows-signing` runs the real Windows signing path; both upload artifacts only. |
 
+## CI jobs
+
+Linux runs build and the full lint/typecheck chain together in `Typecheck`,
+with one separate `Linux Test` job. Windows runs build, license checks and
+typecheck together, with two separate Vitest shards. Both platforms build
+before typecheck to produce the MCP workspace output once per job. Tests
+start after their platform's dependency install, independently of the build.
+
+The required `Build` and `Test` checks are small result jobs without checkout
+or dependency restore. They require successful Linux and Windows builds or
+unit tests respectively, including both Windows test shards. Failed,
+cancelled or unexpectedly skipped dependencies fail the result check.
+`Typecheck`, `Build`, `Test` and `Desktop E2E` keep their required check names.
+
+Desktop E2E remains two Linux shards and four shards each on Windows and
+macOS. macOS has no full unit-test or separate typecheck job in `ci.yml`;
+each E2E shard builds the app before running Playwright.
+
 ## Dependency caches
 
 All dependency jobs pin configure-nodejs v1.7.1 to
@@ -132,16 +150,16 @@ changed path (and `previous_filename` on a rename) is under `docs/` or ends
 with `.md` (case-insensitive), or is exactly `.github/dependabot.yml`,
 Classify Changes sets `code_impacting=false`
 and these jobs skip: `install-deps`, `windows-install-deps`, `typecheck`,
-`macos-install-deps`, `macos-e2e`, `build`, `test`, `desktop-e2e`,
-`desktop-e2e-result`, `windows`,
+`macos-install-deps`, `macos-e2e`, `build`, `linux-test`, `windows-test`,
+`test`, `desktop-e2e`, `desktop-e2e-result`, `windows`,
 `windows-e2e`. Push/main events, API errors, and incomplete file lists still
 run full CI.
 
 Dependency manifests, lockfiles, and workflow changes still run full CI.
 
 Do not add `paths` or `paths-ignore` to the `pull_request` trigger. Required
-status checks (`Typecheck`, `Desktop E2E`) must still exist on every PR;
-skipped jobs satisfy those checks, missing jobs leave them pending.
+status checks (`Typecheck`, `Build`, `Test`, `Desktop E2E`) must still exist
+on every PR; skipped jobs satisfy those checks, missing jobs leave them pending.
 
 ## Required checks stuck on "Expected"
 
