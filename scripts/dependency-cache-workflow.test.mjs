@@ -1,4 +1,5 @@
 import { existsSync, readFileSync, readdirSync } from "node:fs";
+import { spawnSync } from "node:child_process";
 import { dirname, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { expect, test } from "vitest";
@@ -40,8 +41,8 @@ test("every dependency setup uses the reviewed immutable action revision", () =>
 });
 
 test.each([
-  ["install-deps", ["typecheck", "build", "test", "desktop-e2e"]],
-  ["windows-install-deps", ["windows", "windows-e2e"]],
+  ["install-deps", ["typecheck", "linux-test", "desktop-e2e"]],
+  ["windows-install-deps", ["windows", "windows-test", "windows-e2e"]],
   ["macos-install-deps", ["macos-e2e"]],
 ])("%s has compatible strict completed-tree consumers", (producer, consumers) => {
   const producerJob = job(producer);
@@ -98,7 +99,38 @@ test("CI runs only on GitHub-hosted runners", () => {
 });
 
 test("unit-test jobs keep the Electron SQLite rebuild", () => {
-  for (const name of ["test", "windows"]) {
+  for (const name of ["linux-test", "windows-test"]) {
     expect(job(name)).toContain("pnpm --filter @pwrgit/desktop run rebuild:electron-native");
+  }
+});
+
+test.each([
+  ["build", "Build", "typecheck", "windows"],
+  ["test", "Test", "linux-test", "windows-test"],
+])("%s preserves its required check and rejects unsuccessful platform results", (name, check, linux, windows) => {
+  const body = job(name);
+  expect(body).toContain(`name: ${check}\n`);
+  expect(body).toContain(`needs: [changes, ${linux}, ${windows}]`);
+  expect(body).toContain("always() &&");
+  expect(body).toContain("needs.changes.outputs.code_impacting == 'true'");
+  expect(body).toContain(`LINUX_RESULT: \${{ needs.${linux}.result }}`);
+  expect(body).toContain(`WINDOWS_RESULT: \${{ needs.${windows}.result }}`);
+  expect(body).not.toContain("uses:");
+  const script = body.split("        run: |\n")[1];
+  expect(script).toBeDefined();
+  for (const [linuxResult, windowsResult] of [
+    ["success", "success"], ["failure", "success"], ["success", "failure"],
+    ["skipped", "success"], ["success", "skipped"],
+    ["cancelled", "success"], ["success", "cancelled"],
+    ["", "success"], ["success", ""],
+  ]) {
+    const result = spawnSync("bash", ["-e", "-o", "pipefail", "-c", script], {
+      env: { ...process.env, LINUX_RESULT: linuxResult, WINDOWS_RESULT: windowsResult },
+      encoding: "utf8",
+    });
+    expect(result.error).toBeUndefined();
+    expect(result.status, `${linuxResult}/${windowsResult}`).toBe(
+      linuxResult === "success" && windowsResult === "success" ? 0 : 1,
+    );
   }
 });

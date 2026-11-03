@@ -166,7 +166,7 @@ jobs:
     # The job `name:` is pinned: the "Protect main" ruleset lists `Typecheck`
     # as a required status check, so renaming this job would leave that check
     # permanently pending and block every PR. The job now runs the whole
-    # `pnpm lint` chain (typecheck is its last and slowest link).
+    # `pnpm lint` chain and the build on the same runner.
     name: Typecheck
     runs-on: ubuntu-latest
     timeout-minutes: 15
@@ -201,54 +201,35 @@ jobs:
             apps/desktop/scripts/rebuild-native-for-electron.mjs
             apps/desktop/scripts/stage-better-sqlite3-arch.mjs
 
-      # prepare builds outside node_modules, so the archive cannot carry it.
-      - name: Build MCP server workspace output
-        run: pnpm --filter @pwrgit/mcp-server build
+      # Build first to produce the MCP output needed by the lint/typecheck chain.
+      - name: Build
+        run: pnpm run build
 
       # Keep repository checks in the aggregate pnpm lint chain.
       - name: Lint (colors, licenses, boundaries, typecheck)
         run: pnpm lint
 
   build:
+    # Preserve the required status name without restoring dependencies again.
     name: Build
     runs-on: ubuntu-latest
-    timeout-minutes: 15
-    needs: [changes, install-deps]
-    if: needs.changes.outputs.code_impacting == 'true'
-    env:
-      # Completed-tree consumers must never trigger pnpm implicit installs.
-      PNPM_CONFIG_VERIFY_DEPS_BEFORE_RUN: "false"
+    needs: [changes, typecheck, windows]
+    if: >-
+      always() &&
+      needs.changes.outputs.code_impacting == 'true'
+    timeout-minutes: 5
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v5
+      - name: Require Linux and Windows build/typecheck jobs
+        env:
+          LINUX_RESULT: ${{ needs.typecheck.result }}
+          WINDOWS_RESULT: ${{ needs.windows.result }}
+        run: |
+          echo "Linux: $LINUX_RESULT"
+          echo "Windows: $WINDOWS_RESULT"
+          [[ "$LINUX_RESULT" == "success" && "$WINDOWS_RESULT" == "success" ]]
 
-      - name: Install Node.js and dependencies
-        uses: pwrdrvr/configure-nodejs@d416c1c78119b25fe03ee3ef78b75af0d69b10a7 # v1.7.1
-        timeout-minutes: 10
-        with:
-          node-version: 24.22.1
-          dependency-cache: node-modules
-          cache-mode: restore
-          cache-key-suffix: pwrgit-tree-d416c1c78119b25fe03ee3ef78b75af0d69b10a7-v1
-          cache-inputs: |
-            .nvmrc
-            scripts/check-node-version.mjs
-            scripts/linux-sandbox.mjs
-            scripts/lib/cli-entrypoint.mjs
-            scripts/resource-run.mjs
-            scripts/lib/tool-processes.mjs
-            scripts/tool-resource-policy.mjs
-            scripts/windows-tool-job.mjs
-            scripts/windows-tool-job.ps1
-            apps/desktop/scripts/install-electron-binary.mjs
-            apps/desktop/scripts/rebuild-native-for-electron.mjs
-            apps/desktop/scripts/stage-better-sqlite3-arch.mjs
-
-      - name: Build
-        run: pnpm run build
-
-  test:
-    name: Test
+  linux-test:
+    name: Linux Test
     runs-on: ubuntu-latest
     timeout-minutes: 20
     needs: [changes, install-deps]
@@ -309,6 +290,25 @@ jobs:
           path: ${{ runner.temp }}/git-tripwires
           if-no-files-found: ignore
           retention-days: 14
+
+  test:
+    # Preserve the required status name without restoring dependencies again.
+    name: Test
+    runs-on: ubuntu-latest
+    needs: [changes, linux-test, windows-test]
+    if: >-
+      always() &&
+      needs.changes.outputs.code_impacting == 'true'
+    timeout-minutes: 5
+    steps:
+      - name: Require Linux and Windows unit-test jobs
+        env:
+          LINUX_RESULT: ${{ needs.linux-test.result }}
+          WINDOWS_RESULT: ${{ needs.windows-test.result }}
+        run: |
+          echo "Linux: $LINUX_RESULT"
+          echo "Windows: $WINDOWS_RESULT"
+          [[ "$LINUX_RESULT" == "success" && "$WINDOWS_RESULT" == "success" ]]
 
   desktop-e2e:
     name: Linux Desktop E2E (${{ matrix.shard }}/2)
@@ -519,7 +519,7 @@ jobs:
 
           exit "$status"
   windows:
-    name: Windows (typecheck + build + test)
+    name: Windows (typecheck + build)
     runs-on: windows-latest
     needs: [changes, windows-install-deps]
     if: needs.changes.outputs.code_impacting == 'true'
@@ -557,9 +557,9 @@ jobs:
             apps/desktop/scripts/rebuild-native-for-electron.mjs
             apps/desktop/scripts/stage-better-sqlite3-arch.mjs
 
-      # prepare builds outside node_modules, so the archive cannot carry it.
-      - name: Build MCP server workspace output
-        run: pnpm --filter @pwrgit/mcp-server build
+      # Build first to produce the MCP output needed by typecheck.
+      - name: Build
+        run: pnpm run build
 
       # Deliberately NOT `pnpm lint`. This job exists to catch Windows-specific
       # breakage, and most of the lint chain is platform-independent static
@@ -572,20 +572,63 @@ jobs:
       - name: Check package license policy and third-party notices
         run: pnpm licenses:check
 
-      # Same native-build guard as the Linux test job (see comment there).
-      - name: Ensure better-sqlite3 native builds are current
-        run: pnpm --filter @pwrgit/desktop run rebuild:electron-native
-
       - name: Type check
         run: pnpm typecheck
 
-      - name: Build
-        run: pnpm run build
+  windows-test:
+    name: Windows Test (${{ matrix.shard }}/2)
+    runs-on: windows-latest
+    timeout-minutes: 20
+    needs: [changes, windows-install-deps]
+    if: needs.changes.outputs.code_impacting == 'true'
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2]
+    env:
+      # Completed-tree consumers must never trigger pnpm implicit installs.
+      PNPM_CONFIG_VERIFY_DEPS_BEFORE_RUN: "false"
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v5
+
+      - name: Install Node.js and dependencies
+        uses: pwrdrvr/configure-nodejs@d416c1c78119b25fe03ee3ef78b75af0d69b10a7 # v1.7.1
+        timeout-minutes: 10
+        with:
+          node-version: 24.22.1
+          dependency-cache: node-modules
+          cache-mode: restore
+          cache-key-suffix: pwrgit-tree-d416c1c78119b25fe03ee3ef78b75af0d69b10a7-v1
+          cache-inputs: |
+            .nvmrc
+            scripts/check-node-version.mjs
+            scripts/linux-sandbox.mjs
+            scripts/lib/cli-entrypoint.mjs
+            scripts/resource-run.mjs
+            scripts/lib/tool-processes.mjs
+            scripts/tool-resource-policy.mjs
+            scripts/windows-tool-job.mjs
+            scripts/windows-tool-job.ps1
+            apps/desktop/scripts/install-electron-binary.mjs
+            apps/desktop/scripts/rebuild-native-for-electron.mjs
+            apps/desktop/scripts/stage-better-sqlite3-arch.mjs
+
+      # prepare builds outside node_modules, so the archive cannot carry it.
+      - name: Build MCP server workspace output
+        run: pnpm --filter @pwrgit/mcp-server build
+
+      # A fresh `pnpm i` already leaves better-sqlite3 ready for both runtimes
+      # (see the root AGENTS.md), so this exits immediately. It earns its
+      # place on jobs that restore a cached node_modules: the rebuild script
+      # is idempotent and repairs whichever half of the pair is stale.
+      - name: Ensure better-sqlite3 native builds are current
+        run: pnpm --filter @pwrgit/desktop run rebuild:electron-native
 
       - name: Test
         run: |
           git --version
-          pnpm run test
+          pnpm run test --shard=${{ matrix.shard }}/2
         env:
           PWRGIT_GIT_DIAGNOSTICS_DIR: ${{ runner.temp }}/git-tripwires
           PWRGIT_TEST_GIT: installed
@@ -594,7 +637,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v7
         with:
-          name: git-tripwires-${{ runner.os }}
+          name: git-tripwires-${{ runner.os }}-${{ matrix.shard }}
           path: ${{ runner.temp }}/git-tripwires
           if-no-files-found: ignore
           retention-days: 14
