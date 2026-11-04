@@ -311,7 +311,7 @@ export async function refreshRepositoryClones(deps: RefreshClonesDeps): Promise<
     );
   }
   let started = 0;
-  const rows = await mapLimit(linked, deps.concurrency ?? RESHARE_WORKTREE_CONCURRENCY, async (worktree): Promise<ReshareRow> => {
+  const reshareOne = async (worktree: ReshareWorktreeRow): Promise<ReshareRow> => {
     const base = {
       worktreeId: worktree.id,
       path: worktree.path,
@@ -339,7 +339,16 @@ export async function refreshRepositoryClones(deps: RefreshClonesDeps): Promise<
       deps.report(`Worktree ${started} of ${linked.length} · ${worktree.branch || "(detached)"}`);
       return { result: await reshareWorktree(deps.git, worktree) };
     });
-  });
+  };
+  // Kept in the worktrees' order, whichever finishes first.
+  const rows: ReshareRow[] = new Array<ReshareRow>(linked.length);
+  await mapLimit(
+    linked.map((worktree, index) => ({ worktree, index })),
+    deps.concurrency ?? RESHARE_WORKTREE_CONCURRENCY,
+    async ({ worktree, index }) => {
+      rows[index] = await reshareOne(worktree);
+    }
+  );
   const worktrees = rows.map((row) => row.result);
   const cancelled = rows.filter((row) => row.notRun === "cancelled").length;
   const failed = worktrees.filter((worktree) => worktree.outcome === "failed").length;
