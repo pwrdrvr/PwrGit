@@ -269,7 +269,7 @@ async function resolveDefaultBranch(
  * the rejection waits for the reads already running: a failed call must not
  * return while git still works in a checkout its caller may remove next —
  * Windows refuses to remove a directory a process is working in. */
-async function mapLimit<T, R>(
+export async function mapLimit<T, R>(
   values: readonly T[],
   limit: number,
   mapper: (value: T, index: number) => Promise<R>
