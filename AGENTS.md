@@ -28,6 +28,13 @@ change.
    See [Launch the dev app](#launch-the-dev-app).
 6. **Every new `AGENTS.md` gets a sibling `CLAUDE.md` symlink**
    (`ln -s AGENTS.md CLAUDE.md`).
+7. **A bug fix states the rule it broke as a property, model or oracle
+   test, and confirms that test fails on the pre-fix code.** Do the same for
+   new rule-heavy logic, state machines, concurrency, and code that re-derives
+   git state. Example tests alone check only what their author expected. Here
+   they have asserted the bug as correct.
+   [docs/property-model-oracle-testing.md](docs/property-model-oracle-testing.md)
+   says what each kind is and how to write one.
 
 ## Set up a checkout or worktree
 
