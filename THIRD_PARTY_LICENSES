@@ -17,7 +17,7 @@ Source Availability
 -------------------
 
 PwrGit invokes the components below as separate executables over a process boundary and links no code from them. PwrGit redistributes the pinned artifacts identified below without modifying their code. Their corresponding source, and the build scripts and patches used to produce the shipped binaries, are published at:
-- Custom Git embedded runtime (macOS/Linux) 2.56.0-dev-pwrgit.1 (GPL-2.0-only): https://github.com/huntharo/git/tree/d5db8771ce659822bd9fbb0911b600de1339fea3, built by the scripts and patches at https://github.com/huntharo/git/releases/tag/v2.56.0-dev-pwrgit.1
+- Custom Git embedded runtime (macOS/Linux) 2.56.0-dev-pwrgit.2 (GPL-2.0-only): https://github.com/huntharo/git/tree/ada47e445ed68570a72e2b2641c48e36a0f8df63, built by the scripts and patches at https://github.com/huntharo/git/releases/tag/v2.56.0-dev-pwrgit.2
 - Git embedded runtime 2.53.0 (GPL-2.0-only): https://github.com/git/git/tree/v2.53.0, built by the scripts and patches at https://github.com/desktop/dugite-native/tree/v2.53.0-4
 
 Dependency Summary
@@ -50,7 +50,7 @@ BSD-3-Clause
 
 GPL-2.0-only
 ~~~~~~~~~~~~
-- Custom Git embedded runtime (macOS/Linux)@2.56.0-dev-pwrgit.1 | https://github.com/huntharo/git/releases/tag/v2.56.0-dev-pwrgit.1
+- Custom Git embedded runtime (macOS/Linux)@2.56.0-dev-pwrgit.2 | https://github.com/huntharo/git/releases/tag/v2.56.0-dev-pwrgit.2
 - Git embedded runtime@2.53.0 | https://github.com/desktop/dugite-native/tree/v2.53.0-4
 
 ISC
@@ -1777,14 +1777,14 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
 
-Custom Git embedded runtime (macOS/Linux)@2.56.0-dev-pwrgit.1 (GPL-2.0-only)
+Custom Git embedded runtime (macOS/Linux)@2.56.0-dev-pwrgit.2 (GPL-2.0-only)
 ----------------------------------------------------------------------------
 
 Applies to:
-- Custom Git embedded runtime (macOS/Linux)@2.56.0-dev-pwrgit.1 (GPL-2.0-only)
+- Custom Git embedded runtime (macOS/Linux)@2.56.0-dev-pwrgit.2 (GPL-2.0-only)
 - Git embedded runtime@2.53.0 (GPL-2.0-only)
 
-Representative file: Custom Git embedded runtime (macOS/Linux)@2.56.0-dev-pwrgit.1/apps/desktop/resources/embedded-git/COPYING
+Representative file: Custom Git embedded runtime (macOS/Linux)@2.56.0-dev-pwrgit.2/apps/desktop/resources/embedded-git/COPYING
 
 GNU GENERAL PUBLIC LICENSE
                        Version 2, June 1991
