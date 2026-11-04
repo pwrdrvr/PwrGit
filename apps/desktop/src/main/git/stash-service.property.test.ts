@@ -261,7 +261,11 @@ const gc = fc.constant(new Gc());
 const pwrgitRemove = fc.tuple(fc.constantFrom<"drop" | "pop">("drop", "pop"), fc.nat(5), where)
   .map(([kind, pick, w]) => new PwrGitRemove(kind, pick, w));
 
-it("PwrGit drops and pops any stash git lists, and its listing matches git's after every step", async () => {
+// Histories are independent (setup creates a fresh repository for each one).
+// Keep the total 10 Windows / 30 native runs, but bound the histories sharing
+// one 20 s deadline: Windows CI took 12–20+ s for the previous single batch.
+const stashModelRuns = windows ? 10 : 30;
+it.each([0, 1, 2])("PwrGit drops and pops any stash git lists, and its listing matches git's after every step (batch %i)", async (batch) => {
   await fc.assert(
     // Pushes and PwrGit removals are listed twice: weighted up, since every
     // other step only matters once there is a stash to remove.
@@ -279,7 +283,7 @@ it("PwrGit drops and pops any stash git lists, and its listing matches git's aft
     ], { maxCommands: 8 }), async (cmds) => {
       await runModel(cmds);
     }),
-    { numRuns: windows ? 10 : 30 }
+    { numRuns: Math.floor(stashModelRuns / 3) + (batch < stashModelRuns % 3 ? 1 : 0) }
   );
 });
 
