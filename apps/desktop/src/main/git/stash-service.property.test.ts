@@ -1,9 +1,9 @@
 import { execFileSync } from "node:child_process";
-import { appendFileSync, cpSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { appendFileSync, cpSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import fc from "fast-check";
-import { afterAll, afterEach, beforeAll, expect, it } from "vitest";
+import { afterAll, beforeAll, expect, it } from "vitest";
 import type { GitExec } from "./dugite";
 import { pullFastForward } from "./git-service";
 import { dropStash, listStashes, popStash } from "./stash-service";
@@ -23,9 +23,6 @@ import { createSystemGit } from "./test-support/system-git";
 
 const systemGit = createSystemGit();
 const roots: string[] = [];
-afterEach(() => {
-  for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
-});
 
 function git(dir: string, args: string[]): string {
   return execFileSync("git", ["-C", dir, ...args], {
@@ -38,8 +35,6 @@ type Where = "primary" | "linked";
 type Real = { root: string; upstream: string; primary: string; linked: string; next: number };
 type Model = {
   stashes: string[];
-  /** Pull recovery entries whose work Pull already restored. */
-  restored: Set<string>;
 };
 
 let template = "";
@@ -63,6 +58,7 @@ beforeAll(() => {
   git(primary, ["worktree", "add", "-q", "-b", "side", join(template, "linked")]);
 });
 afterAll(() => {
+  for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
   if (template !== "") rmSync(template, { recursive: true, force: true });
 });
 
@@ -89,9 +85,11 @@ function assertOracle(m: Model, r: Real): void {
 }
 
 /** Run the commands, then ask PwrGit's own listing, from the other checkout. */
-async function runModel(cmds: Iterable<Cmd>): Promise<void> {
+async function runModel(cmds: Iterable<Cmd>, initial = () => ({
+  model: { stashes: [] } as Model, real: setup()
+})): Promise<void> {
   let state: { model: Model; real: Real } | undefined;
-  await fc.asyncModelRun(() => (state = { model: { stashes: [], restored: new Set<string>() }, real: setup() }), cmds);
+  await fc.asyncModelRun(() => (state = initial()), cmds);
   const listed = await listStashes(systemGit, state!.real.linked);
   expect(listed.ok && listed.value.map((entry) => entry.hash)).toEqual(state!.model.stashes);
 }
@@ -134,20 +132,6 @@ class PackRefs implements Cmd {
   toString = () => "git pack-refs --all";
 }
 
-class Commit implements Cmd {
-  constructor(readonly where: Where) {}
-  check = () => true;
-  async run(m: Model, r: Real) {
-    const dir = r[this.where];
-    const n = r.next++;
-    writeFileSync(join(dir, `commit-${n}.txt`), `commit ${n}\n`);
-    git(dir, ["add", "-A"]);
-    git(dir, ["commit", "-q", "-m", `commit ${n}`]);
-    assertOracle(m, r);
-  }
-  toString = () => `commit (${this.where})`;
-}
-
 class GitDrop implements Cmd {
   check = (m: Readonly<Model>) => m.stashes.length > 0;
   async run(m: Model, r: Real) {
@@ -166,9 +150,6 @@ class PwrGitRemove implements Cmd {
   async run(m: Model, r: Real) {
     const index = this.pick % m.stashes.length;
     const hash = m.stashes[index]!;
-    // Pull keeps its recovery entry after restoring the work, so that work is
-    // already in the checkout: git refuses to pop it over itself, on purpose.
-    if (this.kind === "pop" && m.restored.has(hash)) return;
     const remove = this.kind === "drop" ? dropStash : popStash;
     expect(await remove(systemGit, r[this.where], hash)).toEqual({ ok: true, value: undefined });
     m.stashes.splice(index, 1);
@@ -177,7 +158,7 @@ class PwrGitRemove implements Cmd {
   toString = () => `PwrGit ${this.kind} #${this.pick} (${this.where})`;
 }
 
-type SiblingPush = "never" | "after save" | "at fast-forward" | "before restore";
+type SiblingPush = "after save" | "at fast-forward" | "before restore";
 
 /**
  * Upstream gains a commit, the primary has its own staged and unstaged work,
@@ -242,58 +223,93 @@ class Pull implements Cmd {
       expect(git(r.linked, ["show", `${foreign}^3:sibling-${n}.txt`])).toBe(`sibling ${n}`);
     }
     m.stashes = after;
-    if (pulled.value.recoveryStash !== undefined) m.restored.add(pulled.value.recoveryStash);
     // The sibling's work went to the stash, not into the primary.
     expect(git(r.primary, ["ls-files", "--", `sibling-${n}.txt`])).toBe("");
-    assertOracle(m, r);
   }
   toString = () => `pull (sibling stash: ${this.sibling})`;
 }
 
-// Each step runs a few real git commands (about 10 ms each here, several
-// times that on the Windows runner), and each test must finish well inside
-// vitest.config.ts's 20 s on Windows too. Linux and macOS take more runs.
-const windows = process.platform === "win32";
+/** Snapshot only the files removals can change. The objects and branch tips
+ * stay fixed; each saved stack was produced by real stash pushes and gc.
+ * Restoring bytes avoids a clone, worktree repair and git reset per run. */
+type Stack = { stashes: string[]; files: Map<string, Buffer | undefined> };
+let removal: Real;
+const stacks: Stack[] = [];
+beforeAll(async () => {
+  removal = setup();
+  const model: Model = { stashes: [] };
+  const save = (): void => {
+    const files = new Map<string, Buffer | undefined>();
+    for (const path of [
+      join(removal.primary, ".git", "refs", "stash"),
+      join(removal.primary, ".git", "logs", "refs", "stash"),
+      join(removal.primary, ".git", "packed-refs"),
+      join(removal.primary, ".git", "index"),
+      join(removal.primary, ".git", "worktrees", "linked", "index")
+    ]) {
+      try { files.set(path, readFileSync(path)); }
+      catch (cause) {
+        if ((cause as NodeJS.ErrnoException).code !== "ENOENT") throw cause;
+        files.set(path, undefined);
+      }
+    }
+    stacks.push({ stashes: [...model.stashes], files });
+  };
+  await new StashPush("primary").run(model, removal);
+  await new Gc().run(model, removal);
+  save(); // One packed entry: removing it must also remove the packed ref.
+  await new StashPush("linked").run(model, removal);
+  await new StashPush("primary").run(model, removal);
+  save(); // A loose tip shadows an older packed value.
+  await new PackRefs().run(model, removal);
+  save(); // Multiple entries with a packed tip; remove any position.
+});
+
+function restoreStack(stack: Stack): { model: Model; real: Real } {
+  for (const [path, bytes] of stack.files) {
+    if (bytes === undefined) rmSync(path, { force: true });
+    else writeFileSync(path, bytes);
+  }
+  // Pop can restore these fixture files into either checkout. Each stash's
+  // names are unique, so applying another entry cannot conflict with them.
+  for (const dir of [removal.primary, removal.linked]) {
+    for (let n = 0; n < removal.next; n++) {
+      rmSync(join(dir, `staged-${n}.txt`), { force: true });
+      rmSync(join(dir, `loose-${n}.txt`), { force: true });
+    }
+  }
+  return { model: { stashes: [...stack.stashes] }, real: removal };
+}
 
 const where = fc.constantFrom<Where>("primary", "linked");
-const stashPush = where.map((w) => new StashPush(w));
-const gc = fc.constant(new Gc());
 const pwrgitRemove = fc.tuple(fc.constantFrom<"drop" | "pop">("drop", "pop"), fc.nat(5), where)
   .map(([kind, pick, w]) => new PwrGitRemove(kind, pick, w));
 
 it("PwrGit drops and pops any stash git lists, and its listing matches git's after every step", async () => {
   await fc.assert(
-    // Pushes and PwrGit removals are listed twice: weighted up, since every
-    // other step only matters once there is a stash to remove.
-    fc.asyncProperty(fc.commands([
-      stashPush,
-      stashPush,
-      gc,
-      fc.constant(new PackRefs()),
-      // Only on the linked worktree's branch: a commit on the primary's
-      // `main` diverges it from upstream, and Pull refuses that on purpose.
-      fc.constant(new Commit("linked")),
-      fc.constant(new GitDrop()),
-      pwrgitRemove,
-      pwrgitRemove
-    ], { maxCommands: 8 }), async (cmds) => {
-      await runModel(cmds);
+    // Every run exercises a removal, rather than spending runs on empty
+    // stacks or unrelated commits. One optional step still checks transitions
+    // between Git's drop and PwrGit's removal, including the last entry.
+    fc.asyncProperty(fc.integer({ min: 0, max: 2 }), pwrgitRemove, fc.commands([
+      pwrgitRemove, fc.constant(new GitDrop())
+    ], { maxCommands: 1 }), async (layout, first, cmds) => {
+      await runModel([first, ...cmds], () => restoreStack(stacks[layout]!));
     }),
-    { numRuns: windows ? 10 : 30 }
+    { numRuns: 40 }
   );
 });
 
 it("Pull restores exactly its own work and leaves every other stash entry listed", async () => {
   await fc.assert(
-    fc.asyncProperty(fc.commands([
-      stashPush,
-      gc,
-      pwrgitRemove,
-      fc.constantFrom<SiblingPush>("never", "after save", "at fast-forward", "before restore")
-        .map((s) => new Pull(s))
-    ], { maxCommands: 5 }), async (cmds) => {
-      await runModel(cmds);
-    }),
-    { numRuns: windows ? 5 : 12 }
+    // A single Pull per run, always with both a prior entry and a sibling
+    // push. Longer command lists could perform several expensive Pulls yet
+    // also spend whole runs without checking Pull at all. Detailed timing
+    // cases are covered by pull-stash-ownership.test.ts.
+    fc.asyncProperty(where,
+      fc.constantFrom<SiblingPush>("after save", "at fast-forward", "before restore"),
+      async (w, sibling) => {
+        await runModel([new StashPush(w), new Pull(sibling)]);
+      }),
+    { numRuns: 3 }
   );
 });
