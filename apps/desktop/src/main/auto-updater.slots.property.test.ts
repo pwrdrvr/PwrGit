@@ -84,6 +84,14 @@ const feedArb = fc.uniqueArray(releaseArb, {
   selector: (release) => release.tag_name
 });
 
+/** A feed with at least one GitHub Latest: a published, unstaged final. */
+const feedWithLatestArb = fc
+  .tuple(fc.tuple(fc.nat(2), fc.nat(2), fc.nat(2)), feedArb)
+  .map(([core, feed]): GitHubRelease[] => {
+    const latest = { tag_name: `v${core.join(".")}`, prerelease: false, draft: false };
+    return [latest, ...feed.filter((r) => r.tag_name !== latest.tag_name)];
+  });
+
 const published = (feed: GitHubRelease[]) => feed.filter((r) => r.draft !== true);
 
 /** The highest release GitHub marks Latest: published, not a Pre-release. */
@@ -120,8 +128,7 @@ describe("selectChannelReleases", () => {
 
   it("P1: with a Stable Latest, every slot is set and none is below it", () => {
     fc.assert(
-      fc.property(feedArb, (feed) => {
-        fc.pre(oracleStableLatest(feed) !== undefined);
+      fc.property(feedWithLatestArb, (feed) => {
         const { stableLatest, stablePrerelease, betaLatest, betaPrerelease } =
           selectChannelReleases(feed);
         expect(stableLatest).toBeDefined();

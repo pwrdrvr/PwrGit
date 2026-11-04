@@ -90,7 +90,13 @@ const fake = vi.hoisted(() => {
     /** Every installer `quitAndInstall` ran: its file, and whether it existed. */
     ran: [] as Array<{ file: string | undefined; onDisk: boolean }>,
     /** The status the renderer last received, i.e. what the toast shows. */
-    shown: undefined as AppUpdateStatus | undefined
+    shown: undefined as AppUpdateStatus | undefined,
+    /** The trigger of the check that last reached the network, from its
+     *  `checking for updates (<trigger>)` log line. */
+    lastCheckTrigger: undefined as string | undefined,
+    /** Misuse of electron-updater the fake caught. A throw alone would be
+     *  swallowed by a background check's catch. */
+    violations: [] as string[]
   };
 
   function landed(version: string): void {
@@ -116,18 +122,25 @@ const fake = vi.hoisted(() => {
       handlers.set(event, (handlers.get(event) ?? new Set()).add(handler));
     },
     once: (event: string, handler: Handler) => {
-      const wrapped: Handler = (...args) => {
+      const wrapped: Handler & { original?: Handler } = (...args) => {
         handlers.get(event)?.delete(wrapped);
         handler(...args);
       };
+      wrapped.original = handler;
       autoUpdater.on(event, wrapped);
     },
     removeListener: (event: string, handler: Handler) => {
-      handlers.get(event)?.delete(handler);
+      for (const h of handlers.get(event) ?? []) {
+        if (h === handler || (h as { original?: Handler }).original === handler) {
+          handlers.get(event)?.delete(h);
+        }
+      }
     },
     checkForUpdates: async () => {
       if (state.pending) {
-        throw new Error(`fake: a check started while ${state.pending.version} downloads`);
+        const message = `electron-updater checked again while ${state.pending.version} downloads`;
+        state.violations.push(message);
+        throw new Error(message);
       }
       emit("checking-for-update");
       const version = state.feedTag!.replace(/^v/, "");
@@ -196,6 +209,7 @@ const fake = vi.hoisted(() => {
       state.feedTag = undefined;
       state.pending = undefined;
       state.shown = undefined;
+      state.lastCheckTrigger = undefined;
       autoUpdater.autoInstallOnAppQuit = false;
     }
   };
@@ -211,7 +225,12 @@ vi.mock("./ipc", () => ({
     if (channel === "app:updateStatus") fake.state.shown = payload as AppUpdateStatus;
   }
 }));
-vi.mock("./logs", () => ({ logMain: () => undefined }));
+vi.mock("./logs", () => ({
+  logMain: (_level: string, _scope: string, message?: unknown) => {
+    const trigger = /^checking for updates \((\w+)\)/.exec(String(message))?.[1];
+    if (trigger) fake.state.lastCheckTrigger = trigger;
+  }
+}));
 
 type Train = "stable" | "beta";
 type Updater = typeof import("./auto-updater");
@@ -275,7 +294,6 @@ class World {
   readonly feed: Set<string>;
   readonly firstSeenAt: number;
   manualChecks: ManualCheck[] = [];
-  manualPending = 0;
   failures = 0;
   lastFetchAt: number | undefined;
   readonly budgetViolations: string[] = [];
@@ -291,18 +309,23 @@ class World {
     );
     fake.state.disk.clear();
     fake.state.ran = [];
+    fake.state.violations = [];
   }
 
   /** Stands in for GitHub's release list. */
   fetch = async (): Promise<Response> => {
     const now = Date.now();
-    if (this.manualPending === 0) {
+    // Every check logs its trigger just before it reads the list. If that
+    // line changes, every request counts as automatic and clicks fail I5
+    // loudly, rather than automatic requests passing as clicks.
+    const trigger = fake.state.lastCheckTrigger;
+    if (trigger !== "manual" && trigger !== "menu") {
       const due = Math.max(
         this.firstSeenAt + APP_UPDATE_FIRST_CHECK_DELAY_MS,
         this.lastFetchAt === undefined ? 0 : this.lastFetchAt + APP_UPDATE_CHECK_INTERVAL_MS
       );
       if (now < due) {
-        this.budgetViolations.push(`automatic release-list request ${due - now} ms early`);
+        this.budgetViolations.push(`${trigger ?? "unlogged"} release-list request ${due - now} ms early`);
       }
     }
     this.lastFetchAt = now;
@@ -335,7 +358,6 @@ class World {
     vi.setSystemTime(now);
     fake.newProcess(current);
     this.manualChecks = [];
-    this.manualPending = 0;
     vi.resetModules();
     this.updater = await import("./auto-updater");
     this.updater.initAutoUpdater({
@@ -380,6 +402,7 @@ function checkInvariants(world: World): void {
     }
   }
   expect(world.budgetViolations.join("; "), "I5: the persisted request budget").toBe("");
+  expect(state.violations.join("; "), "the fake electron-updater").toBe("");
 }
 
 async function after(model: Model, world: World): Promise<void> {
@@ -423,15 +446,10 @@ class ClickCheck implements Cmd {
       failuresAtStart: w.failures
     };
     w.manualChecks.push(record);
-    w.manualPending++;
-    const checks = w.manualChecks;
     void w.updater.checkForAppUpdatesNow("manual").then(
       (result) => { record.result = result; },
       (error: unknown) => { record.error = error; }
-    ).finally(() => {
-      // A check from a process that has since quit counts for nothing.
-      if (w.manualChecks === checks) w.manualPending--;
-    });
+    );
     await after(m, w);
   }
   toString = () => "clickCheck";
