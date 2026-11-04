@@ -1062,7 +1062,9 @@ describe("maintenance dialog after a window reload", () => {
         ? settings(true, 7)
         : name === "maintenance:current"
           ? { ok: true, value: current }
-          : { ok: true, value: name === "maintenance:cancel" ? { cancelled: true } : null }
+          : name === "maintenance:run"
+            ? new Promise(() => undefined)
+            : { ok: true, value: name === "maintenance:cancel" ? { cancelled: true } : null }
     );
     await act(async () =>
       root.render(
@@ -1078,6 +1080,7 @@ describe("maintenance dialog after a window reload", () => {
   it("reattaches to a live collection: same card, Escape still held, Cancel reaches main", async () => {
     await reopen({
       state: "running",
+      cancelling: false,
       run: record({ kind: "gc", mode: "aggressive" }),
       view: {
         repos: [repo, other],
@@ -1139,9 +1142,36 @@ describe("maintenance dialog after a window reload", () => {
     expect(runCalls()).toEqual([]);
   });
 
+  it("keeps a one-repository review's scope, for its label and for Review again", async () => {
+    await reopen({
+      state: "finished",
+      run: { ...record({ kind: "scan-branches", options: { prProof: true, keepDays: 7 } }), repoIds: ["repo"] },
+      summary: { ...summary([{ repo, outcome: "success", message: "1 finished branch · 0 kept.", candidates: [candidate], kept: [] }]), operationId: "op-live" },
+      seen: false
+    });
+    expect(container.textContent).toContain("Only example, from its branch list.");
+    expect(container.textContent).not.toContain("Include all profiles");
+    await click("Local branches");
+    await click("Review local branches");
+    expect(runCalls().at(-1)?.[1]).toMatchObject({ repoIds: ["repo"] });
+  });
+
+  it("does not cancel a run another window started", async () => {
+    await reopen({
+      state: "running",
+      cancelling: false,
+      run: { ...record({ kind: "gc", mode: "standard" }), ownWindow: false },
+      view: { repos: [repo], running: ["repo"], details: {}, results: [], seq: 2 }
+    });
+    expect(button("Cancel").getAttribute("aria-disabled")).toBe("true");
+    await click("Cancel");
+    expect(dispatch.mock.calls.some(([name]) => name === "maintenance:cancel")).toBe(false);
+  });
+
   it("hands a Clones run to the Clones tab", async () => {
     await reopen({
       state: "running",
+      cancelling: false,
       run: record({ kind: "reshare", updateMain: true }),
       view: { repos: [repo], running: ["repo"], details: { repo: "Worktree 1 of 408 · feature" }, results: [], seq: 2 }
     });

@@ -79,7 +79,7 @@ import { BulkSyncDialog } from "./BulkSyncDialog";
 import { FIRST_RUN_MINIMIZE_MS } from "./bulk-sync-prefs";
 import { useBulkSyncRun } from "./useBulkSyncRun";
 import { MaintenanceDialog } from "./MaintenanceDialog";
-import { reopensAfterReload } from "./maintenance-attach";
+import { useReopenMaintenanceAfterReload } from "./maintenance-attach";
 import { HiddenReposButton } from "./HiddenReposButton";
 import { RemoveRepositoryDialog } from "./RemoveRepositoryDialog";
 import { hiddenToast } from "./remove-repo-view";
@@ -342,23 +342,7 @@ export function Sidebar({
     | { repo?: { id: string; name: string }; worktrees?: true }
     | null
   >(null);
-  const maintenanceProfileId = activeProfile?.id;
-  // A reload (or a renderer crash) loses the Maintenance dialog, not main's
-  // run. Reopen it for a run this window started, still live or finished
-  // unseen; the dialog then reattaches (`maintenance-attach.ts`).
-  useEffect(() => {
-    if (maintenanceProfileId === undefined) return;
-    let cancelled = false;
-    void dispatch("maintenance:current", { profileId: maintenanceProfileId })
-      .then((answer) => {
-        if (!cancelled && answer?.ok === true && reopensAfterReload(answer.value))
-          setMaintenance((old) => old ?? {});
-      })
-      .catch(() => undefined);
-    return () => {
-      cancelled = true;
-    };
-  }, [maintenanceProfileId]);
+  useReopenMaintenanceAfterReload(activeProfile?.id, () => setMaintenance((old) => old ?? {}));
   /** The repository the Remove review is open on. */
   const [removing, setRemoving] = useState<Repo | null>(null);
   const [sel, setSel] = useState<Selection>({

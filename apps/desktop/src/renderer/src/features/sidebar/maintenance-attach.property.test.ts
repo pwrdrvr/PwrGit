@@ -108,7 +108,7 @@ describe("reattaching to a maintenance run", () => {
         });
         dispatch.mockImplementation((name: string) =>
           name === "maintenance:current"
-            ? s.schedule(Promise.resolve({ ok: true, value: { state: "running", run, view: snapshot } as MaintenanceCurrent }), "answer")
+            ? s.schedule(Promise.resolve({ ok: true, value: { state: "running", run, view: snapshot, cancelling: false } as MaintenanceCurrent }), "answer")
             : Promise.resolve({ ok: true, value: null })
         );
         let drawn: MaintenanceRunView | null = null;
@@ -143,7 +143,7 @@ describe("reattaching to a maintenance run", () => {
       hear = listener;
       return () => undefined;
     });
-    dispatch.mockResolvedValue({ ok: true, value: { state: "running", run, view: EMPTY_MAINTENANCE_RUN_VIEW } });
+    dispatch.mockResolvedValue({ ok: true, value: { state: "running", run, view: EMPTY_MAINTENANCE_RUN_VIEW, cancelling: false } });
     const drawn: MaintenanceRunView[] = [];
     attachMaintenanceRun("one", {
       claim: () => true,
@@ -160,7 +160,7 @@ describe("reattaching to a maintenance run", () => {
 
   it("says which answers a dialog shows, and which reopen it after a reload", () => {
     const summary: MaintenanceSummary = { operationId: "op", startedAt: run.startedAt, finishedAt: run.startedAt, cancelled: false, results: [] };
-    const running: MaintenanceCurrent = { state: "running", run, view: EMPTY_MAINTENANCE_RUN_VIEW };
+    const running: MaintenanceCurrent = { state: "running", run, view: EMPTY_MAINTENANCE_RUN_VIEW, cancelling: false };
     const unseen: MaintenanceCurrent = { state: "finished", run, summary, seen: false };
     const seen: MaintenanceCurrent = { state: "finished", run, summary, seen: true };
     const elsewhere: MaintenanceCurrent = { ...running, run: { ...run, ownWindow: false } };

@@ -928,15 +928,21 @@ describe("maintenance › reattach after a reload", () => {
     );
     await held.began;
     const attached = await bus.dispatch("maintenance:current", { profileId: "one" }, { webContentsId: 3 });
-    if (!attached.ok || attached.value === null) throw new Error("expected a run");
+    if (!attached.ok || attached.value?.state !== "running") throw new Error("expected a live run");
+    expect(attached.value.cancelling).toBe(false);
     expect(
       await bus.dispatch("maintenance:cancel", { operationId: attached.value.run.operationId }, { webContentsId: 3 })
     ).toEqual(ok({ cancelled: true }));
+    // Reloaded again while it stops: drawn as stopping, not as live.
+    const stopping = await bus.dispatch("maintenance:current", { profileId: "one" }, { webContentsId: 3 });
+    expect(stopping.ok && stopping.value?.state === "running" && stopping.value.cancelling).toBe(true);
     held.release();
     expect(value(await pending).cancelled).toBe(true);
   });
 
   it("tells a reattached window when a run stops on an error", async () => {
+    // An earlier run's receipt is not the latest once a new run starts.
+    value(await bus.dispatch("maintenance:run", { profileId: "one", operationId: "earlier", action: gc }));
     vi.mocked(emitEvent).mockImplementation((channel, payload) => {
       if (channel === "maintenance:progress" && (payload as MaintenanceProgress).phase === "starting")
         throw new Error("renderer gone");
@@ -946,7 +952,8 @@ describe("maintenance › reattach after a reload", () => {
     expect(result.ok).toBe(false);
     expect(emitted("boom").at(-1)).toMatchObject({ phase: "finished" });
     expect(emitted("boom").at(-1)?.summary).toBeUndefined();
-    // Nothing finished, so there is no receipt to show.
+    // Nothing finished, so there is no receipt to show, not even the
+    // earlier run's.
     expect(await bus.dispatch("maintenance:current", { profileId: "one" })).toEqual(ok(null));
   });
 });

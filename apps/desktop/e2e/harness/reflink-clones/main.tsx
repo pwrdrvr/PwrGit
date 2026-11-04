@@ -150,7 +150,7 @@ const harness = {
       operationId = reloadedRun.operationId;
       seq = 0;
       const sent = midRun().map((event) => ({ ...event, operationId, profileId: "demo", seq: ++seq }));
-      current = { state: "running", run: reloadedRun, view: sent.reduce(foldMaintenanceProgress, EMPTY_MAINTENANCE_RUN_VIEW) };
+      current = { state: "running", run: reloadedRun, view: sent.reduce(foldMaintenanceProgress, EMPTY_MAINTENANCE_RUN_VIEW), cancelling: false };
     }
     if (view === "reattach-finished")
       current = { state: "finished", run: reloadedRun, summary: summaryOf(reloadedRun.operationId), seen: false };

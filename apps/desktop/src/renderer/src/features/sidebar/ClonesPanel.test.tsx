@@ -217,7 +217,7 @@ describe("ClonesPanel after a window reload", () => {
     progress?.({ operationId: "op-live", profileId: "one", ...event });
 
   it("picks the live run up where main's snapshot left it, and can still cancel it", async () => {
-    await renderWith({ state: "running", run, view: snapshot });
+    await renderWith({ state: "running", run, view: snapshot, cancelling: false });
     expect(dispatch).toHaveBeenCalledWith("maintenance:current", { profileId: "one" });
     expect(dispatch.mock.calls.some(([name]) => name === "maintenance:run")).toBe(false);
     expect(container.textContent).toContain("Refreshing clones in 1 repository");
@@ -282,8 +282,21 @@ describe("ClonesPanel after a window reload", () => {
     expect(button("Refresh clones").disabled).toBe(false);
   });
 
+  it("draws a run that was already stopping as stopping, not live", async () => {
+    await renderWith({ state: "running", run, view: snapshot, cancelling: true });
+    expect(container.textContent).toContain("Stopping after the worktrees already running…");
+    expect(button("Cancelling…").disabled).toBe(true);
+  });
+
+  it("does not offer Cancel on a run another window started", async () => {
+    await renderWith({ state: "running", run: { ...run, ownWindow: false }, view: snapshot, cancelling: false });
+    expect(container.textContent).toContain("Refreshing clones in 1 repository");
+    expect(button("Cancel").disabled).toBe(true);
+    expect(container.textContent).toContain("Started in another window, which alone can cancel it.");
+  });
+
   it("leaves another kind of run to the dialog", async () => {
-    await renderWith({ state: "running", run: { ...run, action: { kind: "gc", mode: "standard" } }, view: snapshot });
+    await renderWith({ state: "running", run: { ...run, action: { kind: "gc", mode: "standard" } }, view: snapshot, cancelling: false });
     expect(container.textContent).not.toContain("Refreshing clones in");
     expect(button("Refresh clones")).toBeDefined();
   });

@@ -203,7 +203,8 @@ export function registerMaintenanceHandlers(
       return ok({
         state: "running",
         run: { ...active.run, ownWindow: active.owner === ctx.webContentsId },
-        view: active.view
+        view: active.view,
+        cancelling: active.controller.signal.aborted
       });
     const last = finished.get(profileId);
     if (last === undefined) return ok(null);
@@ -332,6 +333,9 @@ export function registerMaintenanceHandlers(
       view: EMPTY_MAINTENANCE_RUN_VIEW
     };
     active = current;
+    // This run supersedes the profile's last receipt. If it ends on an
+    // error there is no newer one, and the older one is not the latest.
+    finished.delete(req.profileId);
     let seq = 0;
     let ended = false;
     const results = new Map<string, MaintenanceRepoResult>();

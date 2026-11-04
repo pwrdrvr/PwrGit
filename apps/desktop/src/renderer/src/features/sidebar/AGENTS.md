@@ -234,7 +234,8 @@ finished one; `maintenance-attach.ts` is the one way to use it.
 
 - **Main and the dialog fold the same events** (`foldMaintenanceProgress`
   in `@pwrgit/shared`). Main's snapshot is that fold, updated in
-  `progress()`. Don't keep run rows in hand-written `useState` again.
+  `progress()`. The dialogs hold it through `useMaintenanceRunView()`;
+  don't keep run rows in hand-written `useState` again.
 - **Subscribe before asking.** Events that arrive before the answer are
   held and folded after the snapshot; each carries `seq`. Two fast-check
   tests hold this: `maintenance-attach.property.test.ts` (reload anywhere,
@@ -245,7 +246,10 @@ finished one; `maintenance-attach.ts` is the one way to use it.
 - **A receipt is shown once.** `maintenance:seen` marks it: on a dialog's
   own answer (even after a close cancelled it) and when a reattach draws
   it. The Sidebar reopens the dialog by itself only for a run this window
-  started (`ownWindow`).
+  started (`useReopenMaintenanceAfterReload`, `ownWindow`). Another
+  window's run is shown, but its Cancel is disabled: main only lets the
+  owner cancel. A live answer also says `cancelling`, so a run stopping
+  before the reload is drawn as stopping.
 - **A Combined plan does not resume.** Its steps lived in the lost dialog;
   the running step reattaches on its own tab. The Worktrees pruner runs
   `prune:*`, not `maintenance:run`, and does not reattach.

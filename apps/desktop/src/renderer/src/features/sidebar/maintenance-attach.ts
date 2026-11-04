@@ -1,7 +1,10 @@
+import { useEffect, useMemo, useState, type Dispatch, type SetStateAction } from "react";
 import {
+  EMPTY_MAINTENANCE_RUN_VIEW,
   foldMaintenanceProgress,
   type MaintenanceCurrent,
   type MaintenanceProgress,
+  type MaintenanceRepoResult,
   type MaintenanceRunRecord,
   type MaintenanceRunView,
   type MaintenanceSummary
@@ -38,7 +41,8 @@ export function attachMaintenanceRun(
   profileId: string,
   handlers: {
     claim: (current: NonNullable<MaintenanceCurrent> | null) => boolean;
-    running: (run: MaintenanceRunRecord, view: MaintenanceRunView) => void;
+    /** `cancelling`: a cancel was already accepted before the reload. */
+    running: (run: MaintenanceRunRecord, view: MaintenanceRunView, cancelling: boolean) => void;
     progress: (view: MaintenanceRunView) => void;
     /** Null summary: the run stopped on an error. */
     finished: (run: MaintenanceRunRecord, summary: MaintenanceSummary | null) => void;
@@ -85,11 +89,55 @@ export function attachMaintenanceRun(
       return;
     }
     followed = { run: shown.run, view: shown.view };
-    handlers.running(shown.run, shown.view);
+    handlers.running(shown.run, shown.view, shown.cancelling);
     for (const event of early.splice(0)) take(event);
   };
   void dispatch("maintenance:current", { profileId })
     .then((answer) => settle(answer.ok ? answer.value : null))
     .catch(() => settle(null));
   return stop;
+}
+
+/**
+ * A run's view, plus the lookups the dialogs draw from. The view is the
+ * fold main keeps too (`foldMaintenanceProgress`); keep run rows here, not
+ * in hand-written state.
+ */
+export function useMaintenanceRunView(): {
+  view: MaintenanceRunView;
+  setView: Dispatch<SetStateAction<MaintenanceRunView>>;
+  current: Set<string>;
+  details: Map<string, string>;
+  results: Map<string, MaintenanceRepoResult>;
+} {
+  const [view, setView] = useState<MaintenanceRunView>(EMPTY_MAINTENANCE_RUN_VIEW);
+  const current = useMemo(() => new Set(view.running), [view.running]);
+  const details = useMemo(() => new Map(Object.entries(view.details)), [view.details]);
+  const results = useMemo(
+    () => new Map(view.results.map((result) => [result.repo.id, result])),
+    [view.results]
+  );
+  return { view, setView, current, details, results };
+}
+
+/**
+ * A reload (or a renderer crash) loses the Maintenance dialog, not main's
+ * run. Call `open` for a run this window started that is still live or
+ * finished unseen; the dialog then reattaches (`attachMaintenanceRun`).
+ */
+export function useReopenMaintenanceAfterReload(profileId: string | undefined, open: () => void): void {
+  useEffect(() => {
+    if (profileId === undefined) return;
+    let cancelled = false;
+    void dispatch("maintenance:current", { profileId })
+      .then((answer) => {
+        if (!cancelled && answer?.ok === true && reopensAfterReload(answer.value)) open();
+      })
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
+    // `open` only sets state; the question is asked once per profile.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [profileId]);
 }

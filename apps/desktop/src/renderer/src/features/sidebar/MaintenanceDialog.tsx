@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   BRANCH_CLEANUP_KEEP_DAYS,
   DEFAULT_BRANCH_CLEANUP_OPTIONS,
@@ -16,7 +16,6 @@ import {
   type KeptBranchReason,
   type MaintenanceAction,
   type MaintenanceRepoResult,
-  type MaintenanceRunView,
   type MaintenanceSummary,
   type StaleBranch,
   type AppSettingsPatch,
@@ -31,7 +30,7 @@ import { PruneWorktreesPanel } from "./PruneWorktreesPanel";
 import { ClonesPanel, clonesBytes as bytes } from "./ClonesPanel";
 import { BulkSyncStatus, StatusMark } from "./BulkSyncStatus";
 import { countOutcomes } from "./bulk-sync-progress";
-import { attachMaintenanceRun, markMaintenanceSeen } from "./maintenance-attach";
+import { attachMaintenanceRun, markMaintenanceSeen, useMaintenanceRunView } from "./maintenance-attach";
 import {
   branchCardCopy,
   branchStepLine,
@@ -116,7 +115,7 @@ export function MaintenanceDialog({
   onClose,
   onRemoveWorktrees,
   initialTab = "combined",
-  repoScope,
+  repoScope: scopeProp,
   autoReview = false,
   now = Date.now
 }: {
@@ -170,14 +169,15 @@ export function MaintenanceDialog({
   const [cancelling, setCancelling] = useState(false);
   /** The run as its progress events drew it: the same fold main keeps for
    *  a window that reattaches. */
-  const [view, setView] = useState<MaintenanceRunView>(EMPTY_MAINTENANCE_RUN_VIEW);
+  const { view, setView, current, details, results } = useMaintenanceRunView();
   const repos = view.repos;
-  const current = useMemo(() => new Set(view.running), [view.running]);
-  const details = useMemo(() => new Map(Object.entries(view.details)), [view.details]);
-  const results = useMemo(
-    () => new Map(view.results.map((result) => [result.repo.id, result])),
-    [view.results]
-  );
+  /** Reattached to a run another window started: only that window can
+   *  cancel it (`maintenance:cancel` checks the owner). */
+  const [foreign, setForeign] = useState(false);
+  /** A reattached run's one repository: the refs browser's review keeps its
+   *  scope after a reload, for its label and for Review again. */
+  const [attachedScope, setAttachedScope] = useState<{ id: string; name: string } | undefined>(undefined);
+  const repoScope = scopeProp ?? attachedScope;
   /** Main has said whether a run is here to reattach to. Nothing starts,
    *  and no setup is drawn, until it has. */
   const [attachChecked, setAttachChecked] = useState(false);
@@ -338,6 +338,7 @@ export function MaintenanceDialog({
     active.current = operationId;
     setRunning(true);
     setCancelling(false);
+    setForeign(false);
     setAction(next);
     setSummary(null);
     setView(EMPTY_MAINTENANCE_RUN_VIEW);
@@ -429,14 +430,19 @@ export function MaintenanceDialog({
           }
           setTab(kind === "gc" ? "gc" : "branches");
           setAllProfiles(found.run.allProfiles);
+          const only = found.run.repoIds?.length === 1 ? found.run.repoIds[0] : undefined;
+          const rows = found.state === "running" ? found.view.repos : found.summary.results.map((row) => row.repo);
+          const scoped = rows.find((row) => row.id === only);
+          if (scopeProp === undefined && scoped !== undefined) setAttachedScope({ id: scoped.id, name: scoped.name });
           return true;
         },
-        running: (run, seeded) => {
+        running: (run, seeded, stopping) => {
           active.current = run.operationId;
           if (run.action.kind === "gc") setMode(run.action.mode);
           setAction(run.action);
           setRunning(true);
-          setCancelling(false);
+          setCancelling(stopping);
+          setForeign(!run.ownWindow);
           setSummary(null);
           setError(null);
           runError.current = null;
@@ -571,7 +577,7 @@ export function MaintenanceDialog({
   };
 
   const cancel = async (): Promise<void> => {
-    if (active.current === null || cancelling) return;
+    if (active.current === null || cancelling || foreign) return;
     setCancelling(true);
     try {
       const response = await dispatch("maintenance:cancel", {
@@ -1327,7 +1333,8 @@ export function MaintenanceDialog({
             <button
               ref={footerFocus}
               className="modal__cancel"
-              aria-disabled={cancelling}
+              aria-disabled={cancelling || foreign}
+              title={foreign ? "Started in another window, which alone can cancel it." : undefined}
               onClick={() => void cancel()}
             >
               {cancelling ? "Cancelling…" : "Cancel"}

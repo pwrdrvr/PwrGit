@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   EMPTY_MAINTENANCE_RUN_VIEW,
   foldMaintenanceProgress,
@@ -6,11 +6,10 @@ import {
   type GitReflinkStatus,
   type MaintenanceRepo,
   type MaintenanceRepoResult,
-  type MaintenanceRunView,
   type MaintenanceSummary
 } from "@pwrgit/shared";
 import { dispatch, subscribe } from "../../lib/pwrgit";
-import { attachMaintenanceRun, markMaintenanceSeen } from "./maintenance-attach";
+import { attachMaintenanceRun, markMaintenanceSeen, useMaintenanceRunView } from "./maintenance-attach";
 import { displayPath } from "../../lib/platform";
 import { formatElapsed } from "../remote/remote-activity";
 import { BulkSyncStatus, StatusMark } from "./BulkSyncStatus";
@@ -94,7 +93,10 @@ export function ClonesPanel({
   const [cancelling, setCancelling] = useState(false);
   /** The run as its progress events drew it: the same fold main keeps for
    *  a window that reattaches. */
-  const [view, setView] = useState<MaintenanceRunView>(EMPTY_MAINTENANCE_RUN_VIEW);
+  const { view, setView, current, details, results } = useMaintenanceRunView();
+  /** Reattached to a run another window started: only that window can
+   *  cancel it (`maintenance:cancel` checks the owner). */
+  const [foreign, setForeign] = useState(false);
   const [summary, setSummary] = useState<MaintenanceSummary | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [startedAt, setStartedAt] = useState(0);
@@ -104,12 +106,6 @@ export function ClonesPanel({
   const live = useRef(true);
   const repos = view.repos;
   const noWorktrees = view.noWorktrees ?? [];
-  const current = useMemo(() => new Set(view.running), [view.running]);
-  const details = useMemo(() => new Map(Object.entries(view.details)), [view.details]);
-  const results = useMemo(
-    () => new Map(view.results.map((result) => [result.repo.id, result])),
-    [view.results]
-  );
 
   useEffect(() => {
     live.current = true;
@@ -140,12 +136,13 @@ export function ClonesPanel({
           setAttachChecked(true);
           return found?.run.action.kind === "reshare";
         },
-        running: (run, seeded) => {
+        running: (run, seeded, stopping) => {
           operation.current = run.operationId;
           if (run.action.kind === "reshare") setUpdateMain(run.action.updateMain);
           setAllProfiles(run.allProfiles);
           setRunning(true);
-          setCancelling(false);
+          setCancelling(stopping);
+          setForeign(!run.ownWindow);
           setSummary(null);
           setError(null);
           setStartedAt(Date.parse(run.startedAt));
@@ -176,6 +173,7 @@ export function ClonesPanel({
     operation.current = operationId;
     setRunning(true);
     setCancelling(false);
+    setForeign(false);
     setSummary(null);
     setError(null);
     setView(EMPTY_MAINTENANCE_RUN_VIEW);
@@ -370,9 +368,14 @@ export function ClonesPanel({
       </div>
       <div className="modal__actions">
         {running ? (
-          <button className="modal__cancel" disabled={cancelling} onClick={cancel}>
-            {cancelling ? "Cancelling…" : "Cancel"}
-          </button>
+          <>
+            {foreign && !cancelling && (
+              <span className="maintenance__footer-lead">Started in another window, which alone can cancel it.</span>
+            )}
+            <button className="modal__cancel" disabled={cancelling || foreign} onClick={cancel}>
+              {cancelling ? "Cancelling…" : "Cancel"}
+            </button>
+          </>
         ) : (
           <>
             <button className="modal__cancel" onClick={onClose}>

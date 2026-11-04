@@ -145,6 +145,9 @@ it("a reloaded window always finds its own profile's run, exactly as the events 
           if (current.state === "running") {
             expect(current.view).toEqual(heard.reduce(foldMaintenanceProgress, EMPTY_MAINTENANCE_RUN_VIEW));
             expect(current.view.seq).toBe(heard.length);
+            // Stopping exactly when a cancel was accepted, so a reloaded
+            // window draws it as stopping.
+            expect(current.cancelling).toBe(accepted);
           } else {
             expect(heard.at(-1)).toMatchObject({ phase: "finished", summary: current.summary });
           }

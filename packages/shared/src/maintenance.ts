@@ -301,7 +301,14 @@ export type MaintenanceRunRecord = {
  * was attached is shown once.
  */
 export type MaintenanceCurrent =
-  | { state: "running"; run: MaintenanceRunRecord; view: MaintenanceRunView }
+  | {
+      state: "running";
+      run: MaintenanceRunRecord;
+      view: MaintenanceRunView;
+      /** Cancel was accepted and the run is stopping after the work that
+       *  is already running. A reloaded window draws it as stopping. */
+      cancelling: boolean;
+    }
   | {
       state: "finished";
       run: MaintenanceRunRecord;
