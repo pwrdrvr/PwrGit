@@ -261,7 +261,9 @@ describe("bundledGitEnvironment", () => {
   });
 
   describe("an inherited GIT_CONFIG_SYSTEM", () => {
-    const includeOf = (file: string) => readFileSync(file, "utf8").match(/\[include\]\n\tpath = "(.*)"/)?.[1];
+    // Unquoted: Git's config syntax escapes every backslash, as on Windows.
+    const includeOf = (file: string) =>
+      readFileSync(file, "utf8").match(/\[include\]\n\tpath = "(.*)"/)?.[1]?.replaceAll("\\\\", "\\");
     const bundleConfig = (runtime: string) => join(runtime, "etc", "gitconfig");
 
     it("includes the user's own system config in place of the bundle's", () => {
