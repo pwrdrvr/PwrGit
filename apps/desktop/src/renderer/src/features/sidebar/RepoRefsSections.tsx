@@ -11,7 +11,14 @@ import {
   type KeyboardEvent as ReactKeyboardEvent,
   type ReactElement
 } from "react";
-import type { TagSummary, LocalBranchSummary, Repo, RepoRefs, Worktree } from "@pwrgit/shared";
+import type {
+  TagStatusFilter,
+  TagSummary,
+  LocalBranchSummary,
+  Repo,
+  RepoRefs,
+  Worktree
+} from "@pwrgit/shared";
 import { dispatch } from "../../lib/pwrgit";
 import { RefreshGlyph } from "../../lib/RefreshGlyph";
 import { SwitchGlyph } from "../../lib/SwitchGlyph";
@@ -209,6 +216,7 @@ export function RepoRefsSections({
     tab: RefsTab;
     status: BranchStatusFilter;
     worktreeStatus: WorktreeStatusFilter;
+    tagFilter?: TagStatusFilter;
   } | null>(null);
   /** Open the refs browser, optionally already filtered — the header's ↑n,
    *  ↓n and gone counts each open it on their own status. */
@@ -216,8 +224,9 @@ export function RepoRefsSections({
     (
       tab: RefsTab,
       status: BranchStatusFilter = "all",
-      worktreeStatus: WorktreeStatusFilter = "all"
-    ) => setBrowserState({ tab, status, worktreeStatus }),
+      worktreeStatus: WorktreeStatusFilter = "all",
+      tagFilter: TagStatusFilter = "all"
+    ) => setBrowserState({ tab, status, worktreeStatus, tagFilter }),
     []
   );
   useEffect(() => {
@@ -920,6 +929,26 @@ export function RepoRefsSections({
                 )}
               </div>
             ))}
+            {/* From the stored comparison: no Git ran for this line. Only a
+                tag that differs asks for a decision; published-only tags are
+                common and wait in the browser. */}
+            {refs?.tagAttention !== undefined && (
+              <button
+                className="ref-tag-attention"
+                onClick={(event) => {
+                  event.stopPropagation();
+                  setBrowser("tags", "all", "all", "differs");
+                }}
+              >
+                <span className="ref-tag-attention__dot" aria-hidden="true" />
+                <span className="ref-tag-attention__text">
+                  {refs.tagAttention.differs === 1
+                    ? `1 tag differs from ${refs.tagAttention.remote}`
+                    : `${refs.tagAttention.differs} tags differ from ${refs.tagAttention.remote}`}
+                </span>
+                <span className="ref-tag-attention__go">Review…</span>
+              </button>
+            )}
             {error !== null && <div className="ref-section__error">{error}</div>}
             {refs !== null && refs.tagCount === 0 && (
               <div className="ref-section__empty">No local tags.</div>
@@ -1314,6 +1343,7 @@ export function RepoRefsSections({
           initialTab={browser.tab}
           initialStatus={browser.status}
           initialWorktreeStatus={browser.worktreeStatus}
+          initialTagFilter={browser.tagFilter ?? "all"}
           onRemoveWorktree={onRemoveWorktree}
           onFork={onFork}
           onPruneWorktrees={

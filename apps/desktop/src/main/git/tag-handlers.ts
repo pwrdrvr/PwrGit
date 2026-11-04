@@ -8,7 +8,6 @@ import {
   applyRemoteTagPlan,
   createTagAt,
   deleteLocalTag,
-  listTagPage,
   planRemoteTag,
   resolveTagTarget
 } from "./git-service";
@@ -38,16 +37,6 @@ export function registerTagHandlers(bus: CommandBus, db: DB): void {
          WHERE r.id = ?`
       )
       .get(repoId) as RepoRow | undefined;
-
-  bus.register("repo:tags", async (req) => {
-    const repo = repoOf(req.repoId);
-    if (repo === undefined) return err(notFound);
-    return listTagPage(execGit, repo.path, {
-      ...(req.query === undefined ? {} : { query: req.query }),
-      ...(req.offset === undefined ? {} : { offset: req.offset }),
-      ...(req.limit === undefined ? {} : { limit: req.limit })
-    });
-  });
 
   const tagSources = tagSourcesFor(db);
   /** Local tags moved: the sidebar's tag rows and the graph's chips. */

@@ -1,5 +1,4 @@
 import { expect, test } from "@playwright/test";
-import { mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { launchApp, type AppHandle } from "./fixtures/electron-app";
 import { createGitSandbox, type GitSandbox } from "./fixtures/git-sandbox";
@@ -18,7 +17,8 @@ test.afterEach(async () => {
 });
 
 for (const operation of ["Fetch", "Pull"]) {
-  test(`${operation} refreshes a reissued tag in the sidebar and lineage`, async () => {
+  test(`${operation} leaves a re-cut tag alone, flags it, and Take origin's moves it and its chip`, async () => {
+    test.setTimeout(90_000);
     sandbox = createGitSandbox();
     const box = sandbox;
     const repo = box.makeRepoWithRemote("release-demo");
@@ -29,12 +29,14 @@ for (const operation of ["Fetch", "Pull"]) {
     box.commit(repo.path, "notes.txt", "Refresh release 1.2.3 notes");
     const newHead = box.git(repo.path, "rev-parse", "HEAD");
     box.git(repo.path, "push", "origin", "main");
+    // Re-cut from a separate clone: the user's checkout keeps its old tag.
     const publisher = join(box.worktreeRoot, "publisher");
     box.git(repo.path, "clone", repo.remotePath, publisher);
     box.git(publisher, "push", "origin", ":refs/tags/v1.2.3");
     box.git(publisher, "tag", "-d", "v1.2.3");
     box.git(publisher, "tag", "-a", "-m", "Reissued release 1.2.3", "v1.2.3");
     box.git(publisher, "push", "origin", "refs/tags/v1.2.3");
+    const oldObject = box.git(repo.path, "rev-parse", "v1.2.3");
 
     handle = await launchApp({ worktreeRoot: box.worktreeRoot, theme: "light" });
     const { window } = handle;
@@ -50,23 +52,34 @@ for (const operation of ["Fetch", "Pull"]) {
     const oldRow = window.locator(`.graph-row[data-hash="${oldHead}"]`);
     const newRow = window.locator(`.graph-row[data-hash="${newHead}"]`);
     await expect(oldRow.locator(".commit-tag--tag .commit-tag__name")).toHaveText("v1.2.3");
-    const shots = process.env.PWRGIT_TAG_SHOTS;
-    if (shots !== undefined && operation === "Fetch") {
-      mkdirSync(shots, { recursive: true });
-      await window.mouse.move(1700, 900);
-      await window.screenshot({ path: join(shots, "before.png"), animations: "disabled" });
-    }
+
     await window.getByRole("button", { name: operation, exact: true }).click();
-    await expect(tag).toContainText(newHead.slice(0, 7));
+    // The first successful sync lists origin's tags in the background. The
+    // fetch itself never rewrites an existing tag.
+    const attention = window.locator(".ref-tag-attention");
+    await expect(attention).toHaveText(/1 tag differs from origin/, { timeout: 20_000 });
+    expect(box.git(repo.path, "rev-parse", "v1.2.3")).toBe(oldObject);
+    await expect(tag).toContainText(oldHead.slice(0, 7));
+    expect(box.git(repo.path, "rev-parse", "HEAD")).toBe(newHead);
+
+    await attention.click();
+    const browser = window.getByRole("dialog", { name: "release-demo branches, tags, and remotes" });
+    await expect(browser.locator(".refs-tag-filter.is-active")).toContainText("Differ");
+    const row = browser.locator('.refs-tag-table__row[data-tag-status="differs"]', { hasText: "v1.2.3" });
+    await expect(row).toContainText("differs from origin");
+    await row.getByRole("button", { name: "Take origin's v1.2.3" }).click();
+    const confirm = window.locator(".modal--dialog");
+    await expect(confirm).toContainText("Replace local tag v1.2.3 with origin's?");
+    await confirm.locator(".modal__create").click();
+
+    await expect.poll(() => box.git(repo.path, "rev-parse", "v1.2.3^{}"), { timeout: 20_000 }).toBe(newHead);
+    // The previous value is pinned by a real ref, so gc keeps it.
+    expect(box.git(repo.path, "for-each-ref", "--format=%(objectname)", "refs/pwrgit/replaced-tags/")).toBe(oldObject);
+    await expect(browser.locator('.refs-tag-table__row[data-tag-status="differs"]')).toHaveCount(0);
+    await browser.getByRole("button", { name: "Close" }).first().click();
     await expect(newRow.locator(".commit-tag--tag .commit-tag__name")).toHaveText("v1.2.3");
     await expect(oldRow.locator(".commit-tag--tag")).toHaveCount(0);
-    expect(box.git(repo.path, "rev-parse", "HEAD")).toBe(newHead);
-    if (shots !== undefined && operation === "Fetch") {
-      await window.getByRole("button", { name: "Dismiss status" }).click();
-      await window.mouse.move(1700, 900);
-      await expect(window.locator(".remote-activity")).toHaveCount(0);
-      await window.screenshot({ path: join(shots, "after.png"), animations: "disabled" });
-    }
+    await expect(attention).toHaveCount(0);
   });
 }
 

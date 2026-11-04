@@ -425,6 +425,50 @@ describe("RepoRefsSections forge links", () => {
   });
 });
 
+describe("published tags in the sidebar", () => {
+  const tagsHead = (): HTMLButtonElement | undefined =>
+    [...container.querySelectorAll<HTMLButtonElement>(".ref-section__head")].find(
+      (head) => head.textContent?.includes("Tags")
+    );
+
+  it("draws one line only when the stored comparison found tags that differ, and it opens Differ", async () => {
+    let attention: RepoRefs["tagAttention"] = { remote: "origin", differs: 2 };
+    const original = dispatchMock.getMockImplementation()!;
+    dispatchMock.mockImplementation((channel: string, request?: { filter?: string }) => {
+      if (channel === "repo:refs") {
+        return Promise.resolve(ok({ ...refs, tagCount: 3, ...(attention === undefined ? {} : { tagAttention: attention }) }));
+      }
+      if (channel === "forge:hosts") return Promise.resolve(ok({ hosts: [], overrides: {} }));
+      if (channel === "repo:tagStatus") {
+        return Promise.resolve(ok({ rows: [], total: 0, counts: null, source: null, filter: request?.filter }));
+      }
+      if (channel === "pr:openList") {
+        return Promise.resolve(ok({ forge: null, fetchedAt: null, truncated: false, entries: [], remotes: [] }));
+      }
+      return original(channel);
+    });
+    await render(primary);
+    await act(async () => tagsHead()?.click());
+    const line = container.querySelector<HTMLButtonElement>(".ref-tag-attention");
+    expect(line?.textContent).toBe("2 tags differ from originReview…");
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    await act(async () => line?.click());
+    await act(async () => {
+      vi.advanceTimersByTime(250);
+    });
+    vi.useRealTimers();
+    const asked = dispatchMock.mock.calls.filter(([channel]) => channel === "repo:tagStatus");
+    expect(asked.at(-1)?.[1]).toMatchObject({ filter: "differs" });
+
+    await act(async () => root.unmount());
+    root = createRoot(container);
+    attention = undefined;
+    await render(primary);
+    await act(async () => tagsHead()?.click());
+    expect(container.querySelector(".ref-tag-attention")).toBeNull();
+  });
+});
+
 describe("a reload keeps the last answer on screen", () => {
   const branch = (name: string): RepoRefs["branches"][number] => ({
     name,
