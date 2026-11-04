@@ -236,9 +236,12 @@ finished one; `maintenance-attach.ts` is the one way to use it.
   in `@pwrgit/shared`). Main's snapshot is that fold, updated in
   `progress()`. Don't keep run rows in hand-written `useState` again.
 - **Subscribe before asking.** Events that arrive before the answer are
-  held and folded after the snapshot; each carries `seq`.
-  `maintenance-attach.property.test.ts` reloads at every point of random
-  runs and checks the result against a window that watched it all.
+  held and folded after the snapshot; each carries `seq`. Two fast-check
+  tests hold this: `maintenance-attach.property.test.ts` (reload anywhere,
+  answer anywhere among live events, same view as a window that watched it
+  all) and main's `maintenance-handlers.property.test.ts` (a model under
+  `fc.scheduler`: never neither running nor finished, profile-scoped,
+  owner-only cancel).
 - **A receipt is shown once.** `maintenance:seen` marks it: on a dialog's
   own answer (even after a close cancelled it) and when a reattach draws
   it. The Sidebar reopens the dialog by itself only for a run this window
