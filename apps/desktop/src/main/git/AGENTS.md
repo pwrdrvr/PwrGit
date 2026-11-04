@@ -768,6 +768,11 @@ On macOS, set `PWRGIT_SHARE_REAL_BINARY` to an absolute built CLI path and run
 `pnpm test apps/desktop/src/main/git/worktree-share.real-cli.test.ts` for the
 opt-in handler-to-binary tests; ordinary tests use the fake executable.
 
+`worktree:removeMany` runs each `worktreeRemove` inside that worktree's queue,
+after `lockForRemoval` drains its probes, as repository removal does. Without
+the queue, a Pull, a switch or a second removal ran Git in the checkout while
+its folder was deleted (`worktree-operation-queue.property.test.ts`).
+
 ## Removing a repository never prunes
 
 **No step runs `git worktree prune`.** `repo-removal.ts`:

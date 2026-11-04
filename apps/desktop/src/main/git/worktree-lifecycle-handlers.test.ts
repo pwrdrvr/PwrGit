@@ -21,9 +21,9 @@ import type { GitExec } from "./dugite";
 import { worktreeAdd } from "./git-service";
 import { RepoIndexer } from "./repo-indexer";
 import { registerWorktreeLifecycleHandlers } from "./worktree-lifecycle-handlers";
+import { WorktreeOperationQueue } from "./worktree-operation-queue";
 import { WorktreeStateService } from "./worktree-state";
 import { createSystemGit } from "./test-support/system-git";
-import { WorktreeOperationQueue } from "./worktree-operation-queue";
 
 // The handlers spawn git through dugite's execGit and broadcast over Electron
 // IPC; neither exists under vitest. Route execGit through the test's recording
@@ -91,6 +91,7 @@ let db: DB;
 let bus: CommandBus;
 let indexer: RepoIndexer;
 let state: WorktreeStateService;
+let operations: WorktreeOperationQueue;
 let profileId: string;
 let repoId: string;
 let repoPath: string;
@@ -115,7 +116,7 @@ beforeAll(async () => {
   repoId = added.value.id;
   repoPath = added.value.path;
 
-  const operations = new WorktreeOperationQueue();
+  operations = new WorktreeOperationQueue();
   state = new WorktreeStateService(db, recordingGit, operations);
   bus = new CommandBus();
   const settings = new SettingsService(join(root, "settings.json"));
@@ -172,6 +173,35 @@ describe("worktree:removeMany × state probes", () => {
       expect(c.end).toBeGreaterThan(0);
       expect(c.end).toBeLessThan(remove?.start ?? 0);
     }
+  });
+});
+
+describe("worktree:removeMany × the worktree queue", () => {
+  // Shrunk by worktree-operation-queue.property.test.ts: two removals (or a
+  // Pull and a removal) of one checkout ran Git in it at the same time.
+  it("waits for the operation holding the worktree before removing it", async () => {
+    await worktreeAdd(systemGit, repoPath, join(root, "wt-held"), "held", {
+      newBranch: true
+    });
+    await indexer.refreshRepoWorktrees(repoId);
+    const wt = indexer
+      .listRepos(profileId)[0]
+      ?.worktrees.find((w) => w.branch === "held");
+    if (wt === undefined) throw new Error("worktree not indexed");
+
+    let release!: () => void;
+    const held = operations.run(wt.id, () => new Promise<void>((r) => { release = r; }));
+    const removesBefore = calls.filter(isRemove).length;
+    const removal = bus.dispatch("worktree:removeMany", { worktreeIds: [wt.id] });
+    await new Promise((r) => setTimeout(r, 50));
+    expect(calls.filter(isRemove)).toHaveLength(removesBefore);
+    expect(existsSync(wt.path)).toBe(true);
+
+    release();
+    await held;
+    const res = await removal;
+    expect(res.ok && res.value.removed).toEqual([wt.id]);
+    expect(existsSync(wt.path)).toBe(false);
   });
 });
 
