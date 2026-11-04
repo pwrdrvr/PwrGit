@@ -157,7 +157,7 @@ describe("ClonesPanel", () => {
     expect(container.querySelector(".maintenance__done-status")?.textContent).toContain(
       "5.0 MiB of file data now shared with main checkouts"
     );
-    expect(container.textContent).toContain("took 1m 5s");
+    expect(container.textContent).toContain("took 1m 05s");
     // Largest share first.
     expect(
       Array.from(container.querySelectorAll(".maintenance__clones-name strong"), (node) => node.textContent)

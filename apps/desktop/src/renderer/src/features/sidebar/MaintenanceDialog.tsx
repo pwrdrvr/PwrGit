@@ -25,7 +25,7 @@ import { useModal } from "../../lib/useModal";
 import type { RemoveWorktreesOutcome } from "../../state/useRepoTree";
 import { MaintenancePlanForm, MaintenanceSteps, MaintenanceRulesApplied, type MaintenancePlan, type StepKey, type StepResult } from "./MaintenancePlan";
 import { PruneWorktreesPanel } from "./PruneWorktreesPanel";
-import { ClonesPanel } from "./ClonesPanel";
+import { ClonesPanel, clonesBytes as bytes } from "./ClonesPanel";
 import { BulkSyncStatus, StatusMark } from "./BulkSyncStatus";
 import { countOutcomes } from "./bulk-sync-progress";
 import {
@@ -105,13 +105,6 @@ function keptLabel(
         : `touched in the last ${keepDays} ${keepDays === 1 ? "day" : "days"}`;
   }
 }
-
-const bytes = (value: number): string => {
-  if (value < 1024 * 1024) return `${(value / 1024).toFixed(1)} KiB`;
-  if (value < 1024 * 1024 * 1024)
-    return `${(value / 1024 / 1024).toFixed(1)} MiB`;
-  return `${(value / 1024 / 1024 / 1024).toFixed(2)} GiB`;
-};
 
 export function MaintenanceDialog({
   profileId,

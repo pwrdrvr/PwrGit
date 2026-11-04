@@ -87,11 +87,22 @@ export function reshareResultFromPorcelain(
   const { summary } = porcelain;
   const reshared = count(summary, "reshared");
   const alreadyShared = count(summary, "already-shared");
-  const skipped = count(summary, "skipped");
   const failed = count(summary, "failed");
   // Absent or `unknown` when Git could not measure allocation (another
   // filesystem); a count of zero is a real answer.
   const reduction = Number(summary?.get("observed-private-reduction") ?? Number.NaN);
+  // Group skip reasons so the line says why files were left, not only how
+  // many. Symlinks, submodules and sparse entries are never candidates, so
+  // they leave the count as well as the reasons.
+  const reasons = new Map<string, number>();
+  let quiet = 0;
+  for (const record of porcelain.paths) {
+    if (record.get("status") !== "skipped") continue;
+    const reason = record.get("reason") ?? "";
+    if (QUIET_REASONS.has(reason)) quiet += 1;
+    else reasons.set(reason, (reasons.get(reason) ?? 0) + 1);
+  }
+  const skipped = Math.max(0, count(summary, "skipped") - quiet);
   const base = {
     worktreeId: worktree.id,
     path: worktree.path,
@@ -111,14 +122,6 @@ export function reshareResultFromPorcelain(
   }
   if (porcelain.header.get("backend") === "unsupported") {
     return { ...base, outcome: "skipped", message: "This volume can’t share file data; files were left as they are." };
-  }
-  // Group skip reasons so the line says why files were left, not only how many.
-  const reasons = new Map<string, number>();
-  for (const record of porcelain.paths) {
-    if (record.get("status") !== "skipped") continue;
-    const reason = record.get("reason") ?? "";
-    if (QUIET_REASONS.has(reason)) continue;
-    reasons.set(reason, (reasons.get(reason) ?? 0) + 1);
   }
   const why = [...reasons.entries()]
     .sort((a, b) => b[1] - a[1])
@@ -272,6 +275,9 @@ async function updateMainCheckout(
 
 const CANCELLED = "Cancelled before this worktree started.";
 
+/** Why a worktree was not run, beside the result it reports. */
+type ReshareRow = { result: ReshareWorktreeResult; notRun?: "cancelled" | "skipped" };
+
 const delay = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
 
 /**
@@ -297,12 +303,15 @@ export async function refreshRepositoryClones(deps: RefreshClonesDeps): Promise<
   // that records it, which Git calls racy and will not use as a clone source.
   // Wait past the timestamp, then let `status` rewrite the index — it does
   // whenever an entry is racy — so the new files can be shared.
-  if (main.outcome === "updated") await (deps.sleep ?? delay)(1_100);
-  if (primary !== undefined && !primary.missing) {
-    await deps.git(["status", "--porcelain", "--untracked-files=no"], primary.path);
+  // Its index belongs to the main checkout, so `status` holds that lock.
+  if (!deps.signal.aborted && primary !== undefined && !primary.missing) {
+    if (main.outcome === "updated") await (deps.sleep ?? delay)(1_100);
+    await deps.runWorktree(primary.id, () =>
+      deps.git(["status", "--porcelain", "--untracked-files=no"], primary.path)
+    );
   }
-  let done = 0;
-  const worktrees = await mapLimit(linked, deps.concurrency ?? RESHARE_WORKTREE_CONCURRENCY, async (worktree) => {
+  let started = 0;
+  const rows = await mapLimit(linked, deps.concurrency ?? RESHARE_WORKTREE_CONCURRENCY, async (worktree): Promise<ReshareRow> => {
     const base = {
       worktreeId: worktree.id,
       path: worktree.path,
@@ -313,26 +322,26 @@ export async function refreshRepositoryClones(deps: RefreshClonesDeps): Promise<
       failed: 0,
       sharedBytes: null
     };
-    let result: ReshareWorktreeResult;
-    if (deps.signal.aborted) {
-      result = { ...base, outcome: "skipped", message: CANCELLED };
-    } else if (worktree.missing) {
-      result = { ...base, outcome: "skipped", message: "Directory missing." };
-    } else if (worktree.locked) {
-      result = { ...base, outcome: "skipped", message: "Locked in Git, so left alone." };
-    } else {
-      result = await deps.runWorktree(worktree.id, async () => {
-        if (deps.signal.aborted) {
-          return { ...base, outcome: "skipped" as const, message: CANCELLED };
-        }
-        deps.report(`Worktree ${done + 1} of ${linked.length} · ${worktree.branch || "(detached)"}`);
-        return reshareWorktree(deps.git, worktree);
-      });
+    const cancelledRow: ReshareRow = {
+      result: { ...base, outcome: "skipped", message: CANCELLED },
+      notRun: "cancelled"
+    };
+    if (deps.signal.aborted) return cancelledRow;
+    if (worktree.missing) {
+      return { result: { ...base, outcome: "skipped", message: "Directory missing." }, notRun: "skipped" };
     }
-    done += 1;
-    return result;
+    if (worktree.locked) {
+      return { result: { ...base, outcome: "skipped", message: "Locked in Git, so left alone." }, notRun: "skipped" };
+    }
+    return deps.runWorktree(worktree.id, async (): Promise<ReshareRow> => {
+      if (deps.signal.aborted) return cancelledRow;
+      started += 1;
+      deps.report(`Worktree ${started} of ${linked.length} · ${worktree.branch || "(detached)"}`);
+      return { result: await reshareWorktree(deps.git, worktree) };
+    });
   });
-  const cancelled = worktrees.filter((worktree) => worktree.message === CANCELLED).length;
+  const worktrees = rows.map((row) => row.result);
+  const cancelled = rows.filter((row) => row.notRun === "cancelled").length;
   const failed = worktrees.filter((worktree) => worktree.outcome === "failed").length;
   const files = worktrees.reduce((sum, worktree) => sum + worktree.reshared, 0);
   const outcome: MaintenanceRepoResult["outcome"] =
@@ -342,7 +351,9 @@ export async function refreshRepositoryClones(deps: RefreshClonesDeps): Promise<
         ? "failed"
         : failed > 0 || cancelled > 0 || main.outcome === "failed"
           ? "partial"
-          : "success";
+          : main.outcome !== "updated" && worktrees.every((worktree) => worktree.outcome === "skipped")
+            ? "skipped"
+            : "success";
   const summary = [
     main.outcome === "not_requested" ? null : main.message.replace(/\.$/, ""),
     plural(linked.length, "worktree"),

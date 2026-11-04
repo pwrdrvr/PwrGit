@@ -7,10 +7,11 @@ import type {
 } from "@pwrgit/shared";
 import { dispatch, subscribe } from "../../lib/pwrgit";
 import { displayPath } from "../../lib/platform";
+import { formatElapsed } from "../remote/remote-activity";
 import { BulkSyncStatus, StatusMark } from "./BulkSyncStatus";
 import { countOutcomes } from "./bulk-sync-progress";
 
-/** File data in binary units, as the other maintenance receipts print it. */
+/** File data in binary units, for every maintenance receipt. */
 export function clonesBytes(value: number): string {
   if (value < 1024) return `${value} B`;
   if (value < 1024 * 1024) return `${(value / 1024).toFixed(1)} KiB`;
@@ -205,7 +206,7 @@ export function ClonesPanel({
             <strong>{summary.cancelled ? `Stopped · ${headline.title}` : headline.title}</strong>
             <small>{headline.detail}</small>
           </div>
-          <time>took {formatTook(Date.parse(summary.finishedAt) - Date.parse(summary.startedAt))}</time>
+          <time>took {formatElapsed(Date.parse(summary.finishedAt) - Date.parse(summary.startedAt))}</time>
         </div>
       ) : null}
       <div className="maintenance__body">
@@ -338,11 +339,6 @@ export function ClonesPanel({
       </div>
     </>
   );
-}
-
-function formatTook(ms: number): string {
-  const seconds = Math.max(0, Math.round(ms / 1000));
-  return seconds >= 60 ? `${Math.floor(seconds / 60)}m ${seconds % 60}s` : `${seconds}s`;
 }
 
 function CloneRepoRow({

@@ -4,7 +4,8 @@ import { mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import type { MaintenanceRepo } from "@pwrgit/shared";
+import { ok, type MaintenanceRepo } from "@pwrgit/shared";
+import type { GitExec } from "./dugite";
 import { createSystemGit } from "./test-support/system-git";
 import {
   parseReflinkPorcelain,
@@ -70,6 +71,93 @@ describe("git worktree reflink porcelain", () => {
   it("fails without a summary, with Git's words", () => {
     const result = reshareResultFromPorcelain(worktree, parseReflinkPorcelain(""), 128, "fatal: not a git repository");
     expect(result).toMatchObject({ outcome: "failed", message: "fatal: not a git repository" });
+  });
+
+  it("leaves symlinks and submodules out of the count, not only the reasons", () => {
+    const parsed = parseReflinkPorcelain(
+      record("reflink 1", "backend clone-replace") +
+        record("path link", "status skipped", "reason index-entry") +
+        record("path sub", "status skipped", "reason index-entry") +
+        record("path a.txt", "status skipped", "reason target-dirty") +
+        record("path b.bin", "status reshared") +
+        record("summary", "reshared 1", "skipped 3", "failed 0", "observed-private-reduction 4096")
+    );
+    const result = reshareResultFromPorcelain(worktree, parsed, 0, "");
+    expect(result).toMatchObject({ skipped: 1 });
+    expect(result.message).toBe("1 file re-shared · 1 left as they are (1 changed).");
+  });
+});
+
+describe("refreshRepositoryClones without Git", () => {
+  const repo: MaintenanceRepo = { id: "r", name: "fixture", path: "/m", profileId: "p", profileName: "P" };
+  const row = (id: string, extra: Partial<ReshareWorktreeRow> = {}): ReshareWorktreeRow => ({
+    id, path: `/${id}`, branch: id, isPrimary: false, missing: false, locked: false, ...extra
+  });
+  const porcelain = record("reflink 1", "backend clone-replace") + record("summary", "reshared 1", "skipped 0", "failed 0");
+  const fake = (calls: string[]): GitExec => async (args, cwd) => {
+    calls.push(`${args[0]} ${cwd}`);
+    return ok({ stdout: args[0] === "worktree" ? porcelain : "", stderr: "", exitCode: 0 });
+  };
+
+  it("numbers worktrees as they start and refreshes the donor index inside its lock", async () => {
+    const calls: string[] = [];
+    const reports: string[] = [];
+    const locks: string[] = [];
+    await refreshRepositoryClones({
+      git: fake(calls),
+      repo,
+      worktrees: [row("main", { isPrimary: true, path: "/m" }), row("a"), row("b"), row("c")],
+      updateMain: false,
+      signal: new AbortController().signal,
+      report: (detail) => reports.push(detail),
+      defaultBranch: async () => "main",
+      softPull: async () => { throw new Error("not asked"); },
+      runWorktree: async (id, operation) => {
+        locks.push(id);
+        const value = await operation();
+        if (id === "main") expect(calls.at(-1)).toBe("status /m");
+        return value;
+      },
+      concurrency: 2
+    });
+    expect(locks[0]).toBe("main");
+    expect(reports).toEqual(["Worktree 1 of 3 · a", "Worktree 2 of 3 · b", "Worktree 3 of 3 · c"]);
+  });
+
+  it("calls a repository whose worktrees all went unrun skipped, not a success", async () => {
+    const calls: string[] = [];
+    const result = await refreshRepositoryClones({
+      git: fake(calls),
+      repo,
+      worktrees: [row("main", { isPrimary: true }), row("gone", { missing: true }), row("held", { locked: true })],
+      updateMain: false,
+      signal: new AbortController().signal,
+      report: () => undefined,
+      defaultBranch: async () => "main",
+      softPull: async () => { throw new Error("not asked"); },
+      runWorktree: (_id, operation) => operation()
+    });
+    expect(result.outcome).toBe("skipped");
+    expect(calls.some((call) => call.startsWith("worktree"))).toBe(false);
+  });
+
+  it("stops before the donor refresh once cancelled", async () => {
+    const calls: string[] = [];
+    const controller = new AbortController();
+    controller.abort();
+    const result = await refreshRepositoryClones({
+      git: fake(calls),
+      repo,
+      worktrees: [row("main", { isPrimary: true }), row("a")],
+      updateMain: false,
+      signal: controller.signal,
+      report: () => undefined,
+      defaultBranch: async () => "main",
+      softPull: async () => { throw new Error("not asked"); },
+      runWorktree: (_id, operation) => operation()
+    });
+    expect(result.outcome).toBe("cancelled");
+    expect(calls).toEqual([]);
   });
 });
 

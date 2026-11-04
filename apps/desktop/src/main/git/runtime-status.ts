@@ -228,7 +228,9 @@ function noteActiveCandidate(candidates: GitRuntimeCandidate[]): void {
   if (active !== undefined) noteGitReflinkSupport(path, active.git, active.reflink ?? NO_REFLINK);
 }
 
-let activeProbe: Promise<void> | undefined;
+/** In-flight probes by path: callers asking about the same Git share one,
+ *  and a runtime switch never waits on the previous Git's answer. */
+const activeProbes = new Map<string, Promise<void>>();
 
 /**
  * Probe only the Git in use, so the `-c checkout.reflink=true` flag follows
@@ -236,8 +238,10 @@ let activeProbe: Promise<void> | undefined;
  * without the flag — the ordinary writer, never a wrong one.
  */
 export function refreshActiveGitReflink(deps: GitDiscoveryDeps = machine): Promise<void> {
-  activeProbe ??= (async () => {
-    const path = activeGitPath();
+  const path = activeGitPath();
+  const pending = activeProbes.get(path);
+  if (pending !== undefined) return pending;
+  const probe = (async () => {
     const probed = await probeGitRuntime(path, installedGitSelection() === null ? "bundled" : "custom", deps);
     noteActiveCandidate([probed]);
     const support = probed.reflink ?? NO_REFLINK;
@@ -247,9 +251,10 @@ export function refreshActiveGitReflink(deps: GitDiscoveryDeps = machine): Promi
       `copy-on-write support of ${path}: checkout ${support.checkout ? "yes" : "no"}, re-share ${support.reshare ? "yes" : "no"}; flag ${reflinkCheckoutActive() ? "on" : "off"}`
     );
   })().finally(() => {
-    activeProbe = undefined;
+    activeProbes.delete(path);
   });
-  return activeProbe;
+  activeProbes.set(path, probe);
+  return probe;
 }
 
 /** What `git:reflinkSupport` answers. */
@@ -280,18 +285,21 @@ export async function selectGitRuntime(
 ): Promise<Result<null>> {
   const path = requested?.trim() ?? "";
   const chosen = path === "" || path === bundledGitPath() ? null : path;
+  let probed: GitRuntimeCandidate | null = null;
   if (chosen !== null) {
     if (!pathsFor(deps).isAbsolute(chosen)) {
       return err({ kind: "git", code: "git_runtime_relative", message: "Choose Git by its full path." });
     }
-    const probed = await probeGitRuntime(chosen, "custom", deps);
+    probed = await probeGitRuntime(chosen, "custom", deps);
     if (probed.problem !== null) {
       return err({ kind: "git", code: `git_runtime_${probed.problem}`, message: PROBLEM_MESSAGE[probed.problem](chosen) });
     }
   }
   settings.update({ gitPath: chosen ?? undefined });
   useInstalledGit(chosen);
-  await refreshActiveGitReflink(deps);
+  // The chosen Git was just probed; only the bundle still needs asking.
+  if (probed === null) await refreshActiveGitReflink(deps);
+  else noteActiveCandidate([probed]);
   logMain("info", "git", chosen === null ? "repository commands use the bundled Git" : `repository commands use the installed Git at ${chosen}`);
   return ok(null);
 }
