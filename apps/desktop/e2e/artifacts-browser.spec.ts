@@ -2,6 +2,7 @@ import { expect, test } from "@playwright/test";
 import { launchApp, type AppHandle } from "./fixtures/electron-app";
 import { createForgeFixture } from "./fixtures/forge-fixture";
 import { createGitSandbox, type GitSandbox } from "./fixtures/git-sandbox";
+import { openAddMenuItem } from "./fixtures/steps";
 
 let handle: AppHandle | null = null;
 let sandbox: GitSandbox | null = null;
@@ -26,8 +27,7 @@ test("browse an Artifacts account and namespace, then select its exact HTTPS rep
   handle = await launchApp({ forgeFixturePath: fixture.path });
   await handle.setPickDirectory(sandbox.reposDir);
   await handle.window.getByRole("button", { name: /Add folders/i }).click();
-  await expect(handle.window.locator(".clone-repo")).toBeEnabled();
-  await handle.window.locator(".clone-repo").click();
+  await openAddMenuItem(handle.window, "Clone…");
   const dialog = handle.window.getByRole("dialog", { name: "Clone a repository" });
   await dialog.getByRole("button", { name: "Browse Cloudflare repositories" }).click();
   await dialog.getByLabel("Cloudflare account", { exact: true }).selectOption(hostname);
