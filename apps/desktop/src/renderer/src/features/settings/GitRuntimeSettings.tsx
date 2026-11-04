@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { Fragment, useEffect, useState } from "react";
 import type {
   GitRuntimeCandidate,
   GitRuntimeProblem,
@@ -109,15 +109,28 @@ function Reading(props: {
   );
 }
 
-/** `2.53.0 · LFS 3.7.1` — the versions a row is chosen by. */
-function rowMeta(candidate: GitRuntimeCandidate): string {
-  return [
+/** `Bundled · 2.53.0 · LFS 3.7.1` — the versions a row is chosen by. The line
+ *  wraps between parts, never inside one, so `2.56.0-dev-pwrgit.2` is not split
+ *  at its hyphens in a narrow window. */
+function RowMeta(props: { candidate: GitRuntimeCandidate }) {
+  const { candidate } = props;
+  const parts = [
     SOURCE_LABEL[candidate.source],
     candidate.git === null ? null : describeVersion("git", candidate.git).version,
     candidate.lfs === null ? null : `LFS ${describeVersion("lfs", candidate.lfs).version}`
-  ]
-    .filter((part) => part !== null)
-    .join(" · ");
+  ].filter((part) => part !== null);
+  return (
+    <span className="settings-ai-install__meta">
+      {parts.map((part, index) => (
+        <Fragment key={index}>
+          {index > 0 ? " " : null}
+          <span className="settings-ai-install__meta-part">
+            {index < parts.length - 1 ? `${part} ·` : part}
+          </span>
+        </Fragment>
+      ))}
+    </span>
+  );
 }
 
 function GitInstalls(props: {
@@ -140,7 +153,7 @@ function GitInstalls(props: {
                 <span className="settings-ai-install__path" {...hoverTooltip(tip, candidate.path)}>
                   {candidate.path}
                 </span>
-                <span className="settings-ai-install__meta">{rowMeta(candidate)}</span>
+                <RowMeta candidate={candidate} />
               </span>
               {using ? (
                 <span className={settingsChipClass(candidate.problem === null ? "ok" : "err")}>
