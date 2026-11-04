@@ -918,7 +918,7 @@ export class RepoIndexer {
     // repo/branch name outranks one buried in a path; PR number/title hits
     // rank just under names.
     const exactTier = searchExactTierParams(query);
-    const prLike = exactTier[3];
+    const prLike = exactTier[1];
     // Rows of a hidden repository are dropped before the cap, not after it
     // (src/main/AGENTS.md). Most profiles hide nothing indexed, and then the
     // clause and its per-row lookup are left out entirely.

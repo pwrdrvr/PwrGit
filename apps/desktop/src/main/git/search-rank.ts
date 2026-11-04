@@ -21,20 +21,34 @@ import type { DB } from "../persistence/db";
  */
 
 /**
- * The names a hit answers to.
+ * Whether a row's own names ARE the query: -1 for a repository the query
+ * names, 0 for anything else it names, null otherwise. `wanted` is the
+ * query's `searchNameKey`.
+ *
+ * Main's `searchMatchTier` and the search SQL (`pwrgit_search_exact_tier`, in
+ * `SEARCH_EXACT_TIER_SQL`) both call this, so the row SQL keeps inside the cap
+ * is the row main would lead with.
  *
  * A checkout answers to its directory as well as its branch: the directory is
  * named once, at creation, and a later branch rename leaves it as the only
  * name that still matches what the user's shell and editor show them.
  *
  * Branch hits get no such treatment even though they carry a `path` — theirs
- * is their REPO's directory, not their own. Counting it would make every
- * worktree-less branch in a repo an exact match for that repo's folder name.
+ * is their REPO's directory (or, in the index, their ref), not their own.
+ * Counting it would make every worktree-less branch in a repo an exact match
+ * for that repo's folder name.
  */
-const answersTo = (hit: RepoSearchHit): string[] =>
-  hit.kind === "repo" || hit.kind === "worktree"
-    ? [hit.name, searchPathLeaf(hit.path)]
-    : [hit.name];
+export function exactNameTier(
+  kind: string,
+  name: string,
+  path: string,
+  wanted: string
+): -1 | 0 | null {
+  const nameKey = searchNameKey(name);
+  if (nameKey === wanted) return kind === "repo" ? -1 : 0;
+  if (kind !== "repo" && kind !== "worktree") return null;
+  return searchNameKey(searchPathLeaf(path)) === wanted ? 0 : null;
+}
 
 /** -1 = an exact repo name; 0 = the query names this hit (or its change
  *  request's number), 1 = it begins one of its names, 2 = somewhere else
@@ -47,18 +61,17 @@ export function searchMatchTier(
 ): SearchMatchTier {
   const wanted = searchNameKey(query);
   if (wanted === "") return 2;
-  if (hit.kind === "repo" && searchNameKey(hit.name) === wanted) return -1;
+  const exact = exactNameTier(hit.kind, hit.name, hit.path, wanted);
+  if (exact !== null) return exact;
   // `106` names change request #106 as surely as a branch's name names the
   // branch — and the index only knows it as a prefix, so #1060 matched too.
   const number = changeRequestNumberQuery(query);
   if (number !== null && hit.pr?.number === number) return 0;
-  let tier: SearchMatchTier = 2;
-  for (const name of answersTo(hit)) {
-    const candidate = searchNameKey(name);
-    if (candidate === wanted) return 0;
-    if (candidate.startsWith(wanted)) tier = 1;
-  }
-  return tier;
+  const names =
+    hit.kind === "repo" || hit.kind === "worktree"
+      ? [hit.name, searchPathLeaf(hit.path)]
+      : [hit.name];
+  return names.some((name) => searchNameKey(name).startsWith(wanted)) ? 1 : 2;
 }
 
 /**
@@ -132,49 +145,40 @@ export function rankSearchHits(
 }
 
 /**
- * The search SQL's own copy of `searchMatchTier`'s exact tiers, decided
- * before the result cap: -1 for a repository the query names, 0 for anything
- * else it names (by name, by a checkout's folder, or by change-request
- * number), 1 for the rest, which bm25 orders.
+ * The search SQL's exact tiers, decided before the result cap: -1 for a
+ * repository the query names, 0 for anything else it names (by name, by a
+ * checkout's folder, or by change-request number), 1 for the rest, which
+ * bm25 orders.
  *
- * It has to agree with `searchMatchTier`, or a row main would lead with is
- * cut before main sees it. So it calls the same `searchNameKey` through
- * `registerSearchSqlFunctions` rather than SQLite's `COLLATE NOCASE`, which
- * folds only ASCII: a repository named `Übersicht` was no exact match for
- * `übersicht` there, and 60 checkouts on a branch of that name took every
- * slot. A checkout's folder is its path's last segment, which FTS5 cannot
- * pick out of a tokenized path.
+ * The names are judged by `exactNameTier`, the function `searchMatchTier`
+ * uses, registered on the connection by `registerSearchSqlFunctions`. SQLite's
+ * `COLLATE NOCASE` folds only ASCII: a repository named `Übersicht` was no
+ * exact match for `übersicht` there, and 60 checkouts on a branch of that
+ * name took every slot before main could rank it first.
  *
  * Reads `kind`, `name`, `path` and `pr` of a `search_fts` row; bind
- * `searchExactTierParams(query)` in order. `AND` short-circuits, so the
- * functions run only on rows of the kinds that need them.
+ * `searchExactTierParams(query)` in order. One call into JS per row.
  */
-export const SEARCH_EXACT_TIER_SQL = `CASE
-  WHEN kind = 'repo' AND pwrgit_search_key(name) = ? THEN -1
-  WHEN pwrgit_search_key(name) = ?
-    OR (kind IN ('repo', 'worktree') AND pwrgit_search_leaf_key(path) = ?)
-    OR pr LIKE ?
-  THEN 0 ELSE 1 END`;
+export const SEARCH_EXACT_TIER_SQL = `MIN(
+  pwrgit_search_exact_tier(kind, name, path, ?),
+  CASE WHEN pr LIKE ? THEN 0 ELSE 1 END)`;
 
-export function searchExactTierParams(
-  query: string
-): [string, string, string, string | null] {
-  const key = searchNameKey(query);
+export function searchExactTierParams(query: string): [string, string | null] {
   // A bare number names a change request exactly; its `pr` text begins with
   // that number and a space. Without this the index's prefix match lets
   // #1060 and every branch spelled `issue-10604` crowd #106 past the cap.
   const prNumber = changeRequestNumberQuery(query);
-  return [key, key, key, prNumber === null ? null : `${prNumber} %`];
+  return [searchNameKey(query), prNumber === null ? null : `${prNumber} %`];
 }
 
-/** Make `SEARCH_EXACT_TIER_SQL`'s functions callable on this connection. */
+/** Make `SEARCH_EXACT_TIER_SQL`'s function callable on this connection. */
 export function registerSearchSqlFunctions(db: DB): void {
   const text = (value: unknown): string =>
     typeof value === "string" ? value : "";
-  db.function("pwrgit_search_key", { deterministic: true }, (value) =>
-    searchNameKey(text(value))
-  );
-  db.function("pwrgit_search_leaf_key", { deterministic: true }, (path) =>
-    searchNameKey(searchPathLeaf(text(path)))
+  db.function(
+    "pwrgit_search_exact_tier",
+    { deterministic: true },
+    (kind, name, path, wanted) =>
+      exactNameTier(text(kind), text(name), text(path), text(wanted)) ?? 1
   );
 }

@@ -15,7 +15,7 @@
 
 const ASCII = /^[\x00-\x7f]*$/;
 
-const stripMarks =(value: string): string =>
+const stripMarks = (value: string): string =>
   value.normalize("NFKD").replace(/\p{M}/gu, "");
 
 /**
@@ -29,10 +29,12 @@ export function searchNameKey(value: string): string {
   // Most names are ASCII, where all of the below is `toLowerCase`. The search
   // SQL calls this once per matched row, on the main process.
   if (ASCII.test(value)) return value.trim().toLowerCase();
-  const folded = Array.from(stripMarks(value.trim()), (char) =>
+  // Trim after decomposing: NFKD can leave a space at either end (a spacing
+  // diaeresis `¨` is a space and a combining mark).
+  const folded = Array.from(stripMarks(value), (char) =>
     char.toUpperCase().toLowerCase()
   ).join("");
-  return stripMarks(folded);
+  return stripMarks(folded).trim();
 }
 
 /** The final segment of a path, with either platform's separators. */

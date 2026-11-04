@@ -33,3 +33,10 @@ describe("searchPathLeaf", () => {
     expect(searchPathLeaf("")).toBe("");
   });
 });
+
+describe("searchNameKey whitespace", () => {
+  it("trims a space that decomposition leaves at the end", () => {
+    // U+00A8 is a spacing diaeresis: NFKD makes it a space and a mark.
+    expect(searchNameKey("a¨")).toBe("a");
+  });
+});

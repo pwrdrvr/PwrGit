@@ -260,8 +260,8 @@ export function buildPaletteItems(
   // `searchNameKey` is main's and the search SQL's test too: a row main
   // ranked as exactly named must lead here as well, in any script.
   const exactName = searchNameKey(query);
-  // Only the full name, any case or accent: typing part of a name you hid should not
-  // bring it back into view, but naming it is asking for it.
+  // Only the full name, in any case or accent: typing part of a name you hid
+  // should not bring it back into view, but naming it is asking for it.
   const hiddenExact: PaletteItem[] =
     exactName === ""
       ? []

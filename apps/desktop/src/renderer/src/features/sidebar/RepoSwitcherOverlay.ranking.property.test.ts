@@ -230,7 +230,17 @@ describe("⌘K exact repository name", () => {
 });
 
 /** One row of every kind the capped search query ranks, named freely. */
-type Names = { repo: string; repoFolder: string; worktree: string; worktreeFolder: string; local: string; remote: string };
+type Names = {
+  repo: string;
+  repoFolder: string;
+  worktree: string;
+  worktreeFolder: string;
+  local: string;
+  remote: string;
+  /** The open PR on the worktree's branch, if any: a bare number names it
+   *  (SQL's `pr LIKE '<n> %'`, main's `pr.number`). */
+  prNumber: number | null;
+};
 
 const names: fc.Arbitrary<Names> = fc.record({
   repo: repoName,
@@ -238,14 +248,21 @@ const names: fc.Arbitrary<Names> = fc.record({
   worktree: repoName,
   worktreeFolder: repoName,
   local: repoName,
-  remote: repoName
+  remote: repoName,
+  prNumber: fc.option(fc.integer({ min: 1, max: 999 }))
 });
 
 /** A query aimed at one of the names (typed in full, or its first letters),
  *  or at nothing in particular. */
 const queryFor = (n: Names): fc.Arbitrary<string> => {
-  const all = Object.values(n);
+  const all = [n.repo, n.repoFolder, n.worktree, n.worktreeFolder, n.local, n.remote];
+  // `#106` and `106` name PR 106; `1060` must not.
+  const prQueries =
+    n.prNumber === null
+      ? []
+      : [fc.constantFrom(`${n.prNumber}`, `#${n.prNumber}`, ` ${n.prNumber}0`)];
   return fc.oneof(
+    ...prQueries,
     fc.constantFrom(...all).chain(typedAs),
     fc
       .constantFrom(...all)
@@ -257,6 +274,14 @@ const queryFor = (n: Names): fc.Arbitrary<string> => {
 
 function seedNames(n: Names): void {
   db.prepare("DELETE FROM repos").run();
+  db.prepare("DELETE FROM branch_pr").run();
+  // Before the worktree: its search row copies the PR when it is written.
+  if (n.prNumber !== null) {
+    db.prepare(
+      `INSERT INTO branch_pr (repo_id, branch, number, url, title, state)
+       VALUES ('r', ?, ?, ?, 'a change', 'open')`
+    ).run(n.worktree, n.prNumber, `https://github.com/o/r/pull/${n.prNumber}`);
+  }
   db.prepare("INSERT INTO repos (id, profile_id, name, path) VALUES ('r', ?, ?, ?)").run(
     mine,
     n.repo,
@@ -323,7 +348,8 @@ describe("⌘K's three tests of an exact name agree", () => {
       worktree: "feature",
       worktreeFolder: "wip_1",
       local: "x",
-      remote: "y"
+      remote: "y",
+      prNumber: null
     });
     expect(sqlTiers("wip1").get("worktree")).toBe(1);
     expect(sqlTiers("WIP_1").get("worktree")).toBe(0);
