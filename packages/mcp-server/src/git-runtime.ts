@@ -14,6 +14,13 @@ export type BundledGitOptions = {
    *  Defaults to the PATH the command inherits. */
   searchPath?: string;
   platform?: NodeJS.Platform;
+  /**
+   * PwrGit's copy-on-write checkout switch, as `checkout.reflink`. Written
+   * after the system config's include, so it outranks the bundle's own config
+   * (the PwrGit runtime `.2` payload forces `true` there) while global and
+   * repository config still win. Undefined writes nothing.
+   */
+  checkoutReflink?: boolean;
 };
 
 let defaultConfigDirectory: string | null = null;
@@ -65,7 +72,7 @@ export function bundledGitEnvironment(
   const includedSystem = userSystem ?? bundleSystem;
   const systemConfig = configDirectory === null || includedSystem === undefined
     ? undefined
-    : bundledSystemConfig(configDirectory, includedSystem, keychainHelper);
+    : bundledSystemConfig(configDirectory, includedSystem, keychainHelper, options.checkoutReflink);
   // With no generated config, Dugite keeps an inherited GIT_CONFIG_SYSTEM, so
   // it is replaced by the user's own, or by the bundle's when that was an
   // app's. (On Windows the variable cannot be unset from here; that needs an
@@ -245,6 +252,8 @@ const writtenSystemConfigs = new Set<string>();
  *   `git lfs install` against their global config. The filter also has
  *   git-lfs install its pre-push hook on first use, so pushes upload objects.
  * - On macOS, the installed keychain credential helper.
+ * - After the include, `checkout.reflink` when the app passes its switch:
+ *   the one setting PwrGit means to hold over the bundle's own.
  *
  * System scope, like the installed Git's, so global and repository config
  * still override every default: `lfs install --skip-smudge` keeps pointers,
@@ -260,7 +269,8 @@ const writtenSystemConfigs = new Set<string>();
 function bundledSystemConfig(
   directory: string,
   systemConfig: string,
-  keychainHelper: string | undefined
+  keychainHelper: string | undefined,
+  checkoutReflink: boolean | undefined
 ): string | undefined {
   const content = [
     `${GENERATED_CONFIG_MARKER} defaults for its bundled Git, then the`,
@@ -282,6 +292,7 @@ function bundledSystemConfig(
       ]),
     "[include]",
     `\tpath = ${quoteConfigValue(systemConfig)}`,
+    ...(checkoutReflink === undefined ? [] : ["[checkout]", `\treflink = ${checkoutReflink}`]),
     ""
   ].join("\n");
   const hash = createHash("sha256").update(content).digest("hex").slice(0, 16);

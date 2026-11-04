@@ -657,8 +657,8 @@ export type GitReflinkStatus = {
   support: GitReflinkSupport;
   /** Settings › General › Git runtime › Copy-on-write checkout. */
   enabled: boolean;
-  /** True when PwrGit passes `-c checkout.reflink=true` right now: the
-   *  switch is on and this Git supports it. */
+  /** True when PwrGit turns `checkout.reflink` on right now: the switch is
+   *  on and this Git supports it. */
   active: boolean;
 };
 

@@ -145,11 +145,15 @@ its main checkout. Support is read from `git worktree -h`
 .1), a `git worktree reflink` line means re-share (.2). Never from a version
 string: a local build of the same source has none.
 
-- **The flag is per process, never config.** `gitProcessInvocation` prefixes
-  `-c checkout.reflink=true` while Settings' switch is on *and* the last probe
-  of the Git in use (`refreshActiveGitReflink`, at launch and after every
-  runtime switch) said it can. Off passes nothing, so the reader's own config
-  stays in charge. Probes call `gitLaunch` directly and never get the flag.
+- **The switch reaches the bundle as system config, not `-c`.**
+  `bundledSystemConfig` writes `checkout.reflink = true|false` *after* the
+  bundle's include, while Settings' switch is on *and* the last probe of the
+  Git in use (`refreshActiveGitReflink`, at launch and after every runtime
+  switch) said it can. Off is written as `false`: runtime `.2`'s own
+  `etc/gitconfig` forces `true` (`.3` drops it). System scope keeps the
+  user's global and repository config in charge, as for LFS and the keychain.
+  An installed Git reads its own system config, which PwrGit never writes, so
+  it gets `-c checkout.reflink=true` while on and nothing while off.
 - **Clones (`worktree-reshare.ts`) is non-destructive by Git's contract.**
   Git compares bytes before it shares and skips changed, untracked and ignored
   files. Keep the real-Git test (`worktree-reshare.test.ts`, run with

@@ -726,10 +726,12 @@ export type GeneralSettings = {
    */
   gitIdentityReminder: boolean;
   /**
-   * Settings › General › Git runtime: run every Git with
-   * `-c checkout.reflink=true`, so checkouts clone files the main checkout
-   * holds unchanged. Applies only while the Git in use supports it; with any
-   * other Git the switch is shown disabled. Nothing is written to Git config.
+   * Settings › General › Git runtime: Git runs with `checkout.reflink` on,
+   * so checkouts clone files the main checkout holds unchanged. Applies only
+   * while the Git in use supports it; with any other Git the switch is shown
+   * disabled. Set in PwrGit's generated system config for the bundle (where
+   * the user's own config still wins) and as `-c` for an installed Git;
+   * nothing is written to the user's Git config.
    */
   gitReflinkCheckout: boolean;
   /**

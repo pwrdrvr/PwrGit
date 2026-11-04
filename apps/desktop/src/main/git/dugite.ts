@@ -64,7 +64,8 @@ export function activeGitReflinkProbe(): { version: string | null; support: GitR
   return probedReflink !== null && probedReflink.path === activeGitPath() ? probedReflink : null;
 }
 
-/** Whether every Git process gets `-c checkout.reflink=true` right now. */
+/** Whether every Git process clones on checkout right now: the switch is on
+ *  and the Git in use said it can. */
 export function reflinkCheckoutActive(): boolean {
   return reflinkCheckoutWanted && activeGitReflinkProbe()?.support.checkout === true;
 }
@@ -178,10 +179,12 @@ export function gitProcessInvocation(
   args: string[],
   cwd: string
 ): GitProcessInvocation {
-  // Copy-on-write checkout is a per-process `-c`, never written to config:
-  // switching it off in Settings leaves the reader's own config in charge.
+  // Copy-on-write checkout: the bundle gets it from PwrGit's generated system
+  // config (`gitExecutionEnvironment`). An installed Git reads its own system
+  // config, which PwrGit never writes, so it gets a per-process `-c` while on.
+  const flag = installedGit !== null && reflinkCheckoutActive() ? REFLINK_CHECKOUT_ARGS : [];
   return {
-    args: [...(reflinkCheckoutActive() ? REFLINK_CHECKOUT_ARGS : []), "-C", cwd, ...args],
+    args: [...flag, "-C", cwd, ...args],
     processCwd: tmpdir()
   };
 }
@@ -194,6 +197,9 @@ export function gitExecutionEnvironment(
   return {
     ...bundledGitEnvironment(bundledDirectory, overrides, {
       configDirectory: generatedConfigDirectory,
+      // Always written, off included: the runtime .2 payload's own config
+      // forces it on. Global and repository config still override it.
+      checkoutReflink: installedGit === null && reflinkCheckoutActive(),
       searchPath: keychainSearchPath()
     }),
     ...NON_INTERACTIVE_GIT_ENV

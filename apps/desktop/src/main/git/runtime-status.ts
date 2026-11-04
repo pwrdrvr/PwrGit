@@ -233,9 +233,9 @@ function noteActiveCandidate(candidates: GitRuntimeCandidate[]): void {
 const activeProbes = new Map<string, Promise<void>>();
 
 /**
- * Probe only the Git in use, so the `-c checkout.reflink=true` flag follows
- * it: at launch and after every runtime switch. Until it answers, Git runs
- * without the flag — the ordinary writer, never a wrong one.
+ * Probe only the Git in use, so `checkout.reflink` follows it: at launch
+ * and after every runtime switch. Until it answers, copy-on-write checkout
+ * stays off — the ordinary writer, never a wrong one.
  */
 export function refreshActiveGitReflink(deps: GitDiscoveryDeps = machine): Promise<void> {
   const path = activeGitPath();

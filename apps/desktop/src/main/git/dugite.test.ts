@@ -1,17 +1,19 @@
 import { execFileSync } from "node:child_process";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import type { PwrGitError } from "@pwrgit/shared";
 import {
   activeGitPath,
+  configureBundledGitConfig,
   execGit,
   execGitRecords,
   gitExecutionEnvironment,
   gitProcessInvocation,
   noteGitReflinkSupport,
   sanitizeGitLogDetail,
+  useInstalledGit,
   useReflinkCheckout
 } from "./dugite";
 
@@ -54,28 +56,52 @@ describe("gitProcessInvocation", () => {
   });
 });
 
-describe("copy-on-write checkout flag", () => {
+describe("copy-on-write checkout", () => {
   const worktree = join(tmpdir(), "fixture", "worktree");
   const capable = { checkout: true, reshare: true };
+  const systemConfig = (): string => readFileSync(gitExecutionEnvironment().GIT_CONFIG_SYSTEM ?? "", "utf8");
 
-  it("prefixes -c checkout.reflink=true only while the switch is on and the Git in use supports it", () => {
+  it("reaches the bundle through PwrGit's system config, off included, and never as -c", () => {
+    const directory = mkdtempSync(join(tmpdir(), "pwrgit-gitconfig-"));
     try {
+      configureBundledGitConfig(directory);
       noteGitReflinkSupport(activeGitPath(), "git version 2.56.0-dev-pwrgit.2", capable);
+      useReflinkCheckout(true);
+      expect(systemConfig()).toContain("[checkout]\n\treflink = true\n");
+      expect(gitProcessInvocation(["switch", "x"], worktree).args[0]).toBe("-C");
+      // Off is written as false: the runtime .2 payload's own config says true.
+      useReflinkCheckout(false);
+      expect(systemConfig()).toContain("[checkout]\n\treflink = false\n");
+      // A Git without support is never told to clone.
+      useReflinkCheckout(true);
+      noteGitReflinkSupport(activeGitPath(), "git version 2.56.0", { checkout: false, reshare: false });
+      expect(systemConfig()).toContain("reflink = false");
+    } finally {
+      configureBundledGitConfig(null);
+      useReflinkCheckout(false);
+      noteGitReflinkSupport("/nowhere", null, { checkout: false, reshare: false });
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
+  it("prefixes -c checkout.reflink=true for an installed Git only while on and capable", () => {
+    const installed = join(tmpdir(), "fixture", "bin", "git");
+    try {
+      useInstalledGit(installed);
+      noteGitReflinkSupport(installed, "git version 2.56.0-dev-pwrgit.2", capable);
       useReflinkCheckout(true);
       expect(gitProcessInvocation(["switch", "x"], worktree).args).toEqual([
         "-c", "checkout.reflink=true", "-C", worktree, "switch", "x"
       ]);
-      // Switched off: nothing, so the reader's own config decides.
+      // Off passes nothing: an installed Git's own config decides.
       useReflinkCheckout(false);
       expect(gitProcessInvocation(["switch", "x"], worktree).args[0]).toBe("-C");
-      // A Git without support never gets the flag.
-      useReflinkCheckout(true);
-      noteGitReflinkSupport(activeGitPath(), "git version 2.56.0", { checkout: false, reshare: false });
-      expect(gitProcessInvocation(["switch", "x"], worktree).args[0]).toBe("-C");
       // A probe of some other Git says nothing about the one in use.
+      useReflinkCheckout(true);
       noteGitReflinkSupport("/elsewhere/git", "git version 2.56.0-dev-pwrgit.2", capable);
       expect(gitProcessInvocation(["switch", "x"], worktree).args[0]).toBe("-C");
     } finally {
+      useInstalledGit(null);
       useReflinkCheckout(false);
       noteGitReflinkSupport("/nowhere", null, { checkout: false, reshare: false });
     }

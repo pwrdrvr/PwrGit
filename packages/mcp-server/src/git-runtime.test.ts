@@ -150,6 +150,18 @@ describe("bundledGitEnvironment", () => {
     expect(path.indexOf("/fixture/bin")).toBeLessThan(path.indexOf(dirname(helper)));
   });
 
+  it("writes the copy-on-write switch after the bundle's include, so it outranks the bundle", () => {
+    const configDirectory = temporary("pwrgit-gitconfig-");
+    const on = readFileSync(bundledGitEnvironment(undefined, {}, { configDirectory, platform: "linux", checkoutReflink: true }).GIT_CONFIG_SYSTEM ?? "", "utf8");
+    const off = bundledGitEnvironment(undefined, {}, { configDirectory, platform: "linux", checkoutReflink: false });
+    const offText = readFileSync(off.GIT_CONFIG_SYSTEM ?? "", "utf8");
+    expect(on.endsWith("[checkout]\n\treflink = true\n")).toBe(true);
+    expect(offText.endsWith("[checkout]\n\treflink = false\n")).toBe(true);
+    expect(offText.indexOf("[checkout]")).toBeGreaterThan(offText.indexOf("[include]"));
+    const unset = readFileSync(bundledGitEnvironment(undefined, {}, { configDirectory, platform: "linux" }).GIT_CONFIG_SYSTEM ?? "", "utf8");
+    expect(unset).not.toContain("[checkout]");
+  });
+
   it("names the file by content, so differing app copies never rewrite each other's", () => {
     const configDirectory = temporary("pwrgit-gitconfig-");
     const one = bundledGitEnvironment(undefined, {}, { configDirectory, platform: "linux" });
@@ -282,7 +294,7 @@ describe("bundledGitEnvironment", () => {
 /** The bundled Git itself, reading the generated config: global config
  *  isolated, prompts off, exactly as PwrGit runs it. */
 describe.skipIf(!posix)("bundled Git with the generated config", () => {
-  function run(args: string[], options: { global?: string; stdin?: string }) {
+  function run(args: string[], options: { global?: string; stdin?: string; checkoutReflink?: boolean }) {
     const { bin } = homebrewGit(temporary("pwrgit-brew-"), "9.1.0");
     const home = temporary("pwrgit-home-");
     const global = join(home, "gitconfig");
@@ -293,7 +305,12 @@ describe.skipIf(!posix)("bundled Git with the generated config", () => {
           GIT_CONFIG_GLOBAL: global,
           HOME: home,
           GIT_TERMINAL_PROMPT: "0"
-        }, { configDirectory: temporary("pwrgit-gitconfig-"), platform: "darwin", searchPath: bin })
+        }, {
+          configDirectory: temporary("pwrgit-gitconfig-"),
+          platform: "darwin",
+          searchPath: bin,
+          ...(options.checkoutReflink === undefined ? {} : { checkoutReflink: options.checkoutReflink })
+        })
       },
       ...(options.stdin === undefined ? {} : { stdin: options.stdin })
     });
@@ -324,5 +341,15 @@ describe.skipIf(!posix)("bundled Git with the generated config", () => {
       global: "[filter \"lfs\"]\n\tsmudge = git-lfs smudge --skip -- %f\n"
     });
     expect(skipSmudge.stdout.trim()).toBe("git-lfs smudge --skip -- %f");
+  });
+
+  it("sets copy-on-write checkout from the app's switch, and leaves global config able to override it", async () => {
+    const off = await run(["config", "--get", "checkout.reflink"], { checkoutReflink: false });
+    expect(off.stdout.trim()).toBe("false");
+    const overridden = await run(["config", "--get", "checkout.reflink"], {
+      checkoutReflink: false,
+      global: "[checkout]\n\treflink = true\n"
+    });
+    expect(overridden.stdout.trim()).toBe("true");
   });
 });
