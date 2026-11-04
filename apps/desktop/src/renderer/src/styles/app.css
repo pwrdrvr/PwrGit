@@ -8497,9 +8497,11 @@ button.agent-menu__item:hover {
 .refs-tag-table__row--remote .refs-table__identity strong {
   color: var(--text-secondary);
 }
-.refs-tag-status {
+.refs-table__identity .refs-tag-status {
   display: flex;
   flex-wrap: wrap;
+  overflow: visible;
+  white-space: normal;
   align-items: center;
   gap: 5px;
 }
@@ -8563,7 +8565,10 @@ button.agent-menu__item:hover {
   color: var(--text-primary);
 }
 .refs-tag-object__kind {
+  min-width: 0;
+  overflow: hidden;
   color: var(--text-muted);
+  text-overflow: ellipsis;
   font: 500 9px/1 var(--font-sans);
 }
 
@@ -8626,7 +8631,7 @@ button.agent-menu__item:hover {
   color: var(--status-warning);
 }
 .refs-tag-details__section {
-  margin-top: 4px;
+  margin-top: 10px;
   color: var(--text-subtle);
   font: 700 9px/1 var(--font-sans);
   letter-spacing: 0.07em;

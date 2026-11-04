@@ -167,29 +167,20 @@ export function TagStatusTableRow({
     );
   }
 
-  const objectLine = (who: string | null, id: string, objectId: string, kind: string | null, emphasis = false) => (
+  /* Two values share one narrow column, so a line carries the commit only:
+     that is what moved. Compare sources… shows each tag object. */
+  const objectLine = (who: string, id: string, kind: string | null, emphasis = false) => (
     <span className="refs-tag-object__line">
-      {who !== null && <span className="refs-tag-object__who">{who}</span>}
+      <span className="refs-tag-object__who">{who}</span>
       <CopyTarget
         value={id}
-        label={`Copy ${who ?? "tag"} target ${id}`}
+        label={`Copy ${who} target ${id}`}
         hint={`${id}\nClick to copy tag target`}
         className={`refs-plan__copy copyable${emphasis ? " refs-tag-object__new" : ""}`}
         deferForDoubleClick
       >
         {id.slice(0, 12)}
       </CopyTarget>
-      {objectId !== id && (
-        <CopyTarget
-          value={objectId}
-          label={`Copy ${who ?? "tag"} tag object ${objectId}`}
-          hint={`${objectId}\nClick to copy the tag object`}
-          className="refs-tag-object__via copyable"
-          deferForDoubleClick
-        >
-          via tag {objectId.slice(0, 8)}
-        </CopyTarget>
-      )}
       {kind !== null && <span className="refs-tag-object__kind">{kind}</span>}
     </span>
   );
@@ -240,8 +231,8 @@ export function TagStatusTableRow({
       <div className="refs-tag-object">
         {twoValues ? (
           <>
-            {objectLine("local", local!.targetId, local!.objectId, kindsDiffer ? local!.kind : null)}
-            {objectLine(remote, published!.targetId, published!.objectId, kindsDiffer ? published!.kind : null, status === "differs")}
+            {objectLine("local", local!.targetId, kindsDiffer ? local!.kind : null)}
+            {objectLine(remote, published!.targetId, kindsDiffer ? published!.kind : null, status === "differs")}
           </>
         ) : local !== null ? (
           <>
@@ -270,7 +261,7 @@ export function TagStatusTableRow({
             )}
           </>
         ) : published !== null ? (
-          objectLine(remote, published.targetId, published.objectId, null)
+          objectLine(remote, published.targetId, null)
         ) : null}
       </div>
       <div className="refs-tag-annotation">
@@ -289,7 +280,7 @@ export function TagStatusTableRow({
           <small>
             {published?.available === true
               ? "Its commit is here; the tag is not"
-              : "Not downloaded — its message is not in this repository yet"}
+              : "Message not downloaded yet"}
           </small>
         ) : (
           <span className="refs-table__muted">—</span>
