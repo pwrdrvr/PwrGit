@@ -14,6 +14,7 @@ import {
 } from "./git-service";
 import type { RepoIndexer } from "./repo-indexer";
 import { worktreePathFor } from "./worktree-paths";
+import type { WorktreeOperationQueue } from "./worktree-operation-queue";
 import type { WorktreeStateService } from "./worktree-state";
 
 export function registerWorktreeLifecycleHandlers(
@@ -21,7 +22,8 @@ export function registerWorktreeLifecycleHandlers(
   db: DB,
   indexer: RepoIndexer,
   settings: SettingsService,
-  state: WorktreeStateService
+  state: WorktreeStateService,
+  operations: WorktreeOperationQueue
 ): void {
   const repoRow = (
     repoId: string
@@ -148,7 +150,10 @@ export function registerWorktreeLifecycleHandlers(
           listings.set(wt.repo_path, listed.ok ? listed.value : undefined);
         }
         const listed = listings.get(wt.repo_path);
-        const res = await worktreeRemove(execGit, wt.repo_path, wt.path, {
+        // In the worktree's queue, after the probes are drained: a Pull,
+        // switch or second removal of this checkout must not run Git in it
+        // while its folder is deleted.
+        const res = await operations.run(id, () => worktreeRemove(execGit, wt.repo_path, wt.path, {
           force: req.force ?? false,
           ...(listed === undefined ? {} : { listed }),
           onProgress: (progress) => {
@@ -158,7 +163,7 @@ export function registerWorktreeLifecycleHandlers(
               itemsDeleted: progress.itemsDeleted
             });
           }
-        });
+        }));
         if (res.ok) {
           logMain(
             "info",
