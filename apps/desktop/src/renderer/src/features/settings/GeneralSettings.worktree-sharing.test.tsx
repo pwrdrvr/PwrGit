@@ -29,9 +29,7 @@ async function render(reflink: "off" | "on", seed: "off" | "on" = "off") {
   await act(async () => root.render(<GeneralSettings
     saving={false}
     snapshot={snapshot}
-    platform="darwin"
     onThemeChange={() => undefined}
-    onDeveloperModeChange={() => undefined}
     onSearchAllProfilesChange={() => undefined}
     onSidebarTextSizeChange={() => undefined}
     onSidebarDensityChange={() => undefined}
