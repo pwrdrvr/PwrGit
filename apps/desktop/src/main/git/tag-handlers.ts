@@ -84,7 +84,8 @@ export function registerTagHandlers(bus: CommandBus, db: DB): void {
   bus.register("tag:keepLocal", async (req) => {
     const repo = repoOf(req.repoId);
     if (repo === undefined) return err(notFound);
-    tagSources.keepLocal(req.repoId, req);
+    const kept = await tagSources.keepLocal(execGit, req.repoId, repo.path, req);
+    if (!kept.ok) return kept;
     logMain(
       "info",
       "tag",
@@ -146,6 +147,9 @@ export function registerTagHandlers(bus: CommandBus, db: DB): void {
       "tag",
       `created ${created.value.kind} tag ${created.value.name} at ${created.value.targetId}`
     );
+    // The sidebar's "N tags differ" line reads a stored count; a new local
+    // name can differ from the publisher's. Name+id only, no network.
+    await tagSources.recountPublisher(execGit, req.repoId, repo.path);
     emitEvent("repo:changed", {
       profileId: repo.profile_id,
       repoIds: [req.repoId]
@@ -169,6 +173,7 @@ export function registerTagHandlers(bus: CommandBus, db: DB): void {
     );
     if (!deleted.ok) return deleted;
     logMain("info", "tag", `deleted local tag ${req.name}`);
+    await tagSources.recountPublisher(execGit, req.repoId, repo.path);
     emitEvent("repo:changed", {
       profileId: repo.profile_id,
       repoIds: [req.repoId]

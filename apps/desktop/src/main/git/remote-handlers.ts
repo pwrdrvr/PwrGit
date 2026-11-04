@@ -78,7 +78,7 @@ import { WorktreeOperationQueue } from "./worktree-operation-queue";
 import { mapLimit } from "../util/map-limit";
 import { inspectForkTracking, repairForkTracking } from "./fork-tracking";
 import { inspectRetrack, listTrackingOptions, retrackBranch } from "./branch-tracking";
-import { tagSourcesFor } from "./tag-sources";
+import { tagSourcesFor, wasStopped } from "./tag-sources";
 
 /** Forge reads at once while confirming extra forks for tracking repair. */
 const FORK_CANDIDATE_READS = 3;
@@ -560,7 +560,14 @@ export function registerRemoteHandlers(
     try {
       const refreshed = await tagSources.refresh(controlledGit(execGit, { signal }), repoId, repo.path, state.primary);
       if (!refreshed.ok) {
-        if (!controller.signal.aborted) tagChecksFailedAt.set(repoId, Date.now());
+        // Yielding to the user's own operation is not a failure. Our own
+        // timeout is: `refresh` leaves stopped listings unrecorded, so say it.
+        if (!controller.signal.aborted) {
+          tagChecksFailedAt.set(repoId, Date.now());
+          if (wasStopped(refreshed.error)) {
+            tagSources.store.recordFailure(repoId, state.primary, `Listing ${state.primary}'s tags timed out`, Date.now());
+          }
+        }
         logMain("debug", "tag", `automatic tag check (${reason}) of ${state.primary} unavailable for ${repo.path}: ${sanitizeGitLogDetail(refreshed.error.message)}`);
         return false;
       }
@@ -865,6 +872,9 @@ export function registerRemoteHandlers(
     });
     if (!result.ok) return result;
     logMain("info", "remote", `removed remote ${req.remote} from ${repo.path}`);
+    // Its published tags, Keep-local decisions and publisher choice go too:
+    // a remote re-added under this name may be another repository.
+    tagSources.store.forgetRemote(req.repoId, req.remote);
     // Forced: the remote set is part of the stored identity, and it just
     // changed. Without `force` the freshness gate skips the row and the
     // repo row keeps its old forge chip for up to six hours.
