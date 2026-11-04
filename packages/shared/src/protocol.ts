@@ -106,7 +106,6 @@ import type {
   RemoteEndpoint,
   ResetTargets,
   ResolvedCommit,
-  TagPage,
   TagAdoptResult,
   TagDetails,
   TagSourceState,
@@ -390,7 +389,7 @@ export const REMOTE_BRANCH_PAGE_MAX = 200;
 /** Local tags carried inline on repo:refs for the collapsed sidebar. */
 export const TAG_PREVIEW = 6;
 
-/** Default and maximum page sizes for repo:tags. */
+/** Default and maximum page sizes for repo:tagStatus. */
 export const TAG_PAGE_SIZE = 50;
 export const TAG_PAGE_MAX = 200;
 
@@ -1706,17 +1705,6 @@ export interface Commands {
     res: RemoteBranchPage;
   };
 
-  /** Search and page local tags without sending thousands over IPC at once. */
-  "repo:tags": {
-    req: {
-      repoId: string;
-      /** Case-insensitive substring over name, annotation, and tagger. */
-      query?: string;
-      offset?: number;
-      limit?: number;
-    };
-    res: TagPage;
-  };
   /**
    * Resolve a typed revision (HEAD, a branch, a short id) to the one commit a
    * tag would be created at, so the dialog can confirm it before creating.

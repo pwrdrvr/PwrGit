@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 
 /**
- * A model test for the debounced, paged search hooks (`useTagSearch`,
+ * A model test for the debounced, paged search hooks (`useTagStatus`,
  * `useRemoteBranchSearch`). Each stamps its fetches with a generation so that
  * only the newest may write state: "slow responses WILL land out of order".
  * Random sequences of typing, debounce time passing, Load more and responses
@@ -23,7 +23,7 @@ const mocks = vi.hoisted(() => ({ dispatch: vi.fn() }));
 vi.mock("./pwrgit", () => ({ dispatch: mocks.dispatch }));
 
 import { useRemoteBranchSearch } from "./useRemoteBranchSearch";
-import { useTagSearch } from "./useTagSearch";
+import { useTagStatus } from "./useTagStatus";
 
 const NAMES = ["alpha", "apple", "banana", "cab", "abba", "bob", "zed"];
 const QUERIES = ["", "a", "ab", "b"];
@@ -34,7 +34,7 @@ type View = { rows: { name: string }[]; total: number; loading: boolean; error: 
 type Hook = (args: { repoId: string; query: string; pageSize: number }) => View;
 
 const HOOKS: [string, string, Hook][] = [
-  ["useTagSearch", "repo:tags", (args) => useTagSearch(args) as unknown as View],
+  ["useTagStatus", "repo:tagStatus", (args) => useTagStatus({ ...args, filter: "all" }) as unknown as View],
   ["useRemoteBranchSearch", "repo:remoteBranches", (args) => useRemoteBranchSearch(args) as unknown as View]
 ];
 

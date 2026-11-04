@@ -8387,6 +8387,320 @@ button.agent-menu__item:hover {
   justify-content: flex-end;
   gap: 6px;
 }
+
+/* ---- Published tags (design/Published Tags - UX Review.dc.html, 2a/2b) ----
+   The strip names the remote whose tags count as published and how old
+   PwrGit's view of it is; it spans the table, above its header. */
+.refs-tag-source {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 10px;
+  min-height: 42px;
+  margin: 0 0 2px;
+  padding: 7px 12px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 8px;
+  background: var(--bg-input);
+  color: var(--text-secondary);
+  font: 500 11px/1.3 var(--font-sans);
+}
+.refs-tag-source--warn {
+  background: color-mix(in srgb, var(--status-warning) 7%, var(--bg-input));
+}
+.refs-tag-source__label {
+  color: var(--text-muted);
+}
+.refs-tag-source__select {
+  height: 26px;
+  padding: 0 6px;
+  border: 1px solid var(--border-default);
+  border-radius: 6px;
+  background: var(--bg-panel-elevated);
+  color: var(--text-primary);
+  font: 600 10.5px/1 var(--font-mono);
+}
+.refs-tag-source__meta {
+  color: var(--text-muted);
+  font: 500 10.5px/1.35 var(--font-sans);
+}
+.refs-tag-source__meta b {
+  color: var(--text-secondary);
+  font-weight: 600;
+}
+.refs-tag-source__meta--error {
+  color: var(--danger-text);
+}
+.refs-tag-source__grow {
+  flex: 1;
+}
+.refs-tag-source__refresh {
+  height: 24px;
+  padding: 0 9px;
+  border-radius: 6px;
+}
+.refs-tag-source__refresh[aria-disabled="true"] {
+  opacity: 0.5;
+  cursor: default;
+}
+.refs-tag-source__spin {
+  flex: none;
+  width: 11px;
+  height: 11px;
+  border: 1.5px solid var(--border-strong);
+  border-top-color: var(--accent-bright);
+  border-radius: 50%;
+  animation: refs-tag-source-spin 0.9s linear infinite;
+}
+@keyframes refs-tag-source-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .refs-tag-source__spin {
+    animation: none;
+  }
+}
+.refs-tag-filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  padding: 8px 8px 2px;
+}
+.refs-tag-filter {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 24px;
+  padding: 0 9px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--text-secondary);
+  font: 600 10px/1 var(--font-sans);
+  cursor: pointer;
+}
+.refs-tag-filter span {
+  color: var(--text-muted);
+  font: 600 9.5px/1 var(--font-mono);
+}
+.refs-tag-filter:hover {
+  background: var(--bg-panel-hover);
+}
+.refs-tag-filter.is-active {
+  border-color: var(--accent-border);
+  background: var(--accent-soft);
+  color: var(--accent-bright);
+}
+.refs-tag-filter.is-active span {
+  color: var(--accent-bright);
+}
+.refs-tag-filter.needs-attention span {
+  color: var(--status-warning);
+}
+.refs-tag-table__row--attention {
+  background: color-mix(in srgb, var(--status-warning) 5%, transparent);
+}
+.refs-tag-table__row--remote .refs-tag-icon,
+.refs-tag-table__row--remote .refs-table__identity strong {
+  color: var(--text-secondary);
+}
+.refs-tag-status {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 5px;
+}
+.refs-tag-pill {
+  display: inline-flex;
+  align-items: center;
+  height: 16px;
+  padding: 0 6px;
+  border-radius: 999px;
+  font: 650 9px/1 var(--font-sans);
+  letter-spacing: 0.02em;
+  text-transform: none;
+  white-space: nowrap;
+}
+.refs-tag-pill--differs {
+  background: var(--warn-soft);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--status-warning) 40%, transparent);
+  color: var(--status-warning);
+}
+.refs-tag-pill--remote-only {
+  background: color-mix(in srgb, var(--info-text) 12%, transparent);
+  color: var(--info-text);
+}
+.refs-tag-pill--local-only,
+.refs-tag-pill--kept-local {
+  background: color-mix(in srgb, var(--text-primary) 6%, transparent);
+  color: var(--text-secondary);
+}
+.refs-tag-pill--kept-local {
+  color: var(--text-muted);
+}
+.refs-tag-pill--missing {
+  box-shadow: inset 0 0 0 1px var(--border-default);
+  color: var(--text-muted);
+}
+.refs-tag-object__line {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  min-width: 0;
+  white-space: nowrap;
+}
+.refs-tag-object__line + .refs-tag-object__line {
+  margin-top: 4px;
+}
+.refs-tag-object__line .refs-tag-object__via {
+  display: inline;
+  margin-top: 0;
+}
+.refs-tag-object__who {
+  flex: none;
+  width: 44px;
+  overflow: hidden;
+  color: var(--text-muted);
+  font: 600 9px/1 var(--font-sans);
+  letter-spacing: 0.03em;
+  text-overflow: ellipsis;
+  text-transform: uppercase;
+}
+.refs-tag-object__new {
+  color: var(--text-primary);
+}
+.refs-tag-object__kind {
+  color: var(--text-muted);
+  font: 500 9px/1 var(--font-sans);
+}
+
+/* Details: every source's own value for one name (3c). */
+.refs-tag-details {
+  width: min(600px, 92vw);
+}
+.refs-tag-compare {
+  overflow: hidden;
+  border: 1px solid var(--border-subtle);
+  border-radius: 8px;
+}
+.refs-tag-compare__row {
+  display: grid;
+  grid-template-columns: minmax(0, 1.2fr) 82px minmax(0, 1.2fr) 104px;
+  gap: 10px;
+  align-items: center;
+  padding: 8px 10px;
+  border-top: 1px solid var(--border-subtle);
+  color: var(--text-secondary);
+  font: 500 10.5px/1.3 var(--font-mono);
+}
+.refs-tag-compare__row:first-child {
+  border-top: 0;
+}
+.refs-tag-compare__row--head {
+  background: color-mix(in srgb, var(--text-primary) 3%, transparent);
+  color: var(--text-subtle);
+  font: 700 8.5px/1 var(--font-sans);
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+}
+.refs-tag-compare__source,
+.refs-tag-compare__target {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+}
+.refs-tag-compare__source {
+  color: var(--text-primary);
+  font-weight: 600;
+}
+.refs-tag-compare__source small,
+.refs-tag-compare__target small {
+  overflow: hidden;
+  color: var(--text-muted);
+  font: 500 9px/1.2 var(--font-sans);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.refs-tag-compare__flag {
+  color: var(--text-muted);
+  font: 600 9.5px/1.2 var(--font-sans);
+}
+.refs-tag-compare__flag.is-here {
+  color: var(--success-text);
+}
+.refs-tag-compare__flag.is-missing {
+  color: var(--status-warning);
+}
+.refs-tag-details__section {
+  margin-top: 4px;
+  color: var(--text-subtle);
+  font: 700 9px/1 var(--font-sans);
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+}
+.refs-tag-replaced {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: center;
+  padding: 8px 10px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 8px;
+}
+.refs-tag-replaced__value {
+  color: var(--text-primary);
+  font: 500 10.5px/1.3 var(--font-mono);
+}
+.refs-tag-replaced__ref {
+  display: block;
+  overflow: hidden;
+  color: var(--text-muted);
+  font: 500 9.5px/1.4 var(--font-mono);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Sidebar: one line, only while a tag needs a decision (3d). */
+.ref-tag-attention {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  width: 100%;
+  min-height: 26px;
+  margin-top: 3px;
+  padding: 5px 8px;
+  border: 0;
+  border-radius: 6px;
+  background: var(--warn-soft);
+  color: var(--status-warning);
+  text-align: left;
+  font: 600 10px/1.25 var(--font-sans);
+  cursor: pointer;
+}
+.ref-tag-attention:hover {
+  background: color-mix(in srgb, var(--status-warning) 22%, transparent);
+}
+.ref-tag-attention__dot {
+  flex: none;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--status-warning);
+}
+.ref-tag-attention__text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ref-tag-attention__go {
+  flex: none;
+  margin-left: auto;
+  color: var(--accent);
+}
 .refs-table__identity > div,
 .refs-remote-branch > div {
   min-width: 0;
