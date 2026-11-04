@@ -295,7 +295,9 @@ it("PwrGit drops and pops any stash git lists, and its listing matches git's aft
     ], { maxCommands: 1 }), async (layout, first, cmds) => {
       await runModel([first, ...cmds], () => restoreStack(stacks[layout]!));
     }),
-    { numRuns: 40 }
+    // Windows CI measured ~0.3 s per removal run; leave room for the
+    // shared real-git fixture and the more expensive Pull property below.
+    { numRuns: 8 }
   );
 });
 
@@ -310,6 +312,8 @@ it("Pull restores exactly its own work and leaves every other stash entry listed
       async (w, sibling) => {
         await runModel([new StashPush(w), new Pull(sibling)]);
       }),
-    { numRuns: 3 }
+    // One generated Pull costs ~4 s on Windows. Its three interleaving
+    // cases also have deterministic tests in pull-stash-ownership.test.ts.
+    { numRuns: 1 }
   );
 });
