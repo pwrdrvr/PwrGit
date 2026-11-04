@@ -93,6 +93,9 @@ function sanitizePatch(patch: AppSettingsPatch): {
     if (typeof gen.gitIdentityReminder === "boolean") {
       general.gitIdentityReminder = gen.gitIdentityReminder;
     }
+    if (typeof gen.gitReflinkCheckout === "boolean") {
+      general.gitReflinkCheckout = gen.gitReflinkCheckout;
+    }
     if (gen.maintenanceBranchMode === "review" || gen.maintenanceBranchMode === "auto") {
       general.maintenanceBranchMode = gen.maintenanceBranchMode;
     }

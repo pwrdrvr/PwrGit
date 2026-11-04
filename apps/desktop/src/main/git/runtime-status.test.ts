@@ -13,10 +13,13 @@ import {
   execGitRecords,
   installedGitEnvironment,
   installedGitSelection,
+  noteGitReflinkSupport,
+  reflinkCheckoutActive,
   useInstalledGit,
+  useReflinkCheckout,
   type GitLaunch
 } from "./dugite";
-import { probeGitRuntime, readGitRuntimeStatus, selectGitRuntime, type GitDiscoveryDeps } from "./runtime-status";
+import { parseReflinkSupport, probeGitRuntime, readGitReflinkStatus, readGitRuntimeStatus, refreshActiveGitReflink, selectGitRuntime, type GitDiscoveryDeps } from "./runtime-status";
 
 const posix = process.platform !== "win32";
 const scratch: string[] = [];
@@ -292,6 +295,34 @@ describe("Git discovery", () => {
   });
 });
 
+describe("copy-on-write probe that gets no answer", () => {
+  afterEach(() => {
+    useReflinkCheckout(false);
+    noteGitReflinkSupport("/nowhere", null, { checkout: false, reshare: false });
+  });
+
+  // Found validating a packaged .3 build: macOS's keychain prompt held the
+  // main thread for 13s, the launch probe's Git runs timed out behind it, and
+  // "no answer" was recorded as "can't" for the rest of the session.
+  it("is unknown, not unsupported: the next ask probes again and turns it on", async () => {
+    let answering = false;
+    const machine = fakeMachine({}, {
+      executable: async () => true,
+      probe: async (_launch, args) =>
+        !answering
+          ? { ok: false, stdout: "" }
+          : { ok: true, stdout: args[0] === "--version" ? "git version 2.56.0-dev-pwrgit.3" : args[0] === "lfs" ? "git-lfs/3.7.1" : "usage: git worktree add [--[no-]reflink]\n   or: git worktree reflink" }
+    });
+    useReflinkCheckout(true);
+    await refreshActiveGitReflink(machine);
+    expect(reflinkCheckoutActive()).toBe(false);
+    answering = true;
+    const status = await readGitReflinkStatus(machine);
+    expect(status.support).toEqual({ checkout: true, reshare: true });
+    expect(reflinkCheckoutActive()).toBe(true);
+  });
+});
+
 describe("selectGitRuntime", () => {
   const settings = () => ({ update: vi.fn() });
 
@@ -328,5 +359,21 @@ describe("selectGitRuntime", () => {
       expect(store.update).toHaveBeenCalledWith({ gitPath: undefined });
       expect(installedGitSelection()).toBeNull();
     }
+  });
+});
+
+describe("parseReflinkSupport", () => {
+  it("reads checkout and re-share support from git worktree -h", () => {
+    const runtime2 = [
+      "usage: git worktree add [-f] [--detach] [--checkout] [--lock [--reason <string>]]",
+      "                        [--[no-]reflink] [--reflink-source=<worktree>]",
+      "   or: git worktree list [-v | --porcelain [-z]]",
+      "   or: git worktree reflink [-n] [-v | --porcelain [-z]]"
+    ].join("\n");
+    expect(parseReflinkSupport(runtime2)).toEqual({ checkout: true, reshare: true });
+    expect(parseReflinkSupport(runtime2.split("\n").slice(0, 3).join("\n"))).toEqual({ checkout: true, reshare: false });
+    expect(
+      parseReflinkSupport("usage: git worktree add [-f] [--detach] [--checkout]\n   or: git worktree list")
+    ).toEqual({ checkout: false, reshare: false });
   });
 });

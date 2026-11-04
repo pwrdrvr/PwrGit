@@ -10,6 +10,7 @@ import { RefreshGlyph } from "../../lib/RefreshGlyph";
 import { hoverTooltip, useViewportTooltip } from "../../lib/useViewportTooltip";
 import { ReadError } from "../shell/ReadError";
 import { ManualPathInput } from "./ManualPathInput";
+import { SettingsSwitch } from "./SettingsSwitch";
 import {
   SettingsField,
   SettingsSection,
@@ -117,7 +118,8 @@ function RowMeta(props: { candidate: GitRuntimeCandidate }) {
   const parts = [
     SOURCE_LABEL[candidate.source],
     candidate.git === null ? null : describeVersion("git", candidate.git).version,
-    candidate.lfs === null ? null : `LFS ${describeVersion("lfs", candidate.lfs).version}`
+    candidate.lfs === null ? null : `LFS ${describeVersion("lfs", candidate.lfs).version}`,
+    candidate.reflink?.checkout === true ? "Copy-on-write" : null
   ].filter((part) => part !== null);
   return (
     <span className="settings-ai-install__meta">
@@ -194,12 +196,90 @@ function GitInstalls(props: {
   );
 }
 
+/** Settings › General › Git runtime › Copy-on-write checkout. */
+export type ReflinkCheckoutSetting = {
+  enabled: boolean;
+  saving: boolean;
+  onChange: (enabled: boolean) => void;
+};
+
+/**
+ * The switch is always drawn. With a Git that cannot clone it is off and
+ * disabled, and the help names the Git that can — with a button that
+ * chooses it when one was found here.
+ */
+function ReflinkCheckoutField(props: {
+  status: GitRuntimeStatus;
+  setting: ReflinkCheckoutSetting;
+  busy: boolean;
+  onSelect: (path: string | null) => Promise<string | null>;
+}) {
+  const [error, setError] = useState<string | null>(null);
+  const current = inUse(props.status);
+  const capable = current?.reflink?.checkout === true;
+  const offer = capable
+    ? undefined
+    : props.status.candidates.find((candidate) => candidate.problem === null && candidate.reflink?.checkout === true);
+  const running =
+    current?.git == null
+      ? "The Git in use"
+      : `The Git in use (${describeVersion("git", current.git).version}, ${SOURCE_LABEL[current.source]})`;
+  const help = capable
+    ? props.setting.enabled
+      ? current?.reflink?.reshare === true
+        ? "Checkout, switch, reset and new worktrees clone files the main checkout holds unchanged, so the copies take no extra space until one is edited. Maintenance › Clones re-shares worktrees that lost it. APFS, Btrfs and XFS; elsewhere files are written as usual."
+        : "Checkout, switch, reset and new worktrees clone files the main checkout holds unchanged, so the copies take no extra space until one is edited. APFS, Btrfs and XFS; elsewhere files are written as usual."
+      : "PwrGit writes every file as usual. A worktree created with --reflink elsewhere, or your own checkout.reflink config, still applies."
+    : offer === undefined
+      ? `Needs PwrGit’s Git (2.56.0-dev-pwrgit.1 or newer). ${running} can’t clone files, and no Git found here can.`
+      : `Needs PwrGit’s Git. ${running} can’t clone files.`;
+  return (
+    <SettingsField
+      label="Copy-on-write checkout"
+      sub="Worktrees share unchanged files with the main checkout"
+      control={
+        <>
+          <SettingsSwitch
+            checked={capable && props.setting.enabled}
+            disabled={!capable}
+            busy={props.setting.saving}
+            label="Copy-on-write checkout"
+            onChange={props.setting.onChange}
+          />
+          <span className="settings-field__help">
+            {help}
+            {offer !== undefined ? (
+              <>
+                {" "}
+                <button
+                  aria-disabled={props.busy}
+                  className="settings-inline-button"
+                  type="button"
+                  onClick={() => {
+                    if (props.busy) return;
+                    setError(null);
+                    void props.onSelect(offer.source === "bundled" ? null : offer.path).then(setError);
+                  }}
+                >
+                  Use PwrGit’s Git
+                </button>
+              </>
+            ) : null}
+          </span>
+        </>
+      }
+      error={error ?? undefined}
+    />
+  );
+}
+
 export function GitRuntimeDetails(props: {
   status: GitRuntimeStatus;
   busy: boolean;
   checking: boolean;
   onSelect: (path: string | null) => Promise<string | null>;
   onRecheck: () => void;
+  reflinkCheckout?: ReflinkCheckoutSetting | undefined;
 }) {
   const { status } = props;
   const current = inUse(status);
@@ -238,6 +318,14 @@ export function GitRuntimeDetails(props: {
               : "Repositories that use Git LFS will check out pointer files. Install Git LFS for this Git, or choose another."
         }
       />
+      {props.reflinkCheckout !== undefined ? (
+        <ReflinkCheckoutField
+          status={status}
+          setting={props.reflinkCheckout}
+          busy={props.busy}
+          onSelect={props.onSelect}
+        />
+      ) : null}
       {/* Only the bundle borrows a helper: an installed Git reads its own
           system config, keychain helper included. */}
       {platform === "darwin" && bundled ? (
@@ -304,7 +392,7 @@ export function GitRuntimeDetails(props: {
   );
 }
 
-export function GitRuntimeSettings() {
+export function GitRuntimeSettings(props: { reflinkCheckout?: ReflinkCheckoutSetting } = {}) {
   const [status, setStatus] = useState<GitRuntimeStatus | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [checking, setChecking] = useState(false);
@@ -378,6 +466,7 @@ export function GitRuntimeSettings() {
           checking={checking}
           onSelect={select}
           onRecheck={() => setRequest((current) => current + 1)}
+          reflinkCheckout={props.reflinkCheckout}
         />
       )}
     </SettingsSection>

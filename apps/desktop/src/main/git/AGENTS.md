@@ -137,6 +137,49 @@ under `xcode-select -p` instead, only when that Git exists. A Git without
 working Git LFS is listed but cannot be chosen. `git:selectRuntime` probes a
 path before it saves it.
 
+## Copy-on-write clones: a `-c` flag and Maintenance › Clones
+
+PwrGit's own Git (huntharo/git runtime) clones files a worktree shares with
+its main checkout. Support is read from `git worktree -h`
+(`parseReflinkSupport`): `[--[no-]reflink]` means `checkout.reflink` (runtime
+.1), a `git worktree reflink` line means re-share (.2). Never from a version
+string: a local build of the same source has none.
+
+- **The switch reaches the bundle as system config, not `-c`.**
+  `bundledSystemConfig` writes `checkout.reflink = true|false` *after* the
+  bundle's include, while Settings' switch is on *and* the last probe of the
+  Git in use (`refreshActiveGitReflink`, at launch and after every runtime
+  switch) said it can. Off is written as `false`, so the runtime's own config
+  never decides: `.2`'s `etc/gitconfig` forced `true`; `.3`, which PwrGit
+  ships, sets nothing. System scope keeps the user's global and repository
+  config in charge, as for LFS and the keychain.
+  An installed Git reads its own system config, which PwrGit never writes, so
+  it gets `-c checkout.reflink=true` while on and nothing while off.
+  - Add no `[include]` or `path =` after the include: `userSystemConfig` and
+    PwrAgent's `operatorSystemConfig` read the first `path =` after the last
+    `[include]`. Keep the `# Written by PwrGit:` first line.
+  - `git-runtime.reflink-oracle.test.ts` asks real Git all 81 combinations of
+    repository, global, switch and runtime config; a sample missed a switch
+    written before the include. `dugite.property.test.ts` and
+    `runtime-status.property.test.ts` hold the switch to the Git in use
+    across runtime switches and out-of-order probes.
+- **Clones (`worktree-reshare.ts`) is non-destructive by Git's contract.**
+  Git compares bytes before it shares and skips changed, untracked and ignored
+  files. Keep the real-Git tests (`worktree-reshare.test.ts`, and the
+  generated-loose-work property in `worktree-reshare.property.test.ts`; run with
+  `PWRGIT_TEST_GIT=installed` and the runtime first on PATH; they skip on any
+  other Git, CI included) proving loose work survives byte for byte.
+- **A file the main checkout just wrote is racy and is no donor** (`no-donor`).
+  After a fast-forward, wait past the index's timestamp, then let `git status`
+  rewrite the index (it does whenever an entry is racy).
+- The main-checkout update is Try pull's own soft pull
+  (`softPullMainCheckout` over `bulkSyncRepositories`), only on the default
+  branch. A running `git worktree reflink` is never cancelled.
+- The receipt's figure is Git's `observed-private-reduction`: file data that
+  stopped being private. Word it "now shared", never "freed".
+
+Design: `design/Refresh Clones - UX Review.dc.html`.
+
 ## Main decides how many Git processes exist, not the renderer
 
 **Bound every Git spawn that an IPC message starts on the main side.** A
