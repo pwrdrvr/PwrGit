@@ -326,6 +326,18 @@ describe("AI Features — default agents", () => {
     expect(updates()).toEqual([{ jobs: { historyEditing: { model: "" } } }]);
   });
 
+  it("keeps a ChatGPT effort when the same model id in the Codex account only supports another effort", async () => {
+    // The catalog-isolation property shrank to the same model id on both
+    // backends: a name match still does not make their capabilities shared.
+    models = [model({ id: "a", isDefault: true, supportedReasoningEfforts: ["high"], defaultReasoningEffort: "high" })];
+    settings = { ...DEFAULT_AI_PROVIDER_SETTINGS, jobs: { ...DEFAULT_AI_PROVIDER_SETTINGS.jobs,
+      historyEditing: { provider: "chatgpt", model: "a", reasoning: "low" } } };
+    await render();
+    expect(select("History editing model").value).toBe("a");
+    expect(select("History editing reasoning effort").value).toBe("low");
+    expect(updates()).toEqual([]);
+  });
+
   it("refreshes runtime discovery along with the models so an upgrade clears its warning", async () => {
     await render();
     await click(button(container, "Refresh models"));
