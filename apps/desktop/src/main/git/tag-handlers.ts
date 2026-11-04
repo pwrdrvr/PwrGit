@@ -12,6 +12,7 @@ import {
   planRemoteTag,
   resolveTagTarget
 } from "./git-service";
+import { tagSourcesFor } from "./tag-sources";
 
 type RepoRow = {
   path: string;
@@ -46,6 +47,85 @@ export function registerTagHandlers(bus: CommandBus, db: DB): void {
       ...(req.offset === undefined ? {} : { offset: req.offset }),
       ...(req.limit === undefined ? {} : { limit: req.limit })
     });
+  });
+
+  const tagSources = tagSourcesFor(db);
+  /** Local tags moved: the sidebar's tag rows and the graph's chips. */
+  const tagsMoved = (repoId: string, profileId: string): void => {
+    emitEvent("repo:changed", { profileId, repoIds: [repoId] });
+    emitEvent("graph:changed", { repoId });
+  };
+
+  bus.register("repo:tagStatus", async (req) => {
+    const repo = repoOf(req.repoId);
+    if (repo === undefined) return err(notFound);
+    const page = await tagSources.statusPage(execGit, req.repoId, repo.path, {
+      ...(req.filter === undefined ? {} : { filter: req.filter }),
+      ...(req.query === undefined ? {} : { query: req.query }),
+      ...(req.offset === undefined ? {} : { offset: req.offset }),
+      ...(req.limit === undefined ? {} : { limit: req.limit })
+    });
+    if (!page.ok) return page;
+    const { differsChanged, ...value } = page.value;
+    // The sidebar's "N tags differ" line reads the stored count.
+    if (differsChanged) {
+      emitEvent("repo:changed", { profileId: repo.profile_id, repoIds: [req.repoId] });
+    }
+    return ok(value);
+  });
+
+  bus.register("tag:setPrimaryRemote", async (req) => {
+    const repo = repoOf(req.repoId);
+    if (repo === undefined) return err(notFound);
+    const source = await tagSources.source(execGit, req.repoId, repo.path);
+    if (!source.ok) return source;
+    if (!source.value.state.remotes.includes(req.remote)) {
+      return err({ kind: "repo", code: "invalid_remote", message: `Not a configured remote: ${req.remote}` });
+    }
+    tagSources.setPrimary(req.repoId, req.remote);
+    logMain("info", "tag", `published tag source for ${repo.path} is now ${req.remote}`);
+    const recount = await tagSources.recountPublisher(execGit, req.repoId, repo.path);
+    if (recount.ok) {
+      emitEvent("repo:changed", { profileId: repo.profile_id, repoIds: [req.repoId] });
+    }
+    const next = await tagSources.source(execGit, req.repoId, repo.path);
+    return next.ok ? ok(next.value.state) : next;
+  });
+
+  bus.register("tag:keepLocal", async (req) => {
+    const repo = repoOf(req.repoId);
+    if (repo === undefined) return err(notFound);
+    tagSources.keepLocal(req.repoId, req);
+    logMain(
+      "info",
+      "tag",
+      `${req.keep ? "keeping" : "no longer keeping"} local ${req.name} ${req.localObjectId.slice(0, 12)} over ${req.remote} ${req.remoteObjectId.slice(0, 12)}`
+    );
+    const recount = await tagSources.recountPublisher(execGit, req.repoId, repo.path);
+    if (recount.ok && recount.value) {
+      emitEvent("repo:changed", { profileId: repo.profile_id, repoIds: [req.repoId] });
+    }
+    return ok(null);
+  });
+
+  bus.register("tag:details", async (req) => {
+    const repo = repoOf(req.repoId);
+    if (repo === undefined) return err(notFound);
+    return tagSources.details(execGit, req.repoId, repo.path, req.name);
+  });
+
+  bus.register("tag:restoreReplaced", async (req) => {
+    const repo = repoOf(req.repoId);
+    if (repo === undefined) return err(notFound);
+    const restored = await tagSources.restore(execGit, req.repoId, repo.path, req);
+    if (!restored.ok) return restored;
+    logMain(
+      "info",
+      "tag",
+      `restored ${req.name} to ${restored.value.objectId} from ${req.ref}${restored.value.replacedRef === null ? "" : `; previous value kept as ${restored.value.replacedRef}`}`
+    );
+    tagsMoved(req.repoId, repo.profile_id);
+    return restored;
   });
 
   bus.register("tag:resolveCommit", async (req) => {
