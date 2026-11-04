@@ -1,8 +1,8 @@
 import { AsyncLocalStorage } from "node:async_hooks";
-import { resolve } from "node:path";
+import { join, resolve } from "node:path";
 import fc from "fast-check";
 import { ok, type Result } from "@pwrgit/shared";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { CommandBus } from "../command-bus";
 import type { DB } from "../persistence/db";
 import type { AppSettings, SettingsService } from "../settings/settings-service";
@@ -14,10 +14,24 @@ import { WorktreeOperationQueue } from "./worktree-operation-queue";
 import type { WorktreeStateService } from "./worktree-state";
 
 const io = vi.hoisted(() => ({
+  windowsPaths: false,
   git: null as unknown as GitExec,
   exists: (_path: string): boolean => false,
   share: null as unknown as (args: string[]) => Promise<{ stdout: string; stderr: string }>
 }));
+// Exercise Windows path rules on native hosts too, without touching a disk or
+// changing process.platform. Only the path operations used by creation vary.
+vi.mock("node:path", async (original) => {
+  const actual = await original<typeof import("node:path")>();
+  const paths = () => io.windowsPaths ? actual.win32 : actual;
+  return {
+    ...actual,
+    resolve: (...parts: string[]) => paths().resolve(...parts),
+    join: (...parts: string[]) => paths().join(...parts),
+    dirname: (path: string) => paths().dirname(path),
+    basename: (path: string, suffix?: string) => paths().basename(path, suffix)
+  };
+});
 vi.mock("../ipc", () => ({ emitEvent: () => undefined }));
 vi.mock("../logs", () => ({ logMain: () => undefined }));
 vi.mock("node:fs/promises", async (original) => ({
@@ -56,9 +70,11 @@ const requestArb = fc.record({
   kind: fc.constantFrom("worktree" as const, "branch" as const),
   ending: fc.constantFrom("shared" as const, "fallback" as const, "unavailable" as const, "failure" as const)
 });
-const primary = (repo: number) => `/fixture-share/repo-${repo}`;
-const linked = (repo: number) => `/fixture-share/linked-${repo}`;
-const destination = (request: Request) => `/fixture-share/managed/repo-${request.repo}/feature-${request.branch}`;
+const fixtureRoot = () => io.windowsPaths ? "D:\\fixture-share" : resolve("/fixture-share");
+const managed = () => join(fixtureRoot(), "managed");
+const primary = (repo: number) => join(fixtureRoot(), `repo-${repo}`);
+const linked = (repo: number) => join(fixtureRoot(), `linked-${repo}`);
+const destination = (request: Request) => join(managed(), `repo-${request.repo}`, `feature-${request.branch}`);
 
 /** The model has atomic registration, like Git. Only completion of I/O is
  * scheduled; production handlers, the shared queue and rollback run unchanged. */
@@ -139,7 +155,7 @@ function harness(scheduler: fc.Scheduler, settings: AppSettings) {
     })
   } as unknown as DB;
   const indexer = { refreshRepoWorktrees: async () => undefined } as unknown as RepoIndexer;
-  const service = { get: () => ({ worktreeRoot: "/fixture-share/managed", ...settings }) } as SettingsService;
+  const service = { get: () => ({ worktreeRoot: managed(), ...settings }) } as SettingsService;
   const operations = new WorktreeOperationQueue();
   const bus = new CommandBus();
   registerWorktreeLifecycleHandlers(bus, db, indexer, service, {} as WorktreeStateService, operations);
@@ -150,7 +166,23 @@ function harness(scheduler: fc.Scheduler, settings: AppSettings) {
   return { dispatch, registrations, maxActive, invocations };
 }
 
-describe("worktree creation model", () => {
+describe.each([
+  { name: "native", windowsPaths: false },
+  { name: "Windows", windowsPaths: true }
+])("worktree creation model ($name paths)", ({ windowsPaths }) => {
+  beforeEach(() => { io.windowsPaths = windowsPaths; });
+  afterEach(() => { io.windowsPaths = false; });
+
+  // Windows CI shrank the failure to one ordinary create with sharing off:
+  // the model looked up a POSIX key after the handler registered a Windows path.
+  it("finds a successful ordinary checkout under its native destination path", async () => {
+    const scheduler = fc.schedulerFor([1]);
+    const request: Request = { id: 0, repo: 0, branch: 0, kind: "worktree", ending: "shared" };
+    const real = harness(scheduler, { worktreeReflink: "off", worktreeSeedCargoTarget: "off" });
+    expect(await scheduler.waitFor(real.dispatch(request))).toMatchObject({ ok: true });
+    expect(real.registrations.get(destination(request))?.owner).toBe(0);
+  });
+
   it("serializes every repository and preserves successful checkouts across arbitrary competing failures", async () => {
     await fc.assert(fc.asyncProperty(fc.scheduler(), fc.array(requestArb, { minLength: 2, maxLength: 6 }), async (scheduler, generated) => {
       const real = harness(scheduler, { worktreeReflink: "on" });
