@@ -11,19 +11,31 @@ import {
 
 // Properties of the lineage layout over generated repository histories.
 // Histories are built the way users build them: a list of git operations
-// (commit, branch, merge, pull, push, checkout) replayed into commits, then
+// (commit, branch, merge, pull, push, publish) replayed into commits, then
 // ordered by the app's own topoMergeCommits and optionally cut to a window,
-// as `git log -n` would.
+// as `git log -n` would. Feature branches f1–f3 track origin/f1–f3 once
+// published, so a checked-out branch can be behind or diverged from its
+// upstream (LaneRefs.headUpstream).
 
-const LOCAL = ["main", "f1", "f2", "f3"] as const;
-const REMOTE = ["origin/main", "origin/team"] as const;
+const FEATURES = ["f1", "f2", "f3"] as const;
+const LOCAL = ["main", ...FEATURES] as const;
+const UPSTREAMS = ["origin/f1", "origin/f2", "origin/f3"] as const;
+const REMOTE = ["origin/main", "origin/team", ...UPSTREAMS] as const;
+type Feature = (typeof FEATURES)[number];
 type LocalRef = (typeof LOCAL)[number];
 type Ref = LocalRef | (typeof REMOTE)[number];
 const REFS: readonly Ref[] = [...LOCAL, ...REMOTE];
+/** The ref fN tracks once published. */
+const trackingRef = (f: Feature) => `origin/${f}` as const;
+const isUpstream = (r: Ref): boolean => (UPSTREAMS as readonly Ref[]).includes(r);
 
 type Op =
   /** A commit on any ref. On a remote ref, someone else pushed and we fetched. */
   | { kind: "commit"; ref: Ref }
+  /** `git push -u origin fN`: create or fast-forward fN's upstream. */
+  | { kind: "publish"; ref: Feature }
+  /** `git pull` on fN: fast-forward to origin/fN, else merge it. */
+  | { kind: "pullBranch"; ref: Feature }
   /** Create a branch (or, for origin/team, fetch a newly pushed one). */
   | { kind: "branch"; ref: "f1" | "f2" | "f3" | "origin/team"; from: Ref }
   /** `git merge`. On origin/main, a PR merged on the server, then fetched. */
@@ -31,9 +43,7 @@ type Op =
   /** `git pull` on main: fast-forward to origin/main, else merge it. */
   | { kind: "pull" }
   /** `git push` of main: only a fast-forward is accepted. */
-  | { kind: "push" }
-  /** Check out a local branch in the viewed worktree. */
-  | { kind: "checkout"; ref: LocalRef };
+  | { kind: "push" };
 
 type Repo = {
   /** Every commit, oldest first; the index is its creation order. */
@@ -42,11 +52,11 @@ type Repo = {
   head: LocalRef;
 };
 
-function replay(ops: readonly Op[]): Repo {
+/** Replay `ops`, with the viewed worktree on `checkedOut` once it exists. */
+function replay(ops: readonly Op[], checkedOut: LocalRef = "main"): Repo {
   const commits: LaneCommit[] = [{ hash: "c0", parents: [] }];
   const byHash = new Map(commits.map((c) => [c.hash, c]));
   const refs: Partial<Record<Ref, string>> = { main: "c0", "origin/main": "c0" };
-  let head: LocalRef = "main";
   const commit = (...parents: string[]): string => {
     const c = { hash: `c${commits.length}`, parents };
     commits.push(c);
@@ -64,9 +74,26 @@ function replay(ops: readonly Op[]): Repo {
   };
   for (const op of ops) {
     switch (op.kind) {
-      case "commit":
+      case "commit": {
         // A commit on a branch that does not exist yet starts it from main.
-        refs[op.ref] = commit(refs[op.ref] ?? (refs.main as string));
+        // An upstream exists only once its branch was published.
+        const tip = refs[op.ref];
+        if (tip === undefined && isUpstream(op.ref)) break;
+        refs[op.ref] = commit(tip ?? (refs.main as string));
+        break;
+      }
+      case "publish": {
+        const local = refs[op.ref];
+        const remote = refs[trackingRef(op.ref)];
+        if (local === undefined) break;
+        // A push is accepted only as a fast-forward.
+        if (remote === undefined || isAncestor(remote, local)) {
+          refs[trackingRef(op.ref)] = local;
+        }
+        break;
+      }
+      case "pullBranch":
+        merge(op.ref, trackingRef(op.ref), false);
         break;
       case "branch": {
         const from = refs[op.from];
@@ -86,11 +113,9 @@ function replay(ops: readonly Op[]): Repo {
         }
         break;
       }
-      case "checkout":
-        if (refs[op.ref] !== undefined) head = op.ref;
-        break;
     }
   }
+  const head = refs[checkedOut] === undefined ? "main" : checkedOut;
   return { commits, refs, head };
 }
 
@@ -114,6 +139,9 @@ function reach(
 
 type Scenario = {
   ops: Op[];
+  /** The branch the viewed worktree has checked out (main if it never
+   *  came to exist). */
+  head: LocalRef;
   /** Clock skew: per-commit amounts subtracted from creation order. */
   skew: number[] | null;
   /** Keep only the newest N + 1 commits, like `git log -n`. */
@@ -126,6 +154,8 @@ type View = {
   /** The drawn window, in the app's order (newest first). */
   commits: LaneCommit[];
   refs: LaneRefs;
+  /** Drawn refs that live on a remote: dashed until a local ref reaches them. */
+  drawnRemotes: Ref[];
   layout: LaneLayout;
 };
 
@@ -164,19 +194,43 @@ function view(repo: Repo, s: Scenario): View {
   // Every non-default branch is drawn, most recently committed first. (Real
   // scopes hide some; a hidden local branch then has no commits in the window
   // to measure "applied" against, which is out of scope here.)
-  const shownBranches = (["f1", "f2", "f3", "origin/team"] as const)
+  const shown: Ref[] = [...FEATURES, "origin/team" as const]
     .filter((r) => repo.refs[r] !== undefined)
     .sort((a, b) => date(repo.refs[b] as string) - date(repo.refs[a] as string));
+  // graph-handlers: a published branch whose upstream has commits it lacks
+  // (`%(upstream:trackshort)` is `<` or `<>`) adds that upstream to the walk,
+  // in `upstreamRefs`, and the checked-out branch's becomes `headUpstream`.
+  const behind = new Map<Ref, Ref>();
+  for (const f of FEATURES) {
+    const local = repo.refs[f];
+    const remote = repo.refs[trackingRef(f)];
+    if (local === undefined || remote === undefined) continue;
+    if (!reach(byHash, local).has(remote)) behind.set(f, trackingRef(f));
+  }
+  const upstreamRefs = shown.flatMap((b) => behind.get(b) ?? []);
+  // LineageGraph draws the union, and every drawn remote name is passed as a
+  // remote branch.
+  const drawn = [...shown, ...upstreamRefs];
+  const drawnRemotes = drawn.filter((r) => (REMOTE as readonly Ref[]).includes(r));
+  const headUpstream = behind.get(repo.head);
   const refs: LaneRefs = {
     tips,
     defaultBranch: "main",
     defaultRefTips: [repo.refs["origin/main"] as string],
     localRefTips: LOCAL.flatMap((r) => repo.refs[r] ?? []),
-    remoteBranches: shownBranches.filter((r) => r === "origin/team"),
+    remoteBranches: drawnRemotes,
     headBranch: repo.head,
-    shownBranches
+    ...(headUpstream === undefined ? {} : { headUpstream }),
+    shownBranches: drawn
   };
-  return { repo, byHash, commits, refs, layout: layoutLanes(commits, refs) };
+  return {
+    repo,
+    byHash,
+    commits,
+    refs,
+    drawnRemotes,
+    layout: layoutLanes(commits, refs)
+  };
 }
 
 /** One line per drawn row, for failure messages: `c3 [c2,c1] lane 1`. */
@@ -195,6 +249,7 @@ function describeView(v: View): string {
 
 const anyRef = fc.constantFrom(...REFS);
 const feature = fc.constantFrom("f1", "f2", "f3", "origin/team");
+const ownFeature = fc.constantFrom(...FEATURES);
 const weighted = <T,>(...xs: [T, number][]) =>
   fc.oneof(...xs.map(([v, weight]) => ({ arbitrary: fc.constant(v), weight })));
 const kind = <K extends Op["kind"]>(k: K) => fc.constant(k);
@@ -203,6 +258,9 @@ const mergeOp = (into: fc.Arbitrary<Ref>, from: fc.Arbitrary<Ref>) =>
 // Weighted like a team's day: PRs land on origin/main, features update from a
 // local main that is often stale, and pulls are occasional. That staleness is
 // what puts a merge of old trunk history above the trunk's newest commit.
+// Published branches get pushes from collaborators and GitHub's "Update
+// branch" (origin/main merged into origin/fN), which leave the local branch
+// behind or diverged from its upstream.
 const op: fc.Arbitrary<Op> = fc.oneof(
   {
     arbitrary: fc.record({
@@ -213,10 +271,19 @@ const op: fc.Arbitrary<Op> = fc.oneof(
         ["f3", 3],
         ["origin/team", 2],
         ["origin/main", 2],
-        ["main", 1]
+        ["main", 1],
+        ["origin/f1", 3],
+        ["origin/f2", 3],
+        ["origin/f3", 3]
       )
     }),
     weight: 6
+  },
+  { arbitrary: fc.record({ kind: kind("publish"), ref: ownFeature }), weight: 4 },
+  { arbitrary: fc.record({ kind: kind("pullBranch"), ref: ownFeature }), weight: 1 },
+  {
+    arbitrary: mergeOp(fc.constantFrom(...UPSTREAMS), fc.constant("origin/main")),
+    weight: 2
   },
   {
     arbitrary: fc.record({ kind: kind("branch"), ref: feature, from: anyRef }),
@@ -226,14 +293,11 @@ const op: fc.Arbitrary<Op> = fc.oneof(
   { arbitrary: mergeOp(fc.constant("origin/main"), feature), weight: 3 },
   { arbitrary: mergeOp(anyRef, anyRef), weight: 2 },
   { arbitrary: fc.record({ kind: kind("pull") }), weight: 1 },
-  { arbitrary: fc.record({ kind: kind("push") }), weight: 1 },
-  {
-    arbitrary: fc.record({ kind: kind("checkout"), ref: fc.constantFrom(...LOCAL) }),
-    weight: 1
-  }
+  { arbitrary: fc.record({ kind: kind("push") }), weight: 1 }
 );
 const scenario: fc.Arbitrary<Scenario> = fc.record({
   ops: fc.array(op, { maxLength: 40, size: "max" }),
+  head: weighted<LocalRef>(["f1", 2], ["f2", 2], ["f3", 2], ["main", 1]),
   skew: fc.oneof(
     { arbitrary: fc.constant(null), weight: 3 },
     { arbitrary: fc.array(fc.nat(6), { minLength: 1, maxLength: 8 }), weight: 1 }
@@ -268,14 +332,17 @@ const synced: fc.Arbitrary<Scenario> = scenario.map((s) => ({
 describe("layoutLanes properties", () => {
   it("dashes a commit's first-parent line exactly when it is fetched but not applied", () => {
     // The rule in lane-layout.ts: the trunk is unapplied until local main
-    // reaches it; a remote-only branch is unapplied until ANY local ref does.
+    // reaches it. Any other drawn remote ref (a remote-only branch, or the
+    // upstream a branch is behind) is unapplied until ANY local ref does.
     fc.assert(
       fc.property(scenario, (s) => {
-        const v = view(replay(s.ops), s);
+        const v = view(replay(s.ops, s.head), s);
         const { refs } = v.repo;
         const fromOrigin = reach(v.byHash, refs["origin/main"]);
         const fromMain = reach(v.byHash, refs.main);
-        const fromTeam = reach(v.byHash, refs["origin/team"]);
+        const fromRemotes = new Set(
+          v.drawnRemotes.flatMap((r) => [...reach(v.byHash, refs[r])])
+        );
         const fromLocal = new Set(
           LOCAL.flatMap((r) => [...reach(v.byHash, refs[r])])
         );
@@ -288,7 +355,7 @@ describe("layoutLanes properties", () => {
             );
             const unapplied =
               (fromOrigin.has(c.hash) && !fromMain.has(c.hash)) ||
-              (fromTeam.has(c.hash) && !fromLocal.has(c.hash));
+              (fromRemotes.has(c.hash) && !fromLocal.has(c.hash));
             const msg = `${c.hash}'s first-parent line`;
             expect(line, msg).toBeDefined();
             expect(line?.dashed !== undefined, msg).toBe(unapplied);
@@ -301,7 +368,7 @@ describe("layoutLanes properties", () => {
   it("draws every edge as one continuous line in its own column", () => {
     fc.assert(
       fc.property(scenario, (s) => {
-        const v = view(replay(s.ops), s);
+        const v = view(replay(s.ops, s.head), s);
         const { rows, laneCount } = v.layout;
         const childEdges = new Map<string, number>();
         let open = 0; // edges from drawn rows to parents not yet drawn
@@ -351,7 +418,7 @@ describe("layoutLanes properties", () => {
     // spine". With main == origin/main the spine starts at main's tip.
     fc.assert(
       fc.property(synced, (s) => {
-        const repo = replay(s.ops);
+        const repo = replay(s.ops, s.head);
         const v = view(repo, s);
         const lane = lanesOf(v);
         check(v, () => {
@@ -370,33 +437,53 @@ describe("layoutLanes properties", () => {
   it("keeps the checked-out branch's own line on lane 1", () => {
     // The promise: "Lane 1 is reserved for the worktree's checked-out branch
     // tip". Its own line is its first-parent chain down to the spine or to
-    // another drawn branch's tip. Main is synced so the spine is main's chain.
+    // another drawn branch's tip. When its upstream is a fast-forward ahead
+    // (no other drawn tip between them), the line starts at the upstream's
+    // tip instead. Main is synced so the spine is main's chain.
     fc.assert(
       fc.property(synced, (s) => {
-        const repo = replay(s.ops);
+        const repo = replay(s.ops, s.head);
         const v = view(repo, s);
         const lane = lanesOf(v);
+        const parent = (h: string) => v.byHash.get(h)?.parents[0];
         const headTip = repo.refs[repo.head];
         const mainTip = repo.refs.main as string;
         if (repo.head === "main" || headTip === undefined) return;
         if (!lane.has(headTip) || !lane.has(mainTip)) return;
         const spine = new Set<string>();
-        for (let h: string | undefined = mainTip; h !== undefined; ) {
+        for (let h: string | undefined = mainTip; h !== undefined; h = parent(h)) {
           spine.add(h);
-          h = v.byHash.get(h)?.parents[0];
         }
-        const otherTips = new Set(
-          REFS.filter((r) => r !== "origin/main" && r !== repo.head).flatMap(
-            (r) => repo.refs[r] ?? []
+        const drawnTips = new Set(
+          ["main", repo.head, ...v.refs.shownBranches].flatMap(
+            (r) => repo.refs[r as Ref] ?? []
           )
         );
+        let start = headTip;
+        const upTip =
+          v.refs.headUpstream === undefined
+            ? undefined
+            : repo.refs[v.refs.headUpstream as Ref];
+        for (let h = upTip; h !== undefined && lane.has(h); h = parent(h)) {
+          if (h === headTip) {
+            start = upTip as string;
+            break;
+          }
+          if (h !== upTip && drawnTips.has(h)) break;
+        }
+        const line: string[] = [];
+        for (
+          let h: string | undefined = start;
+          h !== undefined && lane.has(h) && !spine.has(h);
+          h = parent(h)
+        ) {
+          if (h !== start && h !== headTip && drawnTips.has(h)) break;
+          line.push(h);
+        }
+        // Only a branch that owns its tip has a line, and a reserved lane.
+        if (!line.includes(headTip)) return;
         check(v, () => {
-          for (
-            let h: string | undefined = headTip;
-            h !== undefined && lane.has(h) && !spine.has(h);
-            h = v.byHash.get(h)?.parents[0]
-          ) {
-            if (h !== headTip && otherTips.has(h)) break;
+          for (const h of line) {
             expect(lane.get(h), `${h} is ${repo.head}'s own line`).toBe(1);
           }
         });
