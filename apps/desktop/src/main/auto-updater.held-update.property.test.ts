@@ -1,9 +1,9 @@
 // Model test: random user sessions against the real auto-updater on Windows.
 //
 // fast-check generates sessions of the commands below and runs each on the
-// real `auto-updater.ts` (fresh module per run, fake timers, stubbed fetch, a
-// real userData directory). Only electron-updater is faked, with the
-// behaviour #467 and #468 describe from electron-updater 6.8.x's source:
+// real `auto-updater.ts` (fresh module per run, fake timers, stubbed fetch).
+// Only electron-updater is faked, with the behaviour #467 and #468 describe
+// from electron-updater 6.8.x's source:
 //
 //   - There is ONE pending cache dir for every track.
 //   - Starting a download of a different version empties it, deleting the
@@ -32,7 +32,7 @@
 // in 2–3 runs, shrunk to a single `restart`. See `numRuns` for the budget.
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import fc from "fast-check";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { AppUpdateCheckResult, AppUpdateStatus } from "@pwrgit/shared";
@@ -183,6 +183,8 @@ const fake = vi.hoisted(() => {
     compare,
     macrotask,
     state,
+    /** The userData files, by path: see the `node:fs` mock. */
+    files: new Map<string, string>(),
     autoUpdater,
     downloadSucceeds(): void {
       const pending = state.pending!;
@@ -215,6 +217,44 @@ const fake = vi.hoisted(() => {
   };
 });
 
+// Speed, not behaviour: a run relaunches the module several times, and the
+// Windows CI runner took 11.6 s for this file before these two changes.
+//
+// - `@pwrgit/shared` is the real module, loaded once. A mocked module survives
+//   `vi.resetModules()`, so relaunches skip re-evaluating it.
+// - The release-state file lives in memory. update-release-state.ts still
+//   parses, validates and saves it, and it still outlives a relaunch, which is
+//   what I5 needs. Its real-directory behaviour is covered by
+//   auto-updater.test.ts. Every other path goes to the real fs.
+vi.mock("@pwrgit/shared", async (importOriginal) => await importOriginal());
+vi.mock("node:fs", async (importOriginal) => {
+  const real = await importOriginal<typeof import("node:fs")>();
+  const files = fake.files;
+  const mine = (path: unknown) => String(path).startsWith(fake.state.userData);
+  const fs = {
+    ...real,
+    mkdirSync: ((path, options) =>
+      mine(path) ? undefined : real.mkdirSync(path, options)) as typeof real.mkdirSync,
+    readFileSync: ((path, options) => {
+      if (!mine(path)) return real.readFileSync(path, options);
+      const data = files.get(String(path));
+      if (data === undefined) {
+        throw Object.assign(new Error(`ENOENT: ${String(path)}`), { code: "ENOENT" });
+      }
+      return data;
+    }) as typeof real.readFileSync,
+    writeFileSync: ((path, data, options) => {
+      if (!mine(path)) return real.writeFileSync(path, data, options);
+      files.set(String(path), String(data));
+    }) as typeof real.writeFileSync,
+    renameSync: ((from, to) => {
+      if (!mine(from)) return real.renameSync(from, to);
+      files.set(String(to), files.get(String(from))!);
+      files.delete(String(from));
+    }) as typeof real.renameSync
+  };
+  return { ...fs, default: fs };
+});
 vi.mock("electron", () => ({
   app: { isPackaged: true, getPath: () => fake.state.userData, quit: () => undefined },
   autoUpdater: undefined
@@ -301,7 +341,8 @@ class World {
   constructor(feed: Set<string>, train: Train) {
     this.feed = feed;
     this.train = train;
-    // An installation already due for its first automatic check.
+    // A fresh installation, already due for its first automatic check.
+    fake.files.clear();
     this.firstSeenAt = Date.now() - APP_UPDATE_FIRST_CHECK_DELAY_MS;
     writeFileSync(
       join(fake.state.userData, "update-release-state.json"),
@@ -550,7 +591,8 @@ const originalFetch = globalThis.fetch;
 
 beforeAll(() => {
   vi.useFakeTimers();
-  fake.state.userData = mkdtempSync(join(tmpdir(), "pwrgit-updater-model-"));
+  // Never created: the `node:fs` mock keeps everything under it in memory.
+  fake.state.userData = join(tmpdir(), `pwrgit-updater-model-${process.pid}`);
   Object.defineProperty(process, "platform", { configurable: true, value: "win32" });
 });
 
@@ -559,7 +601,6 @@ afterAll(() => {
   vi.useRealTimers();
   Object.defineProperty(process, "platform", { configurable: true, value: originalPlatform });
   Object.defineProperty(globalThis, "fetch", { configurable: true, value: originalFetch });
-  rmSync(fake.state.userData, { recursive: true, force: true });
 });
 
 describe("auto-updater held-update model (Windows)", () => {
@@ -579,12 +620,13 @@ describe("auto-updater held-update model (Windows)", () => {
           await fc.asyncModelRun(() => ({ model, real: world }), commands);
         }
       ),
-      // Budget: about 6 ms a run on an M-series Mac, so 400 runs take about
-      // 2.5 s here and should stay well under 10 s on Windows CI (the 20 s
-      // test timeout applies). Against the code before #468, 20 seeds first
-      // failed at a mean of 58 runs and at most 160, so 400 runs miss it about
-      // once in a thousand. Sessions are "medium" (up to 30 commands): at the
-      // default size the same bug took a mean of ~700 runs to find.
+      // Budget: about 2 ms a run on an M-series Mac, so 400 runs take under
+      // 1 s here. The file must stay well under 10 s on Windows CI, where the
+      // 20 s test timeout applies; see the mocks above for what that took.
+      // Against the code before #468, 20 seeds first failed at a mean of 58
+      // runs and at most 160, so 400 runs miss it about once in a thousand.
+      // Sessions are "medium" (up to 30 commands): at the default size the
+      // same bug took a mean of ~700 runs to find.
       { numRuns: 400 }
     );
   });
