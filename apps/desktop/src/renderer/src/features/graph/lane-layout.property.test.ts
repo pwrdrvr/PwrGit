@@ -27,7 +27,7 @@ type Ref = LocalRef | (typeof REMOTE)[number];
 const REFS: readonly Ref[] = [...LOCAL, ...REMOTE];
 /** The ref fN tracks once published. */
 const trackingRef = (f: Feature) => `origin/${f}` as const;
-const isUpstream = (r: Ref): boolean => (UPSTREAMS as readonly Ref[]).includes(r);
+const isIn = (group: readonly Ref[], r: Ref): boolean => group.includes(r);
 
 type Op =
   /** A commit on any ref. On a remote ref, someone else pushed and we fetched. */
@@ -53,7 +53,7 @@ type Repo = {
 };
 
 /** Replay `ops`, with the viewed worktree on `checkedOut` once it exists. */
-function replay(ops: readonly Op[], checkedOut: LocalRef = "main"): Repo {
+function replay(ops: readonly Op[], checkedOut: LocalRef): Repo {
   const commits: LaneCommit[] = [{ hash: "c0", parents: [] }];
   const byHash = new Map(commits.map((c) => [c.hash, c]));
   const refs: Partial<Record<Ref, string>> = { main: "c0", "origin/main": "c0" };
@@ -78,7 +78,7 @@ function replay(ops: readonly Op[], checkedOut: LocalRef = "main"): Repo {
         // A commit on a branch that does not exist yet starts it from main.
         // An upstream exists only once its branch was published.
         const tip = refs[op.ref];
-        if (tip === undefined && isUpstream(op.ref)) break;
+        if (tip === undefined && isIn(UPSTREAMS, op.ref)) break;
         refs[op.ref] = commit(tip ?? (refs.main as string));
         break;
       }
@@ -211,7 +211,7 @@ function view(repo: Repo, s: Scenario): View {
   // LineageGraph draws the union, and every drawn remote name is passed as a
   // remote branch.
   const drawn = [...shown, ...upstreamRefs];
-  const drawnRemotes = drawn.filter((r) => (REMOTE as readonly Ref[]).includes(r));
+  const drawnRemotes = drawn.filter((r) => isIn(REMOTE, r));
   const headUpstream = behind.get(repo.head);
   const refs: LaneRefs = {
     tips,

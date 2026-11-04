@@ -38,7 +38,8 @@ export type LaneRefs = {
    *  its history becomes reachable from a local ref. The trunk's dash is not
    *  measured against these — it ends only at local main's own tip. */
   localRefTips?: string[] | undefined;
-  /** Drawn branch names that exist only as remote-tracking refs. */
+  /** Drawn remote-tracking refs: remote-only branches, and the upstreams a
+   *  drawn branch is behind (LineageGraph passes every drawn remote name). */
   remoteBranches?: string[] | undefined;
   /** The branch checked out in the viewing worktree — pinned to lane 1. */
   headBranch?: string | undefined;
