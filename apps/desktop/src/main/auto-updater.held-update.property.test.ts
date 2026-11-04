@@ -231,27 +231,29 @@ vi.mock("node:fs", async (importOriginal) => {
   const real = await importOriginal<typeof import("node:fs")>();
   const files = fake.files;
   const mine = (path: unknown) => String(path).startsWith(fake.state.userData);
+  type Routed = "mkdirSync" | "readFileSync" | "writeFileSync" | "renameSync";
+  /** `name` for paths under userData goes to `inMemory`; the rest to disk. */
+  const route = <K extends Routed>(name: K, inMemory: (...args: unknown[]) => unknown) =>
+    ((...args: unknown[]) =>
+      mine(args[0]) ? inMemory(...args) : Reflect.apply(real[name], real, args)
+    ) as unknown as (typeof real)[K];
   const fs = {
     ...real,
-    mkdirSync: ((path, options) =>
-      mine(path) ? undefined : real.mkdirSync(path, options)) as typeof real.mkdirSync,
-    readFileSync: ((path, options) => {
-      if (!mine(path)) return real.readFileSync(path, options);
+    mkdirSync: route("mkdirSync", () => undefined),
+    readFileSync: route("readFileSync", (path) => {
       const data = files.get(String(path));
       if (data === undefined) {
         throw Object.assign(new Error(`ENOENT: ${String(path)}`), { code: "ENOENT" });
       }
       return data;
-    }) as typeof real.readFileSync,
-    writeFileSync: ((path, data, options) => {
-      if (!mine(path)) return real.writeFileSync(path, data, options);
+    }),
+    writeFileSync: route("writeFileSync", (path, data) => {
       files.set(String(path), String(data));
-    }) as typeof real.writeFileSync,
-    renameSync: ((from, to) => {
-      if (!mine(from)) return real.renameSync(from, to);
+    }),
+    renameSync: route("renameSync", (from, to) => {
       files.set(String(to), files.get(String(from))!);
       files.delete(String(from));
-    }) as typeof real.renameSync
+    })
   };
   return { ...fs, default: fs };
 });
