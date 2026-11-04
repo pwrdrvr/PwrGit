@@ -1,11 +1,12 @@
 import {
+  useContext,
   useEffect,
   useRef,
   type DragEvent,
   type KeyboardEvent as ReactKeyboardEvent,
   type MouseEvent as ReactMouseEvent
 } from "react";
-import type { Worktree } from "@pwrgit/shared";
+import { worktreeLandedChangeRequest, type Worktree } from "@pwrgit/shared";
 import {
   currentPlatform,
   elidePathMiddle,
@@ -27,6 +28,7 @@ import {
   type DropPosition
 } from "./repo-view";
 import { PullBadge } from "./PullBadge";
+import { FinishedAfterDaysContext } from "./finished-after";
 import { useReportVisible } from "../../lib/visibleWorktrees";
 import { DotGlyph } from "../../lib/DotGlyph";
 
@@ -41,6 +43,8 @@ export function WorktreeRow({
   onContextMenu,
   onTogglePin,
   onRemove,
+  forkLabel,
+  onFork,
   onRefreshPullRequest,
   dragProps,
   dragging,
@@ -61,6 +65,10 @@ export function WorktreeRow({
   onContextMenu: (e: ReactMouseEvent) => void;
   onTogglePin: () => void;
   onRemove: () => void;
+  /** Fork the repository, offered from this checkout's menu as the graph
+   *  header's menu offers it. Absent on rows that never fork. */
+  forkLabel?: string;
+  onFork?: () => void;
   /** Refresh this branch's PR after deliberate row hover. */
   onRefreshPullRequest?: () => void;
   /** Drag handlers from useListReorder; false for fixed/computed rows. */
@@ -94,7 +102,8 @@ export function WorktreeRow({
   /** Explicit only in deterministic platform component tests. */
   platform?: string;
 }) {
-  const prunable = isPrunableWorktree(worktree, now);
+  const finishedAfterDays = useContext(FinishedAfterDaysContext);
+  const prunable = isPrunableWorktree(worktree, now, finishedAfterDays);
   // The checkout is gone (deleted outside PwrGit, or on a volume that is not
   // mounted). Nothing is dirty, ahead or behind in a directory that does not
   // exist, so the count badges stay off whatever the row carries; the tag
@@ -104,6 +113,11 @@ export function WorktreeRow({
   // was deleted; "gone" beside it said the same thing twice.
   const showsPr = worktree.pr !== undefined && !worktree.isDefaultBranch;
   const prSettled = showsPr && worktree.pr?.state !== "open";
+  // No upstream, and the tip IS a merged change request's head: its commits
+  // are on no remote ref only because that branch was deleted after the
+  // merge. The "merged" chip says where they went, so an ↑N claiming unpushed
+  // work beside it is dropped (the header's "landed in #N" is the same rule).
+  const landed = showsPr && worktreeLandedChangeRequest(worktree) !== null;
   // The primary checkout sits in the repo's own directory, which the folder row
   // directly above already names — repeating it on every repo's first row would
   // be noise, so only linked worktrees carry the folder.
@@ -305,7 +319,7 @@ export function WorktreeRow({
       {/* On a fork row whose source has commits, the source badge carries the
           branch's own ↑ against the source, as the header's `↓12 upstream ·
           ↑2` does; an ↑ against origin beside it counted something else. */}
-      {!missing && worktree.ahead > 0 && pull?.kind !== "source" && (
+      {!missing && worktree.ahead > 0 && !landed && pull?.kind !== "source" && (
         <>
           <span className="badge-text badge-text--ok" aria-hidden="true">
             ↑{worktree.ahead}
@@ -446,10 +460,11 @@ export function WorktreeRow({
         worktree={worktree}
         className="wt-row__menu"
         platform={platform}
-        {...(missing
+        {...(forkLabel === undefined || onFork === undefined
           ? {}
-          : { onResetToRemote: () => openResetToRemote({ worktree }) })}
-        {...(worktree.isPrimary ? {} : { onRemove })}
+          : { fork: { label: forkLabel, onSelect: onFork } })}
+        onResetToRemote={() => openResetToRemote({ worktree })}
+        onRemove={onRemove}
       />
       {tip.tooltipNode}
     </div>

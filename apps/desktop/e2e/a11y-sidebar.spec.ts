@@ -6,7 +6,8 @@ import {
   branchRow,
   expandRepoGroup,
   lensChip,
-  primaryShortcut
+  primaryShortcut,
+  clickAddFolders
 } from "./fixtures/steps";
 
 /**
@@ -157,7 +158,7 @@ test(
     handle = await launchApp();
     const { window } = handle;
     await handle.setPickDirectory(sandbox.reposDir);
-    await window.getByRole("button", { name: /Add folders/i }).click();
+    await clickAddFolders(window);
 
     // A first run lands in All (lens-row.spec.ts owns that rule). Pin the repo
     // to put something in Focused — the note, and the escape hatch this test

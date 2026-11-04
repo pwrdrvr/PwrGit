@@ -52,8 +52,13 @@ import { WorktreeOperationQueue } from "./worktree-operation-queue";
 import { checkRemoteTips, ensureForkParentRemote } from "./auto-remote-check";
 import { execGit } from "./dugite";
 import { inspectForkTracking, repairForkTracking } from "./fork-tracking";
+import { retrackBranch } from "./branch-tracking";
 
 vi.mock("./fork-tracking", () => ({ inspectForkTracking: vi.fn(), repairForkTracking: vi.fn() }));
+vi.mock("./branch-tracking", async (importOriginal) => ({
+  ...await importOriginal<typeof import("./branch-tracking")>(),
+  retrackBranch: vi.fn()
+}));
 
 vi.mock("./git-service", async (importOriginal) => {
   const actual = await importOriginal<typeof import("./git-service")>();
@@ -101,6 +106,12 @@ vi.mock("./ssh-remote-recovery", () => ({
   testSshRemoteRecovery: vi.fn()
 }));
 
+function deferred(): { promise: Promise<void>; resolve: () => void } {
+  let resolve!: () => void;
+  const promise = new Promise<void>((done) => { resolve = done; });
+  return { promise, resolve };
+}
+
 /** Distinct phases one worktree's activity passed through, in order. */
 function phasesFrom(
   emit: ReturnType<typeof vi.mocked<typeof emitEvent>>,
@@ -135,6 +146,7 @@ describe("remote handlers", () => {
     vi.clearAllMocks();
     vi.mocked(repairForkTracking).mockResolvedValue(ok(null));
     vi.mocked(inspectForkTracking).mockResolvedValue(ok(null));
+    vi.mocked(retrackBranch).mockResolvedValue(ok({ moved: false, copied: null }));
     vi.mocked(checkSelectedRemoteTips).mockResolvedValue(ok("checked"));
     vi.mocked(ensureForkParentRemote).mockResolvedValue(ok(undefined));
     vi.mocked(fetchAllRemotes).mockResolvedValue(ok(undefined));
@@ -179,6 +191,52 @@ describe("remote handlers", () => {
   });
 
   afterEach(() => vi.useRealTimers());
+
+  it.each(["inspectForkTracking", "repairForkTracking", "retrack"] as const)(
+    "finishes Pull and %s when both arrive behind occupied scopes",
+    async (command) => {
+      vi.useFakeTimers();
+      const db = { prepare: (sql: string) => ({ get: () => sql.includes("FROM worktrees")
+        ? { path: "/repos/project", repoId: "repo", branch: "main" }
+        : { path: "/repos/project", profileId: "profile", name: "project" }
+      }) } as unknown as DB;
+      const operations = new WorktreeOperationQueue();
+      const repositoryGate = deferred();
+      const worktreeGate = deferred();
+      const repository = operations.runRepository("repo", () => repositoryGate.promise);
+      const worktree = operations.run("worktree", () => worktreeGate.promise);
+      const bus = new CommandBus();
+      registerRemoteHandlers(bus, db, {
+        refreshWorktree: vi.fn(), refreshRepoWorktrees: vi.fn()
+      }, operations);
+
+      // Pull queues repository -> worktree. The tracking handler must join
+      // the repository queue without reserving the worktree ahead of Pull.
+      const pull = bus.dispatch("remote:pull", { worktreeId: "worktree" });
+      const tracking = command === "inspectForkTracking"
+        ? bus.dispatch("remote:inspectForkTracking", { worktreeId: "worktree" })
+        : command === "repairForkTracking"
+          ? bus.dispatch("remote:repairForkTracking", { worktreeId: "worktree", branch: "main", upstream: "upstream/main" })
+          : bus.dispatch("remote:retrack", {
+            worktreeId: "worktree", branch: "main", remote: "origin", remoteBranch: "main",
+            head: "1".repeat(40), targetHead: "1".repeat(40), upstreamRef: null, move: "none"
+          });
+      worktreeGate.resolve();
+      await worktree;
+      await vi.advanceTimersByTimeAsync(0);
+      repositoryGate.resolve();
+      await repository;
+      await vi.advanceTimersByTimeAsync(0);
+
+      expect(pullFastForward).toHaveBeenCalledTimes(1);
+      const service = command === "inspectForkTracking" ? inspectForkTracking
+        : command === "repairForkTracking" ? repairForkTracking : retrackBranch;
+      expect(service).toHaveBeenCalledTimes(1);
+      expect((await pull).ok).toBe(true);
+      expect((await tracking).ok).toBe(true);
+      expect(liveActivities(vi.mocked(emitEvent))).toEqual([]);
+    }
+  );
 
   const trackingOffer = {
     branch: "main", upstream: "upstream/main", upstreamRemote: "upstream", target: "origin/main",
@@ -729,6 +787,31 @@ describe("remote handlers", () => {
     expect(emitEvent).toHaveBeenCalledWith("stash:changed", {
       repoId: "repo-1"
     });
+  });
+
+  it("repaints the graph after a pull even when the worktree's own state held still", async () => {
+    // The refresher repaints only when this branch's counters moved. A pull
+    // that found main already current, or that moved only other branches'
+    // remote refs, moves none — and a graph drawn mid-pull stayed dashed.
+    const db = {
+      prepare: vi.fn(() => ({
+        get: vi.fn(() => ({ path: "/repos/project", repoId: "repo-1" }))
+      }))
+    } as unknown as DB;
+    const refresher = {
+      refreshWorktree: vi.fn(async () => undefined),
+      refreshRepoWorktrees: vi.fn()
+    } satisfies WorktreeRefresher;
+    vi.mocked(pullFastForward).mockResolvedValueOnce(
+      ok({ fastForwarded: false, stashed: false, reappliedWithConflicts: false })
+    );
+    const bus = new CommandBus();
+    registerRemoteHandlers(bus, db, refresher, new WorktreeOperationQueue());
+
+    await expect(
+      bus.dispatch("remote:pull", { worktreeId: "worktree-1" })
+    ).resolves.toMatchObject({ ok: true });
+    expect(emitEvent).toHaveBeenCalledWith("graph:changed", { repoId: "repo-1" });
   });
 
   it("leaves the network phase before rebuilding the branch index", async () => {
@@ -1305,6 +1388,26 @@ describe("remote handlers", () => {
     );
   });
 
+  it.each(["the recovery entry is missing", "the recovery marker appears more than once"])("preserves actionable Pull ownership guidance when %s", async (reason) => {
+    const db = { prepare: vi.fn(() => ({ get: vi.fn(() => ({ path: "/repos/project", repoId: "repo-1" })) })) } as unknown as DB;
+    const name = "pwrgit: auto-stash before pull [1068b16d-af82-47a9-85bc-a37a73ac310b]";
+    const error = { kind: "remote" as const, code: "pull_stash_ownership", message: `PwrGit cannot identify Pull's saved changes because ${reason}. No stash was applied or removed. Check Stashes for "${name}" before retrying.` };
+    vi.mocked(pullFastForward).mockResolvedValueOnce(err(error));
+    const bus = new CommandBus();
+    registerRemoteHandlers(bus, db, { refreshWorktree: vi.fn(), refreshRepoWorktrees: vi.fn() }, new WorktreeOperationQueue());
+    expect(await bus.dispatch("remote:pull", { worktreeId: "worktree-1" })).toEqual(err(error));
+  });
+
+  it("logs the retained recovery copy on a successful Pull", async () => {
+    const db = { prepare: vi.fn(() => ({ get: vi.fn(() => ({ path: "/repos/project", repoId: "repo-1" })) })) } as unknown as DB;
+    const outcome = { fastForwarded: true, stashed: true, reappliedWithConflicts: false, recoveryStash: "a".repeat(40) };
+    vi.mocked(pullFastForward).mockResolvedValueOnce(ok(outcome));
+    const bus = new CommandBus();
+    registerRemoteHandlers(bus, db, { refreshWorktree: vi.fn(), refreshRepoWorktrees: vi.fn() }, new WorktreeOperationQueue());
+    expect(await bus.dispatch("remote:pull", { worktreeId: "worktree-1" })).toEqual(ok(outcome));
+    expect(logMain).toHaveBeenCalledWith("info", "remote", expect.stringContaining("recovery stash kept in Stashes"));
+  });
+
   it("refreshes repo worktree state after repo-scoped ref operations", async () => {
     const db = {
       prepare: vi.fn(() => ({ get: vi.fn(() => ({ path: "/repos/project" })) }))
@@ -1544,7 +1647,9 @@ describe("remote handlers", () => {
 
   it("refreshes remote-branch search after fetching repository refs", async () => {
     const db = {
-      prepare: vi.fn(() => ({ get: vi.fn(() => ({ path: "/repos/project" })) }))
+      prepare: vi.fn(() => ({
+        get: vi.fn(() => ({ path: "/repos/project", profile_id: "profile-1" }))
+      }))
     } as unknown as DB;
     const refresher = {
       refreshWorktree: vi.fn(async () => undefined),
@@ -1569,6 +1674,12 @@ describe("remote handlers", () => {
     expect(indexer.refreshRepoRemoteBranches).toHaveBeenCalledExactlyOnceWith(
       "repo-1"
     );
+    // A new remote branch moves no checkout's state, so this event is the
+    // only thing that reloads the sidebar's Branches and Remotes for it.
+    expect(emitEvent).toHaveBeenCalledWith("repo:changed", {
+      profileId: "profile-1",
+      repoIds: ["repo-1"]
+    });
 
     vi.mocked(indexer.refreshRepoRemoteBranches).mockClear();
     await expect(
@@ -1957,6 +2068,22 @@ describe("remote handlers", () => {
         if (refused.ok) return;
         expect(refused.error.code).toBe("fork_sync_stale");
         expect(pullFastForward).not.toHaveBeenCalled();
+      });
+
+      it("carries Pull's retained recovery identity through fork sync even without push tracking", async () => {
+        const recoveryStash = "a".repeat(40);
+        vi.mocked(pullFastForward).mockResolvedValueOnce(ok({
+          fastForwarded: true, stashed: true, reappliedWithConflicts: false, recoveryStash
+        }));
+        vi.mocked(resolveForkStatus)
+          .mockResolvedValueOnce(ok(behindSource()))
+          .mockResolvedValueOnce(ok({ ...behindSource(), tracked: null }));
+        const bus = new CommandBus();
+        registerRemoteHandlers(bus, db, refresher(), new WorktreeOperationQueue());
+        expect(await bus.dispatch("remote:syncFork", request)).toMatchObject({
+          ok: true, value: { stashed: true, reappliedWithConflicts: false, recoveryStash, push: { outcome: "no_tracking" } }
+        });
+        expect(pushBranchWithLease).not.toHaveBeenCalled();
       });
 
       it("never forces the fork: a diverged one is reported, not pushed", async () => {

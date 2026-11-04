@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { chmod, mkdtemp, readFile, realpath, rm, unlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { delimiter, dirname, join } from "node:path";
+import { delimiter, dirname, join, resolve } from "node:path";
 import dugite from "dugite";
 import {
   configureBundledGit,
@@ -13,10 +13,13 @@ import {
   execGitRecords,
   installedGitEnvironment,
   installedGitSelection,
+  noteGitReflinkSupport,
+  reflinkCheckoutActive,
   useInstalledGit,
+  useReflinkCheckout,
   type GitLaunch
 } from "./dugite";
-import { probeGitRuntime, readGitRuntimeStatus, selectGitRuntime, type GitDiscoveryDeps } from "./runtime-status";
+import { parseReflinkSupport, probeGitRuntime, readGitReflinkStatus, readGitRuntimeStatus, refreshActiveGitReflink, selectGitRuntime, type GitDiscoveryDeps } from "./runtime-status";
 
 const posix = process.platform !== "win32";
 const scratch: string[] = [];
@@ -168,14 +171,31 @@ describe.skipIf(!posix)("an installed Git chosen in Settings", () => {
     expect(stream.ok ? "" : stream.error.message).toContain("Settings");
   });
 
-  it("keeps a GIT_CONFIG_SYSTEM of the user's own, and drops the bundle's and the generated one", async () => {
+  it("hands an installed Git the user's own GIT_CONFIG_SYSTEM, unwrapped from any a Pwr app generated, or none", async () => {
     const generated = await temporary("pwrgit-gitconfig-");
     configureBundledGitConfig(generated);
     const bundle = dugite.resolveEmbeddedGitDir();
-    const own = installedGitEnvironment({ GIT_CONFIG_SYSTEM: "/etc/custom-gitconfig", PATH: "" }, "/opt/fixture/bin/git");
-    expect(own.GIT_CONFIG_SYSTEM).toBe("/etc/custom-gitconfig");
-    for (const config of [join(bundle, "etc", "gitconfig"), join(generated, "gitconfig-abc")]) {
-      expect(installedGitEnvironment({ GIT_CONFIG_SYSTEM: config, PATH: "" }, "/opt/fixture/bin/git").GIT_CONFIG_SYSTEM).toBeUndefined();
+    const installed = (config: string) =>
+      installedGitEnvironment({ GIT_CONFIG_SYSTEM: config, PATH: "" }, "/opt/fixture/bin/git").GIT_CONFIG_SYSTEM;
+    expect(installed("/etc/custom-gitconfig")).toBe(resolve("/etc/custom-gitconfig"));
+    // Built by the bundled path once or twice (a PwrGit terminal, then PwrGit
+    // again), then a Git chosen in Settings: the user's file comes back.
+    const own = join(await temporary("pwrgit-etc-"), "gitconfig");
+    await writeFile(own, "[user]\n\tname = Machine\n");
+    let env: NodeJS.ProcessEnv = { GIT_CONFIG_SYSTEM: own };
+    for (let build = 0; build < 2; build += 1) {
+      env = gitExecutionEnvironment(env);
+      expect(installedGitEnvironment({ ...env, PATH: "" }, "/opt/fixture/bin/git").GIT_CONFIG_SYSTEM).toBe(own);
+    }
+    // PwrAgent's terminal hands its generated file to anything launched there.
+    const pwragent = join(await temporary("pwragent-gitconfig-"), "gitconfig-abc");
+    await writeFile(pwragent, `# Written by PwrAgent: defaults for its bundled Git\n[include]\n\tpath = "${own.replaceAll("\\", "\\\\")}"\n`);
+    expect(installed(pwragent)).toBe(own);
+    // With no user config underneath, the installed Git reads its own.
+    const bare = join(await temporary("pwragent-gitconfig-"), "gitconfig-def");
+    await writeFile(bare, "# Written by PwrAgent: defaults for its bundled Git\n");
+    for (const config of [join(bundle, "etc", "gitconfig"), join(generated, "gitconfig-abc"), bare, gitExecutionEnvironment({}).GIT_CONFIG_SYSTEM!]) {
+      expect(installed(config)).toBeUndefined();
     }
   });
 });
@@ -275,6 +295,34 @@ describe("Git discovery", () => {
   });
 });
 
+describe("copy-on-write probe that gets no answer", () => {
+  afterEach(() => {
+    useReflinkCheckout(false);
+    noteGitReflinkSupport("/nowhere", null, { checkout: false, reshare: false });
+  });
+
+  // Found validating a packaged .3 build: macOS's keychain prompt held the
+  // main thread for 13s, the launch probe's Git runs timed out behind it, and
+  // "no answer" was recorded as "can't" for the rest of the session.
+  it("is unknown, not unsupported: the next ask probes again and turns it on", async () => {
+    let answering = false;
+    const machine = fakeMachine({}, {
+      executable: async () => true,
+      probe: async (_launch, args) =>
+        !answering
+          ? { ok: false, stdout: "" }
+          : { ok: true, stdout: args[0] === "--version" ? "git version 2.56.0-dev-pwrgit.3" : args[0] === "lfs" ? "git-lfs/3.7.1" : "usage: git worktree add [--[no-]reflink]\n   or: git worktree reflink" }
+    });
+    useReflinkCheckout(true);
+    await refreshActiveGitReflink(machine);
+    expect(reflinkCheckoutActive()).toBe(false);
+    answering = true;
+    const status = await readGitReflinkStatus(machine);
+    expect(status.support).toEqual({ checkout: true, reshare: true });
+    expect(reflinkCheckoutActive()).toBe(true);
+  });
+});
+
 describe("selectGitRuntime", () => {
   const settings = () => ({ update: vi.fn() });
 
@@ -311,5 +359,21 @@ describe("selectGitRuntime", () => {
       expect(store.update).toHaveBeenCalledWith({ gitPath: undefined });
       expect(installedGitSelection()).toBeNull();
     }
+  });
+});
+
+describe("parseReflinkSupport", () => {
+  it("reads checkout and re-share support from git worktree -h", () => {
+    const runtime2 = [
+      "usage: git worktree add [-f] [--detach] [--checkout] [--lock [--reason <string>]]",
+      "                        [--[no-]reflink] [--reflink-source=<worktree>]",
+      "   or: git worktree list [-v | --porcelain [-z]]",
+      "   or: git worktree reflink [-n] [-v | --porcelain [-z]]"
+    ].join("\n");
+    expect(parseReflinkSupport(runtime2)).toEqual({ checkout: true, reshare: true });
+    expect(parseReflinkSupport(runtime2.split("\n").slice(0, 3).join("\n"))).toEqual({ checkout: true, reshare: false });
+    expect(
+      parseReflinkSupport("usage: git worktree add [-f] [--detach] [--checkout]\n   or: git worktree list")
+    ).toEqual({ checkout: false, reshare: false });
   });
 });

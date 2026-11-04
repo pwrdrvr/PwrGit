@@ -1,0 +1,339 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <script src="./support.js"></script>
+  </head>
+  <body>
+    <x-dc>
+      <helmet data-dc-atomics>
+        <link href="https://fonts.googleapis.com/css2?family=Geist:wght@400..700&amp;family=Geist+Mono:wght@400..700&amp;display=swap" rel="stylesheet" />
+        <style>
+          :root {
+            --rv-bg: #050505; --rv-line: rgba(247, 243, 235, 0.1);
+            --rv-t1: #f7f3eb; --rv-t2: #b8b0a5; --rv-t3: #8c857a; --rv-tsub: rgba(247, 243, 235, 0.54);
+            --rv-acc: #ff8a1f; --rv-accb: #ffb35c; --rv-bad: #b94232; --rv-ok: #5fa969;
+            --font-sans: "Geist", "SF Pro Text", system-ui, sans-serif;
+            --font-mono: "Geist Mono", "SF Mono", "JetBrains Mono", Consolas, monospace;
+          }
+          *, *::before, *::after { box-sizing: border-box; }
+          html { background: var(--rv-bg); }
+          body { margin: 0; background: var(--rv-bg); font-family: var(--font-sans); }
+          a { color: var(--rv-accb); text-decoration: none; } a:hover { color: var(--rv-acc); }
+          .dv-turn { padding: 40px 44px 32px; background: var(--rv-bg); border-bottom: 1px solid var(--rv-line); }
+          .dv-thd { display: flex; align-items: baseline; gap: 10px; margin: 0 0 6px; }
+          .dv-tid { font: 600 10px var(--font-mono); padding: 3px 7px; background: var(--rv-t1); color: var(--rv-bg); border-radius: 4px; }
+          .dv-tname { font: 600 13px/1.2 var(--font-sans); color: var(--rv-t1); }
+          .dv-sub { margin: 0 0 22px; font: 400 11.5px/1.5 var(--font-sans); color: var(--rv-t3); max-width: 900px; text-wrap: pretty; }
+          .dv-sub b { color: var(--rv-t2); font-weight: 600; }
+          .dv-opts { display: flex; flex-wrap: wrap; gap: 28px; align-items: flex-start; }
+          .dv-opt { flex: 0 1 auto; min-width: 0; display: flex; flex-direction: column; gap: 9px; }
+          .dv-oid { font: 600 10.5px var(--font-mono); padding: 3px 7px; background: rgba(247, 243, 235, 0.08); color: var(--rv-t1); border-radius: 5px; }
+          .dv-olabel { display: flex; align-items: baseline; gap: 8px; font: 400 11px/1.3 var(--font-sans); color: var(--rv-tsub); max-width: 760px; }
+          .dv-olabel b { color: var(--rv-accb); font-weight: 600; }
+          .dv-next { margin: 26px 0 0; font: 400 11px/1.5 var(--font-sans); color: var(--rv-t3); }
+          .dv-next b { color: var(--rv-t2); }
+          .note { margin: 0; font: 400 10.5px/1.5 var(--font-sans); color: var(--rv-t3); text-wrap: pretty; max-width: 700px; }
+          .note b { color: var(--rv-t2); font-weight: 600; }
+          .pin { display: inline-flex; align-items: center; justify-content: center; flex: none; width: 15px; height: 15px; border-radius: 999px; background: var(--rv-bad); color: #fff; font: 700 9px/1 var(--font-mono); }
+          .find { max-width: 560px; display: flex; flex-direction: column; gap: 14px; padding: 16px; border: 1px solid var(--rv-line); border-radius: 9px; background: #0a0a0a; }
+          .fitem { display: grid; grid-template-columns: 15px minmax(0, 1fr); gap: 9px; align-items: start; }
+          .fitem h4 { margin: 0 0 3px; font: 650 11.5px/1.3 var(--font-sans); color: var(--rv-t1); }
+          .fitem p { margin: 0; font: 400 10.5px/1.5 var(--font-sans); color: var(--rv-t3); text-wrap: pretty; }
+          .fitem b { color: var(--rv-t2); font-weight: 600; }
+          .tbl { border-collapse: collapse; max-width: 980px; font: 400 10.5px/1.45 var(--font-sans); color: var(--rv-t2); }
+          .tbl th { text-align: left; padding: 7px 10px; color: var(--rv-t1); font-weight: 650; border-bottom: 1px solid var(--rv-line); }
+          .tbl td { padding: 7px 10px; vertical-align: top; border-bottom: 1px solid var(--rv-line); }
+          .tbl code { font: 500 10px var(--font-mono); color: var(--rv-accb); }
+
+          .th-light {
+            --bg-stage: #efe9df; --bg-panel: #fdfcfa; --bg-menu: #ffffff; --bg-input: #ffffff; --bg-panel-hover: #f4f0e8;
+            --border-faint: rgba(0, 0, 0, 0.05); --border-subtle: rgba(0, 0, 0, 0.08); --border-default: rgba(0, 0, 0, 0.12); --border-strong: rgba(0, 0, 0, 0.18);
+            --text-primary: #1a1612; --text-secondary: #524a40; --text-muted: #736c64; --text-subtle: rgba(26, 22, 18, 0.68);
+            --accent: #b74c00; --accent-on: #ffffff;
+            --accent-tint: color-mix(in srgb, var(--accent) 8%, transparent); --accent-border: color-mix(in srgb, var(--accent) 42%, transparent); --accent-soft: color-mix(in srgb, var(--accent) 12%, transparent);
+            --danger-base: #8a1f12; --danger-soft: rgba(138, 31, 18, 0.12); --danger-border: rgba(138, 31, 18, 0.28); --danger-text: #8a1f12;
+            --success-soft: rgba(46, 110, 64, 0.14); --success-text: #1a5c2e;
+            --shadow-overlay: 0 24px 60px rgba(40, 28, 12, 0.18);
+          }
+          .stage { padding: 22px; border-radius: 10px; background: var(--bg-stage); }
+          .bs { width: 720px; max-width: 100%; display: flex; flex-direction: column; overflow: hidden; background: var(--bg-menu); border: 1px solid var(--border-strong); border-radius: 14px; box-shadow: var(--shadow-overlay); }
+          .bs-head { padding: 14px 18px 12px; border-bottom: 1px solid var(--border-subtle); }
+          .bs-head h2 { margin: 0; color: var(--text-primary); font: 650 14px/1.2 var(--font-sans); }
+          .mt-tabs { display: flex; gap: 8px; padding: 12px 18px 0; }
+          .mt-tab { padding: 7px 10px; border: 1px solid var(--border-subtle); border-radius: 6px; background: var(--bg-panel); color: var(--text-secondary); font: 600 12px/1 var(--font-sans); }
+          .mt-tab.on { border-color: var(--accent-border); background: var(--accent-tint); color: var(--text-primary); }
+          .bs-body { display: flex; flex-direction: column; padding-bottom: 12px; }
+          .bs-actions { display: flex; justify-content: flex-end; gap: 8px; padding: 12px 18px; border-top: 1px solid var(--border-subtle); }
+          .bs-btn { height: 28px; padding: 0 12px; border: 1px solid var(--border-default); border-radius: 7px; background: var(--bg-panel); color: var(--text-primary); font: 600 12px/1 var(--font-sans); }
+
+          .done { display: flex; align-items: center; gap: 11px; margin: 12px 18px 0; padding: 11px 12px; border: 1px solid var(--border-subtle); border-radius: 8px; background: var(--bg-panel); }
+          .done.bad { border-color: var(--danger-border); }
+          .done strong { display: block; color: var(--text-primary); font: 650 11.5px/1.25 var(--font-sans); }
+          .done small { display: block; margin-top: 3px; color: var(--text-secondary); font: 400 10.5px/1.3 var(--font-sans); }
+          .done time { margin-left: auto; color: var(--text-secondary); font: 600 10.5px/1 var(--font-mono); }
+          .mark { flex: none; display: grid; place-items: center; width: 16px; height: 16px; border-radius: 50%; font: 800 9px/1 var(--font-sans); }
+          .mark.bad { background: var(--danger-soft); color: var(--danger-text); }
+          .mark.ok { background: var(--success-soft); color: var(--success-text); }
+          .mark.run { border: 2px solid var(--accent-border); border-top-color: var(--accent); background: transparent; }
+
+          .steps { display: flex; flex-direction: column; gap: 8px; margin: 12px 18px 0; }
+          .rstep { display: flex; align-items: center; gap: 9px; padding: 10px 12px; border: 1px solid var(--border-subtle); border-radius: 8px; background: var(--bg-panel); }
+          .rstep.skip { border-style: dashed; background: transparent; }
+          .rstep.bad { border-color: var(--danger-border); }
+          .rstep strong { color: var(--text-primary); font: 650 12px/1.2 var(--font-sans); }
+          .rstep .r { margin-left: auto; color: var(--text-secondary); font: 600 10.5px/1 var(--font-mono); }
+          .rstep .r em { font-style: normal; color: var(--danger-text); }
+          .rstep .lnk { color: var(--accent); font: 600 10.5px var(--font-sans); }
+          .snum { flex: none; display: grid; place-items: center; width: 20px; height: 20px; border-radius: 50%; border: 1px solid var(--border-default); color: var(--text-secondary); font: 600 10px/1 var(--font-mono); }
+          .snum.ok { border: 0; background: var(--success-soft); color: var(--success-text); }
+          .snum.bad { border: 0; background: var(--danger-soft); color: var(--danger-text); }
+          .snum.on { border: 0; background: var(--accent); color: var(--accent-on); }
+          .rrow { display: flex; gap: 10px; padding: 3px 12px 3px 41px; color: var(--text-primary); font: 500 11px/1.5 var(--font-mono); }
+          .rrow .sha { margin-left: auto; color: var(--text-muted); }
+          .rrow .rs { color: var(--accent); font: 600 10.5px var(--font-sans); }
+          .rail { display: flex; gap: 8px; margin: 12px 18px 0; }
+          .rail > div { flex: 1; display: flex; align-items: center; gap: 8px; padding: 8px 10px; border: 1px solid var(--border-subtle); border-radius: 8px; background: var(--bg-panel); }
+          .rail > div.cur { border-color: var(--accent-border); }
+          .rail > div.badc { border-color: var(--danger-border); }
+          .rail b { display: block; color: var(--text-primary); font: 650 11px/1.2 var(--font-sans); }
+          .rail small { display: block; color: var(--text-secondary); font: 500 10px/1.2 var(--font-sans); }
+          .rail small em { font-style: normal; color: var(--danger-text); }
+          .run { display: flex; align-items: center; gap: 11px; margin: 12px 18px 0; padding: 11px 12px; height: 62px; border: 1px solid var(--accent-border); border-radius: 8px; background: var(--bg-panel); }
+          .run strong { display: block; color: var(--text-primary); font: 650 11.5px/1.25 var(--font-sans); }
+          .run small { display: block; margin-top: 3px; color: var(--text-secondary); font: 400 10.5px/1.3 var(--font-sans); }
+
+          .old { margin: 12px 18px 0; padding: 10px 12px; border: 1px solid var(--danger-border); border-radius: 8px; background: var(--danger-soft); }
+          .old > strong { color: var(--danger-text); font: 650 12px/1.3 var(--font-sans); }
+          .old > div { max-height: 190px; overflow: auto; margin-top: 8px; }
+          .old h5 { margin: 0; color: var(--text-primary); font: 600 11px/1.4 var(--font-sans); }
+          .old p { margin: 3px 0 0; white-space: pre-wrap; color: var(--text-secondary); font: 400 11px/1.5 var(--font-mono); }
+
+          .pb { margin: 12px 18px 0; border: 1px solid var(--danger-border); border-radius: 8px; background: color-mix(in srgb, var(--danger-base) 6%, transparent); }
+          .pb + .pb { margin-top: 8px; }
+          .pb-head { display: flex; align-items: center; gap: 10px; padding: 10px 12px; }
+          .pb-head > div { flex: 1; min-width: 0; }
+          .pb-head strong { display: block; color: var(--text-primary); font: 650 11.5px/1.25 var(--font-sans); }
+          .pb-head > div > span { display: block; margin-top: 3px; color: var(--text-secondary); font: 500 10.5px/1.35 var(--font-sans); }
+          .pb-mark { flex: none; display: grid; place-items: center; width: 18px; height: 18px; border-radius: 50%; background: var(--danger-soft); color: var(--danger-text); font: 800 10px/1 var(--font-sans); }
+          .pb-log { flex: none; padding: 4px 6px; border-radius: 5px; color: var(--accent); font: 600 10.5px/1 var(--font-sans); }
+          .pb-list { margin: 0; padding: 0; list-style: none; max-height: 196px; overflow-y: auto; border-top: 1px solid var(--border-faint); }
+          .pb-list.focus { outline: 2px solid var(--accent); outline-offset: -2px; border-radius: 0 0 7px 7px; }
+          .pb-row { display: flex; flex-direction: column; gap: 3px; padding: 9px 12px 10px 40px; }
+          .pb-row + .pb-row { border-top: 1px solid var(--border-faint); }
+          .pb-name { display: flex; gap: 10px; color: var(--text-primary); font: 600 11px/1.3 var(--font-mono); }
+          .pb-name > span { font: 650 11px/1.3 var(--font-sans); }
+          .pb-name > i { margin-left: auto; font-style: normal; color: var(--text-secondary); font: 600 10.5px/1.3 var(--font-mono); }
+          .pb-row p { margin: 0; color: var(--text-secondary); font: 500 10.5px/1.4 var(--font-sans); }
+          .pb-row p b { color: var(--danger-text); font-weight: 600; }
+          .pb-row small { color: var(--text-muted); font: 500 9.5px/1.3 var(--font-mono); }
+          .pb-det { align-self: flex-start; margin-top: 3px; color: var(--text-muted); font: 600 10.5px/1 var(--font-sans); }
+          .pb-raw { margin: 4px 0 0; padding: 8px 10px; border: 1px solid var(--border-faint); border-radius: 6px; background: var(--bg-input); color: var(--text-muted); font: 500 10px/1.55 var(--font-mono); white-space: pre-wrap; }
+          .hl { outline: 2px dashed var(--rv-acc); outline-offset: 3px; border-radius: 6px; }
+        </style>
+      </helmet>
+
+      <section class="dv-turn" id="t1" data-screen-label="Turn 1 As built in 528">
+        <div class="dv-thd"><span class="dv-tid">1</span><span class="dv-tname">PR #528 as built: the run now continues, but the errors use a second card the dialog already replaced</span></div>
+        <p class="dv-sub">Repository maintenance › Combined, branches set to <b>Delete without asking</b>. One repository retains a branch whose tip changed after the review. Before #528 the run stopped there and never reached garbage collection, and the receipt listed only what was deleted. #528 keeps going and adds a <b>Needs attention</b> box above the receipt. The behaviour is right. The box is not the outcome card that <a href="Removal%20Errors%20-%20UX%20Review.dc.html">Removal Errors</a> 5d and 5e specified for these two steps, which the Worktrees step already ships as <code>.maintenance__problem</code>. Light theme, as the PR's harness screenshots are. All data is invented.</p>
+        <div class="dv-opts">
+          <div class="dv-opt" id="1a" data-screen-label="1a Before 528">
+            <div class="dv-olabel"><a class="dv-oid" href="#1a">1a</a>Before: stopped after branches, and no reason anywhere</div>
+            <div class="stage th-light">
+              <section class="bs">
+                <div class="bs-head"><h2>Repository maintenance</h2></div>
+                <div class="mt-tabs"><span class="mt-tab on">Combined</span><span class="mt-tab">Worktrees</span><span class="mt-tab">Local branches</span><span class="mt-tab">Garbage collection</span></div>
+                <div class="bs-body">
+                  <div class="done bad"><span class="mark bad">!</span><div><strong>Maintenance stopped</strong><small>0 of 2 steps · 0 worktrees, 26 branches</small></div><time>took 2s</time></div>
+                  <div class="steps">
+                    <div class="rstep skip"><span class="snum">1</span><strong>Worktrees</strong><span class="r">Skipped</span></div>
+                    <div class="rstep bad"><span class="snum bad">2</span><strong>Local branches</strong><span class="r">Stopped · needs attention</span></div>
+                    <div class="rrow">lumen-api · finished/task-1<span class="sha">a1b2c3d4</span><span class="rs">Restore</span></div>
+                    <div class="rrow">lumen-api · finished/task-2<span class="sha">a1b2c3d4</span><span class="rs">Restore</span></div>
+                    <div class="rstep skip"><span class="snum">3</span><strong>Garbage collection</strong><span class="r">Not started</span></div>
+                  </div>
+                </div>
+                <div class="bs-actions"><span class="bs-btn">Close</span><span class="bs-btn">New plan</span></div>
+              </section>
+            </div>
+            <p class="note">The receipt pages deleted branches 20 at a time. The one branch that was kept, and why, appeared nowhere. A single retained branch out of 294 stopped storage collection for all 82 repositories.</p>
+          </div>
+
+          <div class="dv-opt" id="1b" data-screen-label="1b After 528">
+            <div class="dv-olabel"><a class="dv-oid" href="#1b">1b</a>After #528: finished with errors, garbage collection ran, reasons shown</div>
+            <div class="stage th-light">
+              <section class="bs">
+                <div class="bs-head"><h2>Repository maintenance</h2></div>
+                <div class="mt-tabs"><span class="mt-tab on">Combined</span><span class="mt-tab">Worktrees</span><span class="mt-tab">Local branches</span><span class="mt-tab">Garbage collection</span></div>
+                <div class="bs-body">
+                  <div class="done bad"><span class="mark bad">!</span><div><strong>Maintenance finished with errors</strong><small>2 of 2 steps · 0 worktrees, 26 branches, 30.0 MiB of object storage</small></div><time>took 2s</time></div>
+                  <div class="old hl"><strong>Needs attention</strong><div><h5>Local branches · lumen-api</h5><p>26 local branches deleted; 1 retained.
+finished/task-27: The branch changed or is no longer eligible. Review it again; nothing was deleted.</p></div></div>
+                  <div class="steps">
+                    <div class="rstep skip"><span class="snum">1</span><strong>Worktrees</strong><span class="r">Skipped</span></div>
+                    <div class="rstep bad"><span class="snum bad">2</span><strong>Local branches</strong><span class="r">26 deleted in 1 repository · <em>1 needs attention</em></span><span class="lnk">Hide</span></div>
+                    <div class="rrow">lumen-api · finished/task-1<span class="sha">a1b2c3d4</span><span class="rs">Restore</span></div>
+                    <div class="rstep"><span class="snum ok">3</span><strong>Garbage collection</strong><span class="r">1 collected · 90.0 MiB → 60.0 MiB</span></div>
+                  </div>
+                </div>
+                <div class="bs-actions"><span class="bs-btn">Close</span><span class="bs-btn">New plan</span></div>
+              </section>
+            </div>
+          </div>
+
+          <div class="dv-opt" id="1c" data-screen-label="1c Findings">
+            <div class="dv-olabel"><a class="dv-oid" href="#1c">1c</a>Findings</div>
+            <div class="find">
+              <div class="fitem"><span class="pin">1</span><div><h4>Keep the behaviour</h4><p>Per-repository review and delete failures no longer cancel later, independent work. Cancellation and a command that returns nothing still stop. Every branch safety check is unchanged. <b>This part ships as is.</b></p></div></div>
+              <div class="fitem"><span class="pin">2</span><div><h4>A second error style in one dialog</h4><p>The Worktrees step reports failures with the shared outcome card (6% danger wash, mark, count headline, one row per object). #528 adds <code>.maintenance__issues</code>: a full <code>--danger-soft</code> fill, a red “Needs attention” label and no mark. Two failures in one run would draw in two styles.</p></div></div>
+              <div class="fitem"><span class="pin">3</span><div><h4>The headline names nothing</h4><p>Copy rule 1 is <b>count + object + what happened</b>: “1 branch wasn’t deleted”. “Needs attention” says neither how many nor of what.</p></div></div>
+              <div class="fitem"><span class="pin">4</span><div><h4>Prose set as log output, and a repeated sentence</h4><p>Reasons are 11 px mono, joined with newlines under a repository heading. The first line, “26 local branches deleted; 1 retained.”, repeats the receipt. Rows should be <b>repo · branch</b> with the tip SHA, so a failure matches the receipt row, and the reason in sans with its lead phrase in danger ink.</p></div></div>
+              <div class="fitem"><span class="pin">5</span><div><h4>“1 needs attention” counts repositories, not branches</h4><p>With 27 retained branches in one repository, the step line still reads <b>1 needs attention</b>. Count the branches instead: “0 deleted · 27 not deleted”. A failed review counts repositories: “1 not reviewed”.</p></div></div>
+              <div class="fitem"><span class="pin">6</span><div><h4>The scroller has no focus ring</h4><p>The list takes Tab focus (<code>tabIndex 0</code>) so the keyboard can scroll it, but nothing draws when it has focus. House rule: <code>outline: 2px var(--focus-ring)</code>.</p></div></div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="dv-turn" id="t2" data-screen-label="Turn 2 Recommended">
+        <div class="dv-thd"><span class="dv-tid">2</span><span class="dv-tname">Recommended: each step reports with the outcome card, in step order, above the receipt</span></div>
+        <p class="dv-sub">Same behaviour as #528. Only the drawing changes. Each step that left something behind gets one <b>MaintenanceProblem</b> card (Removal Errors 5a–5c): Local branches first, then Garbage collection. A card's rows scroll inside it once there are more than four, so the head always says how many and the receipt stays in reach. The cards appear as soon as a step finishes and stay while later steps run.</p>
+        <div class="dv-opts">
+          <div class="dv-opt" id="2a" data-screen-label="2a Done one retained">
+            <div class="dv-olabel"><a class="dv-oid" href="#2a">2a</a><b>Recommended.</b> Done: one branch retained, collection ran</div>
+            <div class="stage th-light">
+              <section class="bs">
+                <div class="bs-head"><h2>Repository maintenance</h2></div>
+                <div class="mt-tabs"><span class="mt-tab on">Combined</span><span class="mt-tab">Worktrees</span><span class="mt-tab">Local branches</span><span class="mt-tab">Garbage collection</span></div>
+                <div class="bs-body">
+                  <div class="done bad"><span class="mark bad">!</span><div><strong>Maintenance finished with errors</strong><small>2 of 2 steps · 0 worktrees, 26 branches, 30.0 MiB of object storage</small></div><time>took 2s</time></div>
+                  <section class="pb">
+                    <div class="pb-head"><span class="pb-mark">!</span><div><strong>1 branch wasn’t deleted</strong><span>It’s unchanged. The other 26 were deleted, and garbage collection still ran.</span></div></div>
+                    <ul class="pb-list">
+                      <li class="pb-row"><div class="pb-name"><span>lumen-api</span> · finished/task-27<i>a1b2c3d4</i></div><p><b>The branch changed or is no longer eligible.</b> Review it again; nothing was deleted.</p></li>
+                    </ul>
+                  </section>
+                  <div class="steps">
+                    <div class="rstep skip"><span class="snum">1</span><strong>Worktrees</strong><span class="r">Skipped</span></div>
+                    <div class="rstep bad"><span class="snum bad">2</span><strong>Local branches</strong><span class="r">26 deleted in 1 repository · <em>1 not deleted</em></span><span class="lnk">Hide</span></div>
+                    <div class="rrow">lumen-api · finished/task-1<span class="sha">a1b2c3d4</span><span class="rs">Restore</span></div>
+                    <div class="rrow">lumen-api · finished/task-2<span class="sha">a1b2c3d4</span><span class="rs">Restore</span></div>
+                    <div class="rstep"><span class="snum ok">3</span><strong>Garbage collection</strong><span class="r">1 collected · 90.0 MiB → 60.0 MiB</span><span class="lnk">Show</span></div>
+                  </div>
+                </div>
+                <div class="bs-actions"><span class="bs-btn">Close</span><span class="bs-btn">New plan</span></div>
+              </section>
+            </div>
+            <p class="note">The row names the branch exactly as its receipt row would, with the reviewed tip. Main’s own sentence is already plain words, so its first sentence becomes the lead phrase. The repository’s summary line (“26 deleted; 1 retained”) is dropped: the head and the step line already say it.</p>
+          </div>
+
+          <div class="dv-opt" id="2b" data-screen-label="2b 27 retained scrolls">
+            <div class="dv-olabel"><a class="dv-oid" href="#2b">2b</a>Every branch retained: the rows scroll, the head stays put</div>
+            <div class="stage th-light">
+              <section class="bs">
+                <div class="bs-head"><h2>Repository maintenance</h2></div>
+                <div class="bs-body">
+                  <div class="done bad"><span class="mark bad">!</span><div><strong>Maintenance finished with errors</strong><small>2 of 2 steps · 0 worktrees, 0 branches, 30.0 MiB of object storage</small></div><time>took 2s</time></div>
+                  <section class="pb">
+                    <div class="pb-head"><span class="pb-mark">!</span><div><strong>27 branches weren’t deleted</strong><span>They’re unchanged. Garbage collection still ran.</span></div></div>
+                    <ul class="pb-list focus">
+                      <sc-for list="{{ retained }}" as="b" hint-placeholder-count="27">
+                        <li class="pb-row"><div class="pb-name"><span>lumen-api</span> · {{ b.name }}<i>a1b2c3d4</i></div><p><b>The branch changed or is no longer eligible.</b> Review it again; nothing was deleted.</p></li>
+                      </sc-for>
+                    </ul>
+                  </section>
+                  <div class="steps">
+                    <div class="rstep skip"><span class="snum">1</span><strong>Worktrees</strong><span class="r">Skipped</span></div>
+                    <div class="rstep bad"><span class="snum bad">2</span><strong>Local branches</strong><span class="r">0 deleted · <em>27 not deleted</em></span></div>
+                    <div class="rstep"><span class="snum ok">3</span><strong>Garbage collection</strong><span class="r">1 collected · 90.0 MiB → 60.0 MiB</span><span class="lnk">Show</span></div>
+                  </div>
+                </div>
+              </section>
+            </div>
+            <p class="note">The list caps at about four and a half rows (196 px), so a cut row says there is more. It takes Tab focus for keyboard scrolling and draws the house ring while focused (shown). The head never scrolls away.</p>
+          </div>
+
+          <div class="dv-opt" id="2c" data-screen-label="2c While collecting">
+            <div class="dv-olabel"><a class="dv-oid" href="#2c">2c</a>While garbage collection runs, branch failures are already on screen</div>
+            <div class="stage th-light">
+              <section class="bs">
+                <div class="bs-head"><h2>Repository maintenance</h2></div>
+                <div class="bs-body">
+                  <div class="rail">
+                    <div><span class="snum">1</span><div><b>Worktrees</b><small>Skipped</small></div></div>
+                    <div class="badc"><span class="snum bad">2</span><div><b>Local branches</b><small>26 deleted · <em>1 not deleted</em></small></div></div>
+                    <div class="cur"><span class="snum on">3</span><div><b>Garbage collection</b><small>collecting 41 of 82</small></div></div>
+                  </div>
+                  <div class="run"><span class="mark run"></span><div><strong>Collecting garbage in 4 repositories</strong><small>41 of 82 repositories · 18.2 GiB → 15.0 GiB so far</small></div></div>
+                  <section class="pb">
+                    <div class="pb-head"><span class="pb-mark">!</span><div><strong>1 branch wasn’t deleted</strong><span>It’s unchanged. The other 26 were deleted; collection is still running.</span></div></div>
+                    <ul class="pb-list">
+                      <li class="pb-row"><div class="pb-name"><span>lumen-api</span> · finished/task-27<i>a1b2c3d4</i></div><p><b>The branch changed or is no longer eligible.</b> Review it again; nothing was deleted.</p></li>
+                    </ul>
+                  </section>
+                </div>
+              </section>
+            </div>
+            <p class="note">The card sits under the live status card, so the progress card keeps its fixed height and does not jump. The sub-line tense follows the run: “is still running” now, “still ran” on the receipt.</p>
+          </div>
+
+          <div class="dv-opt" id="2d" data-screen-label="2d Review and GC failures">
+            <div class="dv-olabel"><a class="dv-oid" href="#2d">2d</a>A review that failed, a Git refusal, and a collection failure</div>
+            <div class="stage th-light">
+              <section class="bs">
+                <div class="bs-head"><h2>Repository maintenance</h2></div>
+                <div class="bs-body">
+                  <div class="done bad"><span class="mark bad">!</span><div><strong>Maintenance finished with errors</strong><small>2 of 2 steps · 0 worktrees, 31 branches, 1.2 GiB of object storage</small></div><time>took 1m 40s</time></div>
+                  <section class="pb">
+                    <div class="pb-head"><span class="pb-mark">!</span><div><strong>Local branches: 2 problems in 2 repositories</strong><span>Nothing in them was deleted. The other 31 branches were deleted.</span></div></div>
+                    <ul class="pb-list">
+                      <li class="pb-row"><div class="pb-name"><span>orbit-deploy</span></div><p><b>Couldn’t review its branches.</b> Reference lock unreadable.</p><small>/Users/dana/src/orbit-deploy</small></li>
+                      <li class="pb-row"><div class="pb-name"><span>docs-site</span> · agent/vibrant-yalow<i>5e07bb1c</i></div><p><b>Git refused to delete it</b> — the branch is used by a worktree Git can’t find.</p><span class="pb-det">⌄ Details</span><pre class="pb-raw">error: cannot delete branch 'agent/vibrant-yalow' used by worktree at '/Users/dana/github/docs-site/.git/worktrees/vibrant-yalow'</pre></li>
+                    </ul>
+                  </section>
+                  <section class="pb">
+                    <div class="pb-head"><span class="pb-mark">!</span><div><strong>Garbage collection failed in 1 repository</strong><span>Its objects are unchanged. The other 81 were collected.</span></div></div>
+                    <ul class="pb-list">
+                      <li class="pb-row"><div class="pb-name"><span>atlas-api</span></div><p><b>Repack failed.</b> Disk full.</p><small>/Users/dana/src/atlas-api</small></li>
+                    </ul>
+                  </section>
+                  <div class="steps">
+                    <div class="rstep bad"><span class="snum bad">2</span><strong>Local branches</strong><span class="r">31 deleted in 4 repositories · <em>1 not deleted · 1 not reviewed</em></span></div>
+                    <div class="rstep bad"><span class="snum bad">3</span><strong>Garbage collection</strong><span class="r">81 collected · <em>1 failed</em></span></div>
+                  </div>
+                </div>
+              </section>
+            </div>
+            <p class="note">A repository-level failure is a row with the repository and its path, no branch. Raw Git text never leads: a line that starts with <code>error:</code> or <code>fatal:</code>, or runs to several lines, becomes “Git refused to delete it” with Git’s words behind Details. The docs-site row is the shape of the report that started #528: a worktree whose <code>.git</code> file still points at the repository’s old folder.</p>
+          </div>
+        </div>
+        <p class="dv-next">Try next: <b>“2d with a Review again action per branch”</b> · <b>“2a in the dark theme”</b></p>
+      </section>
+
+      <section class="dv-turn" id="t3" data-screen-label="Turn 3 What gets built">
+        <div class="dv-thd"><span class="dv-tid">3</span><span class="dv-tname">What gets built on top of #528</span></div>
+        <p class="dv-sub">Renderer only. Main’s results, the continuation rules and every branch safety check stay as #528 has them.</p>
+        <table class="tbl">
+          <tr><th>Piece</th><th>Change</th></tr>
+          <tr><td>Issue model</td><td><code>StepResult.issues</code> becomes rows, not joined text: <code>{ repo, path, branch?, head?, reason, raw? }</code>. A retained branch is one row; a repository failure with no branch rows is one row. The repository summary sentence is not a row.</td></tr>
+          <tr><td>Card</td><td>Branch and GC issues render as <code>.maintenance__problem</code> (head with mark, headline, sub; one <code>.maintenance__problem-row</code> per issue). Lift the worktree panel’s <code>Icon</code> and <code>Reason</code> so both panels share them. Delete <code>.maintenance__issues</code> and its CSS.</td></tr>
+          <tr><td>Headlines</td><td>Branches: “1 branch wasn’t deleted” / “N branches weren’t deleted”; review only: “Local branches couldn’t be reviewed in N repositories”; mixed: “Local branches: N problems in R repositories”. GC: “Garbage collection failed in N repositories”.</td></tr>
+          <tr><td>Reason</td><td>Lead phrase = main’s first sentence, in danger ink. Raw Git text (starts <code>error:</code>/<code>fatal:</code>/<code>warning:</code>, or multi-line) → “Git refused to delete it” with Details holding the text.</td></tr>
+          <tr><td>Scrolling</td><td>The row list scrolls at <code>max-height: 196px</code>, takes <code>tabIndex 0</code> with an <code>aria-label</code>, and draws <code>outline: 2px solid var(--focus-ring)</code> on <code>:focus-visible</code>.</td></tr>
+          <tr><td>Step lines</td><td>Count objects, not repositories: “· N not deleted”, “· N not reviewed”, “· N failed”.</td></tr>
+          <tr><td>Placement</td><td>Above the receipt steps when done; under the live status card while a later step runs. Cards in step order.</td></tr>
+        </table>
+      </section>
+    </x-dc>
+    <script type="text/x-dc" data-dc-script data-props='{}'>
+      class Component extends DCLogic {
+        renderVals() {
+          const retained = [];
+          for (let i = 1; i <= 27; i++) retained.push({ name: "finished/task-" + i });
+          return { retained };
+        }
+      }
+    </script>
+  </body>
+</html>

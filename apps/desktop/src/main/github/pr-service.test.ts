@@ -113,6 +113,53 @@ describe("PrService", () => {
     if (db) db.close();
   });
 
+  it("derives branch PR source candidates from each checkout's configured fetch remotes", async () => {
+    db.prepare("INSERT INTO profiles (id, name, email) VALUES ('other', 'Other', 'other@example.com')").run();
+    db.prepare("INSERT INTO repos (id, profile_id, name, path) VALUES ('other', 'other', 'PwrGit', '/other')").run();
+    db.prepare("INSERT INTO worktrees (id, repo_id, branch, path) VALUES ('other', 'other', 'feature/pr-state', '/other/wt')").run();
+    const sources: (readonly ForgeRepo[] | undefined)[] = [];
+    const provider = fakeForge({ fetchPrsForBranches: async (_token, _repo, branches, sourceRepos) => {
+      sources.push(sourceRepos);
+      return new Map(branches.map((branch) => [branch, null]));
+    } })().provider;
+    const scopedGit: GitExec = async (args, cwd) => ok({ exitCode: 0, stderr: "", stdout:
+      args[0] === "for-each-ref" ? "feature/pr-state\n" : args[1] === "-v" ?
+        `origin\thttps://github.com/pwrdrvr/PwrGit.git (fetch)\n` +
+        `fork\thttps://github.com/${cwd === "/repo" ? "alice" : "bob"}/PwrGit.git (fetch)\n` +
+        "push-only\thttps://github.com/unrelated/PwrGit.git (push)\n" : REMOTE
+    });
+    const scoped = new PrService(db, scopedGit, { now: () => now, resolveForge: (url) => ({
+      provider, repo: { ...GITHUB_ORIGIN, path: url.includes("alice") ? "alice/PwrGit" :
+        url.includes("bob") ? "bob/PwrGit" : GITHUB_ORIGIN.path }
+    }) });
+    await scoped.refreshRepo("repo");
+    await scoped.refreshRepo("other");
+    expect(sources.map((repos) => repos?.map((repo) => repo.path))).toEqual([
+      ["pwrdrvr/PwrGit", "pwrdrvr/PwrGit", "alice/PwrGit"],
+      ["pwrdrvr/PwrGit", "pwrdrvr/PwrGit", "bob/PwrGit"]
+    ]);
+    expect(scoped.cachedBranchPr("repo", "feature/pr-state")).toBeNull();
+    expect(scoped.cachedBranchPr("other", "feature/pr-state")).toBeNull();
+  });
+
+  it("keeps a cached contribution when reading the configured source remotes fails", async () => {
+    await service.refreshRepo("repo");
+    const unavailableRemotes: GitExec = async (args, cwd, options) => args[0] === "remote" && args[1] === "-v"
+      ? ok({ exitCode: 1, stdout: "", stderr: "Cannot read remotes" })
+      : git(args, cwd, options);
+    let asked = false;
+    const offline = new PrService(db, unavailableRemotes, {
+      now: () => now,
+      resolveForge: fakeForge({ fetchPrsForBranches: async () => {
+        asked = true;
+        return new Map([["feature/pr-state", null]]);
+      } })
+    });
+    expect((await offline.refreshRepo("repo", { force: true })).size).toBe(0);
+    expect(asked).toBe(false);
+    expect(offline.cachedBranchPr("repo", "feature/pr-state")).toMatchObject({ number: 42 });
+  });
+
   it("caches CLI-only GitCafe status without a token method", async () => {
     const provider = createGitCafeProvider(async () => JSON.stringify({ schemaVersion: 1, data: {
       items: [{ number: 7, title: "Fixture", state: "merged", draft: false, crossFork: false, sourceBranch: "feature/pr-state", targetBranch: "main" }],

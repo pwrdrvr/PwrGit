@@ -1,7 +1,7 @@
 import { expect, test } from "@playwright/test";
 import { launchApp, type AppHandle } from "./fixtures/electron-app";
 import { createGitSandbox, type GitSandbox } from "./fixtures/git-sandbox";
-import { lensChip } from "./fixtures/steps";
+import { lensChip, clickAddFolders } from "./fixtures/steps";
 
 let sandbox: GitSandbox | null = null;
 let handle: AppHandle | null = null;
@@ -22,7 +22,7 @@ test("the Pinned lens keeps pinned stars visible", async () => {
   handle = await launchApp();
   const { window } = handle;
   await handle.setPickDirectory(sandbox.reposDir);
-  await window.getByRole("button", { name: /Add folders/i }).click();
+  await clickAddFolders(window);
   await lensChip(window, "All").click();
   await expect(window.locator(".repo-row__name")).toHaveCount(3, {
     timeout: 20_000
@@ -68,7 +68,7 @@ test("a drag keeps stars visible but lets the grip hide again", async () => {
   handle = await launchApp();
   const { window } = handle;
   await handle.setPickDirectory(sandbox.reposDir);
-  await window.getByRole("button", { name: /Add folders/i }).click();
+  await clickAddFolders(window);
   await lensChip(window, "All").click();
   await expect(window.locator(".repo-row__name")).toHaveCount(3, {
     timeout: 20_000

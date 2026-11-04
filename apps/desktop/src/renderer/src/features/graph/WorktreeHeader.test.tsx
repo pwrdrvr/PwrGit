@@ -1827,6 +1827,16 @@ describe("WorktreeHeader settled status card", () => {
     expect(card()?.textContent).not.toContain("Fetched");
   });
 
+  it("reports a restored Pull's retained recovery stash as success", async () => {
+    await press("Pull", ok({
+      fastForwarded: true, stashed: true, reappliedWithConflicts: false,
+      recoveryStash: "a".repeat(40)
+    }));
+    expect(card()?.textContent).toContain("local changes restored · recovery stash kept in Stashes");
+    expect(card()?.textContent).not.toContain("conflicts");
+    expect(card()?.querySelector(".remote-activity__rail")).not.toBeNull();
+  });
+
   // There is work left in the checkout. A receipt that takes itself away in
   // four seconds is the wrong shape for something the user has to act on.
   it("keeps a pull whose stash came back with conflicts up until dismissed", async () => {
@@ -2688,6 +2698,164 @@ describe("WorktreeHeader keeps a fork up with its source", () => {
     );
   });
 
+  /** The disktree report: origin moved on from upstream, which has nothing new. */
+  const movedOnFork = (): ForkStatus =>
+    behindSource({
+      ahead: 7,
+      behind: 0,
+      pushBack: {
+        remote: "origin",
+        branch: "main",
+        ref: "refs/remotes/origin/main",
+        head: "1".repeat(40),
+        overwrites: 7,
+        adds: 0
+      }
+    });
+
+  it("reports a sync that brought nothing as up to date, not as a push held back", async () => {
+    answer(behindSource(), {
+      "remote:syncFork": ok({
+        ...synced,
+        arrived: 0,
+        push: { outcome: "diverged", remote: "origin", branch: "main", overwrites: 7 }
+      })
+    });
+    await remount();
+    await act(async () => {
+      pull()?.click();
+      await settle();
+    });
+    expect(statusChip()).toBe("up to date");
+    expect(card()?.textContent).toContain(
+      "main is up to date with upstream/main · origin/main has 7 commits it doesn't"
+    );
+    expect(card()?.textContent).not.toContain("was not pushed");
+  });
+
+  it.each([0, 10])("reports retained recovery work when fork sync brings %i commits", async (arrived) => {
+    answer(behindSource(), {
+      "remote:syncFork": ok({
+        ...synced, arrived, stashed: true, recoveryStash: "a".repeat(40),
+        ...(arrived === 0 ? { push: { outcome: "diverged", remote: "origin", branch: "main", overwrites: 7 } } : {})
+      })
+    });
+    await remount();
+    await act(async () => { pull()?.click(); await settle(); });
+    expect(card()?.textContent).toContain("local changes restored · recovery stash kept in Stashes");
+    expect(card()?.querySelector(".remote-activity__rail")).not.toBeNull();
+  });
+
+  it("pulls a fork that moved on from itself, and asks once whether to stop syncing", async () => {
+    answer(movedOnFork(), { "remote:pull": ok({ stashed: false, reappliedWithConflicts: false }) });
+    await remount();
+    await act(async () => {
+      pull()?.click();
+      await settle();
+    });
+    expect(bridge.dispatch).toHaveBeenCalledWith("remote:pull", { worktreeId: "worktree-1" });
+    expect(bridge.dispatch).not.toHaveBeenCalledWith("remote:syncFork", expect.anything());
+    expect(card()?.textContent).toContain("has moved on from octo-labs/sparkline");
+    const only = [...document.querySelectorAll<HTMLButtonElement>(".pull-moved-on button")].find(
+      (b) => b.textContent === "Pull from origin only"
+    );
+    await act(async () => only?.click());
+    expect(window.localStorage.getItem("pwrgit.forkMovedOn.repo-1")).toBe("tracked");
+    expect(window.localStorage.getItem("pwrgit.pullChoice.repo-1")).toBe("tracked");
+    expect(card()).toBeNull();
+
+    // Answered: the next Pull asks nothing, and the menu leads with the fork.
+    await act(async () => {
+      pull()?.click();
+      await settle();
+    });
+    expect(document.querySelector(".pull-moved-on")).toBeNull();
+    await act(async () => document.body.dispatchEvent(new MouseEvent("mousedown", { bubbles: true })));
+    await openMenu();
+    expect(menuRows()[0]?.querySelector(".pull-menu__title")?.textContent).toBe("Pull origin/main only");
+    expect(document.querySelector(".pull-menu__note")?.textContent).toContain("Watching upstream/main");
+  });
+
+  it("says in the Pull menu that a moved-on fork's question is still open", async () => {
+    answer(movedOnFork());
+    await remount();
+    await openMenu();
+    // Pull already reads origin, so that row is checked; the note says that
+    // is not a saved answer.
+    expect(menuRows()[0]?.getAttribute("aria-checked")).toBe("true");
+    expect(menuRows()[0]?.querySelector(".pull-menu__title")?.textContent).toBe("Pull origin/main only");
+    expect(document.querySelector(".pull-menu__note")?.textContent).toBe(
+      "origin has moved on from octo-labs/sparkline, so Pull reads origin/main for now. Pick one below to decide."
+    );
+  });
+
+  it("marks one row as what Pull does while a moved-on fork's question is open", async () => {
+    // Nothing stored: the user never picked a Pull choice or answered. Pull
+    // reads origin until they do, so only that row may claim to be Pull's;
+    // "Your default for this repo" under Sync said the opposite.
+    answer(movedOnFork());
+    await remount();
+    expect(pull()?.getAttribute("title") ?? "").not.toContain("upstream/main");
+    await openMenu();
+    const claims = menuRows()
+      .filter((el) => el.getAttribute("aria-checked") === "true" || el.querySelector(".pull-menu__kept") !== null)
+      .map((el) => el.querySelector(".pull-menu__title")?.textContent);
+    expect(claims).toEqual(["Pull origin/main only"]);
+  });
+
+  it("changes the moved-on answer from the Pull menu, as the card says", async () => {
+    window.localStorage.setItem("pwrgit.forkMovedOn.repo-1", "tracked");
+    window.localStorage.setItem("pwrgit.pullChoice.repo-1", "tracked");
+    answer(movedOnFork(), {
+      "remote:syncFork": ok({
+        ...synced,
+        arrived: 0,
+        push: { outcome: "diverged", remote: "origin", branch: "main", overwrites: 7 }
+      })
+    });
+    await remount();
+    await openMenu();
+    await act(async () => {
+      row("Sync with upstream/main")?.click();
+      await settle();
+    });
+    expect(window.localStorage.getItem("pwrgit.forkMovedOn.repo-1")).toBe("sync");
+    bridge.dispatch.mockClear();
+    answer(movedOnFork(), {
+      "remote:syncFork": ok({
+        ...synced,
+        arrived: 0,
+        push: { outcome: "diverged", remote: "origin", branch: "main", overwrites: 7 }
+      })
+    });
+    await act(async () => document.body.dispatchEvent(new MouseEvent("mousedown", { bubbles: true })));
+    await act(async () => {
+      pull()?.click();
+      await settle();
+    });
+    // The button now runs what was picked, not the old answer.
+    expect(bridge.dispatch).toHaveBeenCalledWith("remote:syncFork", expect.objectContaining({ push: true }));
+    expect(bridge.dispatch).not.toHaveBeenCalledWith("remote:pull", expect.anything());
+  });
+
+  it("keeps syncing a moved-on fork once told to, without asking again", async () => {
+    window.localStorage.setItem("pwrgit.forkMovedOn.repo-1", "sync");
+    answer(movedOnFork(), {
+      "remote:syncFork": ok({
+        ...synced,
+        arrived: 0,
+        push: { outcome: "diverged", remote: "origin", branch: "main", overwrites: 7 }
+      })
+    });
+    await remount();
+    await act(async () => {
+      pull()?.click();
+      await settle();
+    });
+    expect(bridge.dispatch).toHaveBeenCalledWith("remote:syncFork", expect.objectContaining({ push: true }));
+    expect(document.querySelector(".pull-moved-on")).toBeNull();
+  });
+
   it("offers SSH when the sync had no HTTPS credential", async () => {
     const recovery: SshRemoteRecovery = {
       remote: "origin",
@@ -3006,6 +3174,74 @@ describe("WorktreeHeader publishes a branch Push has nowhere to send", () => {
       .toContain("1 commit not on fetched remote branches");
     await mount({ state: snapshot({ ahead: 0 }) });
     expect(container.querySelector(".sync-chip:not(.sync-chip--drift)")?.textContent).toBe("no upstream");
+  });
+
+  describe("a tip that is a merged change request's head", () => {
+    const head = "0123456789abcdef0123456789abcdef01234567";
+    const merged = {
+      number: 116,
+      url: "https://example.test/acme/widget/pull/116",
+      title: "Pinned runner readiness",
+      state: "merged" as const,
+      isDraft: false,
+      forge: "github" as const,
+      headOid: head
+    };
+    const chip = (): Element | null =>
+      container.querySelector(".sync-chip:not(.sync-chip--drift)");
+    const tooltipOf = async (element: Element | null): Promise<string | null | undefined> => {
+      await act(async () => element?.dispatchEvent(new MouseEvent("mouseover", { bubbles: true })));
+      return document.querySelector('[role="tooltip"]')?.textContent;
+    };
+
+    it("says the commits landed rather than that they are local work", async () => {
+      await mount({
+        row: { ...unpublishedRow, ahead: 2, head, pr: merged },
+        state: snapshot({ ahead: 2, head })
+      });
+      expect(chip()?.textContent).toBe("landed in #116");
+      expect(chip()?.className).toContain("sync-chip--muted");
+      expect(chip()?.getAttribute("data-mid")).toBe("landed #116");
+      expect(chip()?.getAttribute("data-short")).toBe("landed");
+      expect(await tooltipOf(chip())).toBe(
+        "These 2 commits are pull request #116's head, which was merged. " +
+          "Its remote branch is gone, so no remote branch holds them."
+      );
+    });
+
+    it("speaks of one commit in the singular, and in the forge's own words", async () => {
+      await mount({
+        row: {
+          ...unpublishedRow,
+          ahead: 1,
+          head,
+          pr: { ...merged, number: 41, forge: "gitlab" }
+        },
+        state: snapshot({ ahead: 1, head })
+      });
+      expect(chip()?.textContent).toBe("landed in !41");
+      expect(await tooltipOf(chip())).toBe(
+        "This commit is merge request !41's head, which was merged. " +
+          "Its remote branch is gone, so no remote branch holds it."
+      );
+    });
+
+    it("keeps counting local work once the tip moved on after the merge", async () => {
+      const moved = "fedcba9876543210fedcba9876543210fedcba98";
+      await mount({
+        row: { ...unpublishedRow, ahead: 3, head: moved, pr: merged },
+        state: snapshot({ ahead: 3, head: moved })
+      });
+      expect(chip()?.textContent).toBe("↑3 local · no upstream");
+    });
+
+    it("keeps counting local work for a change request that is still open", async () => {
+      await mount({
+        row: { ...unpublishedRow, ahead: 2, head, pr: { ...merged, state: "open" } },
+        state: snapshot({ ahead: 2, head })
+      });
+      expect(chip()?.textContent).toBe("↑2 local · no upstream");
+    });
   });
 
   it("asks where to publish, and pushes nothing until it is answered", async () => {

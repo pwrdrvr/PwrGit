@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <title>Section headings harness</title>
+    <style>
+      body {
+        margin: 0;
+        padding: 16px;
+        background: var(--bg-app);
+      }
+      .harness-grid {
+        display: grid;
+        gap: 18px 22px;
+        align-items: start;
+      }
+      .harness-caption {
+        margin: 0 0 6px;
+        font: 500 10.5px/1.2 var(--font-mono);
+        color: var(--text-muted);
+      }
+      .harness-scene .pane--sidebar {
+        padding-top: 4px;
+        border: 1px solid var(--border-subtle);
+        border-radius: 6px;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="./main.tsx"></script>
+  </body>
+</html>

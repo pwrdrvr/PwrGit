@@ -1,449 +1,388 @@
 # features/remote — AGENTS.md
 
-Live status for a running fetch / pull / push. The main-process half is
-`src/main/git/remote-activity.ts` — read its `AGENTS.md` section for what the
-record means and why `queued` / `silent` are separate facts.
+This feature shows live status for a running fetch, pull or push. The
+main-process half is `src/main/git/remote-activity.ts`. Its record, and why
+`queued` and `silent` are separate facts, are in
+[main/git/AGENTS.md](../../../../main/git/AGENTS.md) ("Every long-running
+remote command registers an activity").
 
 ## The click opens it; the outcome closes it
 
-Pressing Fetch, Pull or Push calls `status.pin(button, scope)` **before the
-dispatch**, and the card is up from that moment — no age gate, no hover, and no
-wait for main to register the operation. It then outlives the operation: when
-the dispatch resolves, `status.settle({status, summary})` turns the same card
-into the receipt. A success drains a countdown rail and takes itself away; a
-failure stands until dismissed.
+- **Every path out of an operation ends in exactly one of: `settle`,
+  `dismiss` (a modal takes over: divergence dialog, SSH recovery prompt, fork
+  prompt, publish question), or a toast (a failure the card could not
+  carry).** Any other early return leaves a card pinned on "Starting…" until
+  the user clicks it away.
+- **Fetch, Pull and Push call `status.pin(button, scope)` before the
+  dispatch.** The card shows from that moment: no age gate, no hover, no wait
+  for main to register the operation.
+- When the dispatch resolves, `status.settle({status, summary})` turns the
+  same card into the receipt. A success drains a countdown rail and removes
+  itself. A failure stays until dismissed.
+- The card takes a `RemoteActivityView`, not a `RemoteActivity`. `finish()`
+  deletes the record and publishes in the same step, so no record exists when
+  the outcome arrives. `Pin` carries the scope taken at the click. `lastSeen`
+  carries the final record, so the receipt can quote Git. Both are snapshots,
+  never references.
+- **Keep `busy` until the outcome is known**, including the local inspects
+  that decide if a dialog takes over (divergence, SSH recovery). Otherwise the
+  user can start an operation whose card the arriving dialog then dismisses.
 
-That last part is the load-bearing half, and it is why the card takes a
-`RemoteActivityView` rather than a `RemoteActivity`. `finish()` deletes the
-record and publishes in the same breath, so by the time an outcome exists there
-is nothing left to read: `Pin` carries the scope taken at the click, and
-`lastSeen` carries the final record so the receipt can still quote Git. A
-snapshot, never a reference.
+### Staleness guards
 
-**Every path out of an operation ends in exactly one of three things** —
-`settle`, `dismiss` (a modal is taking over: the divergence dialog, the SSH
-recovery prompt, the fork prompt, the publish question), or, for a failure the
-card could not carry, a toast. A fourth early return without one of them leaves
-a card pinned on "Starting…" until the user clicks it away.
+The staleness guards return early and intentionally cannot settle. The
+outcome belongs to a checkout that is no longer selected.
 
-The staleness guards **are** that fourth return, and they deliberately cannot
-settle: an operation whose checkout is no longer selected has an outcome that
-belongs to a toolbar nobody is looking at. `WorktreeHeader` answers them by
-dismissing on `worktree.id`, in an effect of its own because the reset effect
-beside it is declared before the hook that owns `dismiss`. And `run` carries
-the same `activeWorktreeId` guard `onPull` and `onPush` already had — without
-it a fetch started on the checkout you left settles the card of the one you
-are on, under the wrong title, and reports itself carried so the toast that
-should have caught the failure never fires. All three also check one
-`remoteOperation` count, bumped by every start and every switch:
-`activeWorktreeId` reads the same again once the user comes back, and an
-outcome from the earlier visit would otherwise land on whatever they started
-since.
+- `WorktreeHeader` dismisses on `worktree.id`, in its own effect. The reset
+  effect beside it is declared before the hook that owns `dismiss`.
+- `run` has the same `activeWorktreeId` guard as `onPull` and `onPush`.
+  Without it, a fetch on a checkout you left settles the current checkout's
+  card, under the wrong title. It also reports the outcome as carried, so the
+  fallback toast never fires.
+- All three also check one `remoteOperation` count, incremented by every
+  start and every switch. `activeWorktreeId` reads the same again when the
+  user returns, so without the count an outcome from the earlier visit lands
+  on a later operation.
 
-An operation keeps `busy` until its outcome is known, including the local
-inspects that decide whether a dialog takes over (divergence, SSH recovery). A
-button that went idle during that inspect could start an operation whose card
-the arriving dialog then dismisses.
+### Card or toast
 
-`settle` returns whether a pinned card took the outcome, and `flashError` uses
-that: a durable card anchored to the button that was pressed, carrying Git's
-own output plus Logs and Copy, is a better report than a corner toast — and
-both at once is the same failure said twice. The toast is now the fallback for
-a failure with nowhere anchored to go, which is what happens when the user
-clicked the card away mid-operation.
+`settle` returns whether a pinned card took the outcome; `flashError` uses
+this. Do not show both a card and a toast for one failure. The anchored card
+is the better report: it carries Git's output plus Logs and Copy. The toast is
+the fallback when the user clicked the card away during the operation.
 
-Push on a branch with no upstream is the one click that pins **nothing**: it
-asks `PublishBranchDialog` which remote first, because a plain push there only
-gets Git's refusal and its `--set-upstream` advice for a terminal. Nothing is
-running until the question is answered, so the card pins on Publish, off the
-Push button that asked — and a failure to load the remotes is a toast, never a
-`settle`, because any card still up then belongs to an earlier operation. The
-remotes come from `repo:remotes` (one `git remote -v`), not `repo:refs`, which
-walks every ref while the button shows nothing. The header reads "no upstream" from the live snapshot
-(the indexed row until one arrives) and answers Git's own `no_upstream` with the
-same question, for when both were stale — that is a `dismiss`, not a failure.
+### Push with no upstream
+
+Push on a branch with no upstream is the one click that pins **nothing**.
+
+- It first asks `PublishBranchDialog` which remote to use. A plain push only
+  gets Git's refusal and its `--set-upstream` advice for a terminal.
+- The card pins on Publish, off the Push button that asked.
+- A failure to load the remotes is a toast, never a `settle`. Any card still
+  up belongs to an earlier operation.
+- The remotes come from `repo:remotes` (one `git remote -v`), not
+  `repo:refs`, which walks every ref while the button shows nothing.
+- The header reads "no upstream" from the live snapshot, or the indexed row
+  until a snapshot arrives. If both were stale, Git returns `no_upstream` and
+  the header asks the same question. That is a `dismiss`, not a failure.
 
 ## The card accumulates; it does not narrate
 
-Everything the card drew used to be **replaced**. One status line rewritten at
-every phase boundary, a progress block that mounted and unmounted with
-`progress !== null`, a command line that changed with the phase, and a
-Git-output tail rewriting its own last line at Git's rate. Phase transitions
-call `publish(true)` and bypass the 400&nbsp;ms throttle, so a 620&nbsp;ms pull
-walked `prepare → fetch → fast_forward → reapply → refresh` and landed five
-full redraws inside six tenths of a second &mdash; then `settle` threw all of it
-away for one sentence. Correct for a five-minute fetch, where each phase lasts
-long enough to read. Unreadable below a second, which is nearly all of them.
+**Rule: a row changes exactly once and is never moved or removed. Nothing is
+wiped, so nothing needs re-reading.**
 
-So the card keeps a **step list** instead. `activitySteps` turns the ordered,
-deduplicated phases an operation has been observed in into one row each, and a
-row changes exactly once &mdash; when its own work ends, the label moves from
-the present tense to the past and the marker turns. It never moves position and
-is never removed. One change per row, at the moment that row's work finishes,
-is an event a reader can follow; a line that is a different sentence every time
-you look at it is not.
+Why: phase transitions call `publish(true)` and bypass the 400&nbsp;ms
+throttle. A card that rewrote its status line, command and output per phase
+redrew five times in a 620&nbsp;ms pull (`prepare → fetch → fast_forward →
+reapply → refresh`). That is unreadable, and most operations last under one
+second.
 
-The receipt is that same list with every marker turned, which is the whole
-point: **nothing is wiped, so nothing needs re-reading.** It is also why
-`RemoteActivityOutcome` carries `steps` &mdash; the phases were observed off
-records that `finish()` has since deleted.
-
-Four rules hold it together.
-
-- **Bookkeeping earns no row.** `queued` is waiting on another operation's
-  lock, `prepare` is a `git status` main emits whether or not there is anything
-  to stash, and `refresh` is PwrGit's own work after Git is done. None is an
-  outcome. They are dropped rather than shown-and-then-removed: a row that
-  disappears is a layout shift, which is the thing this list exists to avoid.
-  While the operation is *in* one of them every real step reads `done`, which
-  is honest &mdash; during `prepare`, the fetch above it has finished.
+- `activitySteps` turns the ordered, deduplicated phases of an operation into
+  one row each.
+- When a row's work ends, its label moves from present to past tense and its
+  marker changes. That is its only change.
+- The receipt is the same list with every marker changed.
+  `RemoteActivityOutcome` carries `steps`, because `finish()` deleted the
+  records the phases were observed on.
+- **Bookkeeping earns no row.** `queued` waits on another operation's lock.
+  `prepare` is a `git status` that main emits whether or not there is
+  anything to stash. `refresh` is PwrGit's own work after Git. Drop these
+  phases; do not show then remove them, because a removed row is a layout
+  shift. While the operation is in one of them, every real step reads `done`
+  (during `prepare`, the fetch above it has finished).
 - **A phase Git re-enters is still one row.** A pull pops its stash in two
-  places; that is one piece of work, not two.
-- **Below `REMOTE_ACTIVITY_NARRATE_AFTER_MS` there is no narration at all.**
-  The card shows one stable line and then its receipt &mdash; two states, no
-  churn. The steps are still recorded throughout, so a sub-second pull answers
-  "what happened" without ever having flickered. Note what this does *not*
-  gate: the card still opens on the click. That was the original ask and it is
-  what makes the button feel answered; this governs what the card says, not
-  whether it is there.
-
-  **The gate covers the whole card, not the step list.** Gating the list alone
-  left the card falling through to its status line &mdash; and
-  `remoteActivityStatus` *is* the per-phase narration, so the same four
-  sentences went on landing in six tenths of a second by the other door. Below
-  the threshold `startingView` is the view, from the click right through main's
-  first words: one line, no meter, no command. It reads the record only for
-  the operation itself (the id and `canceling`, so Cancel is drawn from the
-  moment there is something to stop rather than appearing when the narration
-  starts) and for the output tail, which rides inside a collapsed disclosure
-  and so cannot move anything.
-- **Git's own output is collapsed while the operation looks healthy, and the
-  command line rides with it.** The output is `\r`-rewritten progress &mdash;
-  built to be transient in a terminal &mdash; and live it grew from nothing to
-  its 108&nbsp;px cap while its last line flickered. That was the single
-  largest source of churn, and on a healthy operation it says nothing the rows
-  have not. It opens *itself* the moment it is the finding: a quiet warning, a
-  failure, or a cancel. Making a user hunt for a disclosure to read the thing
-  they came for would be the same mistake as the age gate was. The open state
-  is React-controlled because the popover re-renders every second &mdash; an
-  uncontrolled `<details>` would shut itself under a user who had just opened
-  it.
-
-  The command line is in there for the same reason and one of its own:
-  `setCommand` fires per Git *invocation*, not per phase &mdash; a pull runs
-  about eight &mdash; and 160 monospace characters wrap to a different number
-  of lines each time, so as a fixture in the card's own column it moved
-  everything under it several times a second. "Which command" and "what did it
-  last print" are the two facts a wedged transfer is diagnosed from; they
-  belong together, behind a disclosure that opens itself on exactly the
-  operations where they are the finding.
+  places; that is one piece of work.
+- **Below `REMOTE_ACTIVITY_NARRATE_AFTER_MS` there is no narration.** The card
+  shows one stable line, then its receipt. The steps are still recorded, so
+  the receipt is complete.
+  - The gate controls what the card says, not whether it opens. The card
+    still opens on the click.
+  - **The gate covers the whole card, not the step list.** Gating only the
+    list let the card fall back to `remoteActivityStatus`, which is the same
+    per-phase narration.
+  - Below the threshold, `startingView` is the view from the click until
+    main's first output: one line, no meter, no command. It reads the record
+    only for the id and `canceling` (so Cancel shows as soon as there is
+    something to stop) and for the output tail (inside a collapsed
+    disclosure, so it cannot move anything).
+- **Git's output and the command line are collapsed while the operation looks
+  healthy.**
+  - The output is `\r`-rewritten progress. Live, it grew to its 108&nbsp;px
+    cap while its last line flickered. It was the largest source of churn.
+  - `setCommand` fires per Git invocation (about eight per pull), and 160
+    monospace characters wrap differently each time.
+  - The disclosure opens itself when it is the finding: a quiet warning, a
+    failure, or a cancel. Command and last output are the two facts that
+    diagnose a wedged transfer, so they stay together.
+  - The open state is React-controlled. The popover re-renders every second,
+    and an uncontrolled `<details>` would close under the user.
 
 ## The card grows; it never takes space back
 
-The step list answered "the text keeps being rewritten". This is the other half
-of the same complaint: **a thing that appears and disappears moves everything
-under it, twice.** So the rule for anything the card draws is that its space is
-reserved for as long as the card might want it, and the card's height only ever
-goes up while an operation runs.
+**Rule: reserve space for anything the card draws for as long as it might
+need it. While an operation runs, the card's height only increases.** An
+element that appears and disappears moves the evidence block and buttons
+below it twice.
 
-Four places used to break it, and each one moved the evidence block and the
-buttons — which is exactly where a reader looks when they want to know what
-happened.
-
-- **A network step's progress track is decided by its PHASE**
-  (`stepHasMeter`), not by whether Git has sent a percentage yet. Git starts
-  reporting a beat after a phase opens and stops before it closes, and
-  `setPhase` clears `progress` outright, so a track that followed the numbers
-  resized its own row twice per step. A `fetch` or `push` row has one from the
-  moment it is written; a `fast_forward` row never does. `Track` renders the
-  reserved-but-empty case as presentational rather than as a `progressbar` with
-  an invented value — an assistive technology should hear "running, progress
-  unknown", not "0%". A finished network step reads 100%, in the success
-  colour, because it transferred.
+- **The PHASE decides if a step has a progress track** (`stepHasMeter`), not
+  whether Git has sent a percentage. Git reports only in the middle of a
+  phase, and `setPhase` clears `progress`.
+  - A `fetch` or `push` row has a track from the moment it is written. A
+    `fast_forward` row never has one.
+  - `Track` renders the reserved, empty case as presentational, not as a
+    `progressbar` with an invented value. Assistive technology must hear
+    "running, progress unknown", not "0%".
+  - A finished network step reads 100%, in the success colour.
 - **The fallback meter keeps its slot for the life of the operation**
-  (`meterSlot`). That is the toast's standing presentation, and the block came
-  and went three times in a pull. The label line holds its height empty, in
-  CSS, for the same reason. `meterSlot` is a field on the view rather than
-  something the card derives, because the *other* fallback — the quiet card
-  before the narration threshold — must NOT reserve it: an empty transfer
-  block there would make that card taller than the one-row step list that
-  replaces it, and turn the card's one honest transition into a shrink.
-- **The health line stays once it has had something to say.** A fetch that
-  goes quiet for twenty seconds and then resumes is a real event and the
-  retraction is real information — but the line has to update in place, not
-  vanish.
-- **The Git-output disclosure keeps its place on the receipt.** It stood under
-  the card for the whole operation (a running card always shows it), so
-  dropping it because a successful fetch had nothing to put in it pulled the
-  buttons upward at the moment the user looked down to read the outcome. "Git
-  produced no output." is a sentence; an absent block is a jump.
+  (`meterSlot`). The meter is the toast's standard presentation. The label
+  line holds its height when empty, in CSS.
+  - `meterSlot` is a field on the view, not derived by the card. The quiet
+    card before the narration threshold must NOT reserve it. An empty block
+    there would make that card taller than the step list that replaces it,
+    so the transition would shrink the card.
+- **The health line stays after it first has something to say.** If a quiet
+  fetch resumes, update the line in place; do not remove it.
+- **The Git-output disclosure stays on the receipt.** If a successful fetch
+  has no output, show "Git produced no output." Removing the block moves the
+  buttons up as the user reads the outcome.
 
-What deliberately still moves, and why it is allowed: rows are **appended** as
-phases are observed, the disclosure **opens** itself on a finding, and a
-failure's headline appears above the list. All three are growth at the moment
-the card has something new to say, and growth below the reader's eye is how a
-card reports progress. What is not allowed is taking any of it back.
+Permitted movement is growth only: rows are **appended**, the disclosure
+**opens** on a finding, and a failure headline appears above the list.
 
-Rows carry bare labels today. Counts &mdash; *"Fast-forwarded · 12 commits"*
-&mdash; need the command results widened in main: `remote:fetch` and
-`remote:push` return `null` and `remote:pull` returns three booleans, while
-`pullBranch` holds the commit range either side of the merge and discards it.
-That is design card 3a's deferred protocol change, in a much smaller form, and
-the list is honest without it.
+### Row labels
 
-`liveActivityView` takes the steps as an argument rather than reading them off
-the record, because a record says which phase the operation is in *now* and
-nothing about the ones before it: the history belongs to whoever has been
-watching. The toast passes none and gets the status line and the shared meter,
-which is right for a card about a repository the user is not looking at.
+Rows carry bare labels. Counts (*"Fast-forwarded · 12 commits"*) need wider
+results from main:
+
+- `remote:fetch` returns only `{ remotes }` (the remotes it asked).
+- `remote:push` returns `null`.
+- `remote:pull` returns three booleans (`PullOutcome`).
+- `pullFastForward` in `src/main/git/git-service.ts` reads the original HEAD
+  but discards the commit range.
+
+This is a smaller form of design card 3a's deferred protocol change.
+
+### Where the steps come from
+
+`liveActivityView` takes the steps as an argument. A record shows only the
+current phase; the history belongs to the component that watched. The toast
+passes no steps, so it gets the status line and the shared meter.
 
 ## Dismissal belongs to the user, not to the pointer
 
-A hover card is the pointer's: leaving it, or scrolling the surface it
-described, is the dismissal. A clicked card is not, so `useViewportTooltip`
-grew `setSticky`, which makes `scheduleHide` and the scroll dismissal no-ops.
-What ends a pinned card is Escape, the always-present ✕, the Close button on a
-failure, a `mousedown` anywhere outside it and outside its own trigger, or the
-rail running out.
+**Rule: a pinned card ends only on a user action or when the rail runs out.**
 
-Two things about that outside-click listener. It is **capture phase**, so a
-surface that stops propagation cannot strand the card on screen; and it calls
-no `preventDefault`, so the click still lands where it was aimed — dismissing
-costs the user nothing but the card. Pressing the trigger again is not
-"elsewhere": that button either starts the next operation (and re-pins) or is
-inert because one is running, and neither should take the status away.
+`setSticky` (see [lib/AGENTS.md](../../lib/AGENTS.md)) makes
+`useViewportTooltip`'s `scheduleHide` and scroll dismissal no-ops. A pinned
+card ends on:
 
-The rail pauses while the pointer is inside the card and stops outright on a
-click or a focus into it — a pointer resting is "still reading", a click is
-"leave this alone". `paused` drives both the CSS `animation-play-state` and the
-JavaScript timer, which banks its remainder in its effect cleanup, so the bar
-and the dismissal always resume from the same place. Under
-`prefers-reduced-motion` the blanket `animation: none !important` in app.css
-would leave a full rail on a card that then vanished unannounced, so the
-popover sets `transform: scaleX()` inline from the seconds clock instead: the
-same drain, in four discrete steps.
+- Escape, or the always-present ✕;
+- the Close button on a failure;
+- a `mousedown` outside the card and outside its trigger;
+- the rail running out.
 
-`settle` starts the receipt **un-held**. A click that landed while the
-operation was still running — Copy, or Cancel itself — was not a click on a
-countdown, because there was no countdown yet; carried forward it hands the
-user a card that never leaves and no timer they could have seen to stop. The
-pointer is the other half and is deliberately *not* reset: `within` is where
-it is right now, and a card under the pointer still waits.
+The outside-click listener:
 
-`REMOTE_ACTIVITY_SETTLED_MS` may be as short as it is *because* of those
-pauses, not despite them — that, plus the ✕, is WCAG SC 2.2.1 met three ways.
+- uses the **capture phase**, so a surface that stops propagation cannot
+  strand the card;
+- does not call `preventDefault`, so the click still lands where it was
+  aimed;
+- ignores the trigger. That button either starts the next operation (and
+  re-pins) or is inert while one runs.
+
+### The rail
+
+- It pauses while the pointer is inside the card ("still reading"). It stops
+  completely on a click or a focus into the card ("leave this alone").
+- `paused` drives the CSS `animation-play-state` and the JavaScript timer. The
+  timer saves its remainder in its effect cleanup, so both resume from the
+  same point.
+- Under `prefers-reduced-motion`, app.css applies `animation: none
+  !important`, which would show a full rail on a card that then vanishes. So
+  the popover sets `transform: scaleX()` inline from the seconds clock: the
+  same drain in four steps.
+- `settle` starts the receipt **un-held**. A click during the operation (Copy,
+  Cancel) happened before any countdown existed. Carried forward, it would
+  make the card permanent. The pointer state (`within`) is intentionally not
+  reset: a card under the pointer still waits.
+- `REMOTE_ACTIVITY_SETTLED_MS` can be short because of these pauses. The
+  pauses plus the ✕ meet WCAG SC 2.2.1 in three ways.
 
 ## One card, four placements
 
-`RemoteActivityCard` is rendered by the pinned popover, by a hover-opened card
-from the same hook, by the elsewhere-toast (`RemoteActivityToast`), and by
-`PushRefsDialog`. They answer the same question from different places, so they
-share the card rather than growing dialects of it; `compact` drops the
-Git-output block for the toast, and `onClose` is what draws the ✕ and the
-Close button — given only where dismissal is the user's to make.
+`RemoteActivityCard` renders in the pinned popover, a hover-opened card from
+the same hook, the elsewhere-toast (`RemoteActivityToast`), and
+`PushRefsDialog`. Share the card; do not add variants.
 
-The dialog is the exception to "a modal takes the card away", and it has to
-be: it is the surface that *starts* the operation. Both halves of the push
-review are network commands — the plan fetches every destination remote
-before it can compare anything — and until `remote:planPushRefs` and
-`remote:pushRefs` were wrapped in `tracked()` neither registered anything at
-all, so the only thing that said an SSH agent had wedged was a button caption
-reading "Pushing…". It draws the card itself rather than leaning on the
-elsewhere-toast because `.toast-host` is z-index 90 under a backdrop at 110:
-that card would be dimmed and unclickable behind the dialog that started the
-work. It shows the live view only; the dialog's own per-destination results
-table is a better receipt than a one-line summary, so there is no `settle`
-here.
+- `compact` removes the Git-output block for the toast.
+- `onClose` draws the ✕ and the Close button. Pass it only where dismissal is
+  the user's decision.
 
-The split between popover and toast is scope, and it is load-bearing: the toast
-shows only operations the toolbar on screen is *not* already reporting. Show
-both and a status card covers the graph for the length of every pull you
-started yourself. The toast always builds a **live** view for the same reason:
-a receipt belongs beside the button that was pressed, and that card is by
-definition for a repository the user is not looking at.
+### `PushRefsDialog`
+
+The dialog is the exception to "a modal takes the card away", because it
+starts the operation.
+
+- `remote:planPushRefs` and `remote:pushRefs` are wrapped in `tracked()`
+  (see main/git/AGENTS.md). Before that, a wedged SSH agent showed only a
+  "Pushing…" caption.
+- The dialog draws the card itself. `.toast-host` is z-index 90, under the
+  backdrop at 110, so the toast would be dimmed and unclickable.
+- It shows the live view only, with no `settle`. Its per-destination results
+  table is the receipt.
+
+### Popover or toast
+
+- **The toast shows only operations that the toolbar on screen does not
+  report.** Otherwise a status card covers the graph for every pull the user
+  started.
+- The toast always builds a **live** view. A receipt belongs beside the
+  pressed button, and the toast is for another repository.
 
 ## Seconds belong in the card, never in the live region
 
-The sync chip is `role="status"`. Its label is the phase alone — "Fetching
-updates…" — because a live region carrying a counter re-announces itself every
-second, which is unusable with a screen reader on.
-
-Everything counted in seconds (elapsed, "no Git output for 2m 04s") lives in
-the card, which is not a live region. The toast sets `aria-live="off"` for the
-same reason: it appears unasked and then changes every second, so it is a place
-to look, not an announcement.
+- **The sync chip is `role="status"`. Its label is the phase only** ("Fetching
+  updates…"). A live region with a counter re-announces every second.
+- **Show everything counted in seconds in the card** (elapsed, "no Git output
+  for 2m 04s"). The card is not a live region.
+- **The toast sets `aria-live="off"`.** It appears unasked and changes every
+  second.
 
 ## Only warn about quiet during network phases
 
-`remoteActivityStatus` treats silence as evidence only in `fetch` and `push`,
-where `--progress` obliges Git to emit. Checkout, stash and merge routinely
-print nothing for a long time; warning there would fire on every healthy pull
-and the warning would stop meaning anything.
+**`remoteActivityStatus` treats silence as evidence only in `fetch` and
+`push`,** where `--progress` forces Git to emit. Checkout, stash and merge
+often print nothing for a long time, so a warning there would fire on every
+healthy pull.
 
 ## The hover path survives, for the operations a click cannot cover
 
-Everything below this line is about the *other* way in, and it still earns its
-keep: an operation against this checkout that something else started — the
-sidebar's refresh, a bulk sync, a second window. There was no click to pin
-from, so the pointer is the only signal there is. That card is transient
-(it leaves with the pointer) and never grows a rail, because there is no
-settle to report.
+The rest of this file covers operations on this checkout that something else
+started: the sidebar's refresh, a bulk sync, a second window. With no click,
+the pointer is the only signal. The hover card is transient and never shows a
+rail.
 
-**A hover card refreshes itself, and ends with the record.** Its own effect,
-and it is the whole reason the card is worth opening: elapsed, the transfer
-meter and "no Git output for 2m 04s" exist only in *later* records, so a card
-frozen at the instant it opened draws a wedged fetch as a healthy one. The
-record going is also its ending, and that is not belt-and-braces — the
-pointer's exit rides on `close()`, a prop on a control that stops being a
-trigger the moment its operation ends, so an operation that finishes under a
-resting pointer takes its own dismissal away with it.
+- **A hover card refreshes itself.** Elapsed, the meter and the quiet warning
+  exist only in later records, so a frozen card shows a wedged fetch as
+  healthy.
+- **The record going away ends the card.** The pointer's exit uses `close()`,
+  a prop on a control that stops being a trigger when the operation ends.
+- **A pin stands the hover path down.** `open`, `close`, the arming effect and
+  the refresh return early while there is a pin. The deferred open checks
+  again when its timer fires. Otherwise a hover could reopen a finished
+  operation's card when the pin is dismissed.
+- **No `useHoverIntent`.** [lib/AGENTS.md](../../lib/AGENTS.md) reserves it
+  for triggers repeated down a column the pointer crosses. These triggers are
+  one button and its chip. The user must aim at them, and they are triggers
+  only while an operation runs.
+- It is an *interactive* `useViewportTooltip`, because the card carries
+  Cancel. The pointer must be able to enter it, and Escape must return focus
+  to the trigger.
 
-A pinned card stands the whole of it down: `open`, `close`, the arming effect
-and that refresh all return early while there is a pin, and the deferred open
-checks again when its timer fires. The click has already answered the question
-this machinery exists to answer, and re-arming underneath it would leave a
-hover primed to reopen a finished operation's card the moment the pinned one
-was dismissed.
+### The age gate
 
-`lib/AGENTS.md` reserves `useHoverIntent` for triggers that repeat down a
-column the pointer crosses on its way elsewhere. These triggers are a single
-button and the chip beside it, both of which the user had to aim at, and they
-only become triggers while an operation is running. There is no sweep to
-suppress, and a delay would make the answer to "what is it doing?" feel
-withheld.
-
-It is an *interactive* `useViewportTooltip` because the card carries Cancel —
-the pointer has to be able to travel into it, and Escape has to return focus to
-the trigger.
-
-What it DOES gate on is the operation's own age
-(`REMOTE_ACTIVITY_POPOVER_AFTER_MS`), and that is not a dwell timer.
-Measuring from `startedAt` means a hover onto something that has already been
-running opens instantly, which is the case the card is for.
-
-**That gate no longer applies to the click**, and the reason it once did is
-worth keeping straight. It existed because clicking Pull leaves the pointer
-resting on the button, and swapping the glyph for the spinner fires
-`mouseenter` under that stationary pointer — so without it every ordinary
-one-second pull threw a card over the graph and took it away again. Pinning
-answers that case directly: the card is already open when the enter arrives,
-and the enter finds it and does nothing. What the gate still suppresses is a
-card **nobody asked for** — a bulk sync turning this button busy under a
-pointer that came to rest there for its own reasons, once per repository. A
-click is an ask; that is not.
+- The hover path gates on the operation's age
+  (`REMOTE_ACTIVITY_POPOVER_AFTER_MS`), measured from `startedAt`. It is not a
+  dwell timer: a hover onto a long-running operation opens instantly.
+- **The age gate does not apply to the click.** The spinner replacing the
+  Pull glyph fires `mouseenter` under the resting pointer. A pinned card is
+  already open, so that enter does nothing.
+- The gate still suppresses a card **nobody asked for**: a bulk sync that
+  makes this button busy under a resting pointer, once per repository.
 
 ## A hover is a place, not a moment — and so is focus
 
-That same stationary-pointer `mouseenter` is the ONLY enter the button will
-ever see, and it fires while the button is busy from the renderer's own
-`busy` state — one or more renders before main reports the operation and
-`activity` stops being `null`. Which side of the record the enter lands on is a
-race nobody can see or influence, and losing it used to be permanent: the
-pointer is already inside the button, so no further enter is coming and the
-card never opened no matter how long the user waited. The one way out was to
-move the pointer off the button and back on — for the operation the card exists
-for, a wedged fetch, that is the worst possible time to ask.
+### The race
 
-So the trigger handlers go on from the **first busy render**, not from the
-record's arrival (`running === kind` in `WorktreeHeader`, not `carriesCard`),
-the popover **remembers the trigger** a hover landed on even with nothing to
-report, and it re-arms when the record arrives. An enter that lands anywhere in
-the busy period is now kept until there is something to answer it with.
+The resting-pointer `mouseenter` is the ONLY enter the button gets. It fires
+when the renderer's own `busy` is set, one or more renders before `activity`
+stops being `null`. If it landed before the record, the card never opened
+until the user moved the pointer off and back.
 
-None of that invents a hover that never happened, and Fetch is where that
-shows: its glyph does not swap (the arrow spins in place), so a click leaves
-the pointer on a button that dispatches no boundary event at all. The keyboard
-fails the same way from the other side — the `focusin` a click or Enter fires
-lands on mousedown, before `running` is set and before any handler is
-listening, and no second focus event follows. There is nothing to remember
-because nothing was ever reported.
+- The trigger handlers start on the **first busy render**: `running === kind`
+  in `WorktreeHeader`, not `carriesCard`.
+- The popover **remembers the trigger** a hover landed on, even with nothing
+  to report, and re-arms when the record arrives.
 
-So when the record arrives with **no trigger rested on at all**, the popover
-asks the DOM where the user is instead of waiting to be told —
-`WHERE_THE_USER_IS`, exported from that file, against refs to the controls that
-can carry the card (the busy `.wt-btn` and the `.sync-chip--progress` beside
-it). What it finds it hands to `restOn`, not to `arm` directly, so a pointer
-that does then move away calls the whole thing off through the element's own
-listeners exactly as if it had arrived by event.
+### No trigger at all: ask the DOM
 
-**`:focus-visible`, never `:focus`.** Chromium focuses a button on click
-without making it focus-visible, so the keyboard half cannot resurrect a card
-for a pointer that has walked away. That is a browser fact the code leans on,
-so it is asserted directly rather than assumed, in the "walked away" e2e.
+Fetch's arrow spins in place, so its click fires no boundary event. The
+keyboard `focusin` fires on mousedown, before `running` is set. So when the
+record arrives and **no trigger is rested on**:
 
-**Tab hands off into the card.** The pointer reaches Cancel by moving into the
-card; the keyboard needs the handoff `GraphRow` already makes into its commit
-context card (`focusFirst`, swallowing the key). Without it Tab lands on Pull,
-blurs the trigger and takes the card with it — so opening the card for the
-keyboard without this would show a Cancel button only a mouse could press.
+- the popover matches `WHERE_THE_USER_IS` (exported from
+  `useRemoteActivityPopover.tsx`) against refs to the busy `.wt-btn` and the
+  `.sync-chip--progress` beside it;
+- it hands a match to `restOn`, not to `arm`. If the pointer then leaves, the
+  element's listeners cancel everything.
 
-It reaches past the trigger the record names, because a pinned card hangs off
-whichever button was *clicked* — but only as far as that button
-(`status.pinnedKind`). The three are adjacent and carry `aria-disabled` rather
-than `disabled`, so they stay tabbable while one of them works: claiming Tab
-on all three would send a keyboard user on Push backwards, past Push, into a
-card hanging off Pull (SC 2.4.3).
+### `:focus-visible`, never `:focus`
 
-Three things keep that from becoming a card nobody asked for.
+Chromium focuses a button on click but does not make it focus-visible. So the
+keyboard half cannot reopen a card for a pointer that moved away. The
+"walked away" e2e asserts this browser fact.
 
-The re-arm is keyed on the operation's **id**, not on the record — one arrives
-every half-second, and re-arming per update would restart the age gate's timer
-forever. A wait already counting down for *that same* operation is left alone;
-one left over from a finished operation is not, or an operation that replaced
-it inside the gate would be armed by nothing at all and its predecessor's timer
-would fire into an id check that discards it.
+### Tab hands off into the card
 
-The popover watches the trigger leave *for itself*, with listeners on the
-element rather than the `close()` prop: that prop rides on a control which
-stops being a trigger the moment its operation ends, so a pointer that wanders
-off after that is never recorded as having left — and the stale trigger would
-open some LATER operation's card beside a pointer nowhere near it.
-(`useViewportTooltip` releases an Escape-dismissed trigger the same way.) Both
-exits matter and neither covers for the other: React derives its `mouseleave`
-prop from `mouseout`, so a unit test dispatching one does not exercise the
-other.
+- Tab from the trigger moves focus into the card (`focusFirst`, swallowing
+  the key), as `GraphRow` does for its commit context card. Without it, Tab
+  blurs the trigger and closes the card, so only a mouse could press Cancel.
+- The handoff follows the *clicked* button (`status.pinnedKind`), not only
+  the trigger the record names.
+- The three buttons use `aria-disabled`, not `disabled`, so they stay
+  tabbable. If Tab were claimed on all three, a keyboard user on Push would
+  jump backwards into a card on Pull (SC 2.4.3).
 
-**Where the pointer is and what it has earned are ONE record.** `Resting`
-holds the trigger, its release, and the wait counting down on it, because
-every bug this has had was two halves of that fact updated by different code
-paths — a wait outliving the operation it was armed for, then a wait outliving
-the trigger it was armed from, still firing a card at a pointer that had gone.
-`restOn` and `forgetTrigger` are the only writers, arming lives on the record
-so letting the trigger go takes the wait with it, and `arm` refuses to arm from
-anything but the trigger currently rested on. Keep it that way: a second cell
-tracking part of this is how each of those bugs started.
+### Three safeguards against a card nobody asked for
 
-And the widening is in **time only, never in scope**. `running` also answers to
-the header's own `busy`, so a locally dispatched fetch can be what makes a
-button busy while the live record for that checkout is a pull started
-elsewhere. `couldCarryCard` keeps the record's kind matched to the button once
-there is a record — a card naming a Pull must never hang off Fetch — while
-still letting the trigger listen through the gap before one exists.
+1. **Re-arm on the operation's id, not on the record.** A record arrives every
+   half-second, so re-arming per record restarts the age gate forever. Keep a
+   wait for the same operation. Clear a wait from a finished operation;
+   otherwise its timer fires into an id check that discards it, and the new
+   operation is never armed.
+2. **The popover watches the trigger leave itself**, with listeners on the
+   element, not through `close()`. After the operation ends, that prop is
+   gone, so a stale trigger would open a later card far from the pointer.
+   `useViewportTooltip` releases an Escape-dismissed trigger the same way.
+   React derives `mouseleave` from `mouseout`, so a unit test that dispatches
+   one does not exercise the other.
+3. **Pointer location and its wait are ONE record.** `Resting` holds the
+   trigger, its release and the wait. `restOn` and `forgetTrigger` are the
+   only writers. Releasing the trigger removes the wait. `arm` refuses any
+   trigger but the current one. Earlier bugs (a wait outliving its operation,
+   then its trigger) came from a second cell that tracked part of this state.
 
-Testing splits along what jsdom can say. It does track `:hover` — but only as
-bookkeeping on a dispatched `mouseover`, and dispatching one is exactly what
-these tests must not do, since React turns it into the `onMouseEnter` whose
-absence is the subject. (It also answers `:focus-visible` for anything merely
-focused, which Chromium does not, and it clears hover on `mouseout` rather than
-on `mouseleave` — so a simulated exit needs both.) `WorktreeHeader.test.tsx`
-therefore answers `WHERE_THE_USER_IS` directly for one element: enough for the
-wiring (which controls carry the ref), the age gate and the Tab handoff, and
-deliberately blind to which half of that query a real browser would have set.
+### Widened in time, never in scope
 
-The jsdom half has one more constraint worth stating plainly, because it is
-easy to undo by accident: **a hover-path test may not press the button first.**
-Every one of them used to, purely to make a control busy, and a click now pins
-a card and stands the hover machinery down. Emitting a record alone is the way
-— `running` answers to the record as well as to this header's own dispatch, so
-a bare record *is* an operation something else started, which is the case the
-hover path is for.
+- `running` also follows the header's own `busy`. So a local fetch can make a
+  button busy while the record is a pull started elsewhere.
+- `couldCarryCard` matches the record's kind to the button once a record
+  exists. A Pull card must never hang off Fetch. Before a record exists, the
+  trigger still listens.
 
-The browser facts live in `e2e/remote-activity.spec.ts`: the pull test, the
-same test for Fetch, the Enter-then-Tab-to-Cancel walk, the walked-away test,
-and the settled receipt. Playwright's `hover()` cannot re-enter a control the
-pointer is already inside — after `pull.click()` it dispatches a bare
-`mousemove` and no boundary event at all — which is why none of them lean on
-one. The walked-away test carries the explicit `:focus-visible` assertion that
-holds the hover path's selector honest, and now asserts the inverse of what it
-used to: a clicked card is *not* the pointer's to take away, and only the click
-out in the graph ends it.
+### Testing in jsdom
+
+- jsdom sets `:hover` only on a dispatched `mouseover`, which React turns into
+  the `onMouseEnter` these tests must not send.
+- jsdom matches `:focus-visible` for any focused element; Chromium does not.
+- jsdom clears hover on `mouseout`, not `mouseleave`, so a simulated exit
+  needs both.
+- So `features/graph/WorktreeHeader.test.tsx` answers `WHERE_THE_USER_IS`
+  directly for one element. This covers the ref wiring, the age gate and the
+  Tab handoff, but not which selector half a browser would match.
+- **A hover-path test may not press the button first.** A click pins a card
+  and stands the hover path down. Emit a record alone: `running` follows the
+  record, so a bare record is an operation something else started.
+
+### Testing in the browser
+
+[e2e/remote-activity.spec.ts](../../../../../e2e/remote-activity.spec.ts)
+holds the browser facts: the pull test ("a pull that gets no answer…"), the
+Fetch test ("a wedged fetch opens its card from the click…"), the
+Enter-then-Tab-to-Cancel walk, the walked-away test, and the settled receipt.
+
+- Playwright's `hover()` cannot re-enter a control the pointer is inside;
+  after `pull.click()` it sends a bare `mousemove`. No test depends on it.
+- The walked-away test has the explicit `:focus-visible` assertion. It also
+  asserts that the pointer cannot take a clicked card away; only a click in
+  the graph ends it.

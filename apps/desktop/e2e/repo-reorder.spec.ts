@@ -6,7 +6,8 @@ import {
   branchRow,
   expandRepoGroup,
   lensChip,
-  primaryShortcut
+  primaryShortcut,
+  clickAddFolders
 } from "./fixtures/steps";
 
 let sandbox: GitSandbox | null = null;
@@ -32,7 +33,7 @@ async function pinnedSandbox(): Promise<Page> {
   handle = await launchApp();
   const { window } = handle;
   await handle.setPickDirectory(sandbox.reposDir);
-  await window.getByRole("button", { name: /Add folders/i }).click();
+  await clickAddFolders(window);
   await lensChip(window, "All").click();
   await expect(window.locator(".repo-row__name")).toHaveCount(3, {
     timeout: 20_000

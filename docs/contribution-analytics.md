@@ -78,7 +78,7 @@ Repository enumeration explicitly sets **both** `affiliations` and
 OWNER default silently loses collaborator/org projects. Forks, archived repos,
 visibility, owner type and immutable IDs are retained. Received and distinct
 counts must match stable `totalCount`; changing counts, duplicate IDs, missing
-cursors, partial GraphQL errors and lost access stop with incomplete coverage.
+cursors, unclassified partial GraphQL errors and lost access stop with incomplete coverage.
 Organizations provide membership context, not a sweep of all public org repos.
 
 Merger reads use repository node IDs and
@@ -115,7 +115,27 @@ history. Merger coverage traverses current affiliated repositories, plus known
 viewer-authored external merges. Other-author merges in external/former-access
 projects remain unverified. Direct author coverage includes visible personal
 and external projects; deleted/inaccessible PRs remain unknown. SSO and permission
-failures are errors, never zero. Personal namespaces remain distinct from orgs;
+failures are missing coverage, never zero. For SAML SSO refusals with an explicit
+path to an authored-connection node, collection keeps the other validated nodes
+and advances the returned cursor, counting each refused node separately. A
+wholly blocked page can advance too. Other GraphQL errors still stop collection.
+SSO-blocked repositories are skipped for the rest of the pass; a refused
+lifecycle batch is isolated before attributing it to an organization. Accessible
+work finishes with partial status, named blocked organizations, and skipped
+counts. Complete backlog/cohort statistics remain unavailable.
+
+GitHub's SSO error may omit the organization name. A bounded read of the
+`X-GitHub-SSO` header on `user/repos` supplies blocked organization IDs. Public
+organization-directory lookups resolve exact matching IDs to logins; unavailable
+names remain identified by ID, or explicitly unknown. Raw errors and expiring
+SSO authorization URLs are not retained. These reads use the same configured
+CLI host and never request new scopes.
+
+After an accessible pass finishes, Resume retries the first skipped authored
+page and repository cursor, and incomplete lifecycle histories. Original UTC
+bounds and previously collected records are retained. Interrupted passes first
+finish their accessible walk so a persistent early SSO gap cannot starve later
+repositories across the page budget. Personal namespaces remain distinct from orgs;
 owner labels reflect current ownership, not historical transfers. GitHub pages
 are not a transactional snapshot: frozen cutoff, ID checks and state/count
 checks detect some concurrent changes; refresh recollects when inconsistent.
@@ -146,7 +166,8 @@ selected repository.
 One collector runs app-wide, sequentially, with 150ms request spacing, a 45s
 subprocess timeout and up to two transient timeout/5xx retries using existing
 forge backoff. A pass pauses at 1,000 pages and can resume. Quota below 200 stops
-until GitHub’s reset time. Auth/SSO/403/429/schema failures stop immediately.
+until GitHub’s reset time. Auth, ordinary 403/429 and schema failures stop immediately. Isolated SAML SSO
+refusals skip blocked work and preserve incomplete coverage while collection continues.
 
 Bounds: 10,000 repositories, 20,000 lifetime authored IDs and retained PRs,
 2,000 lifecycle events per PR and 50,000 events per snapshot. Limit failures

@@ -9,9 +9,9 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { type BulkSyncProgress, err, ok } from "@pwrgit/shared";
-import { bulkSyncRepositories, type BulkSyncRepoInput } from "./bulk-sync";
+import { BULK_WORKTREE_CONCURRENCY, bulkSyncRepositories, type BulkSyncRepoInput } from "./bulk-sync";
 import type { GitExec } from "./dugite";
 import { createSystemGit } from "./test-support/system-git";
 
@@ -137,28 +137,12 @@ describe("bulk repository synchronization", () => {
     git(repo.input.path, "update-ref", "refs/remotes/origin/release", repo.base);
 
     const progress: BulkSyncProgress[] = [];
-    let observedLiveWorktreeResult = false;
     let fetches = 0;
     let fetchArgs: string[] | undefined;
     const countedGit: GitExec = (args, cwd, options) => {
       if (args[0] === "fetch") {
         fetches += 1;
         fetchArgs = args;
-      }
-      if (args[0] === "status" && cwd === releasePath && !observedLiveWorktreeResult) {
-        observedLiveWorktreeResult = true;
-        expect(progress.some((event) => event.phase === "repo_completed")).toBe(false);
-        expect(progress.find((event) => event.remoteResult)?.remoteResult).toEqual({
-          remote: "origin", outcome: "fetched"
-        });
-        expect(progress.find((event) => event.worktreeResult)?.worktreeResult).toMatchObject({
-          worktreeId: repo.input.worktrees[0]!.id, outcome: "updated", afterHead: mainHead
-        });
-        expect(progress.at(-1)).toMatchObject({
-          repoId: repo.input.id, completedRepos: 0, totalWorktrees: 2,
-          worktreePath: releasePath,
-          detail: "release: Checking for uncommitted changes…"
-        });
       }
       return systemGit(args, cwd, options);
     };
@@ -168,7 +152,12 @@ describe("bulk repository synchronization", () => {
       onProgress: (event) => progress.push(event)
     });
 
-    expect(observedLiveWorktreeResult).toBe(true);
+    const firstResult = progress.findIndex((event) => event.worktreeResult !== undefined);
+    expect(firstResult).toBeGreaterThan(0);
+    expect(progress.slice(0, firstResult).some((event) => event.phase === "repo_completed")).toBe(false);
+    expect(progress.slice(0, firstResult).find((event) => event.remoteResult)?.remoteResult).toEqual({
+      remote: "origin", outcome: "fetched"
+    });
     expect(progress.filter((event) => event.worktreeResult)).toHaveLength(2);
     expect(progress.map((event) => event.detail)).toContain("main: Fast-forwarding…");
     expect(fetches).toBe(1);
@@ -268,6 +257,141 @@ describe("bulk repository synchronization", () => {
     },
     60_000
   );
+
+  it("reports a dirty worktree with nothing to pull as up to date, not skipped", async () => {
+    const current = trackedRepo("dirty-current");
+    writeFileSync(join(current.input.path, "scratch.txt"), "work in progress\n");
+    const before = git(current.input.path, "status", "--porcelain");
+
+    const summary = await bulkSyncRepositories(systemGit, [current.input], {
+      operationId: "dirty-current",
+      mode: "soft-pull"
+    });
+
+    expect(summary.results[0]?.worktrees[0]?.outcome).toBe("up_to_date");
+    expect(summary.results[0]?.outcome).toBe("success");
+    expect(git(current.input.path, "status", "--porcelain")).toBe(before);
+  });
+
+  it("does not hold a repository back for worktrees with nothing to pull", async () => {
+    // Main is current; the others are the shapes agent worktrees leave:
+    // detached, no upstream, an upstream deleted on the remote, and ahead.
+    const repo = trackedRepo("agent-worktrees");
+    const add = (name: string, ...args: string[]) => {
+      const path = join(root, `${repo.input.id}-${name}`);
+      git(repo.input.path, "worktree", "add", ...args, path);
+      repo.input.worktrees.push({ id: `${repo.input.id}-${name}`, branch: name, path });
+      return path;
+    };
+    add("detached", "--detach");
+    add("local", "-b", "local");
+    const gone = add("gone", "-b", "gone");
+    git(gone, "push", "-u", "origin", "gone");
+    git(repo.input.path, "push", "origin", "--delete", "gone");
+    const ahead = add("ahead", "-b", "ahead");
+    git(ahead, "push", "-u", "origin", "ahead");
+    writeFileSync(join(ahead, "ahead.txt"), "local\n");
+    git(ahead, "add", "-A");
+    git(ahead, "commit", "-m", "ahead");
+
+    const summary = await bulkSyncRepositories(systemGit, [repo.input], {
+      operationId: "agent-worktrees",
+      mode: "soft-pull"
+    });
+
+    const result = summary.results[0]!;
+    expect(result.worktrees.map((worktree) => worktree.reason)).toEqual([
+      undefined,
+      "detached_head",
+      "no_upstream",
+      "no_upstream",
+      "ahead"
+    ]);
+    expect(result.outcome).toBe("success");
+    expect(summary.counts.worktrees).toMatchObject({ nothingToPull: 4, skipped: 0 });
+  });
+
+  it("keeps a failed fetch failed when the other worktrees have nothing to pull", async () => {
+    const repo = trackedRepo("fetch-fails");
+    const detached = join(root, `${repo.input.id}-detached`);
+    git(repo.input.path, "worktree", "add", "--detach", detached);
+    repo.input.worktrees.push({ id: `${repo.input.id}-detached`, branch: "", path: detached });
+    rmSync(repo.remote, { recursive: true, force: true });
+
+    const summary = await bulkSyncRepositories(systemGit, [repo.input], {
+      operationId: "fetch-fails",
+      mode: "soft-pull"
+    });
+
+    expect(summary.results[0]?.outcome).toBe("failed");
+  });
+
+  it("skips a worktree with a bisect in progress", async () => {
+    const repo = trackedRepo("bisecting");
+    leaveMainBehind(repo);
+    git(repo.input.path, "bisect", "start");
+
+    const summary = await bulkSyncRepositories(systemGit, [repo.input], {
+      operationId: "bisecting",
+      mode: "soft-pull"
+    });
+
+    expect(summary.results[0]?.worktrees[0]?.reason).toBe("in_progress");
+    expect(git(repo.input.path, "rev-parse", "HEAD")).toBe(repo.base);
+  });
+
+  it("calls a repository with only detached worktrees a success, not skipped", async () => {
+    const repo = trackedRepo("all-detached");
+    git(repo.input.path, "switch", "--detach");
+
+    const summary = await bulkSyncRepositories(systemGit, [repo.input], {
+      operationId: "all-detached",
+      mode: "soft-pull"
+    });
+
+    expect(summary.results[0]?.worktrees[0]?.reason).toBe("detached_head");
+    expect(summary.results[0]?.outcome).toBe("success");
+  });
+
+  it("ignores AUTO_MERGE and REBASE_HEAD left behind by a finished merge or rebase", async () => {
+    const repo = trackedRepo("leftovers");
+    const upstream = leaveMainBehind(repo);
+    const gitDir = join(repo.input.path, ".git");
+    writeFileSync(join(gitDir, "AUTO_MERGE"), `${repo.base}\n`);
+    writeFileSync(join(gitDir, "REBASE_HEAD"), `${repo.base}\n`);
+
+    const summary = await bulkSyncRepositories(systemGit, [repo.input], {
+      operationId: "leftovers",
+      mode: "soft-pull"
+    });
+
+    expect(summary.results[0]?.worktrees[0]?.outcome).toBe("updated");
+    expect(git(repo.input.path, "rev-parse", "HEAD")).toBe(upstream);
+  });
+
+  it("still skips a worktree mid-rebase", async () => {
+    const repo = trackedRepo("mid-rebase");
+    leaveMainBehind(repo);
+    git(repo.input.path, "switch", "-c", "topic");
+    writeFileSync(join(repo.input.path, "shared.txt"), "topic\n");
+    git(repo.input.path, "commit", "-am", "topic");
+    git(repo.input.path, "switch", "main");
+    writeFileSync(join(repo.input.path, "shared.txt"), "main\n");
+    git(repo.input.path, "commit", "-am", "main");
+    git(repo.input.path, "switch", "topic");
+    expect(gitMayFail(repo.input.path, "rebase", "main")).not.toBe(0);
+    // Stage the resolution so only the rebase directory marks the operation.
+    writeFileSync(join(repo.input.path, "shared.txt"), "resolved\n");
+    git(repo.input.path, "add", "shared.txt");
+    repo.input.worktrees[0]!.branch = "topic";
+
+    const summary = await bulkSyncRepositories(systemGit, [repo.input], {
+      operationId: "mid-rebase",
+      mode: "soft-pull"
+    });
+
+    expect(summary.results[0]?.worktrees[0]?.reason).toBe("in_progress");
+  });
 
   it("does not confuse branches or tags named like operation pseudo-refs with active operations", async () => {
     const branchNamedLikeRef = trackedRepo("pseudo-branch");
@@ -404,6 +528,53 @@ describe("bulk repository synchronization", () => {
     ).toMatchObject({ outcome: "failed", reason: "unsafe_state" });
   });
 
+  it("bounds checkout concurrency, streams completion, and cancels queued checkouts in input order", async () => {
+    const controller = new AbortController();
+    const releases: (() => void)[] = [];
+    const gates = Array.from({ length: 8 }, () => new Promise<void>((resolve) => {
+      releases.push(resolve);
+    }));
+    const started: number[] = [];
+    const completed: string[] = [];
+    let active = 0;
+    let peak = 0;
+    const fakeGit: GitExec = async (args, cwd) => {
+      if (args[0] === "remote") return ok({ stdout: "origin\n", stderr: "", exitCode: 0 });
+      if (args[0] === "config") return ok({ stdout: "", stderr: "", exitCode: 1 });
+      if (args[0] === "fetch") return ok({ stdout: "", stderr: "", exitCode: 0 });
+      if (args[0] === "status") {
+        const id = Number(cwd.slice(cwd.lastIndexOf("-") + 1));
+        started.push(id);
+        peak = Math.max(peak, ++active);
+        await gates[id];
+        active -= 1;
+        return err({ kind: "git", code: "probe_failed", message: "Fixture status refused" });
+      }
+      throw new Error(`unexpected git command: ${args[0]}`);
+    };
+    const worktrees = Array.from({ length: 8 }, (_, i) => ({
+      id: `wt-${i}`, branch: `feature-${i}`, path: join(root, `wt-${i}`)
+    }));
+    const result = bulkSyncRepositories(fakeGit, [{ id: "repo", name: "repo", path: root, worktrees }], {
+      operationId: "bounded-worktrees", mode: "soft-pull", signal: controller.signal,
+      onProgress: (event) => {
+        if (event.worktreeResult !== undefined) completed.push(event.worktreeResult.worktreeId);
+      },
+      onRepoCompleted: () => { expect(active).toBe(0); }
+    });
+    await vi.waitFor(() => expect(started).toHaveLength(BULK_WORKTREE_CONCURRENCY));
+    releases[3]!();
+    await vi.waitFor(() => expect(started).toHaveLength(BULK_WORKTREE_CONCURRENCY + 1));
+    expect(completed[0]).toBe("wt-3");
+    controller.abort();
+    releases.forEach((release) => release());
+    const summary = await result;
+    expect(peak).toBe(BULK_WORKTREE_CONCURRENCY);
+    expect(started).toHaveLength(BULK_WORKTREE_CONCURRENCY + 1);
+    expect(summary.results[0]!.worktrees.map((wt) => wt.worktreeId)).toEqual(worktrees.map((wt) => wt.id));
+    expect(summary.results[0]!.worktrees.slice(5).every((wt) => wt.outcome === "cancelled")).toBe(true);
+  });
+
   it("caps repository concurrency and returns legible cancellation results", async () => {
     const controller = new AbortController();
     let activeFetches = 0;
@@ -484,6 +655,15 @@ describe("bulk repository synchronization", () => {
         });
       }
       if (args[0] === "rev-parse") {
+        if (args.includes("--git-path")) {
+          // No operation state file exists.
+          const paths = args.filter((_, i) => args[i - 1] === "--git-path");
+          return ok({
+            stdout: paths.map((path) => `/nonexistent/${path}\n`).join(""),
+            stderr: "",
+            exitCode: 0
+          });
+        }
         const target = args.at(-1);
         if (target === "HEAD") {
           return ok({ stdout: "local\n", stderr: "", exitCode: 0 });

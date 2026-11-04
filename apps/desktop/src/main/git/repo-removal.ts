@@ -1,5 +1,4 @@
 import { existsSync } from "node:fs";
-import { rm } from "node:fs/promises";
 import { isAbsolute, join, relative } from "node:path";
 import {
   err,
@@ -14,6 +13,7 @@ import {
   type Result
 } from "@pwrgit/shared";
 import type { DB } from "../persistence/db";
+import { deleteTree } from "../util/delete-tree";
 import { directorySize, type DirSizeResult } from "../util/dir-size";
 import { mapLimit } from "../util/map-limit";
 import { NO_OPTIONAL_LOCKS, requireExit0, type GitExec } from "./dugite";
@@ -405,7 +405,7 @@ export type RemovalExecuteDeps = RemovalReviewDeps & {
   remove?: (path: string) => Promise<void>;
   /** Drain state probes for a checkout; resolves to its release. */
   lockForRemoval: (worktreeId: string) => Promise<() => void>;
-  /** Serialize with other Git work on the checkout, then the repository. */
+  /** Serialize checkout work; when nesting, take runRepository first. */
   runWorktree: <T>(worktreeId: string, op: () => Promise<T>) => Promise<T>;
   runRepository: <T>(repoId: string, op: () => Promise<T>) => Promise<T>;
   refreshRepo: (repoId: string) => Promise<void>;
@@ -497,9 +497,9 @@ export async function executeRepoRemoval(
   };
   const removeFolder = async (step: RemovalStep): Promise<void> => {
     if (step.kind === "delete") {
-      await (deps.remove ?? ((path) => rm(path, { recursive: true, force: false })))(
-        step.path
-      );
+      // Not `rm -r`: a Go module cache's read-only folders stop it with
+      // EACCES. `deleteTree` empties them, without blocking main.
+      await (deps.remove ?? ((path) => deleteTree(path)))(step.path);
     } else {
       await deps.trash(step.path);
     }
@@ -512,10 +512,11 @@ export async function executeRepoRemoval(
     for (const [index, step] of steps.entries()) {
       if (step.isPrimary) continue;
       update(index, { status: "running" });
+      // Drain probes before taking their queue: a poll queued behind this
+      // removal cannot finish until we release it. Keep probes blocked until
+      // the refresh below has dropped the row.
+      releases.push(await deps.lockForRemoval(step.worktreeId));
       const outcome = await deps.runWorktree(step.worktreeId, async () => {
-        // Held until the refresh below has dropped the row, so no probe
-        // spawns Git into a folder that is already in the Trash.
-        releases.push(await deps.lockForRemoval(step.worktreeId));
         if (step.kind !== "forget") {
           try {
             await removeFolder(step);
@@ -550,9 +551,9 @@ export async function executeRepoRemoval(
       });
     } else if (primaryStep !== undefined) {
       update(primaryIndex, { status: "running" });
-      const outcome = await deps.runWorktree(primaryStep.worktreeId, () =>
-        deps.runRepository(review.repoId, async () => {
-          releases.push(await deps.lockForRemoval(primaryStep.worktreeId));
+      releases.push(await deps.lockForRemoval(primaryStep.worktreeId));
+      const outcome = await deps.runRepository(review.repoId, () =>
+        deps.runWorktree(primaryStep.worktreeId, async () => {
           try {
             await removeFolder(primaryStep);
             return { ok: true as const };

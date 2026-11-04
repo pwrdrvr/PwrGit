@@ -1,3 +1,4 @@
+import { ChangeRequestGlyph } from "../../lib/ChangeRequestGlyph";
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
 import {
   ASSUMED_FORGE_KIND,
@@ -6,6 +7,7 @@ import {
   changeRequestNoun,
   changeRequestNumberQuery,
   forgeRepoKey,
+  searchNameKey,
   type ChangeRequestLocation,
   type Commit,
   type FileSearchHit,
@@ -60,7 +62,23 @@ const hitKey = (hit: RepoSearchHit): string =>
       : hit.name)
   }`;
 
-function resolvePaletteHits(
+/**
+ * The highlighted row after a branch row resolved to the checkout that holds
+ * it. `resolvePaletteHits` swaps the row in place, under the checkout's key,
+ * so a highlight on the branch must follow it there — or the old key matches
+ * nothing, the highlight falls back to the first row, and Enter opens
+ * something the reader never pointed at.
+ */
+export function selectionAfterResolve(
+  selectedKey: string | null,
+  branch: RepoSearchHit,
+  resolved: RepoSearchHit | null
+): string | null {
+  if (resolved === null || selectedKey !== hitKey(branch)) return selectedKey;
+  return hitKey(resolved);
+}
+
+export function resolvePaletteHits(
   hits: RepoSearchHit[],
   resolved: ReadonlyMap<string, RepoSearchHit | null>
 ): RepoSearchHit[] {
@@ -239,16 +257,18 @@ export function buildPaletteItems(
   focusedRepoId: string | null = null,
   hidden: { entries: HiddenRepo[]; profileName: string } = { entries: [], profileName: "" }
 ): PaletteItem[] {
-  const exactName = query.trim().normalize("NFC").toLowerCase();
-  // Only the full name, any case: typing part of a name you hid should not
-  // bring it back into view, but naming it is asking for it.
+  // `searchNameKey` is main's and the search SQL's test too: a row main
+  // ranked as exactly named must lead here as well, in any script.
+  const exactName = searchNameKey(query);
+  // Only the full name, in any case or accent: typing part of a name you hid
+  // should not bring it back into view, but naming it is asking for it.
   const hiddenExact: PaletteItem[] =
     exactName === ""
       ? []
       : hidden.entries
           .filter(
             (entry) =>
-              !entry.missing && entry.name.normalize("NFC").toLowerCase() === exactName
+              !entry.missing && searchNameKey(entry.name) === exactName
           )
           .map((entry) => ({ kind: "hidden" as const, entry }));
   const showHidden: PaletteItem[] =
@@ -272,12 +292,11 @@ export function buildPaletteItems(
       hit.kind !== "repo" &&
       hit.kind !== "change_request" &&
       exactName !== "" &&
-      hit.name.normalize("NFC").toLowerCase() === exactName
+      searchNameKey(hit.name) === exactName
     ) {
       focusedBranches.push(hit);
     } else if (
-      (hit.kind === "repo" &&
-        hit.name.normalize("NFC").toLowerCase() === exactName) ||
+      (hit.kind === "repo" && searchNameKey(hit.name) === exactName) ||
       (prNumber !== null && hit.pr?.number === prNumber)
     ) {
       exactRepos.push(hit);
@@ -372,28 +391,6 @@ function FileIcon() {
     >
       <path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8Z" />
       <path d="M14 3v5h5" />
-    </svg>
-  );
-}
-
-/** Lucide `git-pull-request`, hand-transcribed like the other glyphs here. */
-function ChangeRequestIcon() {
-  return (
-    <svg
-      width="15"
-      height="15"
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="1.8"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      aria-hidden="true"
-    >
-      <circle cx="18" cy="18" r="3" />
-      <circle cx="6" cy="6" r="3" />
-      <path d="M13 6h3a2 2 0 0 1 2 2v7" />
-      <path d="M6 9v12" />
     </svg>
   );
 }
@@ -505,12 +502,7 @@ export function RepoSwitcherOverlay({
       const key = hitKey(hit);
       resolvedBranches.current.set(key, resolved);
       setResults((prev) => resolvePaletteHits(prev, resolvedBranches.current));
-      if (resolved !== null) {
-        const replacement = `repo:${hitKey(resolved)}`;
-        setSelectedItemKey((prev) =>
-          prev === `repo:${key}` ? replacement : prev
-        );
-      }
+      setSelectedItemKey((prev) => selectionAfterResolve(prev, hit, resolved));
     }
     return ok(resolved);
   }, []);
@@ -1214,7 +1206,7 @@ export function RepoSwitcherOverlay({
                 {isWorktreelessBranch(r) ? (
                   <BranchGlyph size={15} />
                 ) : r.kind === "change_request" ? (
-                  <ChangeRequestIcon />
+                  <ChangeRequestGlyph />
                 ) : r.kind === "worktree" ? (
                   <WorktreeGlyph size={15} />
                 ) : (

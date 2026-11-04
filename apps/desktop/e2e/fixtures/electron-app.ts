@@ -23,7 +23,7 @@ export type AppHandle = {
 
 type RecoverableBootRead = "profile:list" | "repo:list" | "forge:status";
 
-function cleanEnv(extra: Record<string, string>): Record<string, string> {
+export function cleanEnv(extra: Record<string, string>): Record<string, string> {
   const env: Record<string, string> = {};
   for (const [k, v] of Object.entries(process.env)) {
     if (v !== undefined) env[k] = v;

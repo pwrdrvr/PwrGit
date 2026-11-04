@@ -1,6 +1,15 @@
-import { existsSync, mkdtempSync, readFileSync, rmSync, statSync } from "node:fs";
+import {
+  existsSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  statSync
+} from "node:fs";
+import { realpath } from "node:fs/promises";
+import { randomUUID } from "node:crypto";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
+import { nestedWorktreePathspec } from "@pwrgit/mcp-server/nested-worktrees";
 import {
   type BranchRef,
   type BranchTrackingStatus,
@@ -26,6 +35,7 @@ import {
   type PushRefResult,
   type PullProgressPhase,
   PWRGIT_PULL_STASH_MESSAGE,
+  pwrgitLeftOnStashMessage,
   type PwrGitError,
   type RemoteBranchPage,
   type RemoteBranchSummary,
@@ -57,6 +67,11 @@ import {
   type Result
 } from "@pwrgit/shared";
 import { parseRemoteUrl } from "../forge/resolve";
+import {
+  deleteTree,
+  DeleteTreeError,
+  type DeleteTreeProgress
+} from "../util/delete-tree";
 import { delay } from "../util/timing";
 import { NO_OPTIONAL_LOCKS, requireExit0, type GitExec } from "./dugite";
 import { parseHookTrace } from "./hook-trace";
@@ -202,7 +217,10 @@ export async function readChanges(
       // parent status to recurse into it duplicates that state and can turn a
       // 20-child parent refresh into a long synchronous walk. Commit-pin
       // mismatches still appear as changes.
-      "--ignore-submodules=dirty"
+      "--ignore-submodules=dirty",
+      // An agent's worktree inside this checkout is another checkout, not
+      // content to stage.
+      ...(await nestedWorktreePathspec(cwd))
     ],
     cwd,
     NO_OPTIONAL_LOCKS
@@ -227,7 +245,9 @@ export async function readCheckoutDirtyCount(
     "status",
     "--porcelain=v2",
     "--untracked-files=normal",
-    "--ignore-submodules=none"
+    "--ignore-submodules=none",
+    // A nested worktree of this repository is never carried by a switch.
+    ...(await nestedWorktreePathspec(cwd))
   ];
   const raw = await git(args, cwd, NO_OPTIONAL_LOCKS);
   if (!raw.ok) return raw;
@@ -975,8 +995,9 @@ export type WorktreeInfo = {
   detached: boolean;
   bare: boolean;
   /** Git still lists it, but its directory (or its `.git` link) is gone —
-   *  the entry `git worktree prune` would drop. Never pruned here: an
-   *  unmounted volume reads the same way and comes back. */
+   *  the entry `git worktree prune` would drop. Never pruned repo-wide: an
+   *  unmounted volume reads the same way and comes back. The indexer drops
+   *  such entries one at a time instead (vanished-worktrees.ts). */
   prunable: boolean;
   /** `git worktree lock`ed, typically because it lives on removable media. */
   locked: boolean;
@@ -1129,70 +1150,131 @@ export async function worktreeAdd(
   return ok(undefined);
 }
 
-/** Remove a worktree; refuses when it has changes unless forced. */
-export async function worktreeRemove(
+/**
+ * Which listed worktree is `wanted`: the spelling Git printed, else the same
+ * place on disk. The fallback resolves asynchronously — a listed path on an
+ * unmounted or slow volume must not stall the main process — and resolves
+ * `wanted` once rather than per entry.
+ */
+async function findListedWorktree(
+  listed: WorktreeInfo[],
+  wanted: string
+): Promise<number> {
+  const exact = listed.findIndex((w) => w.path === wanted);
+  if (exact !== -1) return exact;
+  const real = await realpath(wanted).catch(() => null);
+  if (real === null) return -1;
+  const direct = listed.findIndex((w) => w.path === real);
+  if (direct !== -1) return direct;
+  for (const [index, w] of listed.entries()) {
+    if ((await realpath(w.path).catch(() => null)) === real) return index;
+  }
+  return -1;
+}
+
+/** The worktree's `.git` link names its admin directory under the repo's. */
+function worktreeAdminDir(worktreePath: string): string | null {
+  try {
+    const link = readFileSync(join(worktreePath, ".git"), "utf8");
+    const match = /^gitdir:\s*(.+?)\s*$/m.exec(link);
+    return match?.[1] === undefined ? null : resolve(worktreePath, match[1]);
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * A removal failure, worded for the person reading it: `message` opens with
+ * `lead`, a short phrase the dialog sets in bold ("Permission denied"), and
+ * `detail` carries what Node or Git actually said, for Details and the log.
+ */
+export type WorktreeRemoveError = PwrGitError & { lead?: string };
+
+/** errno → [lead, the rest of the sentence]. */
+const DELETE_REASONS: Record<string, [string, string]> = {
+  EACCES: ["Permission denied", "the folder is read-only or in use"],
+  EPERM: ["Permission denied", "the folder is read-only or in use"],
+  EBUSY: ["A file is in use", "by another app — close it, then retry"],
+  ETXTBSY: ["A file is in use", "by another app — close it, then retry"],
+  ENOTEMPTY: ["Something kept writing", "to the folder while it was being deleted"],
+  EROFS: ["The volume is read-only", "so nothing on it can be deleted"]
+};
+
+/** Say what stopped a delete in words, and keep the errno for Details. */
+export function describeDeleteFailure(
+  worktreePath: string,
+  cause: unknown,
+  /** False once Git has already dropped its record: Retry cannot help. */
+  stillRegistered = true
+): WorktreeRemoveError {
+  const code = stillRegistered ? "delete_failed" : "not_a_worktree";
+  const left = stillRegistered
+    ? `The rest of ${worktreePath} is still on disk and still a worktree, so removing it again picks up where this left off.`
+    : `The rest of ${worktreePath} is still on disk, and Git no longer lists it as a worktree; delete it yourself if it is no longer needed.`;
+  if (!(cause instanceof DeleteTreeError)) {
+    const raw = cause instanceof Error ? cause.message : String(cause);
+    return {
+      kind: "repo",
+      code,
+      lead: "Couldn’t delete the folder",
+      message: "Couldn’t delete the folder. Details has what PwrGit saw.",
+      detail: `${worktreePath}: ${raw}\n${left}`
+    };
+  }
+  const [lead, rest] = (cause.code === undefined
+    ? undefined
+    : DELETE_REASONS[cause.code]) ?? ["Couldn’t delete the folder", "Details has what PwrGit saw"];
+  const what = cause.relativePath === "" ? "the folder itself" : cause.relativePath;
+  const why =
+    cause.cause instanceof Error ? cause.cause.message : String(cause.cause);
+  const items = cause.itemsDeleted === 1 ? "1 item was" : `${cause.itemsDeleted} items were`;
+  return {
+    kind: "repo",
+    code,
+    lead,
+    message: `${lead} deleting ${what} — ${rest}.`,
+    detail: `${why}\n${items} deleted before it stopped. ${left}`
+  };
+}
+
+/**
+ * `git worktree remove` itself, for what PwrGit does not delete on its own:
+ * a worktree whose folder is already gone (git then only drops its record), or
+ * one whose checks only Git can make (submodules, a missing `.git` link).
+ */
+async function gitWorktreeRemove(
   git: GitExec,
   repoPath: string,
   worktreePath: string,
-  options: { force: boolean } = { force: false }
-): Promise<Result<void>> {
+  force: boolean
+): Promise<Result<void, WorktreeRemoveError>> {
   const args = ["worktree", "remove"];
-  if (options.force) args.push("--force");
+  if (force) args.push("--force");
   args.push(worktreePath);
   // Windows transiently locks files another process just touched — antivirus
-  // scanning fresh files, or our own state probes: selecting a worktree row
-  // fires WorktreeStateService.compute, a chain of several git spawns whose
-  // cwd is the worktree, and a directory that is any process's cwd cannot be
-  // deleted on Windows. A cold runner can stretch that chain to a few
-  // seconds, so the retry budget must comfortably outlast it (~4.5s here,
-  // plus the rmSync fallback's own retries below) while staying bounded so a
-  // genuinely stuck handle still surfaces.
+  // scanning fresh files, or a state probe whose cwd was the worktree. Retry
+  // those briefly, bounded so a genuinely stuck handle still surfaces.
   const maxAttempts = 6;
   for (let attempt = 1; ; attempt += 1) {
     const raw = await git(args, repoPath);
     if (!raw.ok) return raw;
     if (raw.value.exitCode === 0) return ok(undefined);
     const message = raw.value.stderr.trim();
-    const unregistered = /is not a working tree/i.test(message);
-    // Git says this only for a path it no longer lists at all, so its metadata
-    // is already gone: another tool deleted the checkout and pruned it (or git
-    // pruned on its own) before PwrGit re-indexed. Do NOT `worktree prune`
-    // here — that is repo-wide and also unregisters every worktree whose
-    // directory is merely unreachable right now (an unmounted volume).
-    if (attempt === 1 && unregistered) {
-      // A directory git disowns may belong to something else now (a fresh
-      // clone at the same path, a pruned-then-restored checkout), so never
-      // delete it on a first refusal — report it and leave it in place.
-      if (existsSync(worktreePath)) {
-        return err({
-          kind: "repo",
-          code: "not_a_worktree",
-          message: `${worktreePath} is no longer registered as a worktree of this repository. Its directory was left in place; delete it yourself if it is no longer needed.`
-        });
-      }
-      // Nothing on disk and nothing in git: the removal already happened.
+    // Nothing on disk and nothing in git: an index pass forgot this entry
+    // after the caller listed it (vanished-worktrees.ts). Already removed.
+    if (/is not a working tree/i.test(message) && !existsSync(worktreePath)) {
       return ok(undefined);
     }
-    // A retry can find the worktree already unregistered: the failed attempt
-    // pruned git's metadata before the file deletion hit the lock. Finish the
-    // delete ourselves (rmSync retries EPERM/EBUSY on Windows).
-    if (attempt > 1 && unregistered) {
+    // A retry can find the record already gone: the failed attempt dropped
+    // Git's metadata before its file deletion hit the lock. Finish the delete
+    // Git started — asynchronously, never `rmSync` on main — so the folder is
+    // not left behind with nothing listing it.
+    if (attempt > 1 && /is not a working tree/i.test(message)) {
       try {
-        rmSync(worktreePath, {
-          recursive: true,
-          force: true,
-          maxRetries: 15,
-          retryDelay: 300
-        });
+        await deleteTree(worktreePath);
         return ok(undefined);
       } catch (cause) {
-        return err({
-          kind: "repo",
-          code: "worktree_remove_failed",
-          message: `left-over worktree directory could not be deleted: ${
-            cause instanceof Error ? cause.message : String(cause)
-          }`
-        });
+        return err(describeDeleteFailure(worktreePath, cause, false));
       }
     }
     const transient = /permission denied|device or resource busy|ebusy|eperm/i.test(
@@ -1209,12 +1291,141 @@ export async function worktreeRemove(
       : /is a main working tree|main worktree/i.test(message)
         ? "is_primary"
         : "worktree_remove_failed";
+    if (code !== "worktree_remove_failed") {
+      return err({ kind: "repo", code, message: message || "worktree remove failed" });
+    }
+    const firstLine =
+      message.split(/\r?\n/).find((line) => line.trim() !== "")?.replace(/^(fatal|error):\s*/i, "") ??
+      "worktree remove failed";
     return err({
       kind: "repo",
       code,
-      message: message || "worktree remove failed"
+      lead: "Git couldn’t remove it",
+      message: `Git couldn’t remove it — ${firstLine}.`,
+      detail: message || "worktree remove failed"
     });
   }
+}
+
+export type WorktreeRemoveOptions = {
+  force: boolean;
+  /**
+   * `git worktree list` for this repository, when the caller already has it —
+   * a bulk removal lists each repository once instead of once per worktree.
+   * Only used to find this worktree's entry, so a list taken earlier in the
+   * same batch is fine.
+   */
+  listed?: WorktreeInfo[];
+  /** Streamed while the folder is deleted, throttled to a few per second. */
+  onProgress?: (progress: DeleteTreeProgress) => void;
+};
+
+/**
+ * Remove a worktree; refuses when it has changes unless forced.
+ *
+ * PwrGit deletes the folder itself (`deleteTree`: individual unlinks, four at
+ * once, progress as it goes) and only then asks Git to drop its record. Git's
+ * own delete runs in one process that reports nothing, stops at the first
+ * read-only directory (a Go module cache), and unregisters the worktree even
+ * when it stopped — leaving a folder no list shows. The 2026-10-16 beachball
+ * was the synchronous `rmSync` that used to mop up after that.
+ *
+ * Git's refusals are checked first, against what Git itself checks
+ * (builtin/worktree.c `remove_worktree`): the main worktree, a lock, and —
+ * unless forced — `status --porcelain --ignore-submodules=none`, which is the
+ * exact command Git runs. Anything Git checks that this does not (submodules,
+ * a missing `.git` link) is handed to `git worktree remove` unchanged.
+ *
+ * If the delete stops partway the worktree stays registered, its `.git` link
+ * deleted last so Git still recognises what is left; the error names the
+ * entry that stopped it.
+ */
+export async function worktreeRemove(
+  git: GitExec,
+  repoPath: string,
+  worktreePath: string,
+  options: WorktreeRemoveOptions = { force: false }
+): Promise<Result<void, WorktreeRemoveError>> {
+  let worktrees = options.listed;
+  if (worktrees === undefined) {
+    const listed = await listWorktrees(git, repoPath);
+    if (!listed.ok) return listed;
+    worktrees = listed.value;
+  }
+  const index = await findListedWorktree(worktrees, worktreePath);
+  const entry = worktrees[index];
+  if (entry === undefined) {
+    // Git no longer lists it: another tool deleted the checkout and pruned it
+    // (or git pruned on its own) before PwrGit re-indexed. Do NOT `worktree
+    // prune` here — that is repo-wide and also unregisters every worktree
+    // whose directory is merely unreachable right now (an unmounted volume).
+    // A directory git disowns may belong to something else now (a fresh clone
+    // at the same path), so never delete it — report it and leave it.
+    if (existsSync(worktreePath)) {
+      return err({
+        kind: "repo",
+        code: "not_a_worktree",
+        lead: "Folder is no longer registered",
+        message: "Folder is no longer registered as a Git worktree, so it was left in place. Delete it yourself if it is no longer needed.",
+        detail: `${worktreePath} is not listed by git worktree list for this repository.`
+      });
+    }
+    // Nothing on disk and nothing in git: the removal already happened.
+    return ok(undefined);
+  }
+  if (index === 0 || entry.bare) {
+    return err({
+      kind: "repo",
+      code: "is_primary",
+      message: `${worktreePath} is the repository's main working tree`
+    });
+  }
+  if (entry.locked) {
+    return err({
+      kind: "repo",
+      code: "locked",
+      lead: "Worktree is locked",
+      message: "Worktree is locked with git worktree lock. Unlock it before removing it.",
+      detail: `${worktreePath} is locked.`
+    });
+  }
+
+  const adminDir = worktreeAdminDir(worktreePath);
+  const ours =
+    existsSync(worktreePath) &&
+    adminDir !== null &&
+    !entry.prunable &&
+    // Git refuses a worktree with submodules unless forced; let it decide.
+    (options.force ||
+      (!existsSync(join(worktreePath, ".gitmodules")) &&
+        !existsSync(join(adminDir, "modules"))));
+  if (!ours) {
+    return gitWorktreeRemove(git, repoPath, worktreePath, options.force);
+  }
+
+  if (!options.force) {
+    const args = ["status", "--porcelain", "--ignore-submodules=none"];
+    const raw = await git(args, worktreePath, NO_OPTIONAL_LOCKS);
+    if (!raw.ok) return raw;
+    const checked = requireExit0(raw.value, args);
+    if (!checked.ok) return checked;
+    if (checked.value.stdout.trim() !== "") {
+      return err({
+        kind: "repo",
+        code: "dirty",
+        message: `'${worktreePath}' contains modified or untracked files, use --force to delete it`
+      });
+    }
+  }
+
+  try {
+    await deleteTree(worktreePath, options.onProgress, { deleteLast: [".git"] });
+  } catch (cause) {
+    return err(describeDeleteFailure(worktreePath, cause));
+  }
+  // The folder is gone, so this only clears Git's record of this one
+  // worktree — the targeted form of what `prune` would do to all of them.
+  return gitWorktreeRemove(git, repoPath, worktreePath, true);
 }
 
 function isConcurrentRefUpdate(stderr: string): boolean {
@@ -1440,6 +1651,8 @@ export type PullOutcome = {
   stashed: boolean;
   /** Reapplying the stash after the pull hit conflicts (markers left in-tree). */
   reappliedWithConflicts: boolean;
+  /** Verified commit retained in Stashes as a recovery copy. */
+  recoveryStash?: string;
 };
 
 /**
@@ -1755,7 +1968,10 @@ async function requireCleanWorktree(
   git: GitExec,
   cwd: string
 ): Promise<Result<void>> {
-  const statusRaw = await git(["status", "--porcelain"], cwd);
+  const statusRaw = await git(
+    ["status", "--porcelain", ...(await nestedWorktreePathspec(cwd))],
+    cwd
+  );
   if (!statusRaw.ok) return statusRaw;
   const status = requireExit0(statusRaw.value, ["status"]);
   if (!status.ok) return status;
@@ -1869,7 +2085,9 @@ export async function inspectRemoteDivergence(
   if (!upstream.ok) return upstream;
 
   const [statusRaw, comparison] = await Promise.all([
-    git(["status", "--porcelain"], cwd),
+    nestedWorktreePathspec(cwd).then((nested) =>
+      git(["status", "--porcelain", ...nested], cwd)
+    ),
     compareCommitRanges(git, cwd, ref ?? "@{u}")
   ]);
   if (!statusRaw.ok) return statusRaw;
@@ -2806,11 +3024,76 @@ export async function rebaseOntoUpstream(
   });
 }
 
+/** Find Pull's unique reflog message, never the current top of the shared stack.
+ * Duplicate occurrences are ambiguous even if their commit hashes match. */
+async function ownedPullStash(
+  git: GitExec,
+  cwd: string,
+  message: string
+): Promise<Result<string>> {
+  const args = ["stash", "list", "--format=%H%x00%gs"];
+  const raw = await git(args, cwd);
+  if (!raw.ok) return raw;
+  const checked = requireExit0(raw.value, args);
+  if (!checked.ok) return checked;
+  const matches = checked.value.stdout.split("\n").filter((line) =>
+    line.trimEnd().endsWith(`: ${message}`)
+  );
+  const sha = matches[0]?.split("\0")[0] ?? "";
+  if (matches.length !== 1 || !/^[0-9a-f]{40,64}$/.test(sha)) {
+    return err({
+      kind: "remote",
+      code: "pull_stash_ownership",
+      message: `PwrGit cannot identify Pull's saved changes${matches.length > 1 ? " because the recovery marker appears more than once" : " because the recovery entry is missing"}. No stash was applied or removed. Check Stashes for "${message}" before retrying.`
+    });
+  }
+  return ok(sha);
+}
+
+/** Apply an immutable commit. Git's pop/drop take shifting reflog positions,
+ * so Pull deliberately retains its recovery copy, including after success. */
+async function applyPullStash(
+  git: GitExec,
+  cwd: string,
+  sha: string,
+  allowConflicts: boolean
+): Promise<Result<{ conflicts: boolean }>> {
+  let applied = await git(["stash", "apply", "--index", sha], cwd);
+  if (!applied.ok) return applied;
+  if (applied.value.exitCode !== 0 && allowConflicts) {
+    const args = ["status", "--porcelain"];
+    const raw = await git(args, cwd);
+    if (!raw.ok) return raw;
+    const status = requireExit0(raw.value, args);
+    if (!status.ok) return status;
+    // --index can refuse before touching the checkout. Only then try plain
+    // apply, using the SAME commit even if a sibling just pushed a stash.
+    if (status.value.stdout.trim() === "") {
+      applied = await git(["stash", "apply", sha], cwd);
+      if (!applied.ok) return applied;
+    }
+  }
+  if (applied.value.exitCode === 0) return ok({ conflicts: false });
+  if (allowConflicts) {
+    const args = ["diff", "--name-only", "--diff-filter=U", "-z"];
+    const raw = await git(args, cwd);
+    if (!raw.ok) return raw;
+    const conflicts = requireExit0(raw.value, args);
+    if (!conflicts.ok) return conflicts;
+    if (conflicts.value.stdout !== "") return ok({ conflicts: true });
+  }
+  return err({
+    kind: "remote",
+    code: "stash_reapply_failed",
+    message: `${applied.value.stderr}\n${applied.value.stdout}`.trim() || "Git could not restore the saved changes.",
+    cause: applied.value
+  });
+}
+
 /**
- * Pull = fetch + fast-forward-only merge of the tracked upstream. When the
- * working tree is dirty, local work (tracked + untracked) is auto-stashed so a
- * fast-forward that touches those files isn't blocked, then reapplied — the
- * GitHub-Desktop behavior. A conflicting reapply is reported, not hidden.
+ * Fetch and fast-forward, saving dirty tracked/untracked work first. Restore
+ * only the verified recovery commit and retain it in Stashes; never consume a
+ * moving reflog position. Conflicts and failed restoration remain recoverable.
  */
 export async function pullFastForward(
   git: GitExec,
@@ -2897,26 +3180,41 @@ export async function pullFastForward(
     .filter((path) => path !== "");
 
   onProgress("prepare");
-  const statusRaw = await pullGit(["status", "--porcelain"], cwd);
+  // A nested agent worktree alone must not make the pull stash: git skips it
+  // ("Ignoring path") and would record an empty stash.
+  const statusRaw = await pullGit(
+    ["status", "--porcelain", ...(await nestedWorktreePathspec(cwd))],
+    cwd
+  );
   if (!statusRaw.ok) return statusRaw;
   const status = requireExit0(statusRaw.value, ["status", "--porcelain"]);
   if (!status.ok) return status;
   const dirty = status.value.stdout.trim() !== "";
 
   let stashed = false;
+  let stashSha: string | undefined;
+  let stashFailure: PwrGitError | undefined;
+  const stashMessage = `${PWRGIT_PULL_STASH_MESSAGE} [${randomUUID()}]`;
+  const recoveryNote = () => `Recovery stash kept in Stashes as "${stashMessage}"${stashSha === undefined ? "" : ` (${stashSha})`}.`;
   if (dirty) {
     const stashArgs = [
       "stash",
       "push",
       "--include-untracked",
       "-m",
-      PWRGIT_PULL_STASH_MESSAGE
+      stashMessage
     ];
-    const stashRaw = await pullGit(stashArgs, cwd);
-    if (!stashRaw.ok) return stashRaw;
-    const stash = requireExit0(stashRaw.value, stashArgs);
-    if (!stash.ok) return stash;
-    stashed = !/no local changes to save/i.test(stash.value.stdout);
+    const stashRaw = await pullGit(stashArgs, cwd, PARSEABLE_SWITCH);
+    if (!stashRaw.ok) {
+      // Cancellation can arrive after Git has saved and cleaned the checkout.
+      // Discover ownership and recover with a fresh signal before returning it.
+      stashFailure = stashRaw.error;
+      stashed = true;
+    } else {
+      const stash = requireExit0(stashRaw.value, stashArgs);
+      if (!stash.ok) stashFailure = stash.error;
+      stashed = !stash.ok || !/no local changes to save/i.test(stash.value.stdout);
+    }
   }
 
   const rollbackFailedMerge = async (): Promise<Result<void>> => {
@@ -2933,13 +3231,25 @@ export async function pullFastForward(
         kind: "remote",
         code: "pull_rollback_failed",
         message: `Pull failed, and PwrGit could not restore the original checkout.${
-          stashed ? " Your local changes remain in the stash." : ""
+          stashed ? ` Your local changes remain in the stash. ${recoveryNote()}` : ""
         }${detail !== "" ? ` ${detail}` : ` git ${args.join(" ")} failed.`}`,
         cause: raw.ok ? raw.value : raw.error
       });
     };
 
     const run = async (): Promise<Result<void>> => {
+      if (stashed && stashSha === undefined) {
+        const owned = await ownedPullStash(recoveryGit, cwd, stashMessage);
+        if (!owned.ok) {
+          // A failed push may not have saved anything. Never reset the dirty
+          // checkout, or apply somebody else's entry, without proven ownership.
+          return stashFailure === undefined ? owned : err({
+            ...stashFailure,
+            message: `${stashFailure.message} ${owned.error.message}`
+          });
+        }
+        stashSha = owned.value;
+      }
       if (originalHeadOid !== undefined) {
         const reset = await rollbackStep(["reset", "--hard", originalHeadOid]);
         if (!reset.ok) return reset;
@@ -2982,21 +3292,16 @@ export async function pullFastForward(
       const cleaned = await flushClean();
       if (!cleaned.ok) return cleaned;
 
-      if (!stashed) return ok(undefined);
+      if (stashSha === undefined) return ok(undefined);
       onProgress("reapply");
-      const pop = await recoveryGit(["stash", "pop", "--index"], cwd);
-      if (!pop.ok && isPullTimeout(pop.error)) return pop;
-      if (!pop.ok || pop.value.exitCode !== 0) {
-        const detail = pop.ok
-          ? `${pop.value.stderr}\n${pop.value.stdout}`.trim()
-          : pop.error.message;
+      const restored = await applyPullStash(recoveryGit, cwd, stashSha, false);
+      if (!restored.ok) {
+        if (isPullTimeout(restored.error)) return restored;
         return err({
           kind: "remote",
           code: "stash_reapply_failed",
-          message: `Pull failed and PwrGit restored the original commit, but your stashed changes could not be reapplied. The stash was kept.${
-            detail !== "" ? ` ${detail}` : ""
-          }`,
-          cause: pop.ok ? pop.value : pop.error
+          message: `Pull failed and PwrGit restored the original commit, but your saved changes could not be reapplied. ${recoveryNote()} ${restored.error.message}`,
+          cause: restored.error
         });
       }
       return ok(undefined);
@@ -3012,6 +3317,22 @@ export async function pullFastForward(
     }
   };
 
+  if (stashFailure !== undefined) {
+    const rollback = await rollbackFailedMerge();
+    if (!rollback.ok) return rollback;
+    return err({ ...stashFailure, message: `${stashFailure.message} Local changes restored. ${recoveryNote()}` });
+  }
+  if (stashed) {
+    const owned = await ownedPullStash(pullGit, cwd, stashMessage);
+    if (!owned.ok) {
+      if (owned.error.code === "pull_stash_ownership") return owned;
+      const rollback = await rollbackFailedMerge();
+      if (!rollback.ok) return rollback;
+      return err({ ...owned.error, message: `${owned.error.message} Local changes restored. ${recoveryNote()}` });
+    }
+    stashSha = owned.value;
+  }
+
   onProgress("fast_forward");
   const merge = await pullGit(
     ["merge", "--ff-only", "--progress", upstream.value.head],
@@ -3020,7 +3341,7 @@ export async function pullFastForward(
   if (!merge.ok) {
     const rollback = await rollbackFailedMerge();
     if (!rollback.ok) return rollback;
-    return merge;
+    return stashed ? err({ ...merge.error, message: `${merge.error.message} Local changes restored. ${recoveryNote()}` }) : merge;
   }
   if (merge.value.exitCode !== 0) {
     const rollback = await rollbackFailedMerge();
@@ -3031,47 +3352,44 @@ export async function pullFastForward(
       : /upstream|tracking/i.test(message)
         ? "no_upstream"
         : "merge_failed";
+    const reason = code === "not_fast_forward"
+      ? target.kind === "upstream"
+        ? "Your local branch and its upstream have diverged."
+        : `This branch has commits ${target.label} doesn't, so it can't fast-forward to it.`
+      : message !== "" ? message : "Pull could not fast-forward.";
     return err({
       kind: "remote",
       code,
-      message:
-        code === "not_fast_forward"
-          ? target.kind === "upstream"
-            ? "Your local branch and its upstream have diverged."
-            : `This branch has commits ${target.label} doesn't, so it can't fast-forward to it.`
-          : message !== ""
-            ? message
-            : "pull could not fast-forward"
+      message: stashed ? `${reason} Local changes restored. ${recoveryNote()}` : reason
     });
   }
 
-  if (!stashed) {
+  if (stashSha === undefined) {
     return ok({ fastForwarded: true, stashed: false, reappliedWithConflicts: false });
   }
-  // Reapply the stashed work, including its staged state. When an indexed pop
-  // rejects a conflict before changing the tree, retry without --index so Git
-  // can leave the usual conflict markers. Never retry over partial changes.
+  // Restoring saved work is recovery: cancellation must not strand it after a
+  // successful merge. Use the fresh bounded recovery signal, as rollback does.
   onProgress("reapply");
-  let pop = await pullGit(["stash", "pop", "--index"], cwd);
-  if (!pop.ok) return pop;
-  if (pop.value.exitCode !== 0) {
-    const statusAfterPopRaw = await pullGit(["status", "--porcelain"], cwd);
-    if (!statusAfterPopRaw.ok) return statusAfterPopRaw;
-    const statusAfterPop = requireExit0(statusAfterPopRaw.value, [
-      "status",
-      "--porcelain"
-    ]);
-    if (!statusAfterPop.ok) return statusAfterPop;
-    if (statusAfterPop.value.stdout.trim() === "") {
-      pop = await pullGit(["stash", "pop"], cwd);
-      if (!pop.ok) return pop;
-    }
+  const recoveryControl = control.startRecovery?.();
+  const recoveryGit = controlledGit(git, recoveryControl ?? {});
+  let succeeded = false;
+  try {
+    const restored = await applyPullStash(recoveryGit, cwd, stashSha, true);
+    if (!restored.ok) return err({
+      ...restored.error,
+      code: isPullTimeout(restored.error) ? restored.error.code : "stash_reapply_failed",
+      message: `Pull fast-forwarded, but your saved changes could not be fully restored. ${recoveryNote()} ${restored.error.message}`
+    });
+    succeeded = true;
+    return ok({
+      fastForwarded: true,
+      stashed: true,
+      reappliedWithConflicts: restored.value.conflicts,
+      recoveryStash: stashSha
+    });
+  } finally {
+    recoveryControl?.finish?.(succeeded);
   }
-  return ok({
-    fastForwarded: true,
-    stashed: true,
-    reappliedWithConflicts: pop.value.exitCode !== 0
-  });
 }
 
 /**
@@ -3251,8 +3569,31 @@ const BRANCH_FORMAT = [
   "%(contents:subject)"
 ].join("%09");
 
+/** `refs/remotes/team/fork/main` → `team/fork` + `main` when `team/fork` is a
+ *  configured remote. Longest remote name first: `team` is a prefix of
+ *  `team/fork`. Null for a ref no configured remote owns, and for `HEAD`. */
+export function splitRemoteRefname(
+  refname: string,
+  remotes: readonly string[]
+): { remote: string; remoteBranch: string } | null {
+  const prefix = "refs/remotes/";
+  if (!refname.startsWith(prefix)) return null;
+  const rest = refname.slice(prefix.length);
+  const remote = [...remotes]
+    .sort((a, b) => b.length - a.length)
+    .find((name) => rest.startsWith(`${name}/`));
+  if (remote === undefined) return null;
+  const remoteBranch = rest.slice(remote.length + 1);
+  return remoteBranch === "" || remoteBranch === "HEAD"
+    ? null
+    : { remote, remoteBranch };
+}
+
 /** Parse the tab-delimited `git for-each-ref` output produced with BRANCH_FORMAT. */
-export function parseBranchRefs(stdout: string): BranchRef[] {
+export function parseBranchRefs(
+  stdout: string,
+  remotes: readonly string[] = []
+): BranchRef[] {
   const out: BranchRef[] = [];
   for (const line of stdout.split("\n")) {
     if (line.trim() === "") continue;
@@ -3267,6 +3608,11 @@ export function parseBranchRefs(stdout: string): BranchRef[] {
     if (upstream !== "") ref.upstream = upstream;
     if (date !== "") ref.lastCommitAt = date;
     if (subject !== "") ref.subject = subject;
+    const owner = isRemote ? splitRemoteRefname(full, remotes) : null;
+    if (owner !== null) {
+      ref.remote = owner.remote;
+      ref.remoteBranch = owner.remoteBranch;
+    }
     out.push(ref);
   }
   return out;
@@ -3281,20 +3627,25 @@ export async function listBranches(
   git: GitExec,
   cwd: string
 ): Promise<Result<BranchRef[]>> {
-  const raw = await git(
-    [
-      "for-each-ref",
-      "--sort=-committerdate",
-      `--format=${BRANCH_FORMAT}`,
-      "refs/heads",
-      "refs/remotes"
-    ],
-    cwd
-  );
+  const [raw, remotes] = await Promise.all([
+    git(
+      [
+        "for-each-ref",
+        "--sort=-committerdate",
+        `--format=${BRANCH_FORMAT}`,
+        "refs/heads",
+        "refs/remotes"
+      ],
+      cwd
+    ),
+    listRemoteNames(git, cwd)
+  ]);
   if (!raw.ok) return raw;
   const checked = requireExit0(raw.value, ["for-each-ref"]);
   if (!checked.ok) return checked;
-  return ok(parseBranchRefs(checked.value.stdout));
+  // Without the remote names a ref only loses its `remote` field — the list
+  // itself is still right, so a failed `git remote` does not fail it.
+  return ok(parseBranchRefs(checked.value.stdout, remotes.ok ? remotes.value : []));
 }
 
 const REPO_REFS_FORMAT = [
@@ -4462,28 +4813,76 @@ export async function listRemoteBranchPage(
 }
 
 /**
+ * Git translates its refusals, and the files a checkout would overwrite are
+ * only listed inside one of them. Forcing C makes the headers below stable
+ * tokens rather than a guess about the user's locale (the same reasoning as
+ * `worktree-reclaim.ts`'s dry run). Paths are printed as raw bytes either way.
+ */
+const PARSEABLE_SWITCH = {
+  env: { LC_ALL: "C", LANGUAGE: "C", LANG: "C" }
+};
+
+/** "error: Your local changes to the following files would be overwritten by
+ *  checkout:" and its untracked twins ("…untracked working tree files would be
+ *  overwritten / removed by checkout:"). Each is followed by one TAB-indented
+ *  path per line. */
+const WOULD_CLOBBER_HEADER = /would be (?:overwritten|removed) by \w+:\s*$/;
+
+/**
+ * The paths a refused checkout named, in Git's order, from every list in the
+ * message — a switch can refuse over tracked and untracked files at once and
+ * prints one list for each.
+ */
+export function parseSwitchOverwritePaths(stderr: string): string[] {
+  const paths: string[] = [];
+  let listing = false;
+  for (const line of stderr.split(/\r?\n/)) {
+    if (WOULD_CLOBBER_HEADER.test(line)) {
+      listing = true;
+      continue;
+    }
+    if (listing && line.startsWith("\t") && line.length > 1) {
+      paths.push(line.slice(1));
+      continue;
+    }
+    listing = false;
+  }
+  return [...new Set(paths)];
+}
+
+/**
  * Check out `branch` in this worktree. `git switch` DWIMs a bare remote name
  * (e.g. "main" when only origin/main exists) into a new tracking branch, so
  * callers pass the short local name even for remote-only branches.
+ *
+ * A plain switch brings modified and untracked files along when `branch` does
+ * not touch them, and refuses — atomically, before touching anything — when
+ * one would be overwritten. That refusal is `switch_would_overwrite`, carrying
+ * the files Git named in `paths`, so the caller can ask what to do about
+ * exactly those.
  */
 export async function switchBranch(
   git: GitExec,
   cwd: string,
   branch: string
 ): Promise<Result<void>> {
-  const raw = await git(["switch", branch], cwd);
+  const raw = await git(["switch", branch], cwd, PARSEABLE_SWITCH);
   if (!raw.ok) return raw;
   if (raw.value.exitCode !== 0) {
-    const message = raw.value.stderr.trim();
+    const stderr = raw.value.stderr;
+    const message = stderr.trim();
+    const paths = parseSwitchOverwritePaths(stderr);
     const code = /already used by worktree|already checked out/i.test(message)
       ? "checked_out_elsewhere"
-      : /overwritten by checkout|local changes|would be overwritten/i.test(message)
-        ? "dirty"
+      : paths.length > 0 ||
+          /overwritten by checkout|local changes|would be overwritten/i.test(message)
+        ? "switch_would_overwrite"
         : "switch_failed";
     return err({
       kind: "repo",
       code,
-      message: message !== "" ? message : "Could not switch branch"
+      message: message !== "" ? message : "Could not switch branch",
+      ...(code === "switch_would_overwrite" ? { paths } : {})
     });
   }
   return ok(undefined);
@@ -4767,6 +5166,80 @@ export async function switchBranchCarryingChanges(
     kind: "repo",
     code: "carry_rollback_failed",
     message: `Your changes could not be brought over to ${branch}, and PwrGit could not put the checkout back: ${failure}. Your work is kept in the stash as "pwrgit: carrying changes to ${branch}".`
+  });
+}
+
+/** `refs/stash`'s commit, or null when the stack is empty. */
+async function stashTip(
+  git: GitExec,
+  cwd: string
+): Promise<Result<string | null>> {
+  const raw = await git(["rev-parse", "--verify", "--quiet", "refs/stash"], cwd);
+  if (!raw.ok) return raw;
+  if (raw.value.exitCode !== 0) return ok(null);
+  const sha = raw.value.stdout.trim();
+  return ok(sha === "" ? null : sha);
+}
+
+/**
+ * Check out `branch`, leaving the checkout's uncommitted work behind on the
+ * branch it was made on — stashed as `pwrgitLeftOnStashMessage(<that branch>)`,
+ * which is what coming back to it looks for to offer the work back.
+ *
+ * Same promise as `switchBranchCarryingChanges`, from the other side: either
+ * the checkout is on `branch` with the work in the stash, or it is where it
+ * started with the work back in the tree. A switch that fails after the stash
+ * reapplies it by commit identity, never a bare `stash pop`, and reports Git's
+ * original refusal (`checked_out_elsewhere` is a navigation upstream, not a
+ * failure). `leave_rollback_failed` is the one case that breaks the promise,
+ * and it names the stash entry the work is in.
+ */
+export async function switchBranchLeavingChanges(
+  git: GitExec,
+  cwd: string,
+  branch: string
+): Promise<Result<{ left: boolean }>> {
+  // The branch being left, or a short commit for a detached checkout: there
+  // is no branch to come back to then, but the entry still says where the
+  // work came from.
+  const here = await currentCheckoutRef(git, cwd);
+  if (!here.ok) return here;
+  const message = pwrgitLeftOnStashMessage(
+    /^[0-9a-f]{40,64}$/.test(here.value) ? here.value.slice(0, 12) : here.value
+  );
+
+  // Compared before and after rather than reading Git's "No local changes to
+  // save", which is translated.
+  const before = await stashTip(git, cwd);
+  if (!before.ok) return before;
+  const stashArgs = ["stash", "push", "--include-untracked", "-m", message];
+  const stashRaw = await git(stashArgs, cwd);
+  if (!stashRaw.ok) return stashRaw;
+  const stashed = requireExit0(stashRaw.value, stashArgs);
+  if (!stashed.ok) return stashed;
+  const after = await stashTip(git, cwd);
+  if (!after.ok) return after;
+  const sha = after.value;
+  if (sha === null || sha === before.value) {
+    // The tree went clean between the caller's probe and this operation.
+    // `left: false` is what stops the UI claiming it stashed something.
+    const plain = await switchBranch(git, cwd, branch);
+    return plain.ok ? ok({ left: false }) : plain;
+  }
+
+  const switched = await switchBranch(git, cwd, branch);
+  if (switched.ok) return ok({ left: true });
+
+  // Nothing moved except the stash, and the checkout is still where it was, so
+  // the repair is the reapply.
+  const restored = await reapplyStash(git, cwd, sha);
+  if (restored.ok && restored.value.reapplied) return switched;
+  return err({
+    kind: "repo",
+    code: "leave_rollback_failed",
+    message: `${switched.error.message}\n\nYour changes were saved to the stash first and could not be restored: ${
+      restored.ok ? restored.value.detail : restored.error.message
+    } They are kept in the stash as "${message}".`
   });
 }
 

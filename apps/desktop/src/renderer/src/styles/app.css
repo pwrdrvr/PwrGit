@@ -335,6 +335,65 @@ textarea,
   min-width: 12px;
 }
 
+/* The ⌘F palette's field, at the strip's right end in the drag region that
+   used to be empty. It moved here from the top of the sidebar because the
+   palette searches far more than the sidebar's list.
+
+   Rigid, so the crumbs absorb any shortage; TitleBar's ladder then steps the
+   field down (key cap, then label) while a crumb is cut short. Design:
+   design/Sidebar Header Toolbar - UX Review.dc.html, 3a. */
+.titlebar-jump {
+  -webkit-app-region: no-drag;
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  width: 236px;
+  height: 26px;
+  margin-right: 8px;
+  padding: 0 6px 0 9px;
+  border: 1px solid var(--border-default);
+  border-radius: 7px;
+  background: var(--bg-input);
+  color: var(--text-muted);
+  font: 500 12px/1 var(--font-sans);
+  cursor: pointer;
+  transition: border-color 140ms ease, color 140ms ease;
+}
+.titlebar-jump:hover {
+  border-color: var(--accent-border);
+  color: var(--text-secondary);
+}
+.titlebar-jump > svg {
+  flex: 0 0 auto;
+}
+.titlebar-jump__label {
+  flex: 1;
+  text-align: left;
+  white-space: nowrap;
+}
+.titlebar-jump__kbd.kbd {
+  padding: 2px 4px;
+  font-size: 9.5px;
+}
+.titlebar--jump-no-kbd .titlebar-jump {
+  width: auto;
+  padding-right: 10px;
+}
+.titlebar--jump-no-kbd .titlebar-jump__kbd {
+  display: none;
+}
+/* Still a field-shaped button — same border, same hover — and still named
+   "Jump to repo…", so the square is recognisably the same control. */
+.titlebar--jump-icon .titlebar-jump {
+  width: 28px;
+  padding: 0;
+  justify-content: center;
+}
+.titlebar--jump-icon .titlebar-jump__label {
+  display: none;
+}
+
 /* Back / Forward: PwrAgnt's .history-nav, at the leading edge of the crumbs
    it moves between. Never shrinks or steps down: a control reached for
    mid-task must not vanish at some widths, and at the 940px minimum window
@@ -747,37 +806,189 @@ textarea,
 
 /* ---- Sidebar: search, lens, repo/worktree list ---- */
 
-.sidebar__search {
-  padding: 10px 12px 8px;
-}
-.jump-btn {
-  width: 100%;
-  height: 34px;
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 0 10px;
-  background: var(--bg-input);
-  border: 1px solid var(--border-default);
-  border-radius: 8px;
-  color: var(--text-muted);
-  cursor: pointer;
-  transition: border-color 140ms ease;
-}
-.jump-btn:hover {
-  border-color: var(--accent-border);
-}
-.jump-btn__label {
-  flex: 1;
-  text-align: left;
-  font: 500 12px/1 var(--font-sans);
-}
 .kbd {
   font: 600 10px/1 var(--font-mono);
   color: var(--text-subtle);
   border: 1px solid var(--border-default);
   border-radius: 4px;
   padding: 3px 5px;
+}
+
+/* ---- Sidebar: the one row of profile-wide actions ----
+
+   Add ▾ (Add folders, Clone, Fork), the Fetch/Pull ▾ button, and the maintenance
+   wrench, in one tier of `.wt-btn`-shaped buttons. It replaced five rows in
+   four styles. design/Sidebar Header Toolbar - UX Review.dc.html, 2b and 3b.
+
+   Narrow widths step down by measured fit (SidebarToolbar's useFitLadder), so
+   everything the steps act on is rigid: a shrinkable button never overflows,
+   and the row would read as fitting while its label ellipsized. */
+.sidebar-toolbar {
+  display: flex;
+  gap: 6px;
+  padding: 10px 12px;
+}
+.sidebar-toolbar__btn {
+  flex: 0 0 auto;
+  height: 30px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 0 9px;
+  border: 1px solid var(--border-default);
+  border-radius: 7px;
+  background: var(--bg-panel-elevated);
+  color: var(--text-secondary);
+  font: 600 11px/1 var(--font-sans);
+  white-space: nowrap;
+  cursor: pointer;
+  transition: border-color 120ms ease, color 120ms ease,
+    background 120ms ease;
+}
+/* A glyph that declares no `flex` inherits `0 1 auto` and gives up width to
+   the label beside it. */
+.sidebar-toolbar__btn > svg {
+  flex: 0 0 auto;
+}
+/* Add's caret: quieter than the + it follows, and tucked against the word. */
+.sidebar-toolbar__add > svg:last-child {
+  margin-left: -2px;
+  color: var(--text-muted);
+}
+/* The sync button takes whatever the row has spare. Grow, never shrink — see
+   the note above. Inside it, the face grows and the chevron stays 20px. */
+.sidebar-toolbar__split {
+  flex: 1 0 auto;
+}
+.sidebar-toolbar__split > .sidebar-toolbar__sync {
+  flex: 1 0 auto;
+}
+.sidebar-toolbar__icon {
+  width: 30px;
+  padding: 0;
+}
+/* The sync button (Fetch ▾ / Pull ▾): the face and its chevron read as one
+   button with a seam. The chevron never steps, so the menu stays reachable
+   at every width. design/Fetch Toast and Scope - UX
+   Review.dc.html, 3a and 3c. */
+/* One bordered control with two zones, as PwrAgnt's composer Send pill
+   (`.composer__send-split-pill`). The split owns the border, radius and
+   fill, and clips the face and chevron, which shed theirs. As two butted
+   buttons, hover lit only the chevron's three sides against a grey seam that
+   belonged to the face, and open looked like hover.
+   design/Sync Split Button - UX Review.dc.html, turn 2. */
+.sidebar-toolbar__split {
+  display: flex;
+  height: 30px;
+  overflow: hidden;
+  border: 1px solid var(--border-default);
+  border-radius: 7px;
+  background: var(--bg-panel-elevated);
+  transition: border-color 120ms ease;
+}
+.sidebar-toolbar__split > .sidebar-toolbar__btn {
+  height: 100%;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+}
+/* The seam: a rest-only hairline that says "two targets". */
+.sidebar-toolbar__split > .sidebar-toolbar__chevron {
+  width: 20px;
+  padding: 0;
+  border-left: 1px solid var(--border-default);
+  color: var(--text-muted);
+}
+/* Hover anywhere lights the whole outline, as on every toolbar button; the
+   zone under the pointer fills, so it is plain which half a click fires.
+   Once a zone fills, its edge is the boundary and the seam would read as a
+   stray sliver beside it. */
+.sidebar-toolbar__split:hover:has(> :enabled) {
+  border-color: var(--accent-border);
+}
+.sidebar-toolbar__split > .sidebar-toolbar__btn:hover:not(:disabled) {
+  background: var(--bg-hover-strong);
+}
+/* Doubled class: the generic `.sidebar-toolbar__btn:hover:not(:disabled)`
+   below paints an accent border at this specificity and comes later. */
+.sidebar-toolbar__split:hover > .sidebar-toolbar__chevron.sidebar-toolbar__btn,
+.sidebar-toolbar__split:has(> .sidebar-toolbar__chevron[aria-expanded="true"])
+  > .sidebar-toolbar__chevron.sidebar-toolbar__btn {
+  border-left-color: transparent;
+}
+/* Open is its own state, held while the menu stays open: the outline lit,
+   the chevron zone tinted, and its caret pointing up (SidebarToolbar). */
+.sidebar-toolbar__split:has(> .sidebar-toolbar__chevron[aria-expanded="true"]) {
+  border-color: var(--accent-border);
+}
+/* Doubled class so open outranks the zone hover fill above and the generic
+   hover colour below: it is what the pointer came to see. */
+.sidebar-toolbar__split > .sidebar-toolbar__chevron.sidebar-toolbar__btn[aria-expanded="true"] {
+  background: var(--accent-soft);
+  color: var(--accent-bright);
+}
+/* One focus ring around the pair. A ring on either half would be cut by the
+   clip into an orange bar at the seam (PwrAgnt hit exactly that), and focus
+   would jump between two differently sized boxes. */
+.sidebar-toolbar__split:has(> :focus-visible) {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 1px;
+}
+.sidebar-toolbar__split > .sidebar-toolbar__btn:focus,
+.sidebar-toolbar__split > .sidebar-toolbar__btn:focus-visible {
+  outline: none;
+}
+/* Busy: the face keeps the shared [aria-busy] tint; the outline is the
+   split's, so it follows here. */
+.sidebar-toolbar__split:has(> [aria-busy="true"]) {
+  border-color: var(--accent-border);
+}
+/* With no profile both halves are disabled: dim the control once, not each
+   half inside it as well. */
+.sidebar-toolbar__split:not(:has(> :enabled)) {
+  opacity: 0.42;
+}
+.sidebar-toolbar__split:not(:has(> :enabled)) > .sidebar-toolbar__btn {
+  opacity: 1;
+}
+.sidebar-toolbar__btn:hover:not(:disabled) {
+  border-color: var(--accent-border);
+  color: var(--text-primary);
+}
+.sidebar-toolbar__add[aria-expanded="true"] {
+  background: var(--bg-hover-strong);
+  color: var(--text-primary);
+}
+.sidebar-toolbar__btn:disabled {
+  opacity: 0.42;
+  cursor: default;
+}
+/* Step 1: Add's word goes; the + and the caret still say "add, more inside". */
+.sidebar-toolbar--add-icon .sidebar-toolbar__add {
+  padding: 0 7px;
+}
+.sidebar-toolbar--add-icon .sidebar-toolbar__add .sidebar-toolbar__label {
+  display: none;
+}
+/* Step 2: the sync button loses its words too, and Add, sync and the wrench
+   share the row equally, like the lens chips under them. The accessible
+   names are spelled on the buttons, so nothing is lost to a screen reader. */
+.sidebar-toolbar--icons .sidebar-toolbar__label {
+  display: none;
+}
+.sidebar-toolbar--icons .sidebar-toolbar__btn {
+  flex: 1 1 0;
+  min-width: 30px;
+  padding: 0;
+}
+.sidebar-toolbar--icons .sidebar-toolbar__split {
+  flex: 1 1 0;
+  min-width: 50px;
+}
+.sidebar-toolbar--icons .sidebar-toolbar__chevron {
+  flex: 0 0 20px;
+  min-width: 20px;
 }
 
 .sidebar__lens {
@@ -997,11 +1208,174 @@ textarea,
   }
 }
 
+/* The list area: the repository index (when it fits) beside the tree's
+   column. Both are flex children so the footer below keeps its place. */
+.sidebar__body {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  display: flex;
+}
+/* The tree's own size container. Unpadded and unbordered, so with the index
+   hidden its content box is exactly .pane--sidebar's and every narrow-width
+   rule inside the tree fires at the same sidebar width it always did; with
+   the index shown they follow the tree's real width instead. */
+.sidebar__tree-pane {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  container-type: inline-size;
+}
 .sidebar__list {
   flex: 1;
   min-height: 0;
   overflow-y: auto;
   padding: 0 8px 16px;
+}
+/* Room a jump adds at the end so a repository near the bottom can reach the
+   top (Sidebar's scrollRepoToTop). Zero tall until a jump needs it. */
+.sidebar__jump-room {
+  height: 0;
+}
+
+/* ---- Repository index (RepoIndex.tsx) ----
+   Sized to its longest name, capped at the sidebar's width past the tree's
+   floor (--repo-index-max, written by Sidebar), and never narrower than its
+   shortest useful truncation. Design: Sidebar Repo Index - UX Review, 3a/4a.
+   The font is set on the column itself so `ch` measures the index's text,
+   not the 16px body; the probe carries the same font and min-width and is
+   what Sidebar measures to decide whether the column fits at all. */
+.repo-index,
+.repo-index__probe {
+  font: 500 calc(var(--sidebar-title-size) - 1px) / 1.25 var(--font-sans);
+  min-width: calc(7ch + 19px);
+}
+.repo-index__probe {
+  position: absolute;
+  top: 0;
+  left: 0;
+  height: 0;
+  overflow: hidden;
+  visibility: hidden;
+  pointer-events: none;
+}
+.repo-index {
+  flex: 0 0 auto;
+  width: max-content;
+  max-width: var(--repo-index-max, 0px);
+  min-height: 0;
+  overflow-x: hidden;
+  overflow-y: auto;
+  scrollbar-width: thin;
+  padding: 2px 0 16px;
+  border-right: 1px solid var(--border-subtle);
+}
+.repo-index__list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.repo-index__label {
+  padding: 9px 8px 3px 11px;
+  font: 700 calc(var(--sidebar-eyebrow-size) - 1px) / 1 var(--font-sans);
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.repo-index__item {
+  position: relative;
+  display: block;
+  width: 100%;
+  padding: 4px 8px 4px 11px;
+  border: 0;
+  border-radius: 0 6px 6px 0;
+  background: transparent;
+  color: var(--text-secondary);
+  font: inherit;
+  text-align: left;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  cursor: pointer;
+  scroll-margin-block: 4px;
+}
+/* Two markers that must never look alike. The SELECTION is drawn the way its
+   collapsed tree row draws it — accent name on the strong hover tint — so a
+   repository reads as selected in both columns at once. WHERE YOU ARE in the
+   scroll is only a rail: grey for every repository on screen, accent for the
+   one whose header is stuck at the top. A tint on the scroll marker read as
+   a second selection beside the real one. The rail is a bar, not a colour
+   alone, so it survives forced colours and reads at 3:1. */
+.repo-index__item::before {
+  content: "";
+  position: absolute;
+  left: 3px;
+  top: 0;
+  bottom: 0;
+  width: 2px;
+  background: transparent;
+}
+.repo-index__item:hover {
+  background: var(--bg-panel-hover);
+  color: var(--text-primary);
+}
+.repo-index__item.is-in-view::before {
+  background: var(--border-strong);
+}
+.repo-index__item.is-current {
+  color: var(--text-primary);
+}
+.repo-index__item.is-current::before {
+  background: var(--accent);
+}
+.repo-index__item.is-selected {
+  background: var(--bg-hover-strong);
+  color: var(--accent);
+}
+/* Inset, like the tree's rows: the items sit flush, so an outside ring would
+   be painted over by the neighbour. */
+.repo-index__item:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: -2px;
+}
+:root[data-density="compact"] .repo-index__item {
+  padding-block: 3px;
+}
+/* Names move as the tree's rows do, in the Pinned lens, with the tree's own
+   drag (one `useListReorder`): the held name dims, and the tree's 2px accent
+   line marks the gap, inset to clear the scroll rail. The line hangs off the
+   <li> because the button clips its overflow, and is a pseudo-element so
+   nothing reflows mid-drag. Design: Repo Index Reorder - UX Review, 2a. */
+.repo-index__list > li {
+  position: relative;
+}
+/* Dimmed by colour, not opacity, which would dim a focus ring too. */
+.repo-index__item.is-dragging {
+  background: var(--bg-hover-strong);
+  color: var(--text-subtle);
+}
+.repo-index__list > li.is-drop-before::after,
+.repo-index__list > li.is-drop-after::after {
+  content: "";
+  position: absolute;
+  left: 6px;
+  right: 4px;
+  z-index: 1;
+  height: 2px;
+  border-radius: 999px;
+  background: var(--accent);
+  pointer-events: none;
+}
+.repo-index__list > li.is-drop-before::after {
+  top: -1px;
+}
+.repo-index__list > li.is-drop-after::after {
+  bottom: -1px;
 }
 /* ---------------------------------------------------------------------------
    Density axis — `data-density="compact"` on <html> (Settings → Appearance).
@@ -1034,6 +1408,45 @@ textarea,
   text-align: center;
   color: var(--text-subtle);
   font: 500 12px/1.5 var(--font-sans);
+}
+.sidebar__empty-text {
+  margin: 0;
+}
+/* Day one: the empty list carries Add folders while the profile has none. */
+.sidebar__start {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  margin-top: 12px;
+}
+.sidebar__start-add {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  height: 32px;
+  padding: 0 12px;
+  border: 1px solid var(--accent-border);
+  border-radius: 7px;
+  background: var(--bg-panel-elevated);
+  color: var(--text-primary);
+  font: 600 11.5px/1 var(--font-sans);
+  white-space: nowrap;
+  cursor: pointer;
+}
+.sidebar__start-add > svg {
+  flex: 0 0 auto;
+}
+.sidebar__start-add:hover:not(:disabled) {
+  border-color: var(--accent);
+}
+.sidebar__start-add:disabled {
+  opacity: 0.42;
+  cursor: default;
+}
+.sidebar__start-hint {
+  color: var(--text-subtle);
+  font: 500 10px/1.35 var(--font-sans);
 }
 
 .sidebar__read-status,
@@ -1455,13 +1868,42 @@ a.forge-chip:focus-visible {
 .repo-row__name.is-active {
   color: var(--accent);
 }
-.repo-row__wtcount {
+.repo-row__wtcount,
+.repo-row__wtglyph {
   /* Chip tier: a count is a qualifier, so it tracks the notch one step under
      the name beside it. It was the one sidebar count already at 11px, so "md"
      leaves it exactly where it was. */
   font: 500 var(--sidebar-chip-size)/1 var(--font-mono);
   color: var(--text-subtle);
   flex: 0 0 auto;
+  white-space: nowrap;
+}
+/* The repository row's two steps (RepoRow's `useStepLadder`), taken while
+   the name would otherwise be cut: the forge and visibility marks leave,
+   then "279 wts" becomes the worktree mark and 279. The fork mark that
+   carries an upstream pull is `.badge--source`, an action, and stays; so do
+   the star and the kebab. Everything here is rigid, or the name would read
+   as whole while a mark ellipsized. Design: Sidebar Section Headings, 3d. */
+.repo-row__wtglyph {
+  display: none;
+  align-items: center;
+  gap: 3px;
+}
+.repo-row__wtglyph > svg {
+  flex: 0 0 auto;
+}
+.repo-row > .forge-chip {
+  flex: 0 0 auto;
+}
+.repo-row.rr-no-marks > .forge-chip,
+.repo-row.rr-no-marks > .repo-mark {
+  display: none;
+}
+.repo-row.rr-short-count > .repo-row__wtcount {
+  display: none;
+}
+.repo-row.rr-short-count > .repo-row__wtglyph {
+  display: inline-flex;
 }
 
 .pin {
@@ -1554,12 +1996,10 @@ a.forge-chip:focus-visible {
 .ref-section__chip:focus-visible,
 .ref-remote__main:focus-visible,
 .new-wt:focus-visible,
-.add-folder:focus-visible,
-.clone-repo:focus-visible,
-.fork-repo:focus-visible,
-.bulk-sync-action:focus-visible,
+.sidebar-toolbar__btn:focus-visible,
+.sidebar__start-add:focus-visible,
 .prune__ghost:focus-visible,
-.jump-btn:focus-visible {
+.titlebar-jump:focus-visible {
   outline: 2px solid var(--focus-ring);
   outline-offset: 1px;
 }
@@ -1635,6 +2075,10 @@ a.forge-chip:focus-visible {
   margin-top: 0;
   padding: 7px 6px 6px 4px;
   border-bottom: 1px solid var(--border-subtle);
+  /* A heading row like `.ref-section__head-wrap`: past the ladder's last
+     step it clips at its own edge, keeping the focus rings. */
+  overflow: clip;
+  overflow-clip-margin: 3px;
 }
 .wt-section__elevated {
   padding-top: 3px;
@@ -1654,7 +2098,9 @@ a.forge-chip:focus-visible {
   display: inline-flex;
   align-items: center;
   gap: 7px;
-  min-width: 0;
+  /* Rigid, like everything a heading step acts on: a toggle that shrank
+     would read as fitting while its label wrapped. */
+  flex: 0 0 auto;
   padding: 0;
   border: 0;
   background: transparent;
@@ -1665,6 +2111,7 @@ a.forge-chip:focus-visible {
   padding-top: 3px;
 }
 .wt-section__label {
+  white-space: nowrap;
   font: 600 var(--sidebar-eyebrow-size)/1 var(--font-sans);
   color: var(--text-subtle);
   letter-spacing: 0.08em;
@@ -1675,6 +2122,7 @@ a.forge-chip:focus-visible {
    the eyebrow line taller. */
 .sort-cycle {
   display: inline-flex;
+  flex: 0 0 auto;
   align-items: center;
   gap: 4px;
   height: 24px;
@@ -1689,6 +2137,7 @@ a.forge-chip:focus-visible {
 }
 .wt-refresh {
   display: inline-flex;
+  flex: 0 0 auto;
   align-items: center;
   justify-content: center;
   width: 24px;
@@ -1717,10 +2166,17 @@ a.forge-chip:focus-visible {
 .ref-section {
   border-top: 1px solid var(--border-subtle);
 }
+/* Nothing in a section heading shrinks under its own text, wraps, or paints
+   over a neighbour. When a heading runs out of room its repository block
+   steps down (`.repo-sections`, below); past the last step the row clips at
+   its own edge. The clip margin keeps the 2px+1px focus rings. Design:
+   Sidebar Section Headings - UX Review, 2c and 3. */
 .ref-section__head-wrap {
   display: flex;
   align-items: center;
   gap: 4px;
+  overflow: clip;
+  overflow-clip-margin: 3px;
 }
 .ref-section__head {
   display: flex;
@@ -1734,6 +2190,16 @@ a.forge-chip:focus-visible {
   background: transparent;
   color: var(--text-muted);
   cursor: pointer;
+  /* A button centres its text, which drew a wrapped label as two centred
+     lines; the labels no longer wrap, but start-align regardless. */
+  text-align: start;
+}
+/* Inside a heading row the disclosure still takes the spare width (its hit
+   area is the whole line) but never less than its own label and total: it
+   used to shrink under them and the counts drew on top. */
+.ref-section__head-wrap > .ref-section__head {
+  flex: 1 0 auto;
+  width: auto;
 }
 .ref-section__head:hover,
 .ref-remote__main:hover {
@@ -1756,12 +2222,14 @@ a.forge-chip:focus-visible {
   transform: rotate(90deg);
 }
 .ref-section__label {
+  white-space: nowrap;
   font: 600 var(--sidebar-eyebrow-size)/1 var(--font-sans);
   color: var(--text-subtle);
   letter-spacing: 0.08em;
   text-transform: uppercase;
 }
 .ref-section__count {
+  white-space: nowrap;
   font: 600 var(--sidebar-eyebrow-size)/1 var(--font-mono);
   color: var(--text-subtle);
 }
@@ -1770,6 +2238,8 @@ a.forge-chip:focus-visible {
    inside it (a button cannot nest in a button). At rest they read as the
    counts they were; hover and focus take .ref-mini-action's accent, so each
    announces itself as a control. */
+/* One line of whole chips, rigid: a chip that doesn't fit is folded into
+   +N by the block's ladder, never cut ("43 gone" once read "43"). */
 .ref-section__chips {
   display: flex;
   align-items: center;
@@ -1797,6 +2267,14 @@ a.forge-chip:focus-visible {
    when it read "Missing". */
 .ref-section__chip.is-gone {
   color: var(--text-subtle);
+}
+/* What the ladder folded, one chip per fold step; only the deepest step's
+   shows. Bordered so it reads as "more" rather than as one more count, and
+   the quiet tier: it can hold "gone", which is not a warning. */
+.ref-section__chip.is-more {
+  display: none;
+  color: var(--text-subtle);
+  border-color: var(--border-default);
 }
 .ref-section__chip:hover {
   color: var(--accent-bright);
@@ -1946,6 +2424,71 @@ a.forge-chip:focus-visible {
    (number, title, age, the one verb); line 2 is where it lives here (a tag,
    then the head branch, then the base when it is not the default). The verb
    sits in the same right-hand column as every other ref row's mini action. */
+/* "PRs" (or "MRs") is drawn only at the block's `fit-short` step. */
+.ref-section__label-short {
+  display: none;
+  /* "PRs", not the eyebrow's "PRS", which reads as a word. */
+  text-transform: none;
+}
+
+/* ---- The section headings' ladder (RepoRow's `.repo-sections`) ----
+
+   One repository block steps all of its headings together, by what fits
+   (`section-fit.tsx`): no width in here is a breakpoint, so the steps follow
+   the tree's width, the text-size axis and every count. Cumulative:
+
+   fit-short   "Pull requests" becomes "PRs".
+   fit-glyphs  every label becomes its glyph beside its count.
+   fit-fold-k  gone, then behind, then ahead fold into a +N chip.
+
+   A label that leaves the screen stays in its button's name, visually
+   hidden, so the name keeps the words (and contains the visible "PRs",
+   SC 2.5.3). Its hover card says it instead. Design: Sidebar Section
+   Headings - UX Review, 3a. */
+.ref-section__glyph {
+  display: none;
+  flex: 0 0 auto;
+  align-items: center;
+  color: var(--text-subtle);
+}
+/* The mark tracks the eyebrow it replaces, 12px at the default notch. */
+.ref-section__glyph > svg {
+  width: calc(var(--sidebar-eyebrow-size) + 2px);
+  height: calc(var(--sidebar-eyebrow-size) + 2px);
+}
+.repo-sections.fit-short .ref-section__label-full,
+.repo-sections.fit-glyphs .ref-section__label,
+.repo-sections.fit-glyphs .wt-section__toggle > .wt-section__label {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+.repo-sections.fit-short .ref-section__label-short {
+  display: inline;
+}
+.repo-sections.fit-glyphs .ref-section__label-short {
+  display: none;
+}
+.repo-sections.fit-glyphs .ref-section__glyph {
+  display: inline-flex;
+}
+/* Each count chip carries its fold rank: 3 (gone) folds first, 1 (ahead)
+   last, because it is the one that says something needs pushing. */
+.repo-sections.fit-fold-1 .ref-section__chip[data-rank="3"],
+.repo-sections.fit-fold-2 .ref-section__chip[data-rank="2"],
+.repo-sections.fit-fold-3 .ref-section__chip[data-rank="1"] {
+  display: none;
+}
+.repo-sections.fit-fold-1:not(.fit-fold-2) .ref-section__chip[data-fold="1"],
+.repo-sections.fit-fold-2:not(.fit-fold-3) .ref-section__chip[data-fold="2"],
+.repo-sections.fit-fold-3 .ref-section__chip[data-fold="3"] {
+  display: inline-flex;
+}
 .ref-section__chip.is-failing {
   color: var(--danger-text);
 }
@@ -2211,9 +2754,8 @@ a.forge-chip:focus-visible {
   flex: 1 1 0;
   min-width: 0;
   height: 31px;
-  /* The wrap's gap already separates it from the counts; every pixel here is
-     one "on main" keeps at the default 320px sidebar. */
-  padding: 0 6px 0 0;
+  /* No padding of its own: the text carries its edge margin, so once the
+     text has left, this collapses to nothing and the counts get the room. */
   overflow: hidden;
   /* It ellipsizes down to about six characters ("on m…"), then leaves whole
      rather than draw "o…": below that the text wraps past the zero-width
@@ -2241,6 +2783,7 @@ a.forge-chip:focus-visible {
   text-overflow: ellipsis;
   white-space: nowrap;
   line-height: 31px;
+  margin-right: 6px;
 }
 /* The disclosure gives up the full width it takes elsewhere so the counts can
    sit right after the total; the strip still lights as one. */
@@ -2260,17 +2803,14 @@ a.forge-chip:focus-visible {
 .ref-section__head-wrap--on:has(> .ref-section__on:hover) > .ref-section__head {
   color: var(--text-primary);
 }
-/* Last resort at the narrowest sidebar with every count showing: clip at the
-   heading's edge rather than run past it. */
 .ref-section__head-wrap--on > .ref-section__chips {
-  flex-shrink: 1;
-  min-width: 0;
   margin-right: 0;
-  overflow: hidden;
 }
 .ref-section__head-wrap--on > .ref-section__chips::before {
   content: "·";
-  margin-right: 3px;
+  /* 3px to the first chip with the chips' 2px column gap. It is also the
+     line's first item, so a chip that doesn't fit leaves whole. */
+  margin-right: 1px;
   color: var(--text-subtle);
   font: 600 var(--sidebar-eyebrow-size)/1 var(--font-mono);
 }
@@ -2821,17 +3361,8 @@ a.forge-chip:focus-visible {
   flex: 0 0 auto;
 }
 
-/* Four ghost buttons that share a shape but not a parent, so this rule hands
-   out no margin: spacing belongs to whatever each one sits in. `.new-wt` and
-   `.add-folder` space themselves because their parents are plain blocks;
-   `.clone-repo`/`.fork-repo` declare nothing, because `.sidebar__actions`
-   separates its rows with `gap`. A margin on a flex child does not collapse
-   into that gap, it adds to it — which is how the seam under Add folders drew
-   at 16px in a block whose every other seam was 8px. */
-.new-wt,
-.clone-repo,
-.fork-repo,
-.add-folder {
+/* The dashed "add one" ghost button under a repo's worktrees. */
+.new-wt {
   display: flex;
   align-items: center;
   gap: 7px;
@@ -2844,9 +3375,7 @@ a.forge-chip:focus-visible {
   color: var(--text-muted);
   font: 500 11px/1 var(--font-sans);
   cursor: pointer;
-}
-/* `.wt-section__body` is a plain block, so this one spaces itself. */
-.new-wt {
+  /* `.wt-section__body` is a plain block, so this one spaces itself. */
   margin-top: 4px;
 }
 /* ---- Other worktrees past the cap ----
@@ -2930,101 +3459,6 @@ a.forge-chip:focus-visible {
 .wt-view-all {
   padding: 0 8px;
 }
-.clone-repo,
-.fork-repo {
-  height: 32px;
-  /* Was an accent-bordered, accent-filled bar. Cloning is a secondary action
-     — the sidebar's primary job is picking among repos you already have — and
-     PwrAgnt's theme doc rules out large accent panels outright. Solid-bordered
-     ghost: still clearly a button, no longer competing with the selected row
-     two elements below it. */
-  border-style: solid;
-  border-color: var(--border-default);
-  background: var(--bg-panel-elevated);
-  color: var(--text-secondary);
-  font-weight: 600;
-}
-.clone-repo:hover:not(:disabled),
-.fork-repo:hover:not(:disabled),
-.add-folder:hover {
-  border-color: var(--accent);
-  color: var(--text-primary);
-}
-.clone-repo:disabled,
-.fork-repo:disabled,
-.add-folder:disabled {
-  opacity: 0.42;
-  cursor: default;
-}
-.add-folder {
-  height: 32px;
-  /* Load-bearing, unlike the margins its siblings in `.sidebar__actions` do
-     NOT carry: this is the first row, and `.sidebar__search` above it is a
-     plain block with no `gap` to separate them. Removing it closes the seam
-     under the jump field rather than evening it out. */
-  margin-top: 8px;
-}
-/* The bring-a-repo-in actions, under the jump field. Add folders is the
-   prerequisite — Clone and Fork stay disabled until a root exists — so it
-   leads on its own row and is the solid-bordered one. It used to be a dashed
-   whisper at the very bottom of the list, which on a first-run sidebar made
-   the only working control the quietest thing on screen.
-
-   This wraps: Clone and Fork take the second row (`.clone-repo-row`), because
-   three labels do not fit one row at the 240px resize floor. */
-.sidebar__actions {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: stretch;
-  gap: 8px;
-}
-.sidebar__actions .add-folder,
-.sidebar__actions .clone-repo,
-.sidebar__actions .fork-repo {
-  /* Both labels are single-line. `flex-basis: auto` (not 0) is what keeps that
-     true: an even 0-basis split hands each button half the row, and at the
-     240px resize floor half is ~104px against the ~117px "Add folders…"
-     needs, so it wrapped to two lines inside a fixed 32px box. Sizing from
-     content and sharing only the surplus fits both at every supported width.
-     That 117px was measured while the label led with a 13px text `+`; the
-     mark is <PlusGlyph /> now, so re-measure rather than trusting it. */
-  flex: 1 1 auto;
-  min-width: 0;
-  white-space: nowrap;
-}
-.sidebar__actions .add-folder {
-  border-style: solid;
-  background: var(--bg-panel-elevated);
-  color: var(--text-secondary);
-  font-weight: 600;
-}
-.sidebar__actions .clone-repo,
-.sidebar__actions .fork-repo {
-  flex-grow: 0;
-  border-style: dashed;
-  background: transparent;
-  color: var(--text-muted);
-  font-weight: 500;
-}
-/* Once there is somewhere to clone INTO, the two are peers. */
-.sidebar__actions:has(.clone-repo:not(:disabled)) .clone-repo,
-.sidebar__actions:has(.clone-repo:not(:disabled)) .fork-repo {
-  flex-grow: 1;
-}
-.sidebar__actions:has(.clone-repo:not(:disabled)) .clone-repo,
-.sidebar__actions:has(.clone-repo:not(:disabled)) .fork-repo {
-  border-style: solid;
-  background: var(--bg-panel-elevated);
-  color: var(--text-secondary);
-  font-weight: 600;
-}
-.sidebar__actions-hint {
-  flex: 1 1 100%;
-  padding: 0 2px;
-  color: var(--text-subtle);
-  font: 500 9.5px/1.3 var(--font-sans);
-}
-
 /* ---- Repo switcher overlay (⌘K) ---- */
 
 .overlay-backdrop {
@@ -3657,83 +4091,10 @@ a.forge-chip:focus-visible {
 
 /* ---- Fork dialog ---- */
 
-/* Clone and Fork take a full row of their own. Three labels cannot share one
-   row at the 240px resize floor (see .sidebar__actions' sizing note, tuned
-   when there were two), and wrapping mid-label inside a fixed-height ghost
-   button is the failure it warns about. */
-.clone-repo-row {
-  flex: 1 1 100%;
-  display: flex;
-  gap: 6px;
-}
-.clone-repo-row .clone-repo,
-.clone-repo-row .fork-repo {
-  flex: 1 1 auto;
-  min-width: 0;
-}
-
-.bulk-sync-actions {
-  flex: 1 1 100%;
-  display: flex;
-  gap: 6px;
-}
-/* One row, one button — see the note at its call site in Sidebar.tsx. It keeps
-   the same ghost treatment as the bulk-sync pair above it because it has the
-   same blast radius (every repository in the profile), and inherits their
-   focus ring from the shared `.bulk-sync-action` class. */
-.prune-actions {
-  flex: 1 1 100%;
-  display: flex;
-}
-/* Flex, so the glyph is centred against the label rather than sitting on its
-   baseline: an inline SVG's bottom edge lands ON the baseline, which hung all
-   three marks 2px above the text's optical centre. The label keeps the
-   truncation the button used to own — `text-overflow` needs a block container,
-   so it moves to `__label` rather than staying here doing nothing. */
-.bulk-sync-action {
-  flex: 1 1 0;
-  min-width: 0;
-  height: 30px;
-  padding: 0 7px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 6px;
-  overflow: hidden;
-  border: 1px solid var(--border-subtle);
-  border-radius: 7px;
-  background: transparent;
-  color: var(--text-muted);
-  font: 600 10.5px/1 var(--font-sans);
-  cursor: pointer;
-}
-.bulk-sync-action__label {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-/* Same `flex: 0 0 auto` as `.overlay-result > svg`, and for the same reason:
-   a glyph that declares no `flex` inherits `0 1 auto` and gives up space to
-   the label beside it. Measured at the 240px resize floor, where the row's
-   buttons are 107px wide: "Prune worktrees…" drew its 12px mark at 9.86px.
-   Shrink belongs to `__label`, which says so and is built to ellipsize.
-   These five share the guard but not a rule, so it is spelled once here. */
-.bulk-sync-action > svg,
-.new-wt > svg,
-.clone-repo > svg,
-.fork-repo > svg,
-.add-folder > svg {
+/* A glyph in a flex button declares no `flex`, so it would inherit `0 1 auto`
+   and give up width to the label beside it. Shrink belongs to the label. */
+.new-wt > svg {
   flex: 0 0 auto;
-}
-.bulk-sync-action:hover:not(:disabled) {
-  border-color: var(--accent-border);
-  background: var(--bg-panel-elevated);
-  color: var(--text-primary);
-}
-.bulk-sync-action:disabled {
-  opacity: 0.42;
-  cursor: default;
 }
 
 .fork-name-wrap {
@@ -6441,6 +6802,15 @@ button.agent-menu__item:hover {
 .maintenance__help summary { cursor: pointer; color: var(--text-secondary); }
 .maintenance__help[open] summary { margin-bottom: 8px; }
 .maintenance__body > .bulk-sync__status { margin: 0; }
+/* A live card stays in view while its rows scroll beneath it. Shadows in
+   the dialog's own fill hide rows passing its rounded corners and the
+   body's 12px top padding above it. */
+.maintenance__body > .bulk-sync__status.is-live {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  box-shadow: 0 0 0 4px var(--bg-menu), 0 -12px 0 4px var(--bg-menu);
+}
 .maintenance__results { display: flex; flex-direction: column; gap: 8px; }
 .maintenance__branch { padding: 6px 0; overflow-wrap: anywhere; }
 .maintenance__branch > span { min-width: 0; }
@@ -6661,6 +7031,196 @@ button.agent-menu__item:hover {
   color: var(--text-secondary);
   font: 600 10px/1 var(--font-mono);
 }
+.bulk-sync__minimize {
+  flex: 0 0 auto;
+  width: 26px;
+  height: 22px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--border-subtle);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-secondary);
+  cursor: pointer;
+}
+.bulk-sync__minimize:hover {
+  border-color: var(--accent-border);
+  color: var(--text-primary);
+}
+
+/* A run, minimised (BulkSyncToast). Bottom-left, under the sidebar that
+   started it and clear of the bottom-right error stack. Above that stack
+   (90) and below dialogs (110). design/Fetch Toast and Scope - UX
+   Review.dc.html, 2c–2e. */
+.bulk-sync-toast {
+  position: fixed;
+  /* Clips the countdown rail to the rounded corners. */
+  overflow: hidden;
+  left: 16px;
+  bottom: 48px;
+  z-index: 100;
+  width: min(340px, calc(100vw - 32px));
+  padding: 10px 10px 10px 12px;
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-lg);
+  background: var(--bg-panel-elevated);
+  box-shadow: var(--shadow-popover);
+}
+.bulk-sync-toast.is-live {
+  border-color: var(--accent-border);
+}
+.bulk-sync-toast.is-failed {
+  border-color: color-mix(in srgb, var(--danger-base) 55%, transparent);
+}
+/* The remote-activity card's header: copy at the left edge, the clock and
+   the two actions pinned to the headline's line at the right. */
+.bulk-sync-toast__top {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+}
+.bulk-sync-toast__end {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  /* Centres the 20px buttons on the headline's 14px line. */
+  margin: -3px -3px -3px 0;
+}
+/* Tabular figures: a ticking clock that reflows reads as a glitch. */
+.bulk-sync-toast__clock {
+  margin-right: 6px;
+  color: var(--text-muted);
+  font: 500 10px/1.2 var(--font-sans);
+  font-variant-numeric: tabular-nums;
+}
+.bulk-sync-toast__body {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+}
+.bulk-sync-toast__headline {
+  overflow: hidden;
+  color: var(--text-primary);
+  font: 650 11.5px/1.25 var(--font-sans);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.bulk-sync-toast__meta {
+  margin-top: 4px;
+  overflow: hidden;
+  color: var(--text-muted);
+  font: 500 10px/1.2 var(--font-sans);
+  font-variant-numeric: tabular-nums;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  cursor: pointer;
+}
+/* Finished counts across the card's full width; wide numbers wrap rather
+   than losing the last count (usually failed) to the ellipsis. */
+.bulk-sync-toast__meta:has(> .bulk-sync-toast__counts) {
+  overflow: visible;
+  white-space: normal;
+}
+.bulk-sync-toast__counts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+}
+.bulk-sync-toast__count {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  white-space: nowrap;
+}
+.bulk-sync-toast__count::before {
+  width: 6px;
+  height: 6px;
+  border-radius: 2px;
+  background: var(--bulk-sync-outcome);
+  content: "";
+}
+.bulk-sync-toast__count strong {
+  color: var(--text-secondary);
+  font-weight: 650;
+}
+.bulk-sync-toast__count.is-failed strong {
+  color: var(--danger-text);
+}
+/* The remote-activity card's rail (`.remote-activity__rail`): green, because
+   only a clean finish drains. */
+.bulk-sync-toast__rail {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  height: 2px;
+  background: var(--status-ok);
+  transform-origin: left center;
+  animation: remote-activity-countdown linear forwards;
+}
+/* A failure's or a cancel's rail drains too (Sync options can reopen it),
+   in its own color: green would say it went well. */
+.bulk-sync-toast.is-failed .bulk-sync-toast__rail {
+  background: var(--danger-base);
+}
+.bulk-sync-toast.is-cancelled .bulk-sync-toast__rail {
+  background: var(--status-suspended);
+}
+/* Held under the pointer, any rail greys; as specific as the tones above
+   and after them, so it wins. */
+.bulk-sync-toast .bulk-sync-toast__rail[data-paused="true"] {
+  animation-play-state: paused;
+  background: var(--text-muted);
+}
+/* One tight cluster, as .remote-activity__close: 20px, 2px apart, muted at
+   rest, a fill on hover. 24px boxes 8px apart read as two unrelated
+   controls. */
+.bulk-sync-toast__icon {
+  flex: 0 0 auto;
+  width: 20px;
+  height: 20px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+}
+.bulk-sync-toast__icon:hover {
+  background: var(--bg-panel-hover);
+  color: var(--text-primary);
+}
+.bulk-sync-toast__body:focus-visible,
+.bulk-sync-toast__icon:focus-visible,
+.bulk-sync__minimize:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 1px;
+}
+.bulk-sync__bar.bulk-sync-toast__bar {
+  height: 4px;
+  margin-top: 8px;
+}
+/* The empty card that flies between the dialog and the toast. */
+.bulk-sync-ghost {
+  position: fixed;
+  z-index: 115;
+  pointer-events: none;
+  border: 1px solid var(--accent-border);
+  border-radius: var(--radius-lg);
+  background: var(--bg-menu);
+  box-shadow: var(--shadow-popover);
+}
+
 /* The run status card — one element from the first repository to the receipt
    (design/Bulk Sync Progress - UX Review.dc.html, 2b). Its border carries the
    accent only while the run is live; the fill stays the panel so the bar's
@@ -6782,27 +7342,39 @@ button.agent-menu__item:hover {
   min-width: 0;
   box-shadow: none;
 }
-/* One color per outcome, read by both the bar segment and its legend swatch
-   so the two cannot drift apart. --danger-base is the failed card border's own
+/* One color per outcome, read by the bar segment, its legend swatch, and the
+   toast's bar, so the three cannot drift apart. The toast is not inside a
+   status card, which is why it is named here: scoped to the card alone, its
+   segments drew transparent and only the in-flight stripes showed. --danger-base is the failed card border's own
    base: --status-error sat too close to the light theme's warning brown to
    read as a different outcome. */
-.bulk-sync__status .is-success {
+.bulk-sync__status .is-success,
+.bulk-sync-toast__bar > .is-success,
+.bulk-sync-toast__count.is-success {
   --bulk-sync-outcome: var(--status-ok);
 }
-.bulk-sync__status .is-partial {
+.bulk-sync__status .is-partial,
+.bulk-sync-toast__bar > .is-partial,
+.bulk-sync-toast__count.is-partial {
   --bulk-sync-outcome: var(--status-warning);
 }
-.bulk-sync__status .is-skipped {
+.bulk-sync__status .is-skipped,
+.bulk-sync-toast__bar > .is-skipped,
+.bulk-sync-toast__count.is-skipped {
   --bulk-sync-outcome: color-mix(
     in srgb,
     var(--status-warning) 50%,
     var(--bg-panel)
   );
 }
-.bulk-sync__status .is-failed {
+.bulk-sync__status .is-failed,
+.bulk-sync-toast__bar > .is-failed,
+.bulk-sync-toast__count.is-failed {
   --bulk-sync-outcome: var(--danger-base);
 }
-.bulk-sync__status .is-cancelled {
+.bulk-sync__status .is-cancelled,
+.bulk-sync-toast__bar > .is-cancelled,
+.bulk-sync-toast__count.is-cancelled {
   --bulk-sync-outcome: var(--status-suspended);
 }
 /* In flight is the one accent in the bar, and the one moving part. The global
@@ -7134,7 +7706,6 @@ button.agent-menu__item:hover {
   flex: 0 0 auto;
   color: var(--accent-bright);
 }
-.prune > .modal__error,
 .prune__select {
   margin: 12px 18px 0;
 }
@@ -7645,7 +8216,7 @@ button.agent-menu__item:hover {
 }
 /* A button is `display: block` with centred contents, so a glyph and a label
    inside one baseline-align against a raw text space. Every other glyph+label
-   control here is flex with a real gap (`.graph-locate` 6px, `.jump-btn` 8px);
+   control here is flex with a real gap (`.graph-locate` 6px, `.titlebar-jump` 7px);
    this modifier is that, so an icon action does not arrive with its own
    spacing. */
 .refs-row-action--icon {
@@ -9122,7 +9693,9 @@ button.agent-menu__item:hover {
   box-shadow: 0 0 0 3px var(--accent-soft);
 }
 .branch-item__name {
-  flex: 1;
+  /* Shrinks first; the tracking chip sits right after it and the spacer
+     takes the slack. */
+  flex: 0 1 auto;
   min-width: 0;
   text-align: left;
   font: 600 13px/1.2 var(--font-mono);
@@ -9159,6 +9732,388 @@ button.agent-menu__item:hover {
   color: var(--status-warning);
   font-family: var(--font-sans);
   font-size: 11.5px;
+}
+
+/* The tracking chip: what a row's branch tracks, and a caret to choose another
+   remote's copy. The split control from the sync split button, at pill radius
+   in the row's mono register. The value zone is the row (clicking it acts on
+   the row); only the caret is its own button.
+   Design: design/Tracking Another Remote - UX Review.dc.html, turn 2. */
+.branch-item__grow {
+  flex: 1 1 0;
+  min-width: 0;
+}
+.branch-track {
+  flex: 0 1 auto;
+  min-width: 48px;
+  max-width: 55%;
+  display: inline-flex;
+  align-items: stretch;
+  height: 20px;
+  border: 1px solid var(--border-default);
+  border-radius: 999px;
+  overflow: hidden;
+  background: var(--bg-panel-elevated);
+}
+.branch-track__value {
+  display: block;
+  min-width: 0;
+  padding: 0 8px;
+  font: 500 10px/18px var(--font-mono);
+  color: var(--text-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.branch-track__value b {
+  color: var(--text-secondary);
+  font-weight: 600;
+}
+.branch-track__caret {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  padding: 0;
+  border: none;
+  border-left: 1px solid var(--border-subtle);
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+}
+.branch-track__caret > svg {
+  flex: 0 0 auto;
+}
+.branch-track:hover {
+  border-color: var(--accent-border);
+}
+.branch-track__caret:hover {
+  background: var(--bg-hover-strong);
+  color: var(--text-primary);
+  border-left-color: transparent;
+}
+.branch-track.is-open {
+  border-color: var(--accent-border);
+}
+.branch-track.is-open .branch-track__caret {
+  background: var(--accent-soft);
+  color: var(--accent-bright);
+  border-left-color: transparent;
+}
+/* Chosen, not yet confirmed: accent, "track" for "tracks", and a count. */
+.branch-track.is-changed {
+  border-color: var(--accent-border);
+  background: var(--accent-soft);
+}
+.branch-track.is-changed .branch-track__value,
+.branch-track.is-changed .branch-track__value b,
+.branch-track.is-changed .branch-track__caret {
+  color: var(--accent-bright);
+}
+.branch-track.is-changed .branch-track__caret {
+  border-left-color: var(--accent-border);
+}
+.branch-track__hint {
+  flex: 0 0 auto;
+  font: 600 9.5px/1 var(--font-mono);
+  color: var(--accent);
+}
+.branch-track-menu {
+  position: fixed;
+  z-index: 3;
+  width: 340px;
+  padding: 5px;
+  border: 1px solid var(--border-strong);
+  border-radius: 10px;
+  background: var(--bg-menu);
+  box-shadow: var(--shadow-popover);
+}
+.branch-track-menu__head {
+  padding: 6px 9px 5px;
+  font: 600 9.5px/1 var(--font-mono);
+  color: var(--text-subtle);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.branch-track-menu__item {
+  display: grid;
+  grid-template-columns: 14px minmax(0, 1fr) auto;
+  gap: 8px;
+  align-items: center;
+  padding: 7px 9px;
+  border-radius: 6px;
+  cursor: pointer;
+}
+.branch-track-menu__item.is-selected {
+  background: var(--bg-row-active);
+}
+.branch-track-menu__check {
+  display: inline-flex;
+  color: var(--accent);
+}
+.branch-track-menu__name {
+  min-width: 0;
+  font: 600 11.5px/1.25 var(--font-mono);
+  color: var(--text-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.branch-track-menu__name small {
+  display: block;
+  margin-top: 2px;
+  font: 500 10px/1.2 var(--font-sans);
+  color: var(--text-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.branch-track-menu__rel {
+  font: 600 10px/1 var(--font-mono);
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+.branch-track-menu__rel.is-ff {
+  color: var(--success-text);
+}
+.branch-track-menu__rel.is-dv {
+  color: var(--status-warning);
+}
+
+/* The review step, in place of the list inside the same overlay.
+   Design: turn 3. */
+.overlay-panel.retrack:focus {
+  outline: none;
+}
+.retrack__head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--border-subtle);
+}
+.retrack__back {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  border-radius: 7px;
+  border: 1px solid var(--border-default);
+  background: var(--bg-panel-elevated);
+  color: var(--text-secondary);
+  cursor: pointer;
+}
+.retrack__back > svg {
+  flex: 0 0 auto;
+}
+.retrack__back:hover {
+  background: var(--bg-hover-strong);
+  color: var(--text-primary);
+}
+.retrack__back:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 1px;
+}
+.retrack__title {
+  flex: 1;
+  min-width: 0;
+  font: 650 14px/1.2 var(--font-sans);
+  color: var(--text-primary);
+}
+.retrack__title code {
+  font: 600 13px/1.2 var(--font-mono);
+}
+.retrack__body {
+  max-height: 60vh;
+  overflow-y: auto;
+  padding: 14px 16px 4px;
+}
+.retrack__route {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+  gap: 10px;
+  align-items: center;
+}
+.retrack__stop {
+  min-width: 0;
+  padding: 9px 11px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 8px;
+  background: var(--bg-panel);
+}
+.retrack__stop--to {
+  border-color: var(--accent-border);
+  background: var(--accent-soft);
+}
+.retrack__stop-kind {
+  display: block;
+  font: 600 9.5px/1 var(--font-mono);
+  color: var(--text-subtle);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.retrack__stop-ref {
+  display: block;
+  margin-top: 5px;
+  font: 600 12.5px/1.2 var(--font-mono);
+  color: var(--text-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.retrack__stop-repo {
+  display: block;
+  margin-top: 3px;
+  font: 500 10.5px/1.2 var(--font-sans);
+  color: var(--text-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.retrack__arrow {
+  color: var(--text-subtle);
+  font: 600 14px/1 var(--font-sans);
+}
+.retrack__ledger {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+.reset-ledger__cell.is-warn {
+  border-color: color-mix(in srgb, var(--status-warning) 40%, transparent);
+  background: var(--warn-soft);
+}
+.reset-ledger__cell.is-good {
+  border-color: color-mix(in srgb, var(--success-text) 32%, transparent);
+  background: var(--success-soft);
+}
+.reset-ledger__cell.is-good strong {
+  color: var(--success-text);
+}
+.retrack__commits {
+  margin: 10px 0 0;
+  padding: 0;
+  list-style: none;
+  font: 500 11px/1.5 var(--font-mono);
+  color: var(--text-secondary);
+}
+.retrack__commits li {
+  display: flex;
+  gap: 8px;
+  min-width: 0;
+}
+.retrack__hash {
+  flex: 0 0 auto;
+  color: var(--text-subtle);
+}
+.retrack__subject {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--font-sans);
+}
+.retrack__more {
+  color: var(--text-subtle);
+  font-family: var(--font-sans);
+}
+.retrack__choices {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 12px;
+}
+.retrack__choice {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 9px 11px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 8px;
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+}
+.retrack__choice:hover {
+  background: var(--bg-panel-hover);
+}
+.retrack__choice.is-on {
+  border-color: var(--accent-border);
+  background: var(--accent-soft);
+}
+.retrack__choice:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 1px;
+}
+.retrack__radio {
+  flex: 0 0 auto;
+  width: 12px;
+  height: 12px;
+  margin-top: 2px;
+  border-radius: 999px;
+  border: 1.5px solid var(--border-strong);
+}
+.retrack__choice.is-on .retrack__radio {
+  border-color: var(--accent);
+  box-shadow: inset 0 0 0 2.5px var(--bg-menu);
+  background: var(--accent);
+}
+.retrack__choice-title {
+  display: block;
+  font: 600 12px/1.3 var(--font-sans);
+  color: var(--text-primary);
+}
+.retrack__choice-detail {
+  display: block;
+  margin-top: 3px;
+  font: 500 11px/1.4 var(--font-sans);
+  color: var(--text-muted);
+}
+.retrack__facts {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 12px 0 10px;
+  padding: 0;
+  list-style: none;
+  font: 500 11.5px/1.4 var(--font-sans);
+  color: var(--text-secondary);
+}
+.retrack__fact {
+  display: flex;
+  gap: 8px;
+  align-items: flex-start;
+}
+.retrack__fact code {
+  font: 500 11px/1.4 var(--font-mono);
+}
+.retrack__fact-mark {
+  flex: 0 0 auto;
+  display: inline-flex;
+  margin-top: 2px;
+}
+.retrack__fact--ok .retrack__fact-mark {
+  color: var(--success-text);
+}
+.retrack__fact--warn .retrack__fact-mark {
+  color: var(--status-warning);
+}
+.retrack__foot {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 11px 16px;
+  border-top: 1px solid var(--border-subtle);
+}
+.retrack__cmd {
+  flex: 1;
+  min-width: 0;
+  font: 500 10px/1.3 var(--font-mono);
+  color: var(--text-subtle);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .sync-chip {
   display: inline-flex;
@@ -10553,6 +11508,10 @@ button.ref-chip:focus-visible {
 }
 .discovery-ignored-footer button { margin-left: auto; padding: 2px 0; border: 0; background: none; color: var(--accent-bright); font: 600 10.5px/1 var(--font-sans); cursor: pointer; }
 .discovery-explain-popover { width: min(380px, 90vw); max-width: none; }
+/* Two classes, so this outranks `.viewport-tooltip`'s `pointer-events: none`,
+   which comes later in this file. The card has buttons; without this every
+   click went through it to whatever sat underneath. */
+.viewport-tooltip.discovery-explain-popover { pointer-events: auto; }
 .discovery-explain { display: flex; flex-direction: column; gap: 9px; color: var(--text-secondary); }
 .discovery-explain > strong { color: var(--text-primary); font: 650 12px/1.3 var(--font-sans); }
 .discovery-explain p { margin: 0; font: 400 11px/1.5 var(--font-sans); }
@@ -11816,6 +12775,11 @@ body.is-col-resizing {
   opacity: 0;
   transition: opacity 120ms ease;
 }
+/* Also at rest on the repository you are in. Hidden there, the nearest kebab
+   in sight was the primary checkout's, one row down, and its menu has none of
+   the repository's verbs: people read "Repository setup…" as missing from the
+   lens they were in. Its room is already held, so showing it moves nothing. */
+.repo-row.holds-selection .repo-row__menu,
 .repo-row:hover .repo-row__menu,
 .repo-row:focus-visible .repo-row__menu,
 .repo-row:has(:focus-visible) .repo-row__menu,
@@ -11899,6 +12863,15 @@ body.is-col-resizing {
   height: 1px;
   background: var(--border-subtle);
   margin: 4px;
+}
+/* A group label inside a menu, aligned with the labels of a checked group
+   (the 12px check slot plus the item's 8px gap). */
+.pop-menu__heading {
+  padding: 6px 9px 4px 29px;
+  color: var(--text-subtle);
+  font: 650 9.5px/1 var(--font-sans);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
 }
 /* Pull's menu. Each row says what it does to which branch, so it is two
    lines where the kebab's rows are one, and the width is set for the
@@ -16158,6 +17131,13 @@ body.is-col-resizing {
   color: var(--text-muted);
   font: 400 11px/1.3 var(--font-sans);
 }
+/* One version per box: the line wraps between parts, and only a part wider
+   than the whole row breaks inside itself. */
+.settings-ai-install__meta-part {
+  display: inline-block;
+  max-width: 100%;
+  overflow-wrap: anywhere;
+}
 
 .settings-ai-path {
   display: flex;
@@ -17672,7 +18652,8 @@ button.agent-auth-node:focus-visible,
 .wt-refresh[aria-busy="true"],
 .ref-mini-action[aria-busy="true"],
 .ref-fetch-all[aria-busy="true"],
-.submodule-panel__refresh[aria-busy="true"] {
+.submodule-panel__refresh[aria-busy="true"],
+.sidebar-toolbar__sync[aria-busy="true"] {
   border-color: var(--accent-border);
   background: var(--accent-soft);
   color: var(--accent-bright);
@@ -18411,6 +19392,44 @@ button.agent-auth-node:focus-visible,
 
 /* Stop is the action someone comes to this card for after five silent
    minutes; it should not need hunting for among three identical buttons. */
+/* The receipt's one-time question (a fork that moved on from its original).
+   Primary is the answer the card recommends. */
+.remote-activity__button--primary {
+  border-color: var(--accent-border);
+  background: var(--accent-soft);
+  color: var(--accent-bright);
+}
+.pull-moved-on {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px;
+  border: 1px solid var(--accent-border);
+  border-radius: 8px;
+  background: var(--bg-panel);
+}
+.pull-moved-on__text {
+  margin: 0;
+  font: 500 11.5px/1.45 var(--font-sans);
+  color: var(--text-secondary);
+}
+.pull-moved-on__text b {
+  color: var(--text-primary);
+}
+.pull-moved-on__text code {
+  font: 500 11px/1.45 var(--font-mono);
+}
+.pull-moved-on__actions {
+  flex-wrap: wrap;
+}
+.pull-moved-on__actions .remote-activity__button {
+  white-space: nowrap;
+}
+.pull-moved-on__cap {
+  margin: 0;
+  font: 500 10px/1.3 var(--font-sans);
+  color: var(--text-subtle);
+}
 .remote-activity__button--stop {
   border-color: var(--danger-border);
   color: var(--danger-text);
@@ -19934,7 +20953,9 @@ button.agent-auth-node:focus-visible,
 .maintenance__step.is-off { border-style: dashed; background: transparent; }
 .maintenance__step.is-stop { border-color: var(--danger-border); }
 .maintenance__step.is-stop .maintenance__step-num { border: 0; background: var(--danger-soft); color: var(--danger-text); }
-.maintenance__step.is-stop small { color: var(--danger-text); }
+.maintenance__step.is-stop small { color: var(--text-secondary); }
+/* Only a step line's issue counts ("· 1 not deleted") draw in danger ink. */
+.maintenance__step-issues { font-style: normal; color: var(--danger-text); }
 .maintenance__step-num svg { width: 10px; height: 10px; }
 /* A Finished row's proof, in the success colour a worktree row's reason uses. */
 .maintenance__branch small i { font-style: normal; color: var(--success-text); }
@@ -19972,6 +20993,44 @@ button.agent-auth-node:focus-visible,
 .maintenance__quiet strong { color: var(--text-secondary); font-family: var(--font-mono); }
 .maintenance__quiet button { margin-left: auto; border: 0; background: transparent; color: var(--accent); font: 600 10.5px var(--font-sans); cursor: pointer; }
 .maintenance .bulk-sync__repo-status:has(+ *) { white-space: nowrap; }
+/* Maintenance › Clones (design/Refresh Clones - UX Review.dc.html, turn 2). */
+.maintenance__clones-lead { margin: 0; color: var(--text-secondary); font-size: 11.5px; }
+.maintenance__clones-lead strong { color: var(--text-primary); font-weight: 600; }
+.maintenance__clones-block { padding: 12px; border: 1px solid var(--border-default); border-radius: 8px; background: var(--bg-panel); }
+.maintenance__clones-block strong { display: block; color: var(--text-primary); font: 650 12px/1.3 var(--font-sans); }
+.maintenance__clones-block p { margin: 5px 0 9px; color: var(--text-secondary); font-size: 11px; }
+.maintenance__clones-block code { font: 500 10.5px var(--font-mono); }
+.maintenance__clones-link { padding: 0; border: 0; background: none; color: var(--accent); font: 600 11px/1.3 var(--font-sans); cursor: pointer; }
+.maintenance__clones-link:hover { text-decoration: underline; }
+.maintenance__clones-link:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px; }
+.maintenance__clones-rows { margin: 0; padding: 0; list-style: none; border: 1px solid var(--border-subtle); border-radius: 8px; overflow: hidden; }
+.maintenance__clones-row { background: var(--bg-panel); }
+.maintenance__clones-row + .maintenance__clones-row { border-top: 1px solid var(--border-faint); }
+.maintenance__clones-row > details > summary,
+.maintenance__clones-row:not(:has(details)) { display: grid; grid-template-columns: 16px minmax(0, 1fr) auto; gap: 9px; align-items: start; padding: 8px 12px; }
+.maintenance__clones-row summary { list-style: none; cursor: pointer; }
+.maintenance__clones-row summary::-webkit-details-marker { display: none; }
+.maintenance__clones-row summary:hover { background: var(--bg-panel-hover); }
+.maintenance__clones-row summary:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: -2px; }
+.maintenance__clones-row .bulk-sync__spinner,
+.maintenance__clones-row .bulk-sync__mark { width: 16px; height: 16px; margin-top: 1px; }
+.maintenance__clones-queued { width: 16px; height: 16px; margin-top: 1px; border: 1px solid var(--border-default); border-radius: 50%; }
+.maintenance__clones-queued.is-skipped { border-style: dashed; border-color: var(--border-strong); }
+.maintenance__clones-name { min-width: 0; }
+.maintenance__clones-name strong { display: block; color: var(--text-primary); font: 650 11.5px/1.3 var(--font-sans); }
+.maintenance__clones-name code { display: block; margin-top: 1px; color: var(--text-muted); font: 500 10px/1.4 var(--font-mono); overflow-wrap: anywhere; }
+.maintenance__clones-name small { display: block; margin-top: 2px; color: var(--text-secondary); font-size: 10.5px; line-height: 1.4; overflow-wrap: anywhere; }
+.maintenance__clones-none { color: var(--text-muted); font-size: 11px; }
+.maintenance__clones-none summary { cursor: pointer; color: var(--text-secondary); }
+.maintenance__clones-none p { margin: 6px 0 0; overflow-wrap: anywhere; }
+.maintenance__clones-bytes { color: var(--text-primary); font: 600 10.5px/1.3 var(--font-mono); text-align: right; white-space: nowrap; }
+.maintenance__clones-worktrees { margin: 0; padding: 0 12px 8px 37px; list-style: none; }
+.maintenance__clones-worktrees li { display: flex; gap: 10px; align-items: flex-start; padding: 6px 0; border-top: 1px solid var(--border-faint); }
+.maintenance__clones-worktrees li > span:first-child { flex: 1; min-width: 0; }
+.maintenance__clones-worktrees strong { display: block; color: var(--text-primary); font: 600 11px/1.3 var(--font-sans); }
+.maintenance__clones-worktrees code { display: block; color: var(--text-muted); font: 500 10px/1.4 var(--font-mono); overflow-wrap: anywhere; }
+.maintenance__clones-worktrees small { display: block; color: var(--text-secondary); font-size: 10.5px; line-height: 1.4; }
+.maintenance__clones-worktrees small.is-failed { color: var(--danger-text); }
 .maintenance__done-status { display: flex; align-items: center; gap: 11px; margin: 12px 18px 0; padding: 11px 12px; border: 1px solid var(--border-subtle); border-radius: 8px; background: var(--bg-panel); }
 .maintenance__done-status > .bulk-sync__mark { width: 16px; height: 16px; }
 .maintenance__done-status strong, .maintenance__done-status small { display: block; }
@@ -19981,7 +21040,8 @@ button.agent-auth-node:focus-visible,
 .maintenance__receipt-steps { display: flex; flex-direction: column; gap: 8px; }
 .maintenance__receipt-step { padding: 10px 12px; border: 1px solid var(--border-subtle); border-radius: 8px; background: var(--bg-panel); }
 .maintenance__receipt-step.is-skipped, .maintenance__receipt-step.is-not-started { border-style: dashed; background: transparent; }
-.maintenance__receipt-step.is-failed { border-color: var(--danger-border); }
+.maintenance__receipt-step.is-failed, .maintenance__receipt-step.is-partial, .maintenance__receipt-step.has-issues { border-color: var(--danger-border); }
+.maintenance__receipt-step:is(.is-failed, .is-partial, .has-issues) .maintenance__step-num { border: 0; background: var(--danger-soft); color: var(--danger-text); }
 .maintenance__receipt-head { display: flex; align-items: center; gap: 9px; }
 .maintenance__receipt-head strong { color: var(--text-primary); font: 650 12px/1.2 var(--font-sans); }
 .maintenance__receipt-head > span:nth-last-child(2), .maintenance__receipt-head > span:last-child { margin-left: auto; color: var(--text-secondary); font: 600 10.5px/1 var(--font-mono); }
@@ -20002,6 +21062,9 @@ button.agent-auth-node:focus-visible,
 .prune__protection-controls { justify-content: flex-start; }
 .prune__protection-controls label { color: var(--text-primary); font: 600 12px var(--font-sans); }
 .prune__protection-controls input { accent-color: var(--accent); }
+.prune__protection-controls + .prune__protection-controls { margin-top: 8px; }
+.prune__protection-controls.is-indented { padding-left: 27px; } /* the checkbox, its default margins and the gap */
+.prune__protection-controls.is-indented > span { color: var(--text-primary); font: 600 12px var(--font-sans); }
 .prune__never { flex: 0 0 auto; margin: 12px 18px 0; }
 .prune__intro-note { margin: 12px 18px 0; color: var(--text-muted); font: 400 11px/1.5 var(--font-sans); }
 .prune__summary { align-items: center; border-color: var(--border-subtle); background: var(--bg-panel); }
@@ -20012,6 +21075,121 @@ button.agent-auth-node:focus-visible,
 .prune__summary > .bulk-sync__mark { width: 16px; height: 16px; }
 .prune__summary time { color: var(--text-muted); font: 500 10px var(--font-mono); }
 .prune__panel > .maintenance__applied { flex: 0 0 auto; margin: 12px 18px 0; }
+/* A removal's outcome — the "Removal Errors" board's shared card (3a). It
+   sits in the panel's own column under the receipt, never as a bare mono line
+   flush to the dialog edge. Danger for what failed; `.is-note` for what the
+   user chose to keep. */
+.prune__panel > .modal__error { flex: 0 0 auto; margin: 12px 18px 0; }
+.maintenance__problem {
+  flex: 0 0 auto;
+  margin: 12px 18px 0;
+  border: 1px solid var(--danger-border);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--danger-base) 6%, transparent);
+}
+.maintenance__problem.is-note { border-color: var(--border-subtle); background: var(--bg-panel); }
+.maintenance__problem-head { display: flex; align-items: center; gap: 10px; padding: 10px 12px; }
+.maintenance__problem-head > div { flex: 1; min-width: 0; }
+.maintenance__problem-head > div > strong { display: block; color: var(--text-primary); font: 650 11.5px/1.25 var(--font-sans); }
+.maintenance__problem-head > div > span { display: block; margin-top: 3px; color: var(--text-secondary); font: 500 10.5px/1.35 var(--font-sans); }
+.maintenance__problem-icon {
+  width: 12px;
+  height: 12px;
+  flex: 0 0 auto;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.maintenance__problem-mark {
+  display: grid;
+  place-items: center;
+  width: 18px;
+  height: 18px;
+  flex: 0 0 auto;
+  border-radius: 50%;
+  background: var(--danger-soft);
+  color: var(--danger-text);
+}
+.maintenance__problem-mark .maintenance__problem-icon { width: 10px; height: 10px; }
+.maintenance__problem.is-note .maintenance__problem-mark {
+  background: color-mix(in srgb, var(--text-primary) 8%, transparent);
+  color: var(--text-secondary);
+}
+.maintenance__problem-log {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  flex: 0 0 auto;
+  padding: 4px 6px;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--accent);
+  font: 600 10.5px/1 var(--font-sans);
+  cursor: pointer;
+}
+.maintenance__problem-log:hover { background: var(--accent-soft); }
+.maintenance__problem > ul { margin: 0; padding: 0; list-style: none; }
+.maintenance__problem-row {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 9px 12px 10px 40px;
+  border-top: 1px solid var(--border-faint);
+}
+.maintenance__problem-row > strong { color: var(--text-primary); font: 600 11px/1.3 var(--font-mono); }
+.maintenance__problem-row > strong > span { font: 650 11px/1.3 var(--font-sans); }
+.maintenance__problem-row > p { margin: 0; color: var(--text-secondary); font: 500 10.5px/1.4 var(--font-sans); }
+.maintenance__problem-row > p b { color: var(--danger-text); font-weight: 600; }
+.maintenance__problem-row > small {
+  overflow: hidden;
+  color: var(--text-muted);
+  font: 500 9.5px/1.3 var(--font-mono);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.maintenance__problem-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-top: 5px; }
+.maintenance__problem-actions button {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 24px;
+  padding: 0 9px;
+  border: 1px solid var(--border-default);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-secondary);
+  font: 600 10.5px/1 var(--font-sans);
+  cursor: pointer;
+}
+.maintenance__problem-actions button:hover { border-color: var(--accent-border); background: var(--bg-panel-hover); color: var(--text-primary); }
+.maintenance__problem-actions .maintenance__problem-toggle { padding: 0 4px; border-color: transparent; color: var(--text-muted); }
+.maintenance__problem-actions .maintenance__problem-toggle .maintenance__problem-icon { width: 11px; height: 11px; }
+/* Combined maintenance: one card per step that left something behind, in
+   step order, at the top of the body ("Maintenance Continues Past Errors",
+   2a-2d). Its rows scroll inside it past about four and a half; the head
+   never scrolls away. */
+.maintenance__problems { display: flex; flex-direction: column; gap: 8px; }
+.maintenance__problems > .maintenance__problem { margin: 0; }
+.maintenance__problem-list { max-height: 196px; overflow-y: auto; }
+.maintenance__problem-list:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: -2px; border-radius: 0 0 7px 7px; }
+.maintenance__problem-title { display: flex; align-items: baseline; gap: 10px; min-width: 0; }
+.maintenance__problem-title > strong { min-width: 0; overflow-wrap: anywhere; color: var(--text-primary); font: 600 11px/1.3 var(--font-mono); }
+.maintenance__problem-title > strong > span { font: 650 11px/1.3 var(--font-sans); }
+.maintenance__problem-title > code { flex: 0 0 auto; margin-left: auto; color: var(--text-secondary); font: 600 10.5px/1.3 var(--font-mono); }
+.maintenance__problem-raw {
+  margin: 6px 0 0;
+  padding: 8px 10px;
+  border: 1px solid var(--border-faint);
+  border-radius: 6px;
+  background: var(--bg-input);
+  color: var(--text-muted);
+  font: 500 10px/1.55 var(--font-mono);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
 .prune__select { justify-content: flex-start; padding: 0; border: 0; background: transparent; }
 .prune__select label { color: var(--text-primary); font: 400 12px/1.4 var(--font-sans); }
 .prune__rows { gap: 8px; }
@@ -20036,6 +21214,8 @@ button.agent-auth-node:focus-visible,
 .maintenance__done-status.is-stopped > span { background: var(--danger-soft); color: var(--danger-text); }
 .maintenance__plan-rules { display: flex; flex-direction: column; align-items: stretch; gap: 8px; }
 .maintenance__plan-rule { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+/* A rule with no checkbox lines its words up with the ones that have one. */
+.maintenance__plan-rule.is-indented { padding-left: 21px; }
 .maintenance__plan-mode { flex-basis: auto; }
 .modal.maintenance { height: auto; max-height: min(790px, 92vh); }
 .maintenance > .bulk-sync__status:not(.is-live) { height: auto; min-height: 54px; }

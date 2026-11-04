@@ -4,13 +4,21 @@ packages:
 
 # pnpm 12 reads package-manager settings here, not from package.json or .npmrc.
 overrides:
-  "@types/node": "24.19.1"
+  "@types/node": "24.19.2"
   js-yaml: "4.3.2"
-  hono: "4.13.7"
+  hono: "4.13.11"
+  "@hono/node-server": "2.1.3"
+  qs: "6.17.0"
+  "glob@13.0.6": "14.0.2"
+  "minimatch@9.0.9": "11.0.1"
+  "minimatch@10.2.6": "11.0.1"
   "@pwrdrvr/codex-app-server-protocol": "0.159.2"
 
 # Ignore machine-local hooks so every install hashes only .pnpmfile.cjs.
 globalPnpmfile: null
+
+# Completed CI trees must use portable files and relative workspace links.
+packageImportMethod: auto
 
 # Dependencies that need their build scripts to run during install.
 allowBuilds:
@@ -43,6 +51,16 @@ minimumReleaseAge: 10080
 # Versions allowed past the gate. `name` exempts a package outright; the
 # `name@version` form exempts one reviewed release and nothing else — prefer it.
 minimumReleaseAgeExclude:
+  # Security fixes for GHSA-3g3m-2fjr-6pw4 and GHSA-g3hv-75wg-m249.
+  # These exact releases are taken before the seven-day cooldown completes.
+  - "glob@14.0.2"
+  - "minimatch@11.0.1"
+  # Required by the patched glob release.
+  - "path-scurry@3.0.0"
+
+  # GHSA-jr5w-w6x2-84p9 eMudhra fix; published 2026-10-21T03:31:39.419Z.
+  - "electron@44.9.3"
+
   # The @pwrdrvr/agent-kit packages are PwrDrvr's own, freshly published, and
   # pinned — exempt them outright so PwrGit can consume new versions
   # immediately.

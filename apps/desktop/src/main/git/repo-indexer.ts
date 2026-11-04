@@ -10,7 +10,7 @@ import { readdir } from "node:fs/promises";
 import { basename, join } from "node:path";
 import {
   changeRequestLocalBranch,
-  changeRequestNumberQuery,
+  claimWorktreeOwnership,
   err,
   ok,
   toForgeHost,
@@ -35,8 +35,10 @@ import { requireExit0, type GitExec } from "./dugite";
 import { buildFtsQuery } from "./fts-query";
 import {
   changeRequestAnswersQuery,
-  pathLeafLikePatterns,
-  rankSearchHits
+  rankSearchHits,
+  registerSearchSqlFunctions,
+  SEARCH_EXACT_TIER_SQL,
+  searchExactTierParams
 } from "./search-rank";
 import {
   listBranches,
@@ -45,7 +47,7 @@ import {
   type WorktreeInfo
 } from "./git-service";
 import { SEARCH_ROW_REPO_SQL, visibleRepoSql } from "./hidden-repos";
-import { claimWorktreeOwnership } from "./repo-ownership";
+import { forgetVanishedWorktrees } from "./vanished-worktrees";
 import { checkoutExists } from "./worktree-liveness";
 import { forkSourceFromRow } from "./worktree-state";
 
@@ -63,6 +65,7 @@ const GIT_CONCURRENCY = 12;
 const HYDRATION_GIT_CONCURRENCY = 4;
 const BRANCH_WRITE_CHUNK_SIZE = 100;
 const DISCOVERY_YIELD_EVERY = 32;
+const DISCOVERY_CONCURRENCY = 4;
 const PROFILE_RESCAN_INTERVAL_MS = 24 * 60 * 60 * 1000;
 const HYDRATION_RETRY_INTERVAL_MS = 24 * 60 * 60 * 1000;
 const SKIP_DIRS = new Set([
@@ -168,6 +171,7 @@ type WorktreeRow = {
   diverged_from_default: number | null;
   is_default_branch: number | null;
   last_activity_at: string | null;
+  last_authored_at: string | null;
   head: string | null;
   upstream_gone: number | null;
   source_remote: string | null;
@@ -292,6 +296,7 @@ export class RepoIndexer {
     private readonly git: GitExec,
     options: RepoIndexerOptions = {}
   ) {
+    registerSearchSqlFunctions(db);
     this.yieldToEventLoop =
       options.yieldToEventLoop ?? defaultYieldToEventLoop;
     this.branchWriteChunkSize = Math.max(
@@ -351,11 +356,13 @@ export class RepoIndexer {
     const { signal } = options;
     const found = new Set<string>();
     let everyRootReadable = true;
-    for (const root of profile.roots) {
-      const scan = await scanRepoRoot(root, MAX_SCAN_DEPTH, {
+    const scans = await mapLimit(profile.roots, DISCOVERY_CONCURRENCY, (root) =>
+      scanRepoRoot(root, MAX_SCAN_DEPTH, {
         yieldEvery: this.discoveryYieldEvery,
         yieldToEventLoop: this.yieldToEventLoop
-      });
+      })
+    );
+    for (const scan of scans) {
       if (!scan.rootReadable) everyRootReadable = false;
       for (const dir of scan.dirs) found.add(dir);
     }
@@ -380,13 +387,22 @@ export class RepoIndexer {
       const primary = listed.value[0];
       if (primary === undefined || primary.bare) return;
       if (canonical.has(primary.path)) return;
-      canonical.set(primary.path, {
+      // Claim the repo before awaiting, so a second directory of the same
+      // repo cannot also run its removals.
+      const entry = {
         path: primary.path,
-        worktrees: listed.value
-          .filter((w) => !w.bare)
-          .map((w, i) => worktreeShape(w, i === 0)),
+        worktrees: [] as Worktree[],
         indexedBranches: listedBranches.ok ? listedBranches.value : null
-      });
+      };
+      canonical.set(primary.path, entry);
+      const kept = await forgetVanishedWorktrees(
+        this.git,
+        primary.path,
+        listed.value
+      );
+      entry.worktrees = kept
+        .filter((w) => !w.bare)
+        .map((w, i) => worktreeShape(w, i === 0));
     });
     signal?.throwIfAborted();
 
@@ -455,7 +471,9 @@ export class RepoIndexer {
         message: `No git worktree found at ${path}`
       });
     }
-    const worktrees = listed.value
+    const worktrees = (
+      await forgetVanishedWorktrees(this.git, primary.path, listed.value)
+    )
       .filter((w) => !w.bare)
       .map((w, i) => worktreeShape(w, i === 0));
 
@@ -485,11 +503,15 @@ export class RepoIndexer {
   }
 
   /** `includeHidden` is for callers asking what is on disk rather than what
-   *  to show — clone's "already cloned" and fork's "Reveal checkout". */
+   *  to show — clone's "already cloned" and fork's "Reveal checkout".
+   *  `repoIds` reads only those rows: a `repo:changed` that names its
+   *  repositories is answered with them, not with the whole profile. */
   listRepos(
     profileId: ProfileId,
-    options: { includeHidden?: boolean } = {}
+    options: { includeHidden?: boolean; repoIds?: readonly string[] } = {}
   ): Repo[] {
+    const only = options.repoIds;
+    if (only !== undefined && only.length === 0) return [];
     // NOCASE so "apple" sorts next to "Apple" rather than after "Zebra" —
     // SQLite's default TEXT collation is binary (all uppercase before any
     // lowercase). The trailing `name` breaks NOCASE ties deterministically.
@@ -506,13 +528,14 @@ export class RepoIndexer {
         `SELECT id, profile_id, name, path, pinned, custom_order FROM repos r
          WHERE profile_id = ?
            ${options.includeHidden === true ? "" : `AND ${visibleRepoSql("r")}`}
+           ${only === undefined ? "" : `AND r.id IN (${only.map(() => "?").join(", ")})`}
          ORDER BY pinned DESC, (custom_order IS NULL), custom_order,
                   name COLLATE NOCASE, name`
       )
-      .all(profileId) as RepoRow[];
+      .all(profileId, ...(only ?? [])) as RepoRow[];
     // Ownership filter: a fossil DB (older builds) can hold the same worktree
     // under two repos, which renders as two "selected" rows at once.
-    const identities = this.identityRows(profileId);
+    const identities = this.identityRows(profileId, only);
     return claimWorktreeOwnership(
       repoRows.map((r) => this.repoFromRow(r, identities.get(r.id) ?? null))
     );
@@ -781,7 +804,9 @@ export class RepoIndexer {
         ownerPath: primary.path
       });
     }
-    const worktrees = listed.value
+    const worktrees = (
+      await forgetVanishedWorktrees(this.git, repo.path, listed.value)
+    )
       .filter((w) => !w.bare)
       .map((w, i) => worktreeShape(w, i === 0));
     const releasedBranches: string[] = [];
@@ -885,21 +910,15 @@ export class RepoIndexer {
     const only = scope.allProfiles ? null : scope.profileId;
     const mine = scope.profileId;
 
-    // Exact repo names lead even exact branch/folder matches, so naming a
-    // project cannot lose its row to a busy checkout collection.
-    // Exact literal names come first so the intended row survives the result
-    // cap — a name the user typed in full, or the final segment of a repo's or
-    // a checkout's path, which is that directory's name and is not something
-    // FTS5 can pick out of a tokenized path. Within exact/fuzzy groups, bm25
-    // weights per column (entity_id, kind, name, path, repo_name, pr): a hit in
-    // the repo/branch name outranks one buried in a path; PR number/title hits
+    // Exact names come first so the intended row survives the result cap,
+    // and an exact repository name leads even exact branch and folder
+    // matches, so naming a project cannot lose its row to a busy checkout
+    // collection (SEARCH_EXACT_TIER_SQL). Within each tier, bm25 weights per
+    // column (entity_id, kind, name, path, repo_name, pr): a hit in the
+    // repo/branch name outranks one buried in a path; PR number/title hits
     // rank just under names.
-    const [leafPosix, leafWindows] = pathLeafLikePatterns(query);
-    // A bare number names a change request exactly; its `pr` text begins with
-    // that number and a space. Without this the index's prefix match lets
-    // #1060 and every branch spelled `issue-10604` crowd #106 past the cap.
-    const prNumber = changeRequestNumberQuery(query);
-    const prLike = prNumber === null ? null : `${prNumber} %`;
+    const exactTier = searchExactTierParams(query);
+    const prLike = exactTier[1];
     // Rows of a hidden repository are dropped before the cap, not after it
     // (src/main/AGENTS.md). Most profiles hide nothing indexed, and then the
     // clause and its per-row lookup are left out entirely.
@@ -916,22 +935,14 @@ export class RepoIndexer {
          WHERE search_fts_index MATCH ? AND kind <> 'change_request'
            AND (? IS NULL OR profile_id = ?)
            ${hidden}
-         ORDER BY CASE WHEN kind = 'repo' AND name = ? COLLATE NOCASE
-                       THEN -1
-                       WHEN name = ? COLLATE NOCASE
-                         OR (kind IN ('repo', 'worktree')
-                             AND (path LIKE ? ESCAPE '\\'
-                                  OR path LIKE ? ESCAPE '\\'))
-                         OR pr LIKE ?
-                       THEN 0 ELSE 1 END,
+         ORDER BY ${SEARCH_EXACT_TIER_SQL},
                   repo_name = (SELECT name FROM repos WHERE id = ?) COLLATE NOCASE DESC,
                   profile_id = ? DESC,
                   bm25(search_fts_index, 0.0, 0.0, 10.0, 2.0, 4.0, 8.0, 0.0)
          LIMIT 60`
       )
       .all(
-        fts, only, only, query.trim(), query.trim(),
-        leafPosix, leafWindows, prLike, scope.focusedRepoId ?? null, mine
+        fts, only, only, ...exactTier, scope.focusedRepoId ?? null, mine
       ) as {
       entity_id: string;
       kind: RepoSearchHit["kind"];
@@ -1412,6 +1423,7 @@ export class RepoIndexer {
                   s.diverged_from_default AS diverged_from_default,
                   s.is_default_branch AS is_default_branch,
                   s.last_activity_at AS last_activity_at,
+                  s.last_authored_at AS last_authored_at,
                   s.head AS head,
                   s.upstream_gone AS upstream_gone,
                   s.source_remote AS source_remote,
@@ -1457,6 +1469,8 @@ export class RepoIndexer {
       const tracking = missing ? undefined : trackingFromWorktreeState(w);
       if (tracking !== undefined) wt.tracking = tracking;
       if (w.last_activity_at !== null) wt.lastActivityAt = w.last_activity_at;
+      // A gone checkout is no longer work of yours to focus on.
+      if (!missing && w.last_authored_at !== null) wt.lastAuthoredAt = w.last_authored_at;
       if (!missing && w.head !== null && w.head !== "") wt.head = w.head;
       const source = missing ? undefined : forkSourceFromRow(w);
       if (source !== undefined) wt.source = source;
@@ -1512,7 +1526,10 @@ export class RepoIndexer {
   }
 
   /** Every stored identity for one profile, keyed by repo id. */
-  private identityRows(profileId: ProfileId): Map<string, RepoIdentityRow> {
+  private identityRows(
+    profileId: ProfileId,
+    repoIds?: readonly string[]
+  ): Map<string, RepoIdentityRow> {
     const rows = this.db
       .prepare(
         `SELECT i.repo_id, i.host, i.hostname, i.owner, i.name, i.visibility,
@@ -1520,9 +1537,10 @@ export class RepoIndexer {
                 i.remote_hosts, i.viewer_can_push, i.fetched_at
          FROM repo_identity i
          JOIN repos r ON r.id = i.repo_id
-         WHERE r.profile_id = ?`
+         WHERE r.profile_id = ?
+           ${repoIds === undefined ? "" : `AND r.id IN (${repoIds.map(() => "?").join(", ")})`}`
       )
-      .all(profileId) as RepoIdentityRow[];
+      .all(profileId, ...(repoIds ?? [])) as RepoIdentityRow[];
     return new Map(rows.map((row) => [row.repo_id, row]));
   }
 
@@ -1996,34 +2014,35 @@ export async function scanRepoRoot(
   let rootReadable = true;
 
   while (pending.length > 0) {
-    const current = pending.pop();
-    if (current === undefined) break;
-
-    let entries: Dirent[];
-    try {
-      entries = await readdir(current.dir, { withFileTypes: true });
-    } catch {
-      // Only the root is queued at depth 0, so this identifies it without
-      // re-comparing paths the filesystem may normalise differently.
-      if (current.depth === 0) rootReadable = false;
-      continue;
-    }
-
-    visited += 1;
-    if (entries.some((entry) => entry.name === ".git")) {
-      results.push(current.dir);
-    } else if (current.depth < maxDepth) {
-      for (const entry of entries) {
-        if (!entry.isDirectory()) continue;
-        if (SKIP_DIRS.has(entry.name) || entry.name.startsWith(".")) continue;
-        pending.push({
-          dir: join(current.dir, entry.name),
-          depth: current.depth + 1
-        });
+    const batch = pending.splice(-DISCOVERY_CONCURRENCY);
+    const reads = await mapLimit(batch, DISCOVERY_CONCURRENCY, async (current) => {
+      const entries = await readdir(current.dir, { withFileTypes: true }).catch(() => null);
+      return { current, entries };
+    });
+    for (const { current, entries } of reads) {
+      if (entries === null) {
+        // Only the root is queued at depth 0, so this identifies it without
+        // re-comparing paths the filesystem may normalise differently.
+        if (current.depth === 0) rootReadable = false;
+        continue;
       }
-    }
 
-    if (visited % yieldEvery === 0) await yieldToEventLoop();
+      visited += 1;
+      if (entries.some((entry) => entry.name === ".git")) {
+        results.push(current.dir);
+      } else if (current.depth < maxDepth) {
+        for (const entry of entries) {
+          if (!entry.isDirectory()) continue;
+          if (SKIP_DIRS.has(entry.name) || entry.name.startsWith(".")) continue;
+          pending.push({
+            dir: join(current.dir, entry.name),
+            depth: current.depth + 1
+          });
+        }
+      }
+
+      if (visited % yieldEvery === 0) await yieldToEventLoop();
+    }
   }
 
   return { dirs: results, rootReadable };

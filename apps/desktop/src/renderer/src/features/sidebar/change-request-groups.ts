@@ -154,20 +154,32 @@ export function trackingRemote(location: { fullName: string; branch: string }): 
  * GitLab), where only both words are true. The sidebar section and the refs
  * browser read the same list, so they say the same thing.
  */
+/** "Pull request" → "PRs", "Merge request" → "MRs": the plural the sidebar
+ *  heading steps down to when its row is narrow. */
+function changeRequestShortLabel(forge: ForgeKind): string {
+  const initials = changeRequestLabel(forge)
+    .split(/\s+/)
+    .map((word) => word.charAt(0).toUpperCase())
+    .join("");
+  return `${initials}s`;
+}
+
 export function changeRequestWords(
   list: Pick<ChangeRequestList, "remotes"> | null,
   forge: ForgeKind
-): { label: string; plural: string; noun: string } {
+): { label: string; plural: string; short: string; noun: string } {
   const forges = new Set(list?.remotes.map((remote) => remote.forge) ?? []);
   return forges.size > 1
     ? {
         label: "Pull / merge request",
         plural: "Pull & merge requests",
+        short: "PRs & MRs",
         noun: "pull or merge request"
       }
     : {
         label: changeRequestLabel(forge),
         plural: changeRequestPluralLabel(forge),
+        short: changeRequestShortLabel(forge),
         noun: changeRequestNoun(forge)
       };
 }

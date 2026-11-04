@@ -1,11 +1,11 @@
 // dugite is CommonJS; default-import it so the strict-ESM main bundle loads
 // it (a named `import { exec }` throws at runtime).
 import { execFile, spawn, type ChildProcessWithoutNullStreams, type ExecFileOptions } from "node:child_process";
-import { bundledGitEnvironment, installedKeychainHelper } from "@pwrgit/mcp-server";
+import { bundledGitEnvironment, installedKeychainHelper, userSystemConfig } from "@pwrgit/mcp-server";
 import { tmpdir } from "node:os";
 import { delimiter, dirname, isAbsolute, relative, resolve } from "node:path";
 import dugite from "dugite";
-import { err, ok, type PwrGitError, type Result } from "@pwrgit/shared";
+import { err, ok, type GitReflinkSupport, type PwrGitError, type Result } from "@pwrgit/shared";
 import { cliSearchPath } from "../forge/cli-runner";
 import { logMain } from "../logs";
 
@@ -43,6 +43,41 @@ export function configureBundledGitConfig(directory: string | null): void {
 export function useInstalledGit(path: string | null): void {
   installedGit = path;
 }
+
+let reflinkCheckoutWanted = false;
+let probedReflink: { path: string; version: string | null; support: GitReflinkSupport } | null = null;
+
+/** Settings › General › Git runtime › Copy-on-write checkout. */
+export function useReflinkCheckout(enabled: boolean): void {
+  reflinkCheckoutWanted = enabled;
+}
+
+export function reflinkCheckoutEnabled(): boolean {
+  return reflinkCheckoutWanted;
+}
+
+/** Record what a probe of `path` found. Kept per path, so a runtime switch
+ *  stops the flag until the new Git has answered. */
+export function noteGitReflinkSupport(
+  path: string,
+  version: string | null,
+  support: GitReflinkSupport
+): void {
+  probedReflink = { path, version, support };
+}
+
+/** The last probe of the Git in use, or null when it has not answered. */
+export function activeGitReflinkProbe(): { version: string | null; support: GitReflinkSupport } | null {
+  return probedReflink !== null && probedReflink.path === activeGitPath() ? probedReflink : null;
+}
+
+/** Whether every Git process clones on checkout right now: the switch is on
+ *  and the Git in use said it can. */
+export function reflinkCheckoutActive(): boolean {
+  return reflinkCheckoutWanted && activeGitReflinkProbe()?.support.checkout === true;
+}
+
+export const REFLINK_CHECKOUT_ARGS: readonly string[] = ["-c", "checkout.reflink=true"];
 
 export function installedGitSelection(): string | null {
   return installedGit;
@@ -151,8 +186,12 @@ export function gitProcessInvocation(
   args: string[],
   cwd: string
 ): GitProcessInvocation {
+  // Copy-on-write checkout: the bundle gets it from PwrGit's generated system
+  // config (`gitExecutionEnvironment`). An installed Git reads its own system
+  // config, which PwrGit never writes, so it gets a per-process `-c` while on.
+  const flag = installedGit !== null && reflinkCheckoutActive() ? REFLINK_CHECKOUT_ARGS : [];
   return {
-    args: ["-C", cwd, ...args],
+    args: [...flag, "-C", cwd, ...args],
     processCwd: tmpdir()
   };
 }
@@ -165,6 +204,10 @@ export function gitExecutionEnvironment(
   return {
     ...bundledGitEnvironment(bundledDirectory, overrides, {
       configDirectory: generatedConfigDirectory,
+      // Always written, off included, so the runtime's own config never
+      // decides (runtime .2's forced it on). Global and repository config
+      // still override it.
+      checkoutReflink: installedGit === null && reflinkCheckoutActive(),
       searchPath: keychainSearchPath()
     }),
     ...NON_INTERACTIVE_GIT_ENV
@@ -200,15 +243,15 @@ export function installedGitEnvironment(
       delete env[key];
     } else if (
       ["LOCAL_GIT_DIRECTORY", "GIT_EXEC_PATH", "GIT_TEMPLATE_DIR"].includes(upper) ||
-      (["GIT_CONFIG_SYSTEM", "PREFIX", "GIT_SSL_CAINFO"].includes(upper) &&
-        value !== undefined &&
-        inBundle(value)) ||
-      (upper === "GIT_CONFIG_SYSTEM" &&
-        value !== undefined &&
-        generatedConfigDirectory !== null &&
-        within(resolve(generatedConfigDirectory), value))
+      (["PREFIX", "GIT_SSL_CAINFO"].includes(upper) && value !== undefined && inBundle(value))
     ) {
       delete env[key];
+    } else if (upper === "GIT_CONFIG_SYSTEM") {
+      // The user's own system config, unwrapped from any a Pwr app generated;
+      // with none, the installed Git reads its own.
+      const user = userSystemConfig(bundle, generatedConfigDirectory, value);
+      if (user === undefined) delete env[key];
+      else env[key] = user;
     }
   }
   const searchPath = process.platform === "win32" ? inheritedPath : [inheritedPath, cliSearchPath()].join(delimiter);

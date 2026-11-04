@@ -8,7 +8,8 @@ import {
   type MouseEvent as ReactMouseEvent,
   type ReactNode
 } from "react";
-import { createPortal } from "react-dom";
+import { createPortal, flushSync } from "react-dom";
+import { useDismissable } from "./useDismissable";
 
 const VIEWPORT_PADDING = 12;
 const TOOLTIP_GAP = 8;
@@ -25,13 +26,71 @@ export type TooltipRect = {
   bottom: number;
 };
 
+/**
+ * The transparent strip that joins an interactive card to its trigger.
+ *
+ * A card placed `TOOLTIP_GAP` away from its trigger leaves a gap the pointer
+ * has to cross to reach the card's controls, and in that gap it is on neither.
+ * The strip is part of the card, so the pointer never leaves one for nothing.
+ * PwrAgnt's `.messaging-status-popover` does the same with padding.
+ * `left`/`right` are insets from the card's edges (negative to reach a trigger
+ * the clamp pushed past them).
+ */
+type TooltipBridge = {
+  side: "above" | "below";
+  height: number;
+  left: number;
+  right: number;
+};
+
 type TooltipState = {
   content: ReactNode;
   targetRect: TooltipRect;
   anchor?: TooltipAnchor;
   left?: number;
   top?: number;
+  bridge?: TooltipBridge;
 };
+
+/**
+ * Where an interactive card's bridge goes, or nothing when the card touches
+ * or overlaps its trigger.
+ *
+ * The strip ends exactly at the trigger's edge and never overlaps it. An
+ * overlap would cover the trigger, so a click there would land on the card.
+ * A trigger that hides its card on `mouseleave` at once would also flicker: a
+ * pointer resting on the overlap is on the card, so the trigger hides it,
+ * which uncovers the trigger, which opens it again. The
+ * strip is positioned from the card's padding edge, so `border` (the card's
+ * own border on that side) is added back to reach the trigger.
+ */
+function bridgeBetween(
+  card: TooltipRect,
+  target: TooltipRect,
+  border: { top: number; bottom: number }
+): TooltipBridge | undefined {
+  const left = Math.min(0, target.left - card.left);
+  const right = Math.min(0, card.right - target.right);
+  if (card.bottom <= target.top) {
+    const gap = target.top - card.bottom;
+    return gap > 0
+      ? { side: "below", height: gap + border.bottom, left, right }
+      : undefined;
+  }
+  if (card.top >= target.bottom) {
+    const gap = card.top - target.bottom;
+    return gap > 0
+      ? { side: "above", height: gap + border.top, left, right }
+      : undefined;
+  }
+  return undefined;
+}
+
+/** What `hoverTooltip` and its variants need from a tooltip. */
+export type TooltipHandle = Pick<
+  ViewportTooltip,
+  "show" | "hide" | "hideFrom" | "blurFrom"
+>;
 
 export type ViewportTooltip = {
   /**
@@ -58,6 +117,19 @@ export type ViewportTooltip = {
   hideFrom: (event: {
     relatedTarget: EventTarget | null;
   }) => void;
+  /**
+   * Focus left a trigger. Hides, unless focus went into the card — pressing a
+   * control in an interactive card focuses it, and Chromium does that on
+   * mousedown, so hiding here unmounted the control before its click landed.
+   */
+  blurFrom: (event: { relatedTarget: EventTarget | null }) => void;
+  /**
+   * Open `content` on `target` and hold it there: a click asking for the card.
+   * Unlike `setSticky`, which leaves dismissal to its caller, a pinned card
+   * also closes on a press anywhere outside it and its trigger, and hovering
+   * another trigger of this tooltip does not replace it.
+   */
+  pin: (target: HTMLElement, content: ReactNode) => boolean;
   /** Delay dismissal long enough to cross from a hover target into a card. */
   scheduleHide: () => void;
   /**
@@ -115,13 +187,13 @@ export type ViewportTooltip = {
  * and "Which hover popups are gated" in this directory's AGENTS.md.
  */
 export function hoverTooltip(
-  tip: Pick<ViewportTooltip, "show" | "hide" | "hideFrom">,
+  tip: TooltipHandle,
   content: ReactNode
 ): {
   onMouseEnter: (event: ReactMouseEvent<HTMLElement>) => void;
   onMouseLeave: (event: ReactMouseEvent<HTMLElement>) => void;
   onFocus: (event: ReactFocusEvent<HTMLElement>) => void;
-  onBlur: () => void;
+  onBlur: (event: ReactFocusEvent<HTMLElement>) => void;
 } {
   // `null` and `false` are legitimate ReactNodes that render nothing, so they
   // count as empty alongside `undefined` and "". A node that renders nothing
@@ -145,7 +217,40 @@ export function hoverTooltip(
     // put the row's own card back. See `hideFrom`.
     onMouseLeave: tip.hideFrom,
     onFocus: open,
-    onBlur: tip.hide
+    onBlur: tip.blurFrom
+  };
+}
+
+/**
+ * `hoverTooltip` for an interactive card the user may want to keep: hover
+ * opens it, and a click pins it until Escape or a press outside it (`pin`).
+ * Enter or Space pins it too, and moves focus into the card, since a keyboard
+ * user who asked for its controls has no other way to reach them.
+ *
+ * The click is the trigger's whole action, so this owns `onClick`; spread it
+ * on an element that does nothing else when pressed.
+ */
+export function pinnableTooltip(
+  tip: TooltipHandle & Pick<ViewportTooltip, "pin" | "focusFirst">,
+  content: ReactNode
+): ReturnType<typeof hoverTooltip> & {
+  onClick: (event: ReactMouseEvent<HTMLElement>) => void;
+} {
+  return {
+    ...hoverTooltip(tip, content),
+    onClick: (event) => {
+      const target = event.currentTarget;
+      // Committed before `focusFirst` reads the card: the pin may open it, or
+      // swap another trigger's card for this one, and focusing the card still
+      // on screen would land on a control about to be replaced.
+      let pinned = false;
+      flushSync(() => {
+        pinned = tip.pin(target, content);
+      });
+      if (!pinned) return;
+      // A click from Enter or Space carries no pointer, so `detail` is 0.
+      if (event.detail === 0) tip.focusFirst();
+    }
   };
 }
 
@@ -158,7 +263,7 @@ export function hoverTooltip(
  * then. Measured on every enter rather than observed, because the answer moves
  * with the pane width and the text-size notch and is only ever asked here.
  */
-function isCutShort(el: HTMLElement): boolean {
+export function isCutShort(el: HTMLElement): boolean {
   if (el.scrollWidth > el.clientWidth) return true;
   // Both of those are whole pixels, but the ellipsis is decided at subpixel
   // precision: text 0.3px too wide is cut short while both read 120. The text
@@ -178,21 +283,33 @@ function isCutShort(el: HTMLElement): boolean {
 }
 
 export function truncatedTooltip(
-  tip: Pick<ViewportTooltip, "show" | "hide" | "hideFrom">,
+  tip: TooltipHandle,
   text: string
 ): ReturnType<typeof hoverTooltip> {
-  const handlers = hoverTooltip(tip, text);
-  const ifTruncated =
+  return gatedTooltip(tip, text, isCutShort);
+}
+
+/**
+ * `hoverTooltip` that opens only while `when(trigger)` holds, asked on each
+ * enter and focus. Leaving and blurring always close.
+ */
+export function gatedTooltip(
+  tip: TooltipHandle,
+  content: ReactNode,
+  when: (trigger: HTMLElement) => boolean
+): ReturnType<typeof hoverTooltip> {
+  const handlers = hoverTooltip(tip, content);
+  const gated =
     <E extends ReactMouseEvent<HTMLElement> | ReactFocusEvent<HTMLElement>>(
       open: (event: E) => void
     ) =>
     (event: E): void => {
-      if (isCutShort(event.currentTarget)) open(event);
+      if (when(event.currentTarget)) open(event);
     };
   return {
     ...handlers,
-    onMouseEnter: ifTruncated(handlers.onMouseEnter),
-    onFocus: ifTruncated(handlers.onFocus)
+    onMouseEnter: gated(handlers.onMouseEnter),
+    onFocus: gated(handlers.onFocus)
   };
 }
 
@@ -331,6 +448,9 @@ export function useViewportTooltip(
   const pointerInInteractiveTooltipRef = useRef(false);
   /** Set by `setSticky`; read by the two dismissals the pointer owns. */
   const stickyRef = useRef(false);
+  /** The trigger a `pin` holds the card on, and whether one does. */
+  const pinnedTargetRef = useRef<HTMLElement | null>(null);
+  const [pinned, setPinned] = useState(false);
   // Latched: the caller passes a fresh closure every render, and the only
   // things that read it are event handlers registered once.
   const onPointerWithinRef = useRef(onPointerWithin);
@@ -356,7 +476,35 @@ export function useViewportTooltip(
       ...(state.anchor === undefined ? {} : { anchor: state.anchor })
     });
     if (state.left !== left || state.top !== top) {
-      setState({ ...state, left, top });
+      // Only a card placed against its trigger gets a bridge. A
+      // pointer-anchored card opens beside the cursor, over the trigger's own
+      // row, so there is no gap between the two to cross.
+      const style =
+        interactive && state.anchor === undefined
+          ? getComputedStyle(el)
+          : undefined;
+      const bridge =
+        style === undefined
+          ? undefined
+          : bridgeBetween(
+              {
+                left,
+                top,
+                right: left + rect.width,
+                bottom: top + rect.height
+              },
+              state.targetRect,
+              {
+                top: parseFloat(style.borderTopWidth) || 0,
+                bottom: parseFloat(style.borderBottomWidth) || 0
+              }
+            );
+      setState({
+        ...state,
+        left,
+        top,
+        ...(bridge === undefined ? {} : { bridge })
+      });
     }
   }, [interactive, state]);
 
@@ -370,6 +518,8 @@ export function useViewportTooltip(
     cancelScheduledHide();
     pointerInInteractiveTooltipRef.current = false;
     stickyRef.current = false;
+    pinnedTargetRef.current = null;
+    setPinned(false);
     // The card is going, so the pointer is not in it by any reading a user
     // would give — and `leaveInteractiveTooltip` cannot say so once the node
     // is gone. Whichever channel reports pointer state has to be the one that
@@ -425,6 +575,12 @@ export function useViewportTooltip(
     // origin beside nothing — and, with no trigger left to fire `mouseleave`,
     // leave it there. There is nothing to anchor to, so there is nothing to show.
     if (!target.isConnected) return false;
+    // A pinned card is the user's. Hovering another trigger of the same
+    // tooltip on the way to it must not swap it out.
+    const pinnedOn = pinnedTargetRef.current;
+    if (pinnedOn !== null && pinnedOn !== target && pinnedOn.isConnected) {
+      return false;
+    }
     cancelScheduledHide();
     pointerInInteractiveTooltipRef.current = false;
     targetRef.current = target;
@@ -445,6 +601,17 @@ export function useViewportTooltip(
     // should be on screen now, because its own `mouseenter` will not fire
     // again for a descendant it never lost the pointer to.
     const to = event.relatedTarget;
+    // A pinned card stays where the user put it.
+    if (stickyRef.current) return;
+    // Straight onto the card (its bridge, usually): the card's own
+    // `mouseleave` decides from here.
+    if (
+      interactive &&
+      to instanceof Node &&
+      tooltipRef.current?.contains(to) === true
+    ) {
+      return;
+    }
     if (to instanceof HTMLElement) {
       for (let el: HTMLElement | null = to; el !== null; el = el.parentElement) {
         const remembered = contentByTargetRef.current.get(el);
@@ -454,8 +621,39 @@ export function useViewportTooltip(
         }
       }
     }
+    // An interactive card gets the grace period it promises: the pointer may
+    // be on its way there. A plain tooltip just goes.
+    if (interactive) scheduleHide();
+    else hide();
+  }, [hide, interactive, scheduleHide, show]);
+
+  const blurFrom = useCallback((event: {
+    relatedTarget: EventTarget | null;
+  }): void => {
+    if (stickyRef.current) return;
+    if (interactive) {
+      const to = event.relatedTarget;
+      if (to instanceof Node && tooltipRef.current?.contains(to) === true) return;
+      // A press on a control that does not take focus blurs to nothing. The
+      // pointer being on the card is the same answer.
+      if (pointerInInteractiveTooltipRef.current) return;
+    }
     hide();
-  }, [hide, show]);
+  }, [hide, interactive]);
+
+  const pin = useCallback((target: HTMLElement, content: ReactNode): boolean => {
+    // Re-pinning from a new trigger is a new request; let `show` take it.
+    pinnedTargetRef.current = null;
+    // So is a click on a trigger whose card Escape just dismissed: the latch
+    // only stops a focus restore from reopening it. `setSticky` clears it
+    // too, but only after `show`, which would already have refused.
+    dismissedTargetRef.current = null;
+    if (!show(target, content)) return false;
+    pinnedTargetRef.current = target;
+    setPinned(true);
+    setSticky(true);
+    return true;
+  }, [setSticky, show]);
 
   const update = useCallback((content: ReactNode): void => {
     setState((current) => (current ? { ...current, content } : current));
@@ -464,7 +662,7 @@ export function useViewportTooltip(
   const visible = state !== undefined;
   useEffect(() => {
     if (!visible) return;
-    const onScroll = (): void => {
+    const onScroll = (event: Event): void => {
       // Playwright and browsers can emit a scroll while bringing a control in
       // this card into view. Once the user has reached an interactive card,
       // that mechanical scroll must not make the card run away from its own
@@ -475,9 +673,23 @@ export function useViewportTooltip(
       // `WorktreeHeader`) and never sets the pointer flag, so without this
       // any scroll anywhere — the graph adjusting scrollTop as commits stream
       // in — would take the card away with their focus still inside it.
-      // A pinned card is anchored to a control that does not scroll, and the
-      // user asked for it — scrolling the graph underneath is not a dismissal.
-      if (stickyRef.current) return;
+      // A pinned card is the user's; scrolling the graph underneath is not a
+      // dismissal. Scrolling the trigger itself away is: the card is fixed in
+      // the viewport, so it would stay put with nothing beside it. "Why?"
+      // sits at the foot of the scrolling Changes list.
+      if (stickyRef.current) {
+        const pinnedOn = pinnedTargetRef.current;
+        const scroller = event.target;
+        if (
+          pinnedOn !== null &&
+          scroller instanceof Node &&
+          scroller !== document &&
+          scroller.contains(pinnedOn)
+        ) {
+          hide();
+        }
+        return;
+      }
       if (interactive && pointerInInteractiveTooltipRef.current) return;
       if (
         interactive &&
@@ -558,6 +770,32 @@ export function useViewportTooltip(
     };
   }, [visible, hide, interactive]);
 
+  // A pinned card is a click-opened overlay, so Escape on it goes through the
+  // same owner as every menu and dialog: claimed, so the diff pane under it
+  // does not close too, and focus handed back to the trigger.
+  useDismissable({
+    open: pinned,
+    onDismiss: hide,
+    triggerRef: pinnedTargetRef,
+    surfaceRef: tooltipRef
+  });
+
+  // A pinned card closes on a press anywhere but itself and its trigger. The
+  // press still lands where it was aimed; capture phase so a surface that
+  // stops propagation cannot strand the card, as in `useRemoteActivityPopover`.
+  useEffect(() => {
+    if (!pinned) return;
+    const onPointerDown = (event: MouseEvent): void => {
+      const target = event.target;
+      if (!(target instanceof Node)) return;
+      if (tooltipRef.current?.contains(target) === true) return;
+      if (pinnedTargetRef.current?.contains(target) === true) return;
+      hide();
+    };
+    window.addEventListener("mousedown", onPointerDown, true);
+    return () => window.removeEventListener("mousedown", onPointerDown, true);
+  }, [hide, pinned]);
+
   const enterInteractiveTooltip = useCallback((): void => {
     pointerInInteractiveTooltipRef.current = true;
     cancelScheduledHide();
@@ -605,6 +843,22 @@ export function useViewportTooltip(
                 }
               : {})}
           >
+            {state.bridge !== undefined && (
+              <div
+                data-tooltip-bridge=""
+                aria-hidden="true"
+                style={{
+                  position: "absolute",
+                  left: state.bridge.left,
+                  right: state.bridge.right,
+                  height: state.bridge.height,
+                  pointerEvents: "auto",
+                  ...(state.bridge.side === "below"
+                    ? { top: "100%" }
+                    : { bottom: "100%" })
+                }}
+              />
+            )}
             {state.content}
           </div>,
           document.body
@@ -616,6 +870,8 @@ export function useViewportTooltip(
     update,
     hide,
     hideFrom,
+    blurFrom,
+    pin,
     scheduleHide,
     setSticky,
     focusFirst,

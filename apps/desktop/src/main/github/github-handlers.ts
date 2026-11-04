@@ -159,6 +159,13 @@ export function registerGitHubHandlers(
       syncVisibleReasonsForRepo(repoId);
     }
   });
+  // A branch refresh asks about a no-upstream branch's tip through the
+  // commit association; what it learns reaches the commit list like any
+  // other discovery.
+  const stopCommitChanges = prs.onCommitsChanged((repoId, changed) => {
+    publishCommitPrs(repoId, changed);
+    syncVisibleReasonsForRepo(repoId);
+  });
 
   bus.register("pr:refresh", async (req) => {
     if (req.branches === undefined) onRepoSweep?.(req.repoId);
@@ -364,6 +371,7 @@ export function registerGitHubHandlers(
 
   const stop = (): void => {
     stopForgeStatus();
+    stopCommitChanges();
     visibleCommitReasons.clear();
     reasonGenerations.clear();
     reasonsByWebContents.clear();

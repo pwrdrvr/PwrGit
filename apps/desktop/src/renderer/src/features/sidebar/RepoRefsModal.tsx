@@ -78,6 +78,7 @@ import {
   worktreeStatusCounts,
   type WorktreeStatusFilter
 } from "./RepoWorktreeTable";
+import { forkMenuLabel } from "../shell/worktree-menu-items";
 import { CloseGlyph } from "../../lib/CloseGlyph";
 import { SearchGlyph } from "../../lib/SearchGlyph";
 import { TagGlyph } from "../../lib/TagGlyph";
@@ -587,6 +588,7 @@ export function RepoRefsModal({
   initialWorktreeStatus = "all",
   onCleanUpBranches,
   onPruneWorktrees,
+  onFork,
   onRemoveWorktree,
   onRefresh,
   onLocateTag,
@@ -610,6 +612,8 @@ export function RepoRefsModal({
   initialWorktreeStatus?: WorktreeStatusFilter;
   /** Where the Worktrees tab's Finished view sends its one verb. */
   onPruneWorktrees?: (() => void) | undefined;
+  /** Fork the repository, from the Worktrees tab's row menu. */
+  onFork?: (() => void) | undefined;
   /** The sidebar row's Remove worktree, for the Worktrees tab's rows. */
   onRemoveWorktree?: ((worktreeId: string) => void) | undefined;
   /** Where the Gone view's "Clean up finished branches…" goes. Absent, the
@@ -1545,6 +1549,8 @@ export function RepoRefsModal({
               onRevealWorktree={onRevealWorktree}
               onPruneWorktrees={onPruneWorktrees}
               onRemoveWorktree={onRemoveWorktree}
+              forkLabel={forkMenuLabel(repo)}
+              onFork={onFork}
               onClose={onClose}
             />
           )}

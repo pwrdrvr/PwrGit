@@ -86,11 +86,13 @@ export type TokenForgeProvider = {
   kind: ForgeKind;
   /** A token for this host, or null when the user isn't logged in. */
   getToken(host: string): Promise<string | null>;
-  /** Newest change request per source branch. One entry per requested branch. */
+  /** Newest change request per source branch. Configured source repositories
+   * let a provider distinguish our fork contributions from name collisions. */
   fetchPrsForBranches(
     token: string,
     repo: ForgeRepo,
-    branches: string[]
+    branches: string[],
+    sourceRepos?: readonly ForgeRepo[]
   ): Promise<Map<string, PrSummary | null>>;
   /** Best change request associated with each exact commit SHA. */
   fetchPrsForCommits(
@@ -159,7 +161,8 @@ export function withNullsForMissing<K>(
 export type ForgeConnection = {
   fetchPrsForBranches(
     repo: ForgeRepo,
-    branches: string[]
+    branches: string[],
+    sourceRepos?: readonly ForgeRepo[]
   ): Promise<Map<string, PrSummary | null>>;
   fetchPrsForCommits(
     repo: ForgeRepo,
@@ -186,8 +189,8 @@ export async function connectForge(
   const token = await provider.getToken(host);
   if (token === null) return null;
   return {
-    fetchPrsForBranches: (repo, branches) =>
-      provider.fetchPrsForBranches(token, repo, branches),
+    fetchPrsForBranches: (repo, branches, sourceRepos) =>
+      provider.fetchPrsForBranches(token, repo, branches, sourceRepos),
     fetchPrsForCommits: (repo, commits) =>
       provider.fetchPrsForCommits(token, repo, commits),
     fetchPrsByNumbers: (repo, numbers) =>

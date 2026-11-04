@@ -1,12 +1,22 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState
+} from "react";
+import {
+  BRANCH_CLEANUP_KEEP_DAYS,
   formatBytes,
   STALE_AGE_DAYS,
   type PruneCandidate,
-  type PruneScanSummary
+  type PruneScanSummary,
+  type WorktreeFinishedAfterDays
 } from "@pwrgit/shared";
 import { confirmDialog } from "../shell/dialogs";
+import { revealLabel, revealPath } from "../shell/reveal";
 import { dispatch, subscribe } from "../../lib/pwrgit";
+import type { RemoveWorktreesOutcome } from "../../state/useRepoTree";
 import { currentPlatform } from "../../lib/platform";
 import { relativeAge } from "../../lib/relativeAge";
 import {
@@ -14,8 +24,9 @@ import {
   useViewportTooltip
 } from "../../lib/useViewportTooltip";
 import { ReclaimDiskPanel } from "./ReclaimDiskPanel";
-import { MaintenanceRulesApplied } from "./MaintenancePlan";
+import { daysLabel, FinishedAfterSelect, MaintenanceRulesApplied } from "./MaintenancePlan";
 import { StatusMark } from "./BulkSyncStatus";
+import { DetailsToggle, Icon, ProblemCard, Reason } from "./MaintenanceProblem";
 import {
   describeBytes,
   emptyReviewCopy,
@@ -58,16 +69,25 @@ export function PruneWorktreesPanel({
   onContinue,
   step = false,
   onChangeRules,
-  protectRecent: initialProtectRecent = true,
-  protectionDays: initialProtectionDays = 7
+  protectRecent: givenProtectRecent = true,
+  protectionDays: givenProtectionDays = 7,
+  finishedAfterDays: givenFinishedAfterDays = STALE_AGE_DAYS,
+  onProtectRecent,
+  onProtectionDays,
+  onFinishedAfterDays,
+  rulesLoaded = true
 }: {
   profileId: string;
   /**
    * Bulk removal — `useRepoTree.removeWorktrees`, already confirmed here.
    * Reusing it keeps one removal path: it streams `worktree:removed`, prunes
-   * the sidebar rows live, and owns the dirty/force retry.
+   * the sidebar rows live, and owns the dirty/force retry. It reports what
+   * became of each id, and this panel shows that inline.
    */
-  onRemove: (worktreeIds: string[]) => Promise<void>;
+  onRemove: (
+    worktreeIds: string[],
+    options?: { force?: boolean }
+  ) => Promise<RemoveWorktreesOutcome>;
   onClose: () => void;
   onBusyChange?: (busy: boolean) => void;
   onCandidateCount?: (count: number) => void;
@@ -78,9 +98,29 @@ export function PruneWorktreesPanel({
   onChangeRules?: () => void;
   protectRecent?: boolean;
   protectionDays?: number;
+  /** Days without commits before a merged branch counts as finished. */
+  finishedAfterDays?: WorktreeFinishedAfterDays;
+  /** With these, the rules belong to the caller (which saves them); without,
+   *  the panel keeps its own copy, seeded from the values above. */
+  onProtectRecent?: (enabled: boolean) => void;
+  onProtectionDays?: (days: number) => void;
+  onFinishedAfterDays?: (days: WorktreeFinishedAfterDays) => void;
+  /** False until the caller's saved rules arrive; a sweep waits for them. */
+  rulesLoaded?: boolean;
 }) {
-  const [protectRecent, setProtectRecent] = useState(initialProtectRecent);
-  const [protectionDays, setProtectionDays] = useState(initialProtectionDays);
+  const [ownProtectRecent, setOwnProtectRecent] = useState(givenProtectRecent);
+  const [ownProtectionDays, setOwnProtectionDays] = useState(givenProtectionDays);
+  const [ownFinishedAfterDays, setOwnFinishedAfterDays] = useState(givenFinishedAfterDays);
+  const protectRecent = onProtectRecent === undefined ? ownProtectRecent : givenProtectRecent;
+  const protectionDays = onProtectionDays === undefined ? ownProtectionDays : givenProtectionDays;
+  const finishedAfterDays = onFinishedAfterDays === undefined ? ownFinishedAfterDays : givenFinishedAfterDays;
+  const setProtectRecent = onProtectRecent ?? setOwnProtectRecent;
+  const setProtectionDays = onProtectionDays ?? setOwnProtectionDays;
+  const setFinishedAfterDays = onFinishedAfterDays ?? setOwnFinishedAfterDays;
+  // Read when a sweep starts, not a dependency of it: a changed rule must not
+  // cancel and restart a sweep the combined workflow already began.
+  const finishedAfterRef = useRef(finishedAfterDays);
+  finishedAfterRef.current = finishedAfterDays;
   const [stage, setStage] = useState<Stage>({ kind: autoStart ? "sweeping" : "idle" });
   const [summary, setSummary] = useState<PruneScanSummary | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -103,6 +143,17 @@ export function PruneWorktreesPanel({
   const reclaimedRef = useRef(false);
   /** The reclaim panel is mid-`git clean`; see `busy` below. */
   const [reclaiming, setReclaiming] = useState(false);
+  /** What the last removal could not do, shown in place of the list's end. */
+  const [failures, setFailures] = useState<RemovalFailure[]>([]);
+  /** How many the last run removed, for the outcome card's second line. */
+  const [removedThisRun, setRemovedThisRun] = useState(0);
+  const [keptDirty, setKeptDirty] = useState<PruneCandidate[]>([]);
+  /** The delete in flight: which worktree, and how far its folder has gone. */
+  const [removing, setRemoving] = useState<{
+    ids: string[];
+    current: string | null;
+    itemsDeleted: number;
+  } | null>(null);
 
   const runSweep = useCallback(
     (force: boolean): void => {
@@ -115,6 +166,8 @@ export function PruneWorktreesPanel({
       setRemoved(new Set());
       removedRef.current.clear();
       setError(null);
+      setFailures([]);
+      setKeptDirty([]);
       setCancelling(false);
       setSweep({
         completedRepos: 0,
@@ -122,7 +175,12 @@ export function PruneWorktreesPanel({
         repoName: null,
         sizing: null
       });
-      void dispatch("prune:scan", { operationId, profileId, force }).then(
+      void dispatch("prune:scan", {
+        operationId,
+        profileId,
+        force,
+        finishedAfterDays: finishedAfterRef.current
+      }).then(
         (result) => {
           if (sweepRunRef.current !== run) return;
           if (result.ok) {
@@ -190,6 +248,16 @@ export function PruneWorktreesPanel({
     return subscribe("worktree:removed", ({ worktreeId }) => {
       removedRef.current.add(worktreeId);
       setRemoved((previous) => new Set(previous).add(worktreeId));
+    });
+  }, []);
+
+  useEffect(() => {
+    return subscribe("worktree:removeProgress", ({ worktreeId, itemsDeleted }) => {
+      setRemoving((previous) =>
+        previous === null || !previous.ids.includes(worktreeId)
+          ? previous
+          : { ...previous, current: worktreeId, itemsDeleted }
+      );
     });
   }, []);
 
@@ -271,6 +339,40 @@ export function PruneWorktreesPanel({
     );
   };
 
+  /**
+   * Run a removal and keep what it reports. `force` is only for Retry: those
+   * worktrees were already confirmed, and what is left of them is PwrGit's
+   * own half-finished delete, which Git reads as uncommitted changes.
+   */
+  const runRemoval = async (ids: string[], force: boolean): Promise<void> => {
+    setStage({ kind: "removing" });
+    setError(null);
+    setFailures([]);
+    setKeptDirty([]);
+    setRemoving({ ids, current: ids[0] ?? null, itemsDeleted: 0 });
+    try {
+      const result = await (force ? onRemove(ids, { force: true }) : onRemove(ids));
+      for (const id of result.removed) removedRef.current.add(id);
+      setRemoved((previous) => new Set([...previous, ...result.removed]));
+      setSelected(new Set());
+      const byId = new Map(swept.map((candidate) => [candidate.worktreeId, candidate]));
+      setFailures(result.failed.flatMap((failure) => {
+        const candidate = byId.get(failure.id);
+        return candidate === undefined ? [] : [{ ...failure, candidate }];
+      }));
+      setRemovedThisRun(result.removed.length);
+      setKeptDirty(result.keptDirty.flatMap((id) => byId.get(id) ?? []));
+      if (onContinue !== undefined && ids.every((id) => removedRef.current.has(id))) {
+        continueWithRemoved();
+      }
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : String(cause));
+    } finally {
+      setRemoving(null);
+      setStage({ kind: "review" });
+    }
+  };
+
   const remove = async (): Promise<void> => {
     const picked = candidates.filter((candidate) =>
       selected.has(candidate.worktreeId)
@@ -283,23 +385,7 @@ export function PruneWorktreesPanel({
       danger: true
     });
     if (!go) return;
-    const ids = picked.map((candidate) => candidate.worktreeId);
-    setStage({ kind: "removing" });
-    try {
-      await onRemove(ids);
-      setSelected(new Set());
-      if (onContinue !== undefined) {
-        if (ids.every((id) => removedRef.current.has(id))) {
-          continueWithRemoved();
-        } else {
-          setError("Some worktrees were not removed. Review the remaining worktrees or continue without further pruning.");
-        }
-      }
-    } catch (cause) {
-      setError(cause instanceof Error ? cause.message : String(cause));
-    } finally {
-      setStage({ kind: "review" });
-    }
+    await runRemoval(picked.map((candidate) => candidate.worktreeId), false);
   };
 
   const busy =
@@ -353,7 +439,7 @@ export function PruneWorktreesPanel({
 
             {!step && stage.kind === "idle" && <fieldset className="prune__protection">
               <legend>Finished worktrees</legend>
-              <div className="prune__fixed"><span className="prune__fixed-mark" aria-hidden="true" /><strong>Finished means merged</strong><p>A merged pull request, or merged into the default branch with no commits for {STALE_AGE_DAYS} days. Worktrees that share no history with the default branch count too.</p></div>
+              <div className="prune__fixed"><span className="prune__fixed-mark" aria-hidden="true" /><strong>Finished means merged</strong><p>A merged pull request, or a branch merged into the default branch. Worktrees that share no history with the default branch count after {STALE_AGE_DAYS} days without commits.</p></div>
               <div className="prune__protection-controls">
                 <label>
                   <input type="checkbox" checked={protectRecent} disabled={busy}
@@ -369,12 +455,20 @@ export function PruneWorktreesPanel({
                       setProtectionDays(Number(event.target.value));
                       setSelected(new Set());
                     }}>
-                    {[1, 3, 7, 14, 30, 90].map((days) => (
-                      <option key={days} value={days}>{days} {days === 1 ? "day" : "days"}</option>
+                    {BRANCH_CLEANUP_KEEP_DAYS.map((days) => (
+                      <option key={days} value={days}>{daysLabel(days)}</option>
                     ))}
                   </select>
               </div>
-              <p>Touched is the newest commit or file change, ignored files included. Resets to 7 days each time you open this tab.</p>
+              <div className="prune__protection-controls is-indented">
+                <span>Count a branch merged into the default branch as finished</span>
+                <FinishedAfterSelect label="Finished after" value={finishedAfterDays} disabled={busy}
+                  onChange={(days) => {
+                    setFinishedAfterDays(days);
+                    setSelected(new Set());
+                  }} />
+              </div>
+              <p>Touched is the newest commit or file change, ignored files included.{onFinishedAfterDays === undefined ? "" : " Both rules are saved, and the merged rule also decides the sidebar’s Stale lens."}</p>
             </fieldset>}
             {!step && stage.kind === "idle" && <div className="maintenance__never prune__never"><em>Never offered</em><span>Worktrees with uncommitted or untracked changes</span><span>The repository’s main checkout, and worktrees on the default branch</span><span>Worktrees whose activity could not be fully read</span></div>}
             {!step && stage.kind === "idle" && <p className="prune__intro-note">Removing a worktree deletes its folder. Its branch is kept, and so are the commits.</p>}
@@ -424,8 +518,22 @@ export function PruneWorktreesPanel({
                 </div><time>took {Math.max(0, Math.round((Date.parse(summary.finishedAt) - Date.parse(summary.startedAt)) / 1000))}s</time>
               </div>
             )}
-            {error !== null && <div className="modal__error">{error}</div>}
-            {summary !== null && stage.kind === "review" && <MaintenanceRulesApplied kind="worktrees" protectRecent={protectRecent} protectionDays={protectionDays}
+            {stage.kind === "removing" && removing !== null && (
+              <RemovalActivity removing={removing} candidates={swept} />
+            )}
+            {error !== null && <div className="modal__error" role="alert">{error}</div>}
+            {stage.kind === "review" && failures.length > 0 && (
+              <RemovalFailures
+                failures={failures}
+                removedCount={removedThisRun}
+                canContinue={onContinue !== undefined}
+                onRetry={(ids) => void runRemoval(ids, true)}
+              />
+            )}
+            {stage.kind === "review" && keptDirty.length > 0 && (
+              <KeptForChanges kept={keptDirty} />
+            )}
+            {summary !== null && stage.kind === "review" && <MaintenanceRulesApplied kind="worktrees" protectRecent={protectRecent} protectionDays={protectionDays} finishedAfterDays={finishedAfterDays}
               onChange={() => { if (step) onChangeRules?.(); else { setSummary(null); setStage({ kind: "idle" }); setSelected(new Set()); } }} />}
 
             {stage.kind === "review" && candidates.length > 0 && (
@@ -491,7 +599,7 @@ export function PruneWorktreesPanel({
               {stage.kind === "idle" ? (
                 <>
                   <button className="modal__cancel" onClick={onClose}>Close</button>
-                  <button className="modal__create" onClick={() => runSweep(false)}>Find finished worktrees</button>
+                  <button className="modal__create" disabled={!rulesLoaded} onClick={() => runSweep(false)}>Find finished worktrees</button>
                 </>
               ) : stage.kind === "sweeping" ? (
                 <button
@@ -585,5 +693,161 @@ function PruneRow({
       <span className="prune__row-size">{candidate.sizeBytes === null ? "size unknown" : `${candidate.sizePartial === true ? "≥ " : ""}${formatBytes(candidate.sizeBytes)}`}</span>
       {tip.tooltipNode}
     </label>
+  );
+}
+
+const label = (candidate: PruneCandidate): string =>
+  `${candidate.repoName} · ${candidate.branch}`;
+
+type RemovalFailure = RemoveWorktreesOutcome["failed"][number] & {
+  candidate: PruneCandidate;
+};
+
+function RemovalActivity({
+  removing,
+  candidates
+}: {
+  removing: { ids: string[]; current: string | null; itemsDeleted: number };
+  candidates: PruneCandidate[];
+}) {
+  const current = candidates.find((c) => c.worktreeId === removing.current);
+  const index = removing.current === null ? 0 : removing.ids.indexOf(removing.current);
+  return (
+    <div className="prune__activity" role="status" aria-live="polite" aria-atomic="true">
+      <span className="prune__spinner" aria-hidden="true" />
+      <div className="prune__activity-copy">
+        <strong>
+          {current === undefined
+            ? `Removing ${removing.ids.length} worktree${removing.ids.length === 1 ? "" : "s"}`
+            : `Removing ${label(current)}`}
+        </strong>
+        <span>
+          {removing.itemsDeleted.toLocaleString()} files deleted
+          {removing.ids.length > 1
+            ? ` · worktree ${Math.max(0, index) + 1} of ${removing.ids.length}`
+            : ""}
+        </span>
+      </div>
+    </div>
+  );
+}
+
+function ProblemRow({
+  failure,
+  onRetry
+}: {
+  failure: RemovalFailure;
+  onRetry: (() => void) | null;
+}) {
+  const [open, setOpen] = useState(false);
+  const tip = useViewportTooltip();
+  const { candidate } = failure;
+  return (
+    <li className="maintenance__problem-row">
+      <strong>
+        <span>{candidate.repoName}</span> · {candidate.branch}
+      </strong>
+      <Reason message={failure.message} lead={failure.lead} />
+      <small className="selectable" {...hoverTooltip(tip, candidate.path)}>
+        {candidate.path}
+      </small>
+      <div className="maintenance__problem-actions">
+        <button type="button" onClick={() => revealPath(candidate.path)}>
+          <Icon name="folder" />
+          {revealLabel(currentPlatform())}
+        </button>
+        {onRetry !== null && (
+          <button type="button" onClick={onRetry}>
+            <Icon name="retry" />
+            Retry
+          </button>
+        )}
+        {failure.detail !== undefined && (
+          <DetailsToggle open={open} onToggle={() => setOpen((was) => !was)} />
+        )}
+      </div>
+      {open && failure.detail !== undefined && (
+        <pre className="maintenance__problem-raw selectable">{failure.detail}</pre>
+      )}
+      {tip.tooltipNode}
+    </li>
+  );
+}
+
+/**
+ * What a removal could not do, worktree by worktree — the shared outcome card
+ * from the "Removal Errors" design board (3a). It replaces a one-line "Some
+ * worktrees were not removed" that named neither the worktree nor the reason,
+ * and a notice dialog stacked on top of this one. The headline counts, the
+ * second line says what is left and whether you can go on, and Node's or
+ * Git's own words sit behind Details and in the log.
+ */
+function RemovalFailures({
+  failures,
+  removedCount,
+  canContinue,
+  onRetry
+}: {
+  failures: RemovalFailure[];
+  removedCount: number;
+  canContinue: boolean;
+  onRetry: (ids: string[]) => void;
+}) {
+  const count = failures.length;
+  const one = count === 1;
+  // Retrying a folder Git has disowned, or a lock, would only fail again.
+  const retryable = (failure: RemovalFailure): boolean =>
+    failure.code !== "not_a_worktree" && failure.code !== "locked";
+  const sub = removedCount > 0
+    ? `${one ? "Its folder is" : "Their folders are"} still on disk. The other ${removedCount} ${removedCount === 1 ? "was" : "were"} removed${canContinue ? ", and you can continue" : ""}.`
+    : `Nothing was removed. You can retry${canContinue ? `, or continue without ${one ? "it" : "them"}` : ""}.`;
+  return (
+    <ProblemCard
+      headline={one ? "1 worktree wasn’t removed" : `${count} worktrees weren’t removed`}
+      sub={sub}
+      action={
+        <button
+          type="button"
+          className="maintenance__problem-log"
+          onClick={() => void dispatch("logs:openWindow", undefined)}
+        >
+          <Icon name="log" />
+          View log
+        </button>
+      }
+    >
+      {failures.map((failure) => (
+        <ProblemRow
+          key={failure.candidate.worktreeId}
+          failure={failure}
+          onRetry={retryable(failure) ? () => onRetry([failure.candidate.worktreeId]) : null}
+        />
+      ))}
+    </ProblemCard>
+  );
+}
+
+/** Declining "Remove anyway" is a choice, so this is a note, not an error. */
+function KeptForChanges({ kept }: { kept: PruneCandidate[] }) {
+  const one = kept.length === 1;
+  return (
+    <ProblemCard
+      tone="note"
+      headline={one ? "1 worktree kept: it has uncommitted changes" : `${kept.length} worktrees kept: they have uncommitted changes`}
+      sub={<>You chose to keep {one ? "it" : "them"} when asked. Nothing in {one ? "it was" : "them was"} deleted, and {one ? "it’s" : "they’re"} still in the sidebar.</>}
+    >
+      {kept.map((candidate) => (
+        <li className="maintenance__problem-row" key={candidate.worktreeId}>
+          <strong><span>{candidate.repoName}</span> · {candidate.branch}</strong>
+          <small className="selectable">{candidate.path}</small>
+          <div className="maintenance__problem-actions">
+            <button type="button" onClick={() => revealPath(candidate.path)}>
+              <Icon name="folder" />
+              {revealLabel(currentPlatform())}
+            </button>
+          </div>
+        </li>
+      ))}
+    </ProblemCard>
   );
 }

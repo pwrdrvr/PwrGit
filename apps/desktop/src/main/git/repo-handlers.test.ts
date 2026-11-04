@@ -131,7 +131,8 @@ describe("repo handlers", () => {
           })
         ));
         expect(emitEvent).toHaveBeenCalledWith("repo:changed", {
-          profileId: profile.id
+          profileId: profile.id,
+          repoIds: [indexed.value.id]
         });
         expect(indexer.getRepo(indexed.value.id)?.worktrees).toContainEqual(
           expect.objectContaining({ branch: "fix/search-target", path: checkoutGitPath })

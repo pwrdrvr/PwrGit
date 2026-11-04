@@ -88,7 +88,8 @@ describe("repo worktree refresh events", () => {
         repoId: "repo-1"
       });
       expect(emitEvent).toHaveBeenNthCalledWith(3, "repo:changed", {
-        profileId: "profile-1"
+        profileId: "profile-1",
+        repoIds: ["repo-1"]
       });
     }
   );
@@ -124,7 +125,8 @@ describe("repo worktree refresh events", () => {
       repoId: "repo-1"
     });
     expect(emitEvent).toHaveBeenNthCalledWith(3, "repo:changed", {
-      profileId: "profile-1"
+      profileId: "profile-1",
+      repoIds: ["repo-1"]
     });
     expect(emitEvent).not.toHaveBeenCalledWith("worktree:changed", {
       worktreeId: "wt-same"

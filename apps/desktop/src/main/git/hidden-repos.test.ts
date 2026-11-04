@@ -159,6 +159,16 @@ describe("hidden repositories stay out of", () => {
     expect(hits.map((hit) => hit.repoId)).toEqual(["lantern"]);
   });
 
+  it("Fetch recent, even when it names the hidden repository", () => {
+    // Fetch recent sends the Focused list's ids. A hidden repository stays
+    // out even if a stale list still names it, and another profile's id
+    // fetches nothing here.
+    expect(
+      profileRepos(db, mine, ["harbor", "lantern", "harbor2"])?.map((r) => r.id)
+    ).toEqual(["lantern"]);
+    expect(profileRepos(db, mine, [])).toEqual([]);
+  });
+
   it("Fetch all, Try pull all, the pruner and maintenance", () => {
     const bulk = profileRepos(db, mine);
     expect(bulk?.map((r) => r.id)).toEqual(["lantern"]);

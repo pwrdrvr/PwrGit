@@ -3,6 +3,7 @@ import { isAbsolute, join, resolve } from "node:path";
 import { err, ok, type PwrGitError, type Result } from "@pwrgit/shared";
 import { requireExit0, type GitExec } from "./dugite";
 import { listWorktrees, type WorktreeInfo } from "./git-service";
+import { mapLimit } from "../util/map-limit";
 
 type ReviewedBranch = {
   branch: string;
@@ -142,7 +143,7 @@ async function worktreeHolders(
   const listed = await listWorktrees(git, cwd);
   if (!listed.ok) return listed;
   const holders = new Map<string, string>();
-  for (const worktree of listed.value) {
+  const inspections = await mapLimit(listed.value, 4, async (worktree): Promise<Result<void>> => {
     // A prunable entry has no checkout to be mid-operation in, and running
     // git inside its missing directory fails — which used to refuse every
     // rename and delete in the repo until the row was removed. Git itself
@@ -163,6 +164,13 @@ async function worktreeHolders(
         );
       }
     }
+    return ok(undefined);
+  });
+  // Preserve Git's listing order when more than one checkout refuses.
+  for (const inspection of inspections) {
+    if (!inspection.ok) return inspection;
+  }
+  for (const worktree of listed.value) {
     if (!worktree.detached && !worktree.bare)
       holders.set(worktree.branch, worktree.path);
   }

@@ -322,6 +322,49 @@ describe("RepoRefsSections branch counts", () => {
     expect(head.getAttribute("aria-expanded")).toBe("true");
   });
 
+  // The block's ladder folds gone, then behind, then ahead into a +N chip
+  // (section-fit.tsx); which chip shows is CSS. Each step's chip is drawn,
+  // holds exactly what that step has folded, and opens Branches unfiltered.
+  it("draws a +N chip per fold step, naming what it holds", async () => {
+    await renderCounted();
+    const ranks = [
+      ...container.querySelectorAll<HTMLElement>(".ref-section__chip[data-rank]")
+    ].map((chip) => `${chip.textContent}:${chip.dataset["rank"]}`);
+    expect(ranks).toEqual(["2 ahead:1", "1 behind:2", "2 gone:3"]);
+    const more = [
+      ...container.querySelectorAll<HTMLButtonElement>(".ref-section__chip.is-more")
+    ];
+    expect(more.map((chip) => [chip.dataset["fold"], chip.textContent])).toEqual([
+      ["1", "+1"],
+      ["2", "+2"],
+      ["3", "+3"]
+    ]);
+    expect(more[1]?.getAttribute("aria-label")).toBe(
+      "+2 more: 1 behind, 2 gone. Show branches"
+    );
+    // Inside the chips line, so the heading's three parts stay three.
+    expect(more[0]?.parentElement?.className).toBe("ref-section__chips");
+    await act(async () => more[2]?.click());
+    expect(document.querySelector(".refs-status-chip.is-active")?.textContent).toMatch(
+      /^All/
+    );
+  });
+
+  it("gives every heading a glyph and keeps its words in the name", async () => {
+    await renderCounted();
+    const heads = [
+      ...container.querySelectorAll<HTMLButtonElement>(".ref-section__head")
+    ];
+    for (const word of ["Branches", "Tags", "Remotes"]) {
+      const head = heads.find((node) => node.textContent?.includes(word));
+      expect(head?.querySelector(".ref-section__glyph svg")).not.toBeNull();
+      // Every heading is a row the block's fit test reads, Tags included.
+      expect(head?.parentElement?.classList.contains("ref-section__head-wrap")).toBe(
+        true
+      );
+    }
+  });
+
   it("opens the refs browser on the branches the ↑ count means", async () => {
     await renderCounted();
     await act(async () =>
@@ -379,5 +422,72 @@ describe("RepoRefsSections forge links", () => {
     }
     await act(async () => disclosure.click());
     expect(disclosure.getAttribute("aria-expanded")).toBe("true");
+  });
+});
+
+describe("a reload keeps the last answer on screen", () => {
+  const branch = (name: string): RepoRefs["branches"][number] => ({
+    name,
+    fullName: `refs/heads/${name}`,
+    head: "a".repeat(40),
+    upstream: `origin/${name}`,
+    ahead: 0,
+    behind: 0,
+    tracking: "up_to_date",
+    checkedOutWorktreeIds: []
+  });
+  const withBranches = (count: number): RepoRefs => ({
+    ...refs,
+    branches: Array.from({ length: count }, (_, i) => branch(`b${i}`))
+  });
+  const rerender = async (next: Repo): Promise<void> => {
+    await act(async () => {
+      root.render(
+        <RepoRefsSections
+          repo={next}
+          now={0}
+          focusedWorktree={primary}
+          onRevealWorktree={() => undefined}
+          onCreateWorktree={() => undefined}
+          onFork={() => undefined}
+        />
+      );
+    });
+  };
+  const branchesHead = (): string =>
+    [...container.querySelectorAll(".ref-section__head")].find((head) =>
+      head.textContent?.includes("Branches")
+    )?.textContent ?? "";
+
+  it("never blanks the counts while every repo reloads (a bulk fetch)", async () => {
+    // Each `repo:changed` hands every row a new Repo object, which reloads
+    // its refs. The counts must not flash "…" while the reload is out.
+    const answers: Array<(value: unknown) => void> = [];
+    dispatchMock.mockImplementation((channel: string) =>
+      Promise.resolve(
+        channel === "repo:refs"
+          ? ok(withBranches(3))
+          : ok({ hosts: [], overrides: {} })
+      )
+    );
+    await rerender(repo);
+    expect(branchesHead()).toContain("3");
+
+    dispatchMock.mockImplementation((channel: string) =>
+      channel === "repo:refs"
+        ? new Promise((resolve) => answers.push(resolve))
+        : Promise.resolve(ok({ hosts: [], overrides: {} }))
+    );
+    await rerender({ ...repo });
+    expect(branchesHead()).toContain("3");
+    expect(branchesHead()).not.toContain("…");
+
+    // Two reloads in flight: the newer answer wins even if the older lands
+    // last.
+    await rerender({ ...repo });
+    expect(answers).toHaveLength(2);
+    await act(async () => answers[1]!(ok(withBranches(5))));
+    await act(async () => answers[0]!(ok(withBranches(4))));
+    expect(branchesHead()).toContain("5");
   });
 });

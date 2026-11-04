@@ -22,23 +22,29 @@ const EXPECTED_PACKAGE_POLICIES = new Map([
 ]);
 
 // Keep former-employer names out of first-party source. These are assembled so
-// the policy file does not itself become a match. The one public dependency
-// whose npm scope names its vendor is intentionally retained; only the files
-// required to declare, use, lock, and attribute that dependency may name it.
+// the policy file does not itself become a match. One public dependency's npm
+// scope names its vendor, and naming a published package is always fine: the
+// package specifier may appear anywhere (imports, package.json, the lockfile,
+// a comment about the library). What stays out is the vendor named any other
+// way — "the fix for <vendor> PR 123". The notice is the one file that must
+// name the vendor outright, in the upstream copyright line it reproduces.
 const PROHIBITED_NAMES = [
   ["gi", "phy"].join(""),
   ["ss", "tk"].join(""),
 ];
 const PUBLIC_DEPENDENCY_VENDOR = ["shutter", "stock"].join("");
-const PUBLIC_DEPENDENCY_REFERENCE_PATHS = new Set([
-  "THIRD_PARTY_LICENSES",
-  "apps/desktop/package.json",
-  "apps/desktop/src/main/git/remote-tip-checker.ts",
-  "apps/desktop/src/main/util/map-limit.ts",
-  "apps/desktop/src/renderer/src/lib/asyncFill.ts",
-  "pnpm-lock.yaml",
-  "pnpm-workspace.yaml",
-]);
+const PUBLIC_DEPENDENCY_SPECIFIER = new RegExp(
+  `@${PUBLIC_DEPENDENCY_VENDOR}/p-map-iterable`,
+  "gi",
+);
+const PUBLIC_DEPENDENCY_REFERENCE_PATHS = new Set(["THIRD_PARTY_LICENSES"]);
+
+/** True when the vendor appears on this line only as the package's name. */
+const onlyNamesThePackage = (line) =>
+  !line
+    .replace(PUBLIC_DEPENDENCY_SPECIFIER, "")
+    .toLowerCase()
+    .includes(PUBLIC_DEPENDENCY_VENDOR);
 
 const SKIP_DIRS = new Set([
   ".git",
@@ -184,7 +190,10 @@ export function checkFirstPartyNamePolicy(root = repoRoot) {
     }
   }
   for (const match of trackedMatches(root, PUBLIC_DEPENDENCY_VENDOR)) {
-    if (!PUBLIC_DEPENDENCY_REFERENCE_PATHS.has(match.path)) {
+    if (
+      !PUBLIC_DEPENDENCY_REFERENCE_PATHS.has(match.path) &&
+      !onlyNamesThePackage(match.line.slice(match.path.length + 1))
+    ) {
       failures.push(
         `unexpected public-dependency vendor reference appears at ${match.line}`,
       );

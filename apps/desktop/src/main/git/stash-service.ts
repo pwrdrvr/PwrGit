@@ -54,7 +54,11 @@ export function parseStashList(stdout: string): StashEntry[] {
       subject,
       ...(named === undefined ? {} : { name: named }),
       kind:
-        named === PWRGIT_PULL_STASH_MESSAGE
+        named === PWRGIT_PULL_STASH_MESSAGE ||
+        (named?.startsWith(PWRGIT_PULL_STASH_MESSAGE) === true &&
+          /^ \[[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\]$/.test(
+            named.slice(PWRGIT_PULL_STASH_MESSAGE.length)
+          ))
           ? "pwrgit-pull-recovery"
           : "ordinary",
       createdAt

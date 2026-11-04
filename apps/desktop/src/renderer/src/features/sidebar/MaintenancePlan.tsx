@@ -1,18 +1,26 @@
 import {
   BRANCH_CLEANUP_KEEP_DAYS,
+  STALE_AGE_DAYS,
+  WORKTREE_FINISHED_AFTER_DAYS,
   type BranchCleanupKeepDays,
   type BranchCleanupOptions,
-  type GarbageCollectionMode
+  type GarbageCollectionMode,
+  type WorktreeFinishedAfterDays
 } from "@pwrgit/shared";
 import { StatusGlyph } from "./BulkSyncStatus";
+import type { StepIssue } from "./maintenance-issues";
+import { StepLine } from "./MaintenanceProblem";
 
 export type MaintenancePlan = { worktrees: boolean; branches: boolean; gc: boolean };
 export type StepKey = keyof MaintenancePlan;
 export type StepResult = {
-  state: "done" | "skipped" | "failed";
+  state: "done" | "partial" | "skipped" | "failed";
   summary: string;
   detail?: string;
   items?: { label: string; detail: string }[];
+  /** What the step left behind, one row per branch or repository. Carried
+   *  whatever the state: a skipped deletion can follow a failed review. */
+  issues?: StepIssue[];
 };
 
 const steps: { key: StepKey; title: string }[] = [
@@ -20,7 +28,28 @@ const steps: { key: StepKey; title: string }[] = [
   { key: "branches", title: "Local branches" },
   { key: "gc", title: "Garbage collection" }
 ];
-const daysLabel = (days: number) => `${days} ${days === 1 ? "day" : "days"}`;
+export const daysLabel = (days: number) => `${days} ${days === 1 ? "day" : "days"}`;
+const finishedAfterLabel = (days: number) => days === 0 ? "right away" : `after ${daysLabel(days)}`;
+
+/** Step 1's sentence, which follows the finished-after setting. */
+export function finishedWorktreesSentence(finishedAfterDays: number): string {
+  return finishedAfterDays === 0
+    ? "Clean worktrees whose pull request merged, or whose branch is merged into the default branch."
+    : `Clean worktrees whose pull request merged, or whose branch is merged into the default branch and has had no commits for ${daysLabel(finishedAfterDays)}.`;
+}
+
+/** The "Count a merged branch as finished" select, shared by both tabs. */
+export function FinishedAfterSelect({ value, onChange, disabled = false, label }: {
+  value: number;
+  onChange: (days: WorktreeFinishedAfterDays) => void;
+  disabled?: boolean;
+  label: string;
+}) {
+  return <select aria-label={label} value={value} disabled={disabled}
+    onChange={(event) => onChange(Number(event.target.value) as WorktreeFinishedAfterDays)}>
+    {WORKTREE_FINISHED_AFTER_DAYS.map((days) => <option key={days} value={days}>{finishedAfterLabel(days)}</option>)}
+  </select>;
+}
 
 export function MaintenanceSteps({ plan, current, results, branchMode, gcMode, progress }: {
   plan: MaintenancePlan;
@@ -34,11 +63,14 @@ export function MaintenanceSteps({ plan, current, results, branchMode, gcMode, p
   return <div className="maintenance__steps" aria-label="Maintenance steps">
     {steps.map((step, index) => {
       const result = results[step.key];
-      const state = result?.state === "failed" ? "stop" : result?.state === "done" ? "done" :
-        !plan[step.key] || result?.state === "skipped" ? "off" : current === step.key ? "on" :
-          current === "done" || index < currentIndex ? "off" : "next";
-      const detail = result?.summary ?? (state === "off" ? current === "done" && plan[step.key] ? "Not started" : "Skipped" :
-        current === step.key ? progress ?? "Running" : step.key === "worktrees" ? "next · pauses for review" :
+      // The running step is live whatever an earlier attempt recorded, and
+      // shows its progress, not a stale summary.
+      const state = current === step.key ? "on" :
+        result?.state === "failed" || result?.state === "partial" || (result?.issues?.length ?? 0) > 0 ? "stop" :
+          result?.state === "done" ? "done" : !plan[step.key] || result?.state === "skipped" ? "off" :
+            current === "done" || index < currentIndex ? "off" : "next";
+      const detail = state === "on" ? progress ?? "Running" : result?.summary !== undefined ? <StepLine line={result.summary} /> : (state === "off" ? current === "done" && plan[step.key] ? "Not started" : "Skipped" :
+        step.key === "worktrees" ? "next · pauses for review" :
           step.key === "branches" ? `next · ${branchMode === "review" ? "pauses for review" : "deletes without asking"}` :
             `last · ${gcMode}`);
       return <div key={step.key} className={`maintenance__step is-${state}`}>
@@ -49,17 +81,20 @@ export function MaintenanceSteps({ plan, current, results, branchMode, gcMode, p
   </div>;
 }
 
-export function MaintenanceRulesApplied({ kind, branchOptions, protectRecent, protectionDays, onChange }: {
+export function MaintenanceRulesApplied({ kind, branchOptions, protectRecent, protectionDays, finishedAfterDays = STALE_AGE_DAYS, onChange }: {
   kind: "worktrees" | "branches";
   branchOptions?: BranchCleanupOptions;
   protectRecent?: boolean;
   protectionDays?: number;
+  finishedAfterDays?: number;
   onChange: () => void;
 }) {
   return <div className="maintenance__applied">
     <div><em>Rules</em><span>{kind === "worktrees" ? <>
       {protectRecent ? <>Keep if touched in the last <b>{daysLabel(protectionDays ?? 7)}</b></> : <b>Recent protection off</b>}
-      <span className="maintenance__separator">·</span> finished = <b>merged PR</b> or <b>merged {14} days ago</b>
+      <span className="maintenance__separator">·</span> finished = <b>merged PR</b> or {finishedAfterDays === 0
+        ? <b>merged into the default branch</b>
+        : <b>merged, no commits for {daysLabel(finishedAfterDays)}</b>}
     </> : <>
       {branchOptions?.keepDays === null ? <b>Age guard off</b> : <>Keep if touched in the last <b>{daysLabel(branchOptions?.keepDays ?? 7)}</b></>}
       <span className="maintenance__separator">·</span> {branchOptions?.prProof ? <><b>Merged PR</b> counts as proof when the tip is its head</> : <b>PR proof off</b>}
@@ -74,7 +109,8 @@ export function MaintenanceRulesApplied({ kind, branchOptions, protectRecent, pr
 
 export function MaintenancePlanForm({
   plan, onChange, branchMode, onBranchMode, options, onOptions, gcMode, onGcMode,
-  protectRecent, protectionDays, onProtectRecent, onProtectionDays, lastKeepDays
+  protectRecent, protectionDays, onProtectRecent, onProtectionDays, lastKeepDays,
+  finishedAfterDays, onFinishedAfterDays
 }: {
   plan: MaintenancePlan;
   onChange: (plan: MaintenancePlan) => void;
@@ -90,6 +126,8 @@ export function MaintenancePlanForm({
   onProtectionDays: (days: number) => void;
   /** The branch age guard's last notch, restored when the guard is switched back on. */
   lastKeepDays: BranchCleanupKeepDays;
+  finishedAfterDays: number;
+  onFinishedAfterDays: (days: WorktreeFinishedAfterDays) => void;
 }) {
   return <div className="maintenance__body">
     <p className="maintenance__help">Runs top to bottom in this window’s profile. Each step works on what the step before it left.</p>
@@ -98,11 +136,13 @@ export function MaintenancePlanForm({
         <input aria-label="Remove finished worktrees" type="checkbox" checked={plan.worktrees} onChange={(event) => onChange({ ...plan, worktrees: event.target.checked })} />
         <span className="maintenance__step-num">1</span><div>
           <div className="maintenance__plan-head"><h3>Remove finished worktrees</h3><span className="maintenance__pause">Pauses for review</span></div>
-          <p>Clean worktrees whose branch merged, or that have been inactive for 14 days after merging into the default branch.</p>
+          <p>{finishedWorktreesSentence(finishedAfterDays)}</p>
           {plan.worktrees && <div className="maintenance__plan-rules"><div className="maintenance__plan-rule"><label><input type="checkbox" checked={protectRecent} onChange={(event) => onProtectRecent(event.target.checked)} />Keep worktrees touched in the last</label>
             <select aria-label="Combined worktree age guard" value={protectionDays} disabled={!protectRecent} onChange={(event) => onProtectionDays(Number(event.target.value))}>
               {BRANCH_CLEANUP_KEEP_DAYS.map((days) => <option key={days} value={days}>{daysLabel(days)}</option>)}
-            </select><small>commits and file changes, ignored files included</small></div></div>}
+            </select><small>commits and file changes, ignored files included</small></div>
+            <div className="maintenance__plan-rule is-indented"><span>Count a branch merged into the default branch as finished</span>
+            <FinishedAfterSelect label="Combined worktree finished after" value={finishedAfterDays} onChange={onFinishedAfterDays} /></div></div>}
         </div>
       </article>
       <article className={`maintenance__plan-step${plan.branches ? "" : " is-off"}`}>

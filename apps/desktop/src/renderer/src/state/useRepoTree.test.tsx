@@ -34,7 +34,9 @@ const repo: Repo = {
 let container: HTMLDivElement;
 let root: Root;
 let latest: UseRepoTree;
-let repoChanged: ((value: { profileId: string }) => void) | undefined;
+let repoChanged:
+  | ((value: { profileId: string; repoIds?: string[] }) => void)
+  | undefined;
 let reads: Array<Promise<Result<Repo[]>>>;
 
 function Harness() {
@@ -165,5 +167,134 @@ describe("useRepoTree", () => {
 
     expect(latest.loadState).toEqual({ status: "ready" });
     expect(latest.repos.map((item) => item.id)).toEqual(["repo-1"]);
+  });
+});
+
+describe("repo:changed that names its repositories", () => {
+  const other: Repo = { ...repo, id: "repo-2", name: "PwrSnap", path: "/src/PwrSnap" };
+  const listCalls = (): unknown[] =>
+    mocks.dispatch.mock.calls
+      .filter(([name]) => name === "repo:list")
+      .map(([, req]) => req);
+
+  it("re-reads only those repositories and keeps every other object", async () => {
+    nextRead(ok([repo, other]));
+    await act(async () => root.render(<Harness />));
+    const before = latest.repos;
+
+    const fresh: Repo = { ...other, pinned: false, worktrees: [] };
+    nextRead(ok([fresh]));
+    await act(async () => {
+      repoChanged?.({ profileId: "personal", repoIds: ["repo-2"] });
+    });
+
+    expect(listCalls().at(-1)).toEqual({
+      profileId: "personal",
+      repoIds: ["repo-2"]
+    });
+    // The untouched repository is the same object, so nothing keyed on it
+    // (an expanded row's repo:refs) runs again.
+    expect(latest.repos[0]).toBe(before[0]);
+    expect(latest.repos[1]).toBe(fresh);
+  });
+
+  it("drops a named repository the answer leaves out (gone or hidden)", async () => {
+    nextRead(ok([repo, other]));
+    await act(async () => root.render(<Harness />));
+
+    nextRead(ok([]));
+    await act(async () => {
+      repoChanged?.({ profileId: "personal", repoIds: ["repo-2"] });
+    });
+    expect(latest.repos.map((item) => item.id)).toEqual(["repo-1"]);
+  });
+
+  it("batches ids that arrive while a read is out", async () => {
+    nextRead(ok([repo, other]));
+    await act(async () => root.render(<Harness />));
+
+    let answer!: (value: Result<Repo[]>) => void;
+    reads.push(new Promise((resolve) => (answer = resolve)));
+    nextRead(ok([repo, other]));
+    await act(async () => {
+      repoChanged?.({ profileId: "personal", repoIds: ["repo-1"] });
+      repoChanged?.({ profileId: "personal", repoIds: ["repo-2"] });
+      repoChanged?.({ profileId: "personal", repoIds: ["repo-1"] });
+    });
+    await act(async () => answer(ok([repo])));
+
+    // One read for the first, one for everything that queued behind it.
+    expect(listCalls().slice(1)).toEqual([
+      { profileId: "personal", repoIds: ["repo-1"] },
+      { profileId: "personal", repoIds: ["repo-2", "repo-1"] }
+    ]);
+  });
+
+  it("still re-reads the whole profile when no repositories are named", async () => {
+    nextRead(ok([repo]));
+    await act(async () => root.render(<Harness />));
+    nextRead(ok([repo, other]));
+    await act(async () => {
+      repoChanged?.({ profileId: "personal" });
+    });
+    expect(listCalls().at(-1)).toEqual({ profileId: "personal" });
+    expect(latest.repos.map((item) => item.id)).toEqual(["repo-1", "repo-2"]);
+  });
+});
+
+describe("repo:changed reads that go wrong", () => {
+  const other: Repo = { ...repo, id: "repo-2", name: "PwrSnap", path: "/src/PwrSnap" };
+  const listCalls = (): unknown[] =>
+    mocks.dispatch.mock.calls
+      .filter(([name]) => name === "repo:list")
+      .map(([, req]) => req);
+
+  it("falls back to a full read when a named read fails, so ready comes back", async () => {
+    nextRead(ok([repo, other]));
+    await act(async () => root.render(<Harness />));
+
+    nextRead(err({ kind: "repo", code: "read_failed", message: "busy" }));
+    nextRead(ok([repo, other]));
+    await act(async () => {
+      repoChanged?.({ profileId: "personal", repoIds: ["repo-2"] });
+    });
+
+    expect(listCalls().at(-1)).toEqual({ profileId: "personal" });
+    expect(latest.loadState).toEqual({ status: "ready" });
+  });
+
+  it("never drains another profile's ids under the old profile's name", async () => {
+    let profile = "personal";
+    function Switching() {
+      latest = useRepoTree(profile);
+      return null;
+    }
+    nextRead(ok([repo]));
+    await act(async () => root.render(<Switching />));
+
+    // A named read for "personal" is still out when the window switches.
+    let answer!: (value: Result<Repo[]>) => void;
+    reads.push(new Promise((resolve) => (answer = resolve)));
+    await act(async () => {
+      repoChanged?.({ profileId: "personal", repoIds: ["repo-1"] });
+    });
+    nextRead(ok([other]));
+    profile = "work";
+    await act(async () => root.render(<Switching />));
+
+    nextRead(ok([other]));
+    await act(async () => {
+      repoChanged?.({ profileId: "work", repoIds: ["repo-2"] });
+    });
+    await act(async () => answer(ok([])));
+
+    const named = listCalls().filter(
+      (req) => (req as { repoIds?: string[] }).repoIds !== undefined
+    );
+    expect(named).toEqual([
+      { profileId: "personal", repoIds: ["repo-1"] },
+      { profileId: "work", repoIds: ["repo-2"] }
+    ]);
+    expect(latest.repos.map((item) => item.id)).toEqual(["repo-2"]);
   });
 });

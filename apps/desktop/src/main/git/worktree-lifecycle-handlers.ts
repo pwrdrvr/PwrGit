@@ -1,12 +1,20 @@
-import { err, ok } from "@pwrgit/shared";
+import { err, ok, type Res } from "@pwrgit/shared";
 import type { CommandBus } from "../command-bus";
 import { emitEvent } from "../ipc";
+import { logMain } from "../logs";
 import type { DB } from "../persistence/db";
 import type { SettingsService } from "../settings/settings-service";
 import { execGit } from "./dugite";
-import { worktreeAdd, worktreeRemove } from "./git-service";
+import {
+  listWorktrees,
+  worktreeAdd,
+  worktreeRemove,
+  type WorktreeInfo,
+  type WorktreeRemoveError
+} from "./git-service";
 import type { RepoIndexer } from "./repo-indexer";
 import { worktreePathFor } from "./worktree-paths";
+import type { WorktreeOperationQueue } from "./worktree-operation-queue";
 import type { WorktreeStateService } from "./worktree-state";
 
 export function registerWorktreeLifecycleHandlers(
@@ -14,7 +22,8 @@ export function registerWorktreeLifecycleHandlers(
   db: DB,
   indexer: RepoIndexer,
   settings: SettingsService,
-  state: WorktreeStateService
+  state: WorktreeStateService,
+  operations: WorktreeOperationQueue
 ): void {
   const repoRow = (
     repoId: string
@@ -45,7 +54,10 @@ export function registerWorktreeLifecycleHandlers(
     });
     if (!added.ok) return added;
     await indexer.refreshRepoWorktrees(repo.id);
-    emitEvent("repo:changed", { profileId: repo.profile_id });
+    emitEvent("repo:changed", {
+      profileId: repo.profile_id,
+      repoIds: [repo.id]
+    });
     // Hand the new worktree's id back so the caller can select it. A branch is
     // checked out in at most one worktree, so its name identifies the row the
     // refresh just indexed — reading it back beats rebuilding the id from a
@@ -73,22 +85,56 @@ export function registerWorktreeLifecycleHandlers(
 
     const removed: string[] = [];
     const dirty: string[] = [];
-    const failed: { id: string; message: string }[] = [];
+    const failed: Res<"worktree:removeMany">["failed"] = [];
     const affectedRepos = new Set<string>();
     const affectedProfiles = new Set<string>();
 
-    // Remove sequentially — concurrent `git worktree remove` in one repo would
-    // race on .git/worktrees. Dozens of removes is still fast.
+    // Every outcome reaches the log. The renderer may show a failure small, or
+    // only as "not removed" — the Logs window must still say which and why.
+    const fail = (
+      id: string,
+      path: string | null,
+      error: Pick<WorktreeRemoveError, "message" | "lead" | "detail"> & {
+        code?: string;
+      }
+    ): void => {
+      failed.push({
+        id,
+        message: error.message,
+        ...(error.code === undefined ? {} : { code: error.code }),
+        ...(error.lead === undefined ? {} : { lead: error.lead }),
+        ...(error.detail === undefined ? {} : { detail: error.detail })
+      });
+      logMain(
+        "error",
+        "worktree",
+        `could not remove ${path ?? id}:`,
+        error.message,
+        ...(error.detail === undefined ? [] : [error.detail])
+      );
+    };
+    const started = Date.now();
+    logMain(
+      "info",
+      "worktree",
+      `removing ${req.worktreeIds.length} worktree${req.worktreeIds.length === 1 ? "" : "s"}${req.force === true ? " (forced)" : ""}`
+    );
+
+    // One worktree at a time — concurrent `git worktree remove` in one repo
+    // would race on .git/worktrees. Each folder's own delete is parallel
+    // (`deleteTree`, four at once) and never blocks the main process.
     const releases: (() => void)[] = [];
+    // One `git worktree list` per repository, not per worktree.
+    const listings = new Map<string, WorktreeInfo[] | undefined>();
     try {
       for (const id of req.worktreeIds) {
         const wt = stmt.get(id) as Row | undefined;
         if (wt === undefined) {
-          failed.push({ id, message: "worktree not found" });
+          fail(id, null, { message: "Worktree not found — it may have been removed already." });
           continue;
         }
         if (wt.is_primary === 1) {
-          failed.push({ id, message: "Can't remove the primary worktree" });
+          fail(id, wt.path, { message: "The repository’s main checkout can’t be removed here." });
           continue;
         }
         // Windows can't delete a directory that is any process's cwd, and a
@@ -97,10 +143,36 @@ export function registerWorktreeLifecycleHandlers(
         // ones) before removing it. Held until the batch's indexer refresh
         // drops the DB rows, so no probe spawns git in a deleted directory.
         releases.push(await state.lockForRemoval(id));
-        const res = await worktreeRemove(execGit, wt.repo_path, wt.path, {
-          force: req.force ?? false
+        const began = Date.now();
+        let itemsDeleted = 0;
+        // In the worktree's queue, after the probes are drained: a Pull,
+        // switch or second removal of this checkout must not run Git in it
+        // while its folder is deleted. The listing is read inside it too, so
+        // it is no older than the wait.
+        const res = await operations.run(id, async () => {
+          if (!listings.has(wt.repo_path)) {
+            const listed = await listWorktrees(execGit, wt.repo_path);
+            listings.set(wt.repo_path, listed.ok ? listed.value : undefined);
+          }
+          const listed = listings.get(wt.repo_path);
+          return worktreeRemove(execGit, wt.repo_path, wt.path, {
+            force: req.force ?? false,
+            ...(listed === undefined ? {} : { listed }),
+            onProgress: (progress) => {
+              itemsDeleted = progress.itemsDeleted;
+              emitEvent("worktree:removeProgress", {
+                worktreeId: id,
+                itemsDeleted: progress.itemsDeleted
+              });
+            }
+          });
         });
         if (res.ok) {
+          logMain(
+            "info",
+            "worktree",
+            `removed ${wt.path} (${itemsDeleted} items, ${((Date.now() - began) / 1000).toFixed(1)}s)`
+          );
           removed.push(id);
           affectedRepos.add(wt.repo_id);
           affectedProfiles.add(wt.profile_id);
@@ -109,8 +181,13 @@ export function registerWorktreeLifecycleHandlers(
           emitEvent("worktree:removed", { worktreeId: id });
         } else if (res.error.code === "dirty") {
           dirty.push(id);
+          logMain(
+            "warn",
+            "worktree",
+            `kept ${wt.path}: it has uncommitted or untracked changes`
+          );
         } else {
-          failed.push({ id, message: res.error.message });
+          fail(id, wt.path, res.error);
           // Git disowned this path but its directory survives: the row is a
           // fossil, so drop it and let `repo:changed` reload the tree. Not a
           // `worktree:removed` — nothing was removed, and that event ticks the
@@ -132,6 +209,14 @@ export function registerWorktreeLifecycleHandlers(
     for (const profileId of affectedProfiles) {
       emitEvent("repo:changed", { profileId });
     }
+    logMain(
+      failed.length > 0 ? "warn" : "info",
+      "worktree",
+      `removed ${removed.length} of ${req.worktreeIds.length} worktree${req.worktreeIds.length === 1 ? "" : "s"}` +
+        `${dirty.length > 0 ? `, ${dirty.length} kept for changes` : ""}` +
+        `${failed.length > 0 ? `, ${failed.length} failed` : ""}` +
+        ` (${((Date.now() - started) / 1000).toFixed(1)}s)`
+    );
     return ok({ removed, dirty, failed });
   });
 

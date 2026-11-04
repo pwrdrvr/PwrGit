@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import {
   type Commit,
   type LaneGraph,
@@ -8,7 +9,8 @@ import {
 import type { CommandBus } from "../command-bus";
 import { prSummaryFromRow, prSummarySelect } from "../forge/pr-row";
 import type { DB } from "../persistence/db";
-import { execGit } from "./dugite";
+import { limitConcurrency } from "../util/map-limit";
+import { execGit, type GitExec } from "./dugite";
 import { missingWorktreeError } from "./worktree-liveness";
 import {
   branchTips,
@@ -46,9 +48,13 @@ type CachedLanes = {
   upstreamRefs: string[];
   matchedBranches: number;
   hiddenBranches: number;
+  /** The branch refs as they stood when this build began (`readRefsStamp`). */
+  refsStamp: string;
   at: number;
 };
 const laneCache = new Map<string, CachedLanes>();
+/** Builds started per cache key. Only the newest build may write the cache. */
+const laneBuilds = new Map<string, number>();
 const LANE_TTL_MS = 30_000;
 /** Trunk window — recent default-branch history drawn as the spine. */
 const TRUNK_CAP = 150;
@@ -59,11 +65,31 @@ const UNIQUE_CAP = 500;
  *  first; the toolbar reports "N of M". */
 const ACTIVE_DRAW_CAP = 30;
 
+/**
+ * A digest of every local and remote-tracking branch tip. A cached build is
+ * only served while this still matches: refs move without a `graph:changed`
+ * reaching the renderer (a pull fetches, then fast-forwards seconds later; an
+ * agent pulls in a terminal), and a build that read them in between draws the
+ * trunk dashed until something forces a rebuild. Null when git cannot answer,
+ * which never matches. Tags are left out: tag commands invalidate the graph
+ * themselves, and a repo can carry tens of thousands of them.
+ */
+async function readRefsStamp(git: GitExec, cwd: string): Promise<string | null> {
+  const raw = await git(
+    ["for-each-ref", "--format=%(objectname) %(refname)", "refs/heads", "refs/remotes"],
+    cwd
+  );
+  if (!raw.ok || raw.value.exitCode !== 0) return null;
+  return createHash("sha1").update(raw.value.stdout).digest("hex");
+}
+
 export function registerGraphHandlers(
   bus: CommandBus,
   db: DB,
   state: WorktreeStateService
 ): void {
+  // Shared across requests: overlapping graph rebuilds share this ceiling.
+  const git = limitConcurrency(execGit, 6);
   bus.register("graph:log", async (req) => {
     const wt = db
       .prepare("SELECT path, repo_id FROM worktrees WHERE id = ?")
@@ -78,18 +104,22 @@ export function registerGraphHandlers(
     const gone = missingWorktreeError(db, req.worktreeId);
     if (gone !== null) return err(gone);
 
-    const def = await state.resolveDefaultBranch(wt.repo_id, wt.path);
-    const unborn = await isUnbornHead(execGit, wt.path);
+    const [def, unborn] = await Promise.all([
+      state.resolveDefaultBranch(wt.repo_id, wt.path),
+      isUnbornHead(git, wt.path)
+    ]);
     if (!unborn.ok) return unborn;
     if (unborn.value) {
       return ok({ commits: [], branchRoot: null, defaultBranch: def.name });
     }
 
-    const commits = await readLog(execGit, wt.path, req.limit ?? 200);
+    const [commits, mb] = await Promise.all([
+      readLog(git, wt.path, req.limit ?? 200),
+      git(["merge-base", "HEAD", def.ref], wt.path)
+    ]);
     if (!commits.ok) return commits;
 
     let branchRoot: string | null = null;
-    const mb = await execGit(["merge-base", "HEAD", def.ref], wt.path);
     if (mb.ok && mb.value.exitCode === 0) {
       const hash = mb.value.stdout.trim();
       branchRoot = hash !== "" ? hash : null;
@@ -122,7 +152,10 @@ export function registerGraphHandlers(
     const gone = missingWorktreeError(db, req.worktreeId);
     if (gone !== null) return err(gone);
 
-    const unborn = await isUnbornHead(execGit, wt.path);
+    const [unborn, refsStamp] = await Promise.all([
+      isUnbornHead(git, wt.path),
+      readRefsStamp(git, wt.path)
+    ]);
     if (!unborn.ok) return unborn;
     if (unborn.value) {
       const def = await state.resolveDefaultBranch(wt.repo_id, wt.path);
@@ -154,28 +187,32 @@ export function registerGraphHandlers(
 
     // The branch set + union log is the same for every worktree in a repo — only
     // the HEAD dot moves — so compute it once and cache it. A plain worktree
-    // switch reuses the cache (one cheap rev-parse); `force` (a real change) and
-    // the TTL recompute it.
+    // switch reuses the cache (one cheap rev-parse and a for-each-ref); `force`
+    // (a real change), the TTL, and any branch ref that moved recompute it.
+    // The stamp is read BEFORE the build reads anything, so a ref that moves
+    // mid-build leaves the entry older than its refs, never newer.
     const key = `${wt.repo_id}:${req.scope}`;
     let cached = laneCache.get(key);
     const fresh =
       cached !== undefined &&
       req.force !== true &&
+      refsStamp !== null &&
+      cached.refsStamp === refsStamp &&
       Date.now() - cached.at < LANE_TTL_MS;
 
     if (!fresh) {
+      const build = (laneBuilds.get(key) ?? 0) + 1;
+      laneBuilds.set(key, build);
       const def = await state.resolveDefaultBranch(wt.repo_id, wt.path);
 
-      let shown: string[];
-      let matchedBranches: number;
-      let hiddenBranches = 0;
-      if (req.scope === "all") {
-        // Everything in flight: unmerged local + remote branches, recency-capped.
-        const all = await selectAllGraphBranches(execGit, wt.path, def.ref, def.name);
-        if (!all.ok) return all;
-        shown = all.value.branches;
-        matchedBranches = all.value.total;
-      } else {
+      const select = async () => {
+        if (req.scope === "all") {
+          // Everything in flight: unmerged local + remote branches, recency-capped.
+          const all = await selectAllGraphBranches(git, wt.path, def.ref, def.name);
+          return all.ok
+            ? ok({ shown: all.value.branches, matchedBranches: all.value.total, hiddenBranches: 0 })
+            : all;
+        }
         const worktreeBranches = new Set(
           (
             db
@@ -193,27 +230,36 @@ export function registerGraphHandlers(
           ).map((r) => r.branch)
         );
         // Recency-sorted (listLocalBranchNames sorts by committerdate).
-        const allLocal = await listLocalBranchNames(execGit, wt.path);
+        const [allLocal, active] = await Promise.all([
+          listLocalBranchNames(git, wt.path),
+          selectActiveBranches(git, wt.path, {
+            defaultRef: def.ref,
+            defaultName: def.name,
+            email: wt.email,
+            worktreeBranches,
+            mergedPrBranches
+          })
+        ]);
         if (!allLocal.ok) return allLocal;
-        const active = await selectActiveBranches(execGit, wt.path, {
-          defaultRef: def.ref,
-          defaultName: def.name,
-          email: wt.email,
-          worktreeBranches,
-          mergedPrBranches
-        });
         if (!active.ok) return active;
         // Draw the most recently committed active branches, capped.
         const activeSet = new Set(active.value);
-        shown = allLocal.value
+        const shown = allLocal.value
           .filter((b) => activeSet.has(b))
           .slice(0, ACTIVE_DRAW_CAP);
-        matchedBranches = active.value.length;
+        const matchedBranches = active.value.length;
         const totalOther = allLocal.value.filter((b) => b !== def.name).length;
-        hiddenBranches = Math.max(0, totalOther - shown.length);
-      }
-
-      const tips = await branchTips(execGit, wt.path);
+        const hiddenBranches = Math.max(0, totalOther - shown.length);
+        return ok({ shown, matchedBranches, hiddenBranches });
+      };
+      const [selection, tips, unapplied, tags] = await Promise.all([
+        select(),
+        branchTips(git, wt.path),
+        unappliedUpstreams(git, wt.path),
+        readGraphTags(git, wt.path)
+      ]);
+      if (!selection.ok) return selection;
+      const { shown, matchedBranches, hiddenBranches } = selection.value;
       if (!tips.ok) return tips;
       // Every remote's copy of the default branch joins the trunk walk, so a
       // remote-ahead trunk (origin/main, or upstream/main on a fork) is in the
@@ -237,7 +283,6 @@ export function registerGraphHandlers(
       // nothing to point at. Their refs ride in `upstreamRefs` — NOT in
       // `shownBranches`, which the toolbar counts as active branches — and the
       // renderer draws that union, dashing them as fetched-but-unapplied.
-      const unapplied = await unappliedUpstreams(execGit, wt.path);
       if (!unapplied.ok) return unapplied;
       // The trunk's own remotes are already walked and drawn as the spine.
       // Re-adding one here would hand the default branch's ref to a feature
@@ -264,20 +309,22 @@ export function registerGraphHandlers(
       // branch tip older than the trunk's newest N commits. Trunk and branch
       // segments are fetched separately (branch segments in ONE not-in-trunk
       // walk) and topo-merged, so every drawn branch is genuinely present.
-      const trunk = await readLogRefs(
-        execGit,
-        wt.path,
-        [...new Set([def.ref, ...remoteDefaultRefs])],
-        req.limit ?? TRUNK_CAP
-      );
+      const [trunk, uniques] = await Promise.all([
+        readLogRefs(
+          git,
+          wt.path,
+          [...new Set([def.ref, ...remoteDefaultRefs])],
+          req.limit ?? TRUNK_CAP
+        ),
+        readUniqueCommits(
+          git,
+          wt.path,
+          def.ref,
+          walkRefs,
+          UNIQUE_CAP
+        )
+      ]);
       if (!trunk.ok) return trunk;
-      const uniques = await readUniqueCommits(
-        execGit,
-        wt.path,
-        def.ref,
-        walkRefs,
-        UNIQUE_CAP
-      );
       if (!uniques.ok) return uniques;
 
       // Per-branch adornments for the tip chips: PR (from branch_pr) and the
@@ -308,7 +355,6 @@ export function registerGraphHandlers(
       // Tags are decoration on a commit row. A refs/tags directory this
       // process cannot read is a reason to draw no chips, not a reason to
       // refuse the graph — which is what returning the error here would do.
-      const tags = await readGraphTags(execGit, wt.path);
       cached = {
         tags: tags.ok ? tags.value : {},
         commits: topoMergeCommits([trunk.value, uniques.value]),
@@ -323,16 +369,27 @@ export function registerGraphHandlers(
         upstreamRefs,
         matchedBranches,
         hiddenBranches,
+        refsStamp: refsStamp ?? "",
         at: Date.now()
       };
-      laneCache.set(key, cached);
+      // Builds overlap: a graph:changed during a slow build starts another.
+      // The older one finishing last must not replace the newer answer — it
+      // still answers its own request, but it never becomes the shared cache.
+      if (laneBuilds.get(key) === build) {
+        laneCache.set(key, cached);
+        // Per-HEAD supplements were merged into the replaced base; drop them
+        // rather than leave one per HEAD ever seen.
+        for (const k of laneCache.keys()) {
+          if (k.startsWith(`${key}:`)) laneCache.delete(k);
+        }
+      }
     }
     if (cached === undefined) {
       return err({ kind: "repo", code: "graph_failed", message: "graph unavailable" });
     }
 
     // HEAD is per-worktree — always resolve it (one cheap call).
-    const headSha = await execGit(["rev-parse", "HEAD"], wt.path);
+    const headSha = await git(["rev-parse", "HEAD"], wt.path);
     const head =
       headSha.ok && headSha.value.exitCode === 0
         ? headSha.value.stdout.trim()
@@ -346,7 +403,7 @@ export function registerGraphHandlers(
     let headOnlyCommits: string[] = [];
     if (head !== "") {
       const headOnly = await readUniqueCommits(
-        execGit,
+        git,
         wt.path,
         cached.defaultRef,
         [head],
@@ -393,6 +450,8 @@ export function registerGraphHandlers(
       if (
         supCached !== undefined &&
         req.force !== true &&
+        refsStamp !== null &&
+        supCached.refsStamp === refsStamp &&
         Date.now() - supCached.at < LANE_TTL_MS
       ) {
         out = supCached;
@@ -406,7 +465,7 @@ export function registerGraphHandlers(
           ...(missingUpstream !== undefined ? [missingUpstream] : [])
         ];
         const line = await readUniqueCommits(
-          execGit,
+          git,
           wt.path,
           cached.defaultRef,
           supRefs,
@@ -415,7 +474,7 @@ export function registerGraphHandlers(
         if (!line.ok) return line;
         let extra = line.value;
         if (missingHead && !extra.some((c) => c.hash === head)) {
-          const self = await readLogRefs(execGit, wt.path, [head], 1);
+          const self = await readLogRefs(git, wt.path, [head], 1);
           if (self.ok) extra = [...extra, ...self.value];
         }
         out = {
@@ -437,7 +496,7 @@ export function registerGraphHandlers(
       // The reveal is an enhancement to this request, so a hash this repo
       // cannot resolve costs the caller the jump, not the graph. A stale
       // target racing a cross-repo switch is the ordinary way that happens.
-      const window = await readLogRefs(execGit, wt.path, [req.revealHash], 40);
+      const window = await readLogRefs(git, wt.path, [req.revealHash], 40);
       if (window.ok) commits = topoMergeCommits([commits, window.value]);
     }
     // Built from the commits being drawn, not from every tag in the repo: the

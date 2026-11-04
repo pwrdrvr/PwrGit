@@ -7,7 +7,8 @@ import {
   expandRepoGroup,
   expandWorktrees,
   lensChip,
-  primaryShortcut
+  primaryShortcut,
+  clickAddFolders
 } from "./fixtures/steps";
 
 let sandbox: GitSandbox | null = null;
@@ -56,7 +57,7 @@ test("the lens row fits, and names every lens for the keyboard", async () => {
   handle = await launchApp();
   const { window } = handle;
   await handle.setPickDirectory(sandbox.reposDir);
-  await window.getByRole("button", { name: /Add folders/i }).click();
+  await clickAddFolders(window);
   await lensChip(window, "All").click();
   await expect(window.locator(".repo-row__name")).toHaveCount(15, {
     timeout: 20_000
@@ -112,7 +113,7 @@ test("the lens row survives the narrowest sidebar at the largest text size", asy
   handle = await launchApp();
   const { window } = handle;
   await handle.setPickDirectory(sandbox.reposDir);
-  await window.getByRole("button", { name: /Add folders/i }).click();
+  await clickAddFolders(window);
   await lensChip(window, "All").click();
   await expect(window.locator(".repo-row__name")).toHaveCount(12, {
     timeout: 20_000
@@ -152,7 +153,7 @@ test("the lens chips divide the sidebar's surplus width", async () => {
   handle = await launchApp();
   const { window } = handle;
   await handle.setPickDirectory(sandbox.reposDir);
-  await window.getByRole("button", { name: /Add folders/i }).click();
+  await clickAddFolders(window);
   await expect(window.locator(".repo-row__name")).toHaveCount(4, {
     timeout: 20_000
   });
@@ -223,7 +224,7 @@ test("sidebar rows are sized by their content, not by a fixed box", async () => 
   handle = await launchApp();
   const { window } = handle;
   await handle.setPickDirectory(sandbox.reposDir);
-  await window.getByRole("button", { name: /Add folders/i }).click();
+  await clickAddFolders(window);
   await lensChip(window, "All").click();
   const repoRow = window.locator(".repo-row", { hasText: "dense" });
   await expect(repoRow).toBeVisible({ timeout: 20_000 });
@@ -281,7 +282,7 @@ test("every lens shares one left edge — the Pinned grip must not indent its ro
   handle = await launchApp();
   const { window } = handle;
   await handle.setPickDirectory(sandbox.reposDir);
-  await window.getByRole("button", { name: /Add folders/i }).click();
+  await clickAddFolders(window);
   await lensChip(window, "All").click();
   await expect(window.locator(".repo-row__name")).toHaveCount(2, {
     timeout: 20_000
@@ -313,7 +314,7 @@ test("a long ref-list branch name ellipsises instead of hard-clipping", async ()
   handle = await launchApp();
   const { window } = handle;
   await handle.setPickDirectory(sandbox.reposDir);
-  await window.getByRole("button", { name: /Add folders/i }).click();
+  await clickAddFolders(window);
   await lensChip(window, "All").click();
   await expandRepoGroup(window, "refs-overflow");
   await window.getByRole("button", { name: /^Branches/ }).first().click();
@@ -356,7 +357,7 @@ test("the selected worktree row clears BOTH sticky bars when grouped", async () 
   handle = await launchApp();
   const { window } = handle;
   await handle.setPickDirectories([sandbox.reposDir, otherRoot]);
-  await window.getByRole("button", { name: /Add folders/i }).click();
+  await clickAddFolders(window);
   await lensChip(window, "All").click();
   await expect(window.locator(".repo-group__head")).not.toHaveCount(0, {
     timeout: 20_000
@@ -404,7 +405,7 @@ test("the repo row counts linked worktrees only, and hides a zero", async () => 
   handle = await launchApp();
   const { window } = handle;
   await handle.setPickDirectory(sandbox.reposDir);
-  await window.getByRole("button", { name: /Add folders/i }).click();
+  await clickAddFolders(window);
   await lensChip(window, "All").click();
   await expect(window.locator(".repo-row__name")).toHaveCount(2, {
     timeout: 20_000
@@ -428,7 +429,7 @@ test("the section headings account for every worktree the repo row claims", asyn
   handle = await launchApp();
   const { window } = handle;
   await handle.setPickDirectory(sandbox.reposDir);
-  await window.getByRole("button", { name: /Add folders/i }).click();
+  await clickAddFolders(window);
   await lensChip(window, "All").click();
   await expandRepoGroup(window, "split");
   await expandWorktrees(window, "split");
@@ -474,7 +475,7 @@ test("the worktree row reserves no lane for the kebab", async () => {
   handle = await launchApp();
   const { window } = handle;
   await handle.setPickDirectory(sandbox.reposDir);
-  await window.getByRole("button", { name: /Add folders/i }).click();
+  await clickAddFolders(window);
   await lensChip(window, "All").click();
   await expandRepoGroup(window, "roomy");
   await expandWorktrees(window, "roomy");
@@ -522,7 +523,7 @@ test("the worktree row's pin keeps a full target under the kebab", async () => {
   handle = await launchApp();
   const { window } = handle;
   await handle.setPickDirectory(sandbox.reposDir);
-  await window.getByRole("button", { name: /Add folders/i }).click();
+  await clickAddFolders(window);
   await lensChip(window, "All").click();
   await expandRepoGroup(window, "targets-wt");
   await expandWorktrees(window, "targets-wt");
@@ -556,7 +557,7 @@ test("row focus is a solid ring, not a 12%-alpha whisper", async () => {
   handle = await launchApp();
   const { window } = handle;
   await handle.setPickDirectory(sandbox.reposDir);
-  await window.getByRole("button", { name: /Add folders/i }).click();
+  await clickAddFolders(window);
   await lensChip(window, "All").click();
   const row = window.locator(".repo-row", { hasText: "focusable" });
   await expect(row).toBeVisible({ timeout: 20_000 });
@@ -594,7 +595,7 @@ test("the row controls clear the 24px pointer-target floor", async () => {
   handle = await launchApp();
   const { window } = handle;
   await handle.setPickDirectory(sandbox.reposDir);
-  await window.getByRole("button", { name: /Add folders/i }).click();
+  await clickAddFolders(window);
   await lensChip(window, "All").click();
   await expandRepoGroup(window, "targets");
 
@@ -629,7 +630,7 @@ test("a first run lands in the one lens that has anything in it", async () => {
   handle = await launchApp();
   const { window } = handle;
   await handle.setPickDirectory(sandbox.reposDir);
-  await window.getByRole("button", { name: /Add folders/i }).click();
+  await clickAddFolders(window);
 
   // Per-worktree state is computed lazily per repo, so on a profile nobody has
   // opened yet Focused, Behind and Stale are empty by construction. This used
@@ -675,7 +676,7 @@ test("a window with no remembered lens opens on Focused once it has one", async 
   handle = await launchApp();
   const { window } = handle;
   await handle.setPickDirectory(sandbox.reposDir);
-  await window.getByRole("button", { name: /Add folders/i }).click();
+  await clickAddFolders(window);
   await expect(window.locator(".repo-row__name")).toHaveCount(2, {
     timeout: 20_000
   });
@@ -712,7 +713,7 @@ test("selecting a worktree row does not move it", async () => {
   handle = await launchApp();
   const { window } = handle;
   await handle.setPickDirectory(sandbox.reposDir);
-  await window.getByRole("button", { name: /Add folders/i }).click();
+  await clickAddFolders(window);
   await lensChip(window, "All").click();
   await expandRepoGroup(window, "steady");
   await expandWorktrees(window, "steady");
@@ -739,7 +740,7 @@ test("the chosen lens survives a reload", async () => {
   handle = await launchApp();
   const { window } = handle;
   await handle.setPickDirectory(sandbox.reposDir);
-  await window.getByRole("button", { name: /Add folders/i }).click();
+  await clickAddFolders(window);
   await lensChip(window, "All").click();
   await expect(window.locator(".repo-row__name")).toHaveCount(2, {
     timeout: 20_000
@@ -782,7 +783,7 @@ test("a viewed repo remains in Focused after a reload", async () => {
   handle = await launchApp();
   const { window } = handle;
   await handle.setPickDirectory(sandbox.reposDir);
-  await window.getByRole("button", { name: /Add folders/i }).click();
+  await clickAddFolders(window);
   await lensChip(window, "All").click();
   await expect(window.locator(".repo-row__name")).toHaveCount(2, {
     timeout: 20_000
@@ -813,7 +814,10 @@ test("a viewed repo remains in Focused after a reload", async () => {
   await expect(window.locator(".repo-row__focus-reason")).toHaveText("Viewed");
 });
 
-test("Focused keeps clean unpublished work after its activity window expires", async () => {
+// Focused (and so Fetch/Pull recent) is for something you did. Unpushed work
+// alone no longer counts, since every agent worktree has some; a commit you
+// authored in the last RECENT_DAYS does.
+test("Focused takes in a repo you just committed in, not unpushed work alone", async () => {
   sandbox = createGitSandbox();
   const unpublished = sandbox.makeRepo("old-unpublished");
   sandbox.commitEmptyAt(
@@ -821,24 +825,24 @@ test("Focused keeps clean unpublished work after its activity window expires", a
     "local work not on a remote",
     Math.floor(Date.parse("2000-01-01T00:00:00Z") / 1000)
   );
+  const mine = sandbox.makeRepo("mine");
+  // The app reads "you" from the repo's user.email; the sandbox commits
+  // through GIT_AUTHOR_EMAIL, so name the same address here.
+  sandbox.git(mine.path, "config", "user.email", "test@pwrgit.com");
+  sandbox.commit(mine.path, "mine.txt", "yours, today");
 
   handle = await launchApp();
   const { window } = handle;
   await handle.setPickDirectory(sandbox.reposDir);
-  await window.getByRole("button", { name: /Add folders/i }).click();
+  await clickAddFolders(window);
   await lensChip(window, "All").click();
+  // On screen, both repos' snapshots are probed; main's sweep of your commits
+  // (WorktreeStateService.sweepAuthored, ~15s after launch) covers the rest.
   await expandRepoGroup(window, "old-unpublished");
-  // This chip is backed by the same completed state probe the repo index reads.
-  // This fixture has an initial commit plus the dated local commit, and no
-  // remote branches. Both commits therefore contribute to the local count.
-  await expect(window.locator(".wt-header .sync-chip")).toHaveText(
-    "↑2 local · no upstream",
-    { timeout: 20_000 }
-  );
+  await expandRepoGroup(window, "mine");
 
-  // Remove the selection-derived signal and remount the renderer. The only
-  // remaining Focus reason is the persisted unpublished tracking state; the
-  // branch timestamp is intentionally far outside the 30-day window.
+  // Remove the selection and visit signals and remount the renderer. The
+  // only Focus reason left is your own commit.
   await window.evaluate(() => {
     window.localStorage.clear();
     window.localStorage.setItem("pwrgit.lens", "Focused");
@@ -850,12 +854,11 @@ test("Focused keeps clean unpublished work after its activity window expires", a
     "true",
     { timeout: 20_000 }
   );
-  await expect(window.locator(".repo-row__name")).toHaveText([
-    "old-unpublished"
-  ]);
-  await expect(window.locator(".repo-row__focus-reason")).toHaveText(
-    "Changes"
-  );
+  // Long enough for the launch sweep if the on-screen probe hadn't landed.
+  await expect(window.locator(".repo-row__name")).toHaveText(["mine"], {
+    timeout: 40_000
+  });
+  await expect(window.locator(".repo-row__focus-reason")).toHaveText("Yours");
 });
 
 test(
@@ -877,7 +880,7 @@ test(
     handle = await launchApp();
     const { window } = handle;
     await handle.setPickDirectory(sandbox.reposDir);
-    await window.getByRole("button", { name: /Add folders/i }).click();
+    await clickAddFolders(window);
     await lensChip(window, "All").click();
     await expandRepoGroup(window, "working-set");
     await expandWorktrees(window, "working-set");
@@ -937,7 +940,7 @@ test("an automatic widen does not retire the lens the user chose", async () => {
   handle = await launchApp();
   const { window } = handle;
   await handle.setPickDirectory(sandbox.reposDir);
-  await window.getByRole("button", { name: /Add folders/i }).click();
+  await clickAddFolders(window);
   await lensChip(window, "All").click();
   await expect(window.locator(".repo-row__name")).toHaveCount(2, {
     timeout: 20_000

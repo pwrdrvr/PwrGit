@@ -17,7 +17,7 @@ import {
   worktreeRemove
 } from "./git-service";
 import type { GitExec } from "./dugite";
-import { mkdtempSync, existsSync, mkdirSync, rmSync } from "node:fs";
+import { mkdtempSync, existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -169,6 +169,25 @@ describe("parseBranchRefs", () => {
       ].join("\n")
     );
     expect(out.map((ref) => ref.name)).toEqual(["topic/HEAD", "origin/topic/HEAD"]);
+  });
+
+  it("names each remote ref's remote, matching a name with a slash whole", () => {
+    const out = parseBranchRefs(
+      [
+        row(["refs/heads/main", "main", "*", "origin/main", "", ""]),
+        row(["refs/remotes/origin/main", "origin/main", " ", "", "", ""]),
+        row(["refs/remotes/team/fork/main", "team/fork/main", " ", "", "", ""]),
+        row(["refs/remotes/gone/main", "gone/main", " ", "", "", ""])
+      ].join("\n"),
+      ["origin", "team", "team/fork"]
+    );
+    expect(out.map(({ name, remote, remoteBranch }) => ({ name, remote, remoteBranch }))).toEqual([
+      { name: "main", remote: undefined, remoteBranch: undefined },
+      { name: "origin/main", remote: "origin", remoteBranch: "main" },
+      { name: "team/fork/main", remote: "team/fork", remoteBranch: "main" },
+      // A ref no configured remote owns keeps its name and claims no remote.
+      { name: "gone/main", remote: undefined, remoteBranch: undefined }
+    ]);
   });
 });
 
@@ -351,10 +370,39 @@ describe("worktreeRemove", () => {
     const res = await worktreeRemove(disowningGit(gone, calls), root, gone);
 
     expect(res.ok).toBe(true);
-    // Git only says "not a working tree" for a path it no longer lists, so
-    // there is no metadata to prune — and `worktree prune` is repo-wide: it
-    // would also unregister worktrees on a volume that is merely unmounted.
-    expect(calls).toEqual([["worktree", "remove", gone]]);
+    // Git no longer lists the path, so there is no metadata to prune — and
+    // `worktree prune` is repo-wide: it would also unregister worktrees on a
+    // volume that is merely unmounted. Reading the list is the only call.
+    expect(calls).toEqual([["worktree", "list", "--porcelain"]]);
+  });
+
+  // Git's own delete (the delegated path: submodules, a prunable entry) can
+  // stop on a lock after it has already dropped the record. The retry then
+  // reads "not a working tree"; finish the delete instead of leaving a folder
+  // nothing lists.
+  it("finishes a delete Git abandoned after unregistering the worktree", async () => {
+    const half = join(root, "half");
+    mkdirSync(join(half, "left"), { recursive: true });
+    writeFileSync(join(half, "left", "file.txt"), "x");
+    let removes = 0;
+    const git: GitExec = async (args) => {
+      if (args[1] === "list") {
+        return ok({
+          stdout: `worktree ${root}\nHEAD abc\nbranch refs/heads/main\n\nworktree ${half}\nHEAD abc\nbranch refs/heads/half\nprunable gitdir file points to non-existent location\n\n`,
+          stderr: "",
+          exitCode: 0
+        });
+      }
+      removes += 1;
+      return removes === 1
+        ? ok({ stdout: "", stderr: `error: failed to delete '${half}': Permission denied\n`, exitCode: 255 })
+        : notAWorkingTree(half);
+    };
+
+    const res = await worktreeRemove(git, root, half);
+
+    expect(res.ok).toBe(true);
+    expect(existsSync(half)).toBe(false);
   });
 
   // A directory git no longer recognises may hold work from somewhere else

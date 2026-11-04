@@ -47,14 +47,16 @@ describe("parsePrResponse", () => {
   const branches = ["a", "b", "c"];
   const data = {
     repository: {
-      a0: { nodes: [{ number: 12, title: "Feat", url: "u12", state: "MERGED", isDraft: false }] },
-      a1: { nodes: [{ number: 34, title: null, url: "u34", state: "OPEN", isDraft: true }] },
+      a0: { nodes: [{ number: 12, title: "Feat", url: "u12", state: "MERGED", isDraft: false,
+        headRepository: { nameWithOwner: "o/r" } }] },
+      a1: { nodes: [{ number: 34, title: null, url: "u34", state: "OPEN", isDraft: true,
+        headRepository: { nameWithOwner: "o/r" } }] },
       a2: { nodes: [] }
     }
   };
 
   it("maps each branch to its most-recent PR, lowercasing lifecycle", () => {
-    const map = parsePrResponse(branches, data);
+    const map = parsePrResponse(branches, data, ["o/r"]);
     expect(map.get("a")).toEqual({
       number: 12,
       url: "u12",

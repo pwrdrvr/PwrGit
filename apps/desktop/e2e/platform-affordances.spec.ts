@@ -46,12 +46,13 @@ test("renderer affordances follow the real OS platform", async () => {
         ? "Show in Explorer"
         : "Show in folder";
 
-  const searchHint = window.locator(".sidebar__search .kbd");
+  // The jump field lives in the title strip; its key cap advertises Find.
+  const searchHint = window.locator(".titlebar-jump .kbd");
   await expect(searchHint).toHaveText(shortcut("F"));
   // The alternative chord is a `useViewportTooltip` card now, not a `title`:
   // hover it and read what rendered. (See `lib/AGENTS.md`.)
   await searchHint.hover();
-  await expect(window.getByRole("tooltip")).toHaveText(
+  await expect(window.getByRole("tooltip")).toContainText(
     `${shortcut("F")} or ${shortcut("K")}`
   );
 

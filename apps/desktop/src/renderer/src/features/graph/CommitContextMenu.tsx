@@ -1,7 +1,7 @@
 import type { LaneBranchInfo } from "@pwrgit/shared";
 import { copyText } from "../../lib/copyText";
-import { dispatch } from "../../lib/pwrgit";
 import { ContextMenu, type MenuItem } from "../shell/ContextMenu";
+import { changeRequestMenuItems } from "../shell/change-request-menu-items";
 import type { GraphRowVM } from "./GraphRow";
 import {
   branchRefsAtCommit,
@@ -139,18 +139,7 @@ export function CommitContextMenu({
     items.push({ type: "sep" });
     const commitLinks = new Set<string>();
     for (const pr of pullRequests) {
-      items.push(
-        {
-          type: "item",
-          label: `Open PR #${pr.number}`,
-          onSelect: () => void dispatch("shell:openExternal", { url: pr.url })
-        },
-        {
-          type: "item",
-          label: `Copy PR #${pr.number} link`,
-          onSelect: () => void copyText(pr.url)
-        }
-      );
+      items.push(...changeRequestMenuItems(pr));
       const commitLink = commitUrlForPullRequest(pr, commit.hash);
       if (commitLink === null || commitLinks.has(commitLink)) continue;
       commitLinks.add(commitLink);

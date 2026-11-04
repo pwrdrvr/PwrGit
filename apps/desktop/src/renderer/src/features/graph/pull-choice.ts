@@ -39,3 +39,54 @@ export function writePullChoice(repoId: string, choice: PullChoice): void {
     // A blocked storage partition costs the memory of the choice, nothing else.
   }
 }
+
+/**
+ * The answer to "this fork has moved on from its original", asked once per
+ * repository in the Pull card that first shows it.
+ *
+ * - `tracked` — the fork is its own project now: Pull brings in only what the
+ *   fork's own branch has. Work from the original arrives another way (for
+ *   PwrDisk, an agent ports upstream pull requests one by one), so the Pull
+ *   menu stops offering to rebase onto it or reset to it.
+ * - `sync` — keep syncing from the original; asked and declined, so not asked
+ *   again.
+ * Design: `design/Tracking Another Remote - UX Review.dc.html`, turn 4.
+ */
+export type MovedOnAnswer = "tracked" | "sync";
+
+const movedOnKey = (repoId: string): string => `pwrgit.forkMovedOn.${repoId}`;
+
+export function readMovedOnAnswer(repoId: string): MovedOnAnswer | null {
+  try {
+    const raw = window.localStorage.getItem(movedOnKey(repoId));
+    return raw === "tracked" || raw === "sync" ? raw : null;
+  } catch {
+    return null;
+  }
+}
+
+export function writeMovedOnAnswer(repoId: string, answer: MovedOnAnswer): void {
+  try {
+    window.localStorage.setItem(movedOnKey(repoId), answer);
+  } catch {
+    // As above: the question comes back, nothing else is lost.
+  }
+}
+
+/**
+ * Whether the fork's own branch has moved on from the original: the branch
+ * has everything the original has, so has the fork's tracked branch, and the
+ * fork's branch has commits the original lacks. A sync then fast-forwards
+ * nothing and has nothing it could push.
+ */
+export function forkMovedOn(source: {
+  behind: number;
+  pushBack: { adds: number; overwrites: number } | null;
+}): boolean {
+  return (
+    source.behind === 0 &&
+    source.pushBack !== null &&
+    source.pushBack.adds === 0 &&
+    source.pushBack.overwrites > 0
+  );
+}

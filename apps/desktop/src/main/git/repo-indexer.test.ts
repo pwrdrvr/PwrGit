@@ -1018,10 +1018,11 @@ describe("RepoIndexer", () => {
   });
 
   // Codex cleans up ~/.codex/worktrees/... without `git worktree remove`, so
-  // git keeps listing the checkout — with a `prunable` line the parser used to
-  // drop. Every rescan then re-upserted the dead row as healthy, and each
-  // action on it failed with git's raw "cannot change to '<path>'".
-  it("keeps a worktree whose directory was deleted, flagged missing", async () => {
+  // git keeps listing the checkout with a `prunable` line — and refuses to
+  // check its branch out anywhere else while it does. A worktree is
+  // ephemeral: the re-index drops git's record and the row. A LOCKED one is
+  // git's "do not touch" (removable media), so it stays, flagged missing.
+  it("drops a worktree whose directory was deleted, keeps a locked one flagged", async () => {
     const isolatedRoot = mkdtempSync(join(tmpdir(), "pwrgit-missing-"));
     const repoPath = join(isolatedRoot, "repo");
     const gonePath = join(isolatedRoot, "gone");
@@ -1030,6 +1031,13 @@ describe("RepoIndexer", () => {
     git(repoPath, ["worktree", "add", gonePath, "-b", "feat/gone"]);
     git(repoPath, ["worktree", "add", lockedPath, "-b", "feat/locked"]);
     git(repoPath, ["worktree", "lock", "--reason", "on a thumb drive", lockedPath]);
+    // Two detached checkouts: one on main's commit, one holding a commit no
+    // ref reaches — git's record is all that still points at it.
+    const onMainPath = join(isolatedRoot, "on-main");
+    const orphanPath = join(isolatedRoot, "orphan");
+    git(repoPath, ["worktree", "add", "--detach", onMainPath]);
+    git(repoPath, ["worktree", "add", "--detach", orphanPath]);
+    git(orphanPath, ["-c", "user.email=t@t.com", "-c", "user.name=T", "commit", "--allow-empty", "-m", "only here"]);
 
     const isolatedDb = openDatabase(":memory:");
     const profiles = new ProfileService(isolatedDb);
@@ -1050,28 +1058,49 @@ describe("RepoIndexer", () => {
     ).toBe(true);
 
     rmSync(gonePath, { recursive: true, force: true });
+    rmSync(lockedPath, { recursive: true, force: true });
+    rmSync(onMainPath, { recursive: true, force: true });
+    rmSync(orphanPath, { recursive: true, force: true });
     const refreshed = await isolatedIndexer.refreshRepoWorktrees(indexed.id);
     expect(refreshed.ok).toBe(true);
     if (!refreshed.ok || refreshed.value.outcome !== "reconciled") return;
-    // The row survives — it is what the user removes from the sidebar — and
-    // the flip is reported as an update so the caller repaints.
-    expect(refreshed.value).toMatchObject({ removed: 0, updated: 1 });
-    const gone = refreshed.value.repo.worktrees.find(
-      (w) => w.branch === "feat/gone"
+    expect(refreshed.value).toMatchObject({ removed: 2, updated: 2 });
+    const branches = refreshed.value.repo.worktrees.map((w) => w.branch);
+    expect(branches).not.toContain("feat/gone");
+    // Of the two detached checkouts only the one holding its own commit stays.
+    const detached = refreshed.value.repo.worktrees.filter((w) =>
+      w.branch.startsWith("detached@")
     );
-    expect(gone).toMatchObject({ id: before?.id, missing: true });
+    expect(detached).toHaveLength(1);
+    expect(detached[0]).toMatchObject({ missing: true });
+    expect(detached[0]?.path.endsWith("orphan")).toBe(true);
+    expect(
+      refreshed.value.repo.worktrees.find((w) => w.branch === "feat/locked")
+    ).toMatchObject({ missing: true, locked: true });
     expect(
       refreshed.value.repo.worktrees.find((w) => w.isPrimary)?.missing
     ).toBeUndefined();
 
-    // Restoring the directory (a volume remounting reads the same way to git)
-    // clears the flag on the next reconcile, with no prune in between.
+    // Git's record went too, so the branch is free to check out again; the
+    // locked entry is still registered.
+    const listed = execFileSync("git", ["worktree", "list", "--porcelain"], {
+      cwd: repoPath,
+      encoding: "utf8"
+    });
+    expect(listed).not.toContain("feat/gone");
+    expect(listed).toContain("feat/locked");
+    git(repoPath, ["switch", "feat/gone"]);
+    git(repoPath, ["switch", "-"]);
+
+    // Restoring the locked directory (a volume remounting) clears its flag on
+    // the next reconcile.
+    git(repoPath, ["worktree", "unlock", lockedPath]);
     git(repoPath, ["worktree", "prune"]);
-    git(repoPath, ["worktree", "add", gonePath, "feat/gone"]);
+    git(repoPath, ["worktree", "add", lockedPath, "feat/locked"]);
     const restored = await isolatedIndexer.refreshRepoWorktrees(indexed.id);
     if (!restored.ok || restored.value.outcome !== "reconciled") return;
     expect(
-      restored.value.repo.worktrees.find((w) => w.branch === "feat/gone")
+      restored.value.repo.worktrees.find((w) => w.branch === "feat/locked")
         ?.missing
     ).toBeUndefined();
   });

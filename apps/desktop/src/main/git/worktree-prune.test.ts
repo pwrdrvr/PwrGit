@@ -109,6 +109,14 @@ describe("candidatesForRepo", () => {
     ]);
   });
 
+  it("offers a merged branch committed today when the setting says right away", () => {
+    const today = repo("svc", [
+      wt({ id: "fresh", branch: "feat/fresh", mergedIntoDefault: true, lastActivityAt: ago(0.1) })
+    ]);
+    expect(candidatesForRepo(today, NOW)).toEqual([]);
+    expect(candidatesForRepo(today, NOW, 0).map((c) => c.worktreeId)).toEqual(["fresh"]);
+  });
+
   it("never offers a locked checkout, however finished it looks", () => {
     // A lock is git's explicit "do not touch this", and removal would need
     // --force, which the bulk remove only offers for the dirty set.
@@ -142,6 +150,18 @@ describe("sweepPrunableWorktrees", () => {
     computeRepoState: async () => undefined,
     readRepo: (repoId) => repos[repoId] ?? null,
     ...overrides
+  });
+
+  it("judges with the finished-after setting it was given", async () => {
+    const fresh = wt({ id: "w1", branch: "w1", mergedIntoDefault: true, lastActivityAt: ago(2) });
+    const repos = { r: repo("r", [fresh]) };
+    const byDefault = await sweepPrunableWorktrees([input("r", ["w1"], NOW)], options(repos));
+    expect(byDefault.counts.candidates).toBe(0);
+    const rightAway = await sweepPrunableWorktrees(
+      [input("r", ["w1"], NOW)],
+      options(repos, { finishedAfterDays: 0 })
+    );
+    expect(rightAway.counts.candidates).toBe(1);
   });
 
   it("computes cold repos, reuses fresh ones, and reports which is which", async () => {

@@ -18,7 +18,8 @@
   "exports": {
     ".": "./src/index.ts",
     "./access-policy": "./src/access-policy.ts",
-    "./agent-access-protocol": "./src/agent-access-protocol.ts"
+    "./agent-access-protocol": "./src/agent-access-protocol.ts",
+    "./nested-worktrees": "./src/nested-worktrees.ts"
   },
   "scripts": {
     "build": "node ../../scripts/resource-run.mjs node ../../node_modules/typescript/lib/tsc.js -p tsconfig.build.json",
@@ -27,12 +28,13 @@
     "typecheck": "node ../../scripts/resource-run.mjs node ../../scripts/typecheck.mjs --noEmit -p tsconfig.json"
   },
   "dependencies": {
-    "@modelcontextprotocol/sdk": "1.32.1",
+    "@modelcontextprotocol/sdk": "1.32.2",
     "ws": "^8.22.0",
     "dugite": "^3.2.3",
-    "zod": "^4.6.5"
+    "zod": "^4.6.7"
   },
   "devDependencies": {
-    "@types/ws": "^8.18.2"
+    "@types/ws": "^8.18.2",
+    "fast-check": "^4.10.2"
   }
 }

@@ -1,0 +1,501 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <script src="./support.js"></script>
+  </head>
+  <body>
+    <x-dc>
+      <helmet data-dc-atomics>
+        <meta name="design_doc_mode" content="canvas" />
+        <link href="https://fonts.googleapis.com/css2?family=Geist:wght@400..700&amp;family=Geist+Mono:wght@400..700&amp;display=swap" rel="stylesheet" />
+        <style>
+          :root {
+            --rv-bg: #050505; --rv-line: rgba(247, 243, 235, 0.1);
+            --rv-t1: #f7f3eb; --rv-t2: #b8b0a5; --rv-t3: #8c857a; --rv-tsub: rgba(247, 243, 235, 0.54);
+            --rv-acc: #ff8a1f; --rv-accb: #ffb35c; --rv-accon: #160a00;
+            --rv-bad: #b94232; --rv-ok: #5fa969;
+            --font-sans: "Geist", "SF Pro Text", "Inter", system-ui, sans-serif;
+            --font-mono: "Geist Mono", "SF Mono", "JetBrains Mono", Consolas, monospace;
+          }
+          *, *::before, *::after { box-sizing: border-box; }
+          html { background: var(--rv-bg); }
+          body { margin: 0; background: var(--rv-bg); font-family: var(--font-sans); }
+          a { color: var(--rv-accb); text-decoration: none; } a:hover { color: var(--rv-acc); }
+
+          /* ---- review chrome (house convention) ---- */
+          .dv-turn { padding: 40px 44px 32px; background: var(--rv-bg); border-bottom: 1px solid var(--rv-line); }
+          .dv-thd { display: flex; align-items: baseline; gap: 10px; margin: 0 0 6px; }
+          .dv-tid { font: 600 10px var(--font-mono); padding: 3px 7px; background: var(--rv-t1); color: var(--rv-bg); border-radius: 4px; text-decoration: none; }
+          .dv-tname { font: 600 13px/1.2 var(--font-sans); color: var(--rv-t1); }
+          .dv-sub { margin: 0 0 22px; font: 400 11.5px/1.5 var(--font-sans); color: var(--rv-t3); max-width: 900px; text-wrap: pretty; }
+          .dv-sub b { color: var(--rv-t2); font-weight: 600; }
+          .dv-sub code, .note code, .fitem code, .tr code { font: 500 10px/1.4 var(--font-mono); color: var(--rv-t2); }
+          .dv-opts { display: flex; flex-wrap: wrap; gap: 28px; align-items: flex-start; }
+          .dv-opt { flex: none; display: flex; flex-direction: column; gap: 9px; scroll-margin-top: 16px; }
+          .dv-oid { font: 600 10.5px var(--font-mono); padding: 3px 7px; background: rgba(247, 243, 235, 0.08); color: var(--rv-t1); border-radius: 5px; text-decoration: none; }
+          .dv-opt:target .dv-oid { background: var(--rv-acc); color: var(--rv-accon); }
+          .dv-olabel { display: flex; align-items: baseline; gap: 8px; font: 400 11px/1.3 var(--font-sans); color: var(--rv-tsub); max-width: 820px; }
+          .dv-next { margin: 22px 0 0; font: 12px/1.5 var(--font-sans); color: var(--rv-t3); }
+          .note { margin: 0; font: 400 10.5px/1.5 var(--font-sans); color: var(--rv-t3); text-wrap: pretty; max-width: 400px; }
+          .note b { color: var(--rv-t2); font-weight: 600; }
+          .rec, .rej, .alt { display: inline-flex; align-items: center; height: 17px; padding: 0 6px; border-radius: 999px; font: 700 8.5px/1 var(--font-sans); letter-spacing: 0.06em; text-transform: uppercase; }
+          .rec { background: var(--rv-acc); color: var(--rv-accon); }
+          .rej { background: rgba(185, 66, 50, 0.24); color: #ffb0a1; }
+          .alt { background: rgba(247, 243, 235, 0.08); color: var(--rv-t2); }
+          .pin { display: inline-flex; align-items: center; justify-content: center; flex: none; width: 15px; height: 15px; border-radius: 999px; background: var(--rv-bad); color: #fff; font: 700 9px/1 var(--font-mono); }
+          .pin.ok { background: var(--rv-ok); color: #050505; }
+          .pin.q { background: var(--rv-t3); color: #050505; }
+          .find { width: 560px; display: flex; flex-direction: column; gap: 14px; padding: 16px; border: 1px solid var(--rv-line); border-radius: 9px; background: #0a0a0a; }
+          .fitem { display: grid; grid-template-columns: 15px minmax(0, 1fr); gap: 9px; align-items: start; }
+          .fitem h4 { margin: 0 0 3px; font: 650 11.5px/1.3 var(--font-sans); color: var(--rv-t1); }
+          .fitem p { margin: 0; font: 400 10.5px/1.5 var(--font-sans); color: var(--rv-t3); text-wrap: pretty; }
+          .fitem b { color: var(--rv-t2); font-weight: 600; }
+          .tbl { border: 1px solid var(--rv-line); border-radius: 9px; background: #0a0a0a; overflow: hidden; width: 820px; }
+          .tr { display: grid; grid-template-columns: 54px 230px minmax(0, 1fr); gap: 12px; align-items: start; padding: 8px 12px; border-bottom: 1px solid var(--rv-line); font: 500 10.5px/1.45 var(--font-sans); color: var(--rv-t2); }
+          .tr.m { grid-template-columns: 200px 90px 90px 90px 90px minmax(0, 1fr); }
+          .tr:last-child { border-bottom: 0; }
+          .tr.head { font: 600 9.5px/1.3 var(--font-sans); letter-spacing: 0.04em; text-transform: uppercase; color: var(--rv-t3); background: rgba(247, 243, 235, 0.03); }
+          .tr b { color: var(--rv-t1); font-weight: 600; }
+          .cap-row { display: flex; gap: 18px; align-items: flex-start; flex-wrap: wrap; }
+          .cap-col { display: flex; flex-direction: column; gap: 6px; }
+          .wcap { font: 500 9.5px/1.2 var(--font-mono); color: var(--rv-t3); }
+          .wcap b { color: var(--rv-accb); font-weight: 600; }
+          .wcap.bad { color: #ffb0a1; }
+
+          /* ---- PwrGit light theme, the tokens these rows read (tokens.css) ---- */
+          .sbx {
+            --sidebar-title-size: 13px;
+            --sidebar-eyebrow-size: calc(var(--sidebar-title-size) - 3px);
+            --sidebar-chip-size: calc(var(--sidebar-title-size) - 2px);
+            --bg-sidebar: #f7f4ef; --bg-panel-hover: #f4f0e8; --bg-hover-strong: #ebe5da;
+            --border-subtle: rgba(0, 0, 0, 0.08); --border-default: rgba(0, 0, 0, 0.12);
+            --text-primary: #1a1612; --text-secondary: #524a40; --text-muted: #736c64; --text-subtle: rgba(26, 22, 18, 0.68);
+            --accent: #b74c00; --danger-text: #8a1f12; --status-warning: #805200;
+            background: var(--bg-sidebar); color: var(--text-primary);
+            padding: 2px 0; border-radius: 6px; outline: 1px dashed rgba(247, 243, 235, 0.16); outline-offset: 3px;
+          }
+          .sbx button { font-family: inherit; }
+
+          /* ---- The heading CSS, copied from app.css (".now" is today's) ---- */
+          .ref-section { border-top: 1px solid var(--border-subtle); }
+          .ref-section:first-child { border-top: 0; }
+          .ref-section__head-wrap { display: flex; align-items: center; gap: 4px; }
+          .ref-section__head { display: flex; align-items: center; gap: 7px; width: 100%; min-width: 0; height: 31px; padding: 0 6px 0 4px; border: 0; background: transparent; color: var(--text-muted); cursor: pointer; text-align: center; font-size: 13.33px; }
+          .ref-section__chev { width: 0; height: 0; flex: 0 0 auto; border-top: 3px solid transparent; border-bottom: 3px solid transparent; border-left: 4px solid currentColor; opacity: 0.82; }
+          .ref-section__label { font: 600 var(--sidebar-eyebrow-size)/1 var(--font-sans); color: var(--text-subtle); letter-spacing: 0.08em; text-transform: uppercase; }
+          .ref-section__count { font: 600 var(--sidebar-eyebrow-size)/1 var(--font-mono); color: var(--text-subtle); }
+          .ref-section__chips { display: flex; align-items: center; gap: 2px; flex: 0 0 auto; margin-right: 4px; }
+          .ref-section__chip { display: inline-flex; align-items: center; height: calc(var(--sidebar-eyebrow-size) + 10px); padding: 0 5px; border: 1px solid transparent; border-radius: 5px; background: transparent; color: var(--status-warning); font: 600 var(--sidebar-eyebrow-size)/1 var(--font-mono); white-space: nowrap; cursor: pointer; }
+          .ref-section__chip.is-gone, .ref-section__chip.is-more { color: var(--text-subtle); }
+          .ref-section__chip.is-failing { color: var(--danger-text); }
+          .ref-section__chip.is-more { border-color: var(--border-default); }
+          .ref-section__head-wrap--on > .ref-section__head { flex: 0 0 auto; width: auto; }
+          .ref-section__head-wrap--on > .ref-section__chips { flex-shrink: 1; min-width: 0; margin-right: 0; overflow: hidden; }
+          .ref-section__head-wrap--on > .ref-section__chips::before { content: "\00b7"; margin-right: 3px; color: var(--text-subtle); font: 600 var(--sidebar-eyebrow-size)/1 var(--font-mono); }
+          .ref-section__on { flex: 1 1 0; min-width: 0; height: 31px; padding: 0 6px 0 0; overflow: hidden; display: flex; flex-wrap: wrap; justify-content: flex-end; font: 600 var(--sidebar-eyebrow-size)/1 var(--font-mono); color: var(--text-subtle); }
+          .ref-section__on::before { content: ""; height: 31px; }
+          .ref-section__on-text { flex: 1 1 6ch; max-width: max-content; min-width: 6ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; line-height: 31px; }
+          .tail { display: contents; }
+          .ref-fetch-all { display: inline-flex; align-items: center; justify-content: center; flex: 0 0 auto; width: 24px; height: 24px; margin: -2px 5px -2px -2px; padding: 0; border: 1px solid var(--border-subtle); border-radius: 5px; background: transparent; color: var(--text-muted); }
+          .wt-sort { flex: 0 0 auto; height: 22px; margin-right: 5px; padding: 0 7px; border: 1px solid var(--border-subtle); border-radius: 5px; background: transparent; color: var(--text-muted); font: 500 var(--sidebar-chip-size)/1 var(--font-mono); }
+          .glyph, .lbl-short, .is-more { display: none; }
+          .gi { width: 12px; height: 12px; display: none; }
+
+          /* ---- Proposed (".new"): nothing in a heading shrinks or wraps ---- */
+          .new .ref-section__head-wrap { overflow: hidden; }
+          .new .ref-section__head { flex: 1 0 auto; width: auto; text-align: start; }
+          .new .ref-section__head-wrap--on > .ref-section__head { flex: 0 0 auto; }
+          .new .ref-section__label, .new .ref-section__count { white-space: nowrap; }
+          .new .ref-section__head-wrap--on > .ref-section__chips { flex-shrink: 0; overflow: visible; }
+          .new .tail { display: flex; align-items: center; gap: 4px; flex: 0 0 auto; margin-left: auto; }
+          .new .ref-section__head-wrap--on > .tail { margin-left: 0; }
+          .new .tail .ref-fetch-all, .new .tail .wt-sort { margin-left: 0; }
+          .new .lbl-short { display: none; }
+          .new .fit-short .lbl-long { display: none; }
+          .new .fit-short .lbl-short { display: inline; }
+          .new .fit-glyphs .ref-section__label { display: none; }
+          .new .fit-glyphs .glyph { display: inline-flex; flex: 0 0 auto; color: var(--text-subtle); }
+          .new .fit-glyphs .g-wt .gi-wt, .new .fit-glyphs .g-pr .gi-pr, .new .fit-glyphs .g-br .gi-br,
+          .new .fit-glyphs .g-tag .gi-tag, .new .fit-glyphs .g-rem .gi-rem { display: block; }
+          .new .fit-fold-1 .ref-section__chip[data-rank="3"],
+          .new .fit-fold-2 .ref-section__chip[data-rank="2"],
+          .new .fit-fold-3 .ref-section__chip[data-rank="1"] { display: none; }
+          .new .fit-fold-1:not(.fit-fold-2) .more-1,
+          .new .fit-fold-2:not(.fit-fold-3) .more-2,
+          .new .fit-fold-3 .more-3 { display: inline-flex; }
+
+          /* ---- Repo row (RepoRow.tsx), abridged ---- */
+          .rrbox { padding: 0; }
+          .rr { display: flex; align-items: center; gap: 8px; min-height: calc(var(--sidebar-title-size) * 1.25 + 10px); padding: 0 8px 0 6px; }
+          .rr .chev { width: 0; height: 0; flex: 0 0 auto; border-top: 4px solid transparent; border-bottom: 4px solid transparent; border-left: 5px solid var(--text-muted); }
+          .rr .nm { flex: 1; min-width: 0; font: 600 var(--sidebar-title-size)/1.25 var(--font-sans); color: var(--text-primary); text-align: left; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+          .rr .mk { flex: 0 0 auto; width: 15px; height: 15px; color: var(--text-muted); }
+          .rr .wc { flex: 0 0 auto; display: inline-flex; align-items: center; gap: 3px; font: 500 var(--sidebar-chip-size)/1 var(--font-mono); color: var(--text-subtle); }
+          .rr .wc .g { display: none; align-items: center; gap: 3px; }
+          .rr .wc .g .gi { display: block; width: 11px; height: 11px; }
+          .rr .star { flex: 0 0 auto; width: 14px; height: 14px; color: var(--accent); }
+          .new .rr-no-marks .mk { display: none; }
+          .new .rr-short-count .wc .w { display: none; }
+          .new .rr-short-count .wc .g { display: inline-flex; }
+
+          /* ---- Live prototype ---- */
+          .proto { width: 880px; display: flex; flex-direction: column; gap: 12px; padding: 16px; border: 1px solid var(--rv-line); border-radius: 9px; background: #0a0a0a; }
+          .ctl { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
+          .ctl-l { font: 600 9.5px/1 var(--font-sans); letter-spacing: 0.05em; text-transform: uppercase; color: var(--rv-t3); }
+          .seg { display: inline-flex; border: 1px solid var(--rv-line); border-radius: 7px; overflow: hidden; }
+          .seg button { height: 26px; padding: 0 10px; border: 0; border-right: 1px solid var(--rv-line); background: transparent; color: var(--rv-t2); font: 500 11px var(--font-mono); cursor: pointer; }
+          .seg button:last-child { border-right: 0; }
+          .seg button.on { background: var(--rv-acc); color: var(--rv-accon); }
+          .pv-stage { display: flex; gap: 22px; align-items: flex-start; }
+          .tree { padding: 6px 8px 8px; }
+          .tree .secs { margin: 2px 8px 0 26px; }
+          .readout { font: 500 10.5px/1.5 var(--font-mono); color: var(--rv-t2); white-space: pre-wrap; }
+          .hint { margin: 0; font: 400 10.5px/1.5 var(--font-sans); color: var(--rv-t3); max-width: 760px; }
+
+        </style>
+      </helmet>
+<svg width="0" height="0" style="position:absolute" aria-hidden="true"><symbol id="g-wt" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="4.5" width="11.5" height="15" rx="3"/><path d="M3.6 12h5.4"/><circle cx="3.4" cy="12" r="1.7" fill="currentColor" stroke="none"/></symbol><symbol id="g-pr" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="18" cy="18" r="3"/><circle cx="6" cy="6" r="3"/><path d="M13 6h3a2 2 0 0 1 2 2v7"/><path d="M6 9v12"/></symbol><symbol id="g-br" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 3v12"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="6" r="3"/><path d="M18 9c0 6-6 6-6 12"/></symbol><symbol id="g-tag" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12.586 2.586A2 2 0 0 0 11.172 2H4a2 2 0 0 0-2 2v7.172a2 2 0 0 0 .586 1.414l8.704 8.704a2.426 2.426 0 0 0 3.42 0l6.58-6.58a2.426 2.426 0 0 0 0-3.42z"/></symbol><symbol id="g-rem" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17.5 19H9a7 7 0 1 1 6.71-9h1.79a4.5 4.5 0 1 1 0 9Z"/></symbol><symbol id="g-refresh" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-9-9c2.52 0 4.93 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/></symbol><symbol id="g-gh" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 22v-4a4.8 4.8 0 0 0-1-3.5c3 0 6-2 6-5.5.08-1.25-.27-2.48-1-3.5.28-1.15.28-2.35 0-3.5 0 0-1 0-3 1.5-2.64-.5-5.36-.5-8 0C6 2 5 2 5 2c-.3 1.15-.3 2.35 0 3.5A5.403 5.403 0 0 0 4 9c0 3.5 3 5.5 6 5.5-.39.49-.68 1.05-.85 1.65-.17.6-.22 1.23-.15 1.85v4"/><path d="M9 18c-4.51 2-5-2-7-2"/></symbol><symbol id="g-globe" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M12 2a14.5 14.5 0 0 0 0 20 14.5 14.5 0 0 0 0-20"/><path d="M2 12h20"/></symbol><symbol id="g-star" viewBox="0 0 24 24" fill="currentColor" stroke="none"><path d="M12 2.5l2.9 6.1 6.6.8-4.9 4.6 1.3 6.6L12 17.3l-5.9 3.3 1.3-6.6-4.9-4.6 6.6-.8z"/></symbol></svg>      <!-- ================================ TURN 1 ================================ -->
+      <section class="dv-turn" id="t1">
+        <div class="dv-thd"><a class="dv-tid" href="#t1">1</a><span class="dv-tname">Why the section headings collide, clip and wrap</span></div>
+        <p class="dv-sub">The operator, on the repository index build: <b>&#8220;looks mashed up?&#8221;</b> then <b>&#8220;it just keeps getting worse&#8230; We might need to rekey our breakpoints to be on the size of the sidebar that is allocated to that section&#8230; the centering and line breaking is just weird. Should maybe drop to icons at narrow widths and start hiding some details we can&#8217;t fit?&#8221;</b> Every specimen below is the app&#8217;s own heading CSS, copied from <code>app.css</code> and rendered at the widths a sidebar actually gives a section row. A section row is the tree&#8217;s width less 50&nbsp;px: <b>270</b> at the 320&nbsp;px default with the index off (main today), <b>222</b> at a 400&nbsp;px sidebar with the index (the screenshot), <b>194</b> at the 320&nbsp;px default with the index on, <b>190</b> at the 240&nbsp;px floor. Repositories and counts are invented.</p>
+        <div class="dv-opts">
+
+          <div class="dv-opt" id="1a" data-screen-label="1a Branches overlap">
+            <div class="dv-olabel"><a class="dv-oid" href="#1a">1a</a>Branches with no &#8220;on main&#8221;: the total slides under the counts</div>
+            <div class="cap-row"><sc-for list="{{c1}}" as="sp" hint-placeholder-count="4"><div class="cap-col"><span class="wcap">{{sp.cap}}</span><div class="{{sp.sbx}}"><sc-if value="{{sp.rr}}" hint-placeholder-val="{{ false }}"><div class="{{sp.cls}}" style="{{sp.style}}"><div class="rr"><span class="chev"></span><span class="nm">{{sp.name}}</span><svg class="mk"><use href="#g-gh"/></svg><svg class="mk"><use href="#g-globe"/></svg><span class="wc"><span class="w">{{sp.wtsText}}</span><span class="g"><svg class="gi"><use href="#g-wt"/></svg>{{sp.wts}}</span></span><svg class="star"><use href="#g-star"/></svg></div></div></sc-if><sc-if value="{{sp.sx}}" hint-placeholder-val="{{ true }}"><div class="{{sp.cls}}" style="{{sp.style}}"><sc-for list="{{sp.secs}}" as="s" hint-placeholder-count="2"><div class="ref-section"><div class="{{s.wrapCls}}"><button class="ref-section__head"><span class="ref-section__chev"></span><span class="glyph g-{{s.kind}}"><svg class="gi gi-wt"><use href="#g-wt"/></svg><svg class="gi gi-pr"><use href="#g-pr"/></svg><svg class="gi gi-br"><use href="#g-br"/></svg><svg class="gi gi-tag"><use href="#g-tag"/></svg><svg class="gi gi-rem"><use href="#g-rem"/></svg></span><span class="ref-section__label"><span class="lbl-long">{{s.long}}</span><span class="lbl-short">{{s.short}}</span></span><span class="ref-section__count">{{s.count}}</span></button><sc-if value="{{s.hasChips}}" hint-placeholder-val="{{ false }}"><span class="ref-section__chips"><sc-for list="{{s.chips}}" as="c" hint-placeholder-count="2"><button class="{{c.cls}}" data-rank="{{c.rank}}">{{c.text}}</button></sc-for></span></sc-if><sc-if value="{{s.hasOn}}" hint-placeholder-val="{{ false }}"><span class="ref-section__on"><span class="ref-section__on-text">on main</span></span></sc-if><sc-if value="{{s.hasTail}}" hint-placeholder-val="{{ false }}"><span class="tail"><sc-if value="{{s.hasRefresh}}" hint-placeholder-val="{{ false }}"><button class="ref-fetch-all"><svg width="12" height="12"><use href="#g-refresh"/></svg></button></sc-if><sc-if value="{{s.hasRecent}}" hint-placeholder-val="{{ false }}"><button class="wt-sort">Recent</button></sc-if></span></sc-if></div></div></sc-for></div></sc-if></div></div></sc-for></div>
+          </div>
+
+          <div class="dv-opt" id="1b" data-screen-label="1b Branches clipped">
+            <div class="dv-olabel"><a class="dv-oid" href="#1b">1b</a>Branches with &#8220;on main&#8221;: the counts are cut off at the edge</div>
+            <div class="cap-row"><sc-for list="{{c2}}" as="sp" hint-placeholder-count="3"><div class="cap-col"><span class="wcap">{{sp.cap}}</span><div class="{{sp.sbx}}"><sc-if value="{{sp.rr}}" hint-placeholder-val="{{ false }}"><div class="{{sp.cls}}" style="{{sp.style}}"><div class="rr"><span class="chev"></span><span class="nm">{{sp.name}}</span><svg class="mk"><use href="#g-gh"/></svg><svg class="mk"><use href="#g-globe"/></svg><span class="wc"><span class="w">{{sp.wtsText}}</span><span class="g"><svg class="gi"><use href="#g-wt"/></svg>{{sp.wts}}</span></span><svg class="star"><use href="#g-star"/></svg></div></div></sc-if><sc-if value="{{sp.sx}}" hint-placeholder-val="{{ true }}"><div class="{{sp.cls}}" style="{{sp.style}}"><sc-for list="{{sp.secs}}" as="s" hint-placeholder-count="2"><div class="ref-section"><div class="{{s.wrapCls}}"><button class="ref-section__head"><span class="ref-section__chev"></span><span class="glyph g-{{s.kind}}"><svg class="gi gi-wt"><use href="#g-wt"/></svg><svg class="gi gi-pr"><use href="#g-pr"/></svg><svg class="gi gi-br"><use href="#g-br"/></svg><svg class="gi gi-tag"><use href="#g-tag"/></svg><svg class="gi gi-rem"><use href="#g-rem"/></svg></span><span class="ref-section__label"><span class="lbl-long">{{s.long}}</span><span class="lbl-short">{{s.short}}</span></span><span class="ref-section__count">{{s.count}}</span></button><sc-if value="{{s.hasChips}}" hint-placeholder-val="{{ false }}"><span class="ref-section__chips"><sc-for list="{{s.chips}}" as="c" hint-placeholder-count="2"><button class="{{c.cls}}" data-rank="{{c.rank}}">{{c.text}}</button></sc-for></span></sc-if><sc-if value="{{s.hasOn}}" hint-placeholder-val="{{ false }}"><span class="ref-section__on"><span class="ref-section__on-text">on main</span></span></sc-if><sc-if value="{{s.hasTail}}" hint-placeholder-val="{{ false }}"><span class="tail"><sc-if value="{{s.hasRefresh}}" hint-placeholder-val="{{ false }}"><button class="ref-fetch-all"><svg width="12" height="12"><use href="#g-refresh"/></svg></button></sc-if><sc-if value="{{s.hasRecent}}" hint-placeholder-val="{{ false }}"><button class="wt-sort">Recent</button></sc-if></span></sc-if></div></div></sc-for></div></sc-if></div></div></sc-for></div>
+          </div>
+
+          <div class="dv-opt" id="1c" data-screen-label="1c PR wrap">
+            <div class="dv-olabel"><a class="dv-oid" href="#1c">1c</a>Pull requests: the label breaks onto two centred lines</div>
+            <div class="cap-row"><sc-for list="{{c3}}" as="sp" hint-placeholder-count="3"><div class="cap-col"><span class="wcap">{{sp.cap}}</span><div class="{{sp.sbx}}"><sc-if value="{{sp.rr}}" hint-placeholder-val="{{ false }}"><div class="{{sp.cls}}" style="{{sp.style}}"><div class="rr"><span class="chev"></span><span class="nm">{{sp.name}}</span><svg class="mk"><use href="#g-gh"/></svg><svg class="mk"><use href="#g-globe"/></svg><span class="wc"><span class="w">{{sp.wtsText}}</span><span class="g"><svg class="gi"><use href="#g-wt"/></svg>{{sp.wts}}</span></span><svg class="star"><use href="#g-star"/></svg></div></div></sc-if><sc-if value="{{sp.sx}}" hint-placeholder-val="{{ true }}"><div class="{{sp.cls}}" style="{{sp.style}}"><sc-for list="{{sp.secs}}" as="s" hint-placeholder-count="2"><div class="ref-section"><div class="{{s.wrapCls}}"><button class="ref-section__head"><span class="ref-section__chev"></span><span class="glyph g-{{s.kind}}"><svg class="gi gi-wt"><use href="#g-wt"/></svg><svg class="gi gi-pr"><use href="#g-pr"/></svg><svg class="gi gi-br"><use href="#g-br"/></svg><svg class="gi gi-tag"><use href="#g-tag"/></svg><svg class="gi gi-rem"><use href="#g-rem"/></svg></span><span class="ref-section__label"><span class="lbl-long">{{s.long}}</span><span class="lbl-short">{{s.short}}</span></span><span class="ref-section__count">{{s.count}}</span></button><sc-if value="{{s.hasChips}}" hint-placeholder-val="{{ false }}"><span class="ref-section__chips"><sc-for list="{{s.chips}}" as="c" hint-placeholder-count="2"><button class="{{c.cls}}" data-rank="{{c.rank}}">{{c.text}}</button></sc-for></span></sc-if><sc-if value="{{s.hasOn}}" hint-placeholder-val="{{ false }}"><span class="ref-section__on"><span class="ref-section__on-text">on main</span></span></sc-if><sc-if value="{{s.hasTail}}" hint-placeholder-val="{{ false }}"><span class="tail"><sc-if value="{{s.hasRefresh}}" hint-placeholder-val="{{ false }}"><button class="ref-fetch-all"><svg width="12" height="12"><use href="#g-refresh"/></svg></button></sc-if><sc-if value="{{s.hasRecent}}" hint-placeholder-val="{{ false }}"><button class="wt-sort">Recent</button></sc-if></span></sc-if></div></div></sc-for></div></sc-if></div></div></sc-for></div>
+          </div>
+
+          <div class="dv-opt" id="1d" data-screen-label="1d Repo row">
+            <div class="dv-olabel"><a class="dv-oid" href="#1d">1d</a>Repository row: the name gives way before any decoration does</div>
+            <div class="cap-row"><sc-for list="{{c4}}" as="sp" hint-placeholder-count="3"><div class="cap-col"><span class="wcap">{{sp.cap}}</span><div class="{{sp.sbx}}"><sc-if value="{{sp.rr}}" hint-placeholder-val="{{ false }}"><div class="{{sp.cls}}" style="{{sp.style}}"><div class="rr"><span class="chev"></span><span class="nm">{{sp.name}}</span><svg class="mk"><use href="#g-gh"/></svg><svg class="mk"><use href="#g-globe"/></svg><span class="wc"><span class="w">{{sp.wtsText}}</span><span class="g"><svg class="gi"><use href="#g-wt"/></svg>{{sp.wts}}</span></span><svg class="star"><use href="#g-star"/></svg></div></div></sc-if><sc-if value="{{sp.sx}}" hint-placeholder-val="{{ true }}"><div class="{{sp.cls}}" style="{{sp.style}}"><sc-for list="{{sp.secs}}" as="s" hint-placeholder-count="2"><div class="ref-section"><div class="{{s.wrapCls}}"><button class="ref-section__head"><span class="ref-section__chev"></span><span class="glyph g-{{s.kind}}"><svg class="gi gi-wt"><use href="#g-wt"/></svg><svg class="gi gi-pr"><use href="#g-pr"/></svg><svg class="gi gi-br"><use href="#g-br"/></svg><svg class="gi gi-tag"><use href="#g-tag"/></svg><svg class="gi gi-rem"><use href="#g-rem"/></svg></span><span class="ref-section__label"><span class="lbl-long">{{s.long}}</span><span class="lbl-short">{{s.short}}</span></span><span class="ref-section__count">{{s.count}}</span></button><sc-if value="{{s.hasChips}}" hint-placeholder-val="{{ false }}"><span class="ref-section__chips"><sc-for list="{{s.chips}}" as="c" hint-placeholder-count="2"><button class="{{c.cls}}" data-rank="{{c.rank}}">{{c.text}}</button></sc-for></span></sc-if><sc-if value="{{s.hasOn}}" hint-placeholder-val="{{ false }}"><span class="ref-section__on"><span class="ref-section__on-text">on main</span></span></sc-if><sc-if value="{{s.hasTail}}" hint-placeholder-val="{{ false }}"><span class="tail"><sc-if value="{{s.hasRefresh}}" hint-placeholder-val="{{ false }}"><button class="ref-fetch-all"><svg width="12" height="12"><use href="#g-refresh"/></svg></button></sc-if><sc-if value="{{s.hasRecent}}" hint-placeholder-val="{{ false }}"><button class="wt-sort">Recent</button></sc-if></span></sc-if></div></div></sc-for></div></sc-if></div></div></sc-for></div>
+          </div>
+
+          <div class="dv-opt" id="1e" data-screen-label="1e Findings">
+            <div class="dv-olabel"><a class="dv-oid" href="#1e">1e</a>What is wrong, measured</div>
+            <div class="find">
+              <div class="fitem"><span class="pin">1</span><div><h4>The Branches total is allowed to shrink, and nothing clips it</h4><p><code>.ref-section__head</code> is <code>width: 100%; min-width: 0</code> with the default <code>flex-shrink: 1</code>, and the chips beside it are rigid. Below 306&nbsp;px the button takes the whole shortfall and its text paints under the chips: <b>32&nbsp;px of overlap at 270, 80 at 222, 94 at 194</b>. Measured in a Vite build of <code>app.css</code> with the bundled Geist.</p></div></div>
+              <div class="fitem"><span class="pin">2</span><div><h4>The &#8220;on main&#8221; variant hides counts to avoid the overlap</h4><p>It made the total rigid and gave the chips <code>overflow: hidden</code>, commented as a last resort at the narrowest sidebar. At 222 it already shows 21 of &#8220;43 gone&#8221;&#8217;s 54&nbsp;px, which reads as &#8220;43&#8221;; at 194 the chip is gone entirely, with no sign that anything is missing.</p></div></div>
+              <div class="fitem"><span class="pin">3</span><div><h4>Labels can wrap, and a button centres its text</h4><p>No heading label has <code>white-space: nowrap</code>, and the user agent centres a button&#8217;s text, so &#8220;Pull requests&#8221; breaks into two centred lines from 222&nbsp;px down inside a 31&nbsp;px row. That is the &#8220;centering and line breaking&#8221;.</p></div></div>
+              <div class="fitem"><span class="pin">4</span><div><h4>The repository row spends its width on decoration first</h4><p>Only the name may shrink, so at the default width with the index on, &#8220;atlas-api-gateway&#8221; ellipsizes while two forge marks, &#8220;279 wts&#8221; and the star all stay whole.</p></div></div>
+              <div class="fitem"><span class="pin">5</span><div><h4>None of these rows has a breakpoint at all</h4><p>No rule fires for them; this is what flexbox does when it runs out of room. The tree is described as built for 240&nbsp;px (<code>SIDEBAR_MIN_WIDTH</code>), but at 240 its section rows are 190&nbsp;px and all three fail. The bugs are older than the index (main at 320 already overlaps by 32&nbsp;px for a repository with three counts), but the index turned the narrow case into the default: at 320 it leaves the tree 244&nbsp;px.</p></div></div>
+            </div>
+          </div>
+
+        </div>
+        <p class="dv-next">Try next: &#8220;show 1a at the large text size&#8221; &#183; &#8220;add the Worktrees heading at 170&#8221;</p>
+      </section>
+
+      <!-- ================================ TURN 2 ================================ -->
+      <section class="dv-turn" id="t2">
+        <div class="dv-thd"><a class="dv-tid" href="#t2">2</a><span class="dv-tname">Four ways to fit a heading into its section</span></div>
+        <p class="dv-sub">All four start from the same hygiene: the total never shrinks, no label wraps, text starts at the left, and nothing paints over anything. They differ in what decides <b>when</b> a heading gives something up, and <b>what</b> it gives up. Each is drawn at 222 and 194&nbsp;px with the busiest repository, plus a quiet one where it matters.</p>
+        <div class="dv-opts">
+
+          <div class="dv-opt" id="2a" data-screen-label="2a Hygiene only">
+            <div class="dv-olabel"><a class="dv-oid" href="#2a">2a</a>Hygiene only: clip each row at its edge <span class="rej">Rejected</span></div>
+            <div class="cap-row"><sc-for list="{{c5}}" as="sp" hint-placeholder-count="2"><div class="cap-col"><span class="wcap">{{sp.cap}}</span><div class="{{sp.sbx}}"><sc-if value="{{sp.rr}}" hint-placeholder-val="{{ false }}"><div class="{{sp.cls}}" style="{{sp.style}}"><div class="rr"><span class="chev"></span><span class="nm">{{sp.name}}</span><svg class="mk"><use href="#g-gh"/></svg><svg class="mk"><use href="#g-globe"/></svg><span class="wc"><span class="w">{{sp.wtsText}}</span><span class="g"><svg class="gi"><use href="#g-wt"/></svg>{{sp.wts}}</span></span><svg class="star"><use href="#g-star"/></svg></div></div></sc-if><sc-if value="{{sp.sx}}" hint-placeholder-val="{{ true }}"><div class="{{sp.cls}}" style="{{sp.style}}"><sc-for list="{{sp.secs}}" as="s" hint-placeholder-count="2"><div class="ref-section"><div class="{{s.wrapCls}}"><button class="ref-section__head"><span class="ref-section__chev"></span><span class="glyph g-{{s.kind}}"><svg class="gi gi-wt"><use href="#g-wt"/></svg><svg class="gi gi-pr"><use href="#g-pr"/></svg><svg class="gi gi-br"><use href="#g-br"/></svg><svg class="gi gi-tag"><use href="#g-tag"/></svg><svg class="gi gi-rem"><use href="#g-rem"/></svg></span><span class="ref-section__label"><span class="lbl-long">{{s.long}}</span><span class="lbl-short">{{s.short}}</span></span><span class="ref-section__count">{{s.count}}</span></button><sc-if value="{{s.hasChips}}" hint-placeholder-val="{{ false }}"><span class="ref-section__chips"><sc-for list="{{s.chips}}" as="c" hint-placeholder-count="2"><button class="{{c.cls}}" data-rank="{{c.rank}}">{{c.text}}</button></sc-for></span></sc-if><sc-if value="{{s.hasOn}}" hint-placeholder-val="{{ false }}"><span class="ref-section__on"><span class="ref-section__on-text">on main</span></span></sc-if><sc-if value="{{s.hasTail}}" hint-placeholder-val="{{ false }}"><span class="tail"><sc-if value="{{s.hasRefresh}}" hint-placeholder-val="{{ false }}"><button class="ref-fetch-all"><svg width="12" height="12"><use href="#g-refresh"/></svg></button></sc-if><sc-if value="{{s.hasRecent}}" hint-placeholder-val="{{ false }}"><button class="wt-sort">Recent</button></sc-if></span></sc-if></div></div></sc-for></div></sc-if></div></div></sc-for></div>
+            <p class="note">Fixes the overlap and the wrapping, and nothing else. &#8220;322 gone&#8221; and then &#8220;32 behind&#8221; still fall off the right edge with no trace, which is finding 2 moved to every heading.</p>
+          </div>
+
+          <div class="dv-opt" id="2b" data-screen-label="2b Section breakpoints">
+            <div class="dv-olabel"><a class="dv-oid" href="#2b">2b</a>Breakpoints keyed to the section&#8217;s own width <span class="alt">Alternative</span></div>
+            <div class="cap-row"><sc-for list="{{c6}}" as="sp" hint-placeholder-count="2"><div class="cap-col"><span class="wcap">{{sp.cap}}</span><div class="{{sp.sbx}}"><sc-if value="{{sp.rr}}" hint-placeholder-val="{{ false }}"><div class="{{sp.cls}}" style="{{sp.style}}"><div class="rr"><span class="chev"></span><span class="nm">{{sp.name}}</span><svg class="mk"><use href="#g-gh"/></svg><svg class="mk"><use href="#g-globe"/></svg><span class="wc"><span class="w">{{sp.wtsText}}</span><span class="g"><svg class="gi"><use href="#g-wt"/></svg>{{sp.wts}}</span></span><svg class="star"><use href="#g-star"/></svg></div></div></sc-if><sc-if value="{{sp.sx}}" hint-placeholder-val="{{ true }}"><div class="{{sp.cls}}" style="{{sp.style}}"><sc-for list="{{sp.secs}}" as="s" hint-placeholder-count="2"><div class="ref-section"><div class="{{s.wrapCls}}"><button class="ref-section__head"><span class="ref-section__chev"></span><span class="glyph g-{{s.kind}}"><svg class="gi gi-wt"><use href="#g-wt"/></svg><svg class="gi gi-pr"><use href="#g-pr"/></svg><svg class="gi gi-br"><use href="#g-br"/></svg><svg class="gi gi-tag"><use href="#g-tag"/></svg><svg class="gi gi-rem"><use href="#g-rem"/></svg></span><span class="ref-section__label"><span class="lbl-long">{{s.long}}</span><span class="lbl-short">{{s.short}}</span></span><span class="ref-section__count">{{s.count}}</span></button><sc-if value="{{s.hasChips}}" hint-placeholder-val="{{ false }}"><span class="ref-section__chips"><sc-for list="{{s.chips}}" as="c" hint-placeholder-count="2"><button class="{{c.cls}}" data-rank="{{c.rank}}">{{c.text}}</button></sc-for></span></sc-if><sc-if value="{{s.hasOn}}" hint-placeholder-val="{{ false }}"><span class="ref-section__on"><span class="ref-section__on-text">on main</span></span></sc-if><sc-if value="{{s.hasTail}}" hint-placeholder-val="{{ false }}"><span class="tail"><sc-if value="{{s.hasRefresh}}" hint-placeholder-val="{{ false }}"><button class="ref-fetch-all"><svg width="12" height="12"><use href="#g-refresh"/></svg></button></sc-if><sc-if value="{{s.hasRecent}}" hint-placeholder-val="{{ false }}"><button class="wt-sort">Recent</button></sc-if></span></sc-if></div></div></sc-for></div></sc-if></div></div></sc-for></div>
+            <p class="note">A named container per heading (<code>container: ref-head / inline-size</code>) with fixed cuts, for example glyph labels below 240 and &#8220;gone&#8221; folded below 210. This is the right axis, the section rather than the sidebar. But a fixed cut is only right for one amount of content: &#8220;29 ahead 32 behind 322 gone&#8221; needs 194&nbsp;px and &#8220;3 ahead&#8221; needs 47. Here the quiet repository loses its words although they fit, and at the busy one the cut lands 2&nbsp;px from overflow. Fork Sync shipped a fixed cut and hid its chip at the stock window width.</p>
+          </div>
+
+          <div class="dv-opt" id="2c" data-screen-label="2c Measured ladder">
+            <div class="dv-olabel"><a class="dv-oid" href="#2c">2c</a>A measured ladder per repository block <span class="rec">Recommended</span></div>
+            <div class="cap-row"><sc-for list="{{c7}}" as="sp" hint-placeholder-count="3"><div class="cap-col"><span class="wcap">{{sp.cap}}</span><div class="{{sp.sbx}}"><sc-if value="{{sp.rr}}" hint-placeholder-val="{{ false }}"><div class="{{sp.cls}}" style="{{sp.style}}"><div class="rr"><span class="chev"></span><span class="nm">{{sp.name}}</span><svg class="mk"><use href="#g-gh"/></svg><svg class="mk"><use href="#g-globe"/></svg><span class="wc"><span class="w">{{sp.wtsText}}</span><span class="g"><svg class="gi"><use href="#g-wt"/></svg>{{sp.wts}}</span></span><svg class="star"><use href="#g-star"/></svg></div></div></sc-if><sc-if value="{{sp.sx}}" hint-placeholder-val="{{ true }}"><div class="{{sp.cls}}" style="{{sp.style}}"><sc-for list="{{sp.secs}}" as="s" hint-placeholder-count="2"><div class="ref-section"><div class="{{s.wrapCls}}"><button class="ref-section__head"><span class="ref-section__chev"></span><span class="glyph g-{{s.kind}}"><svg class="gi gi-wt"><use href="#g-wt"/></svg><svg class="gi gi-pr"><use href="#g-pr"/></svg><svg class="gi gi-br"><use href="#g-br"/></svg><svg class="gi gi-tag"><use href="#g-tag"/></svg><svg class="gi gi-rem"><use href="#g-rem"/></svg></span><span class="ref-section__label"><span class="lbl-long">{{s.long}}</span><span class="lbl-short">{{s.short}}</span></span><span class="ref-section__count">{{s.count}}</span></button><sc-if value="{{s.hasChips}}" hint-placeholder-val="{{ false }}"><span class="ref-section__chips"><sc-for list="{{s.chips}}" as="c" hint-placeholder-count="2"><button class="{{c.cls}}" data-rank="{{c.rank}}">{{c.text}}</button></sc-for></span></sc-if><sc-if value="{{s.hasOn}}" hint-placeholder-val="{{ false }}"><span class="ref-section__on"><span class="ref-section__on-text">on main</span></span></sc-if><sc-if value="{{s.hasTail}}" hint-placeholder-val="{{ false }}"><span class="tail"><sc-if value="{{s.hasRefresh}}" hint-placeholder-val="{{ false }}"><button class="ref-fetch-all"><svg width="12" height="12"><use href="#g-refresh"/></svg></button></sc-if><sc-if value="{{s.hasRecent}}" hint-placeholder-val="{{ false }}"><button class="wt-sort">Recent</button></sc-if></span></sc-if></div></div></sc-for></div></sc-if></div></div></sc-for></div>
+            <p class="note">The hook the toolbar, title strip and lineage header already use (<code>useStepLadder</code>). Each repository block measures its own section rows, at whatever width the tree gives them, and takes the first step at which every heading fits: shorter words, then glyph labels, then the least urgent counts fold into a <b>+N</b> chip. It is keyed to the section and to what is in it, so a quiet repository keeps its words at the same width where a busy one steps down.</p>
+          </div>
+
+          <div class="dv-opt" id="2d" data-screen-label="2d Icons always">
+            <div class="dv-olabel"><a class="dv-oid" href="#2d">2d</a>Icons at every width <span class="rej">Rejected as the default</span></div>
+            <div class="cap-row"><sc-for list="{{c8}}" as="sp" hint-placeholder-count="1"><div class="cap-col"><span class="wcap">{{sp.cap}}</span><div class="{{sp.sbx}}"><sc-if value="{{sp.rr}}" hint-placeholder-val="{{ false }}"><div class="{{sp.cls}}" style="{{sp.style}}"><div class="rr"><span class="chev"></span><span class="nm">{{sp.name}}</span><svg class="mk"><use href="#g-gh"/></svg><svg class="mk"><use href="#g-globe"/></svg><span class="wc"><span class="w">{{sp.wtsText}}</span><span class="g"><svg class="gi"><use href="#g-wt"/></svg>{{sp.wts}}</span></span><svg class="star"><use href="#g-star"/></svg></div></div></sc-if><sc-if value="{{sp.sx}}" hint-placeholder-val="{{ true }}"><div class="{{sp.cls}}" style="{{sp.style}}"><sc-for list="{{sp.secs}}" as="s" hint-placeholder-count="2"><div class="ref-section"><div class="{{s.wrapCls}}"><button class="ref-section__head"><span class="ref-section__chev"></span><span class="glyph g-{{s.kind}}"><svg class="gi gi-wt"><use href="#g-wt"/></svg><svg class="gi gi-pr"><use href="#g-pr"/></svg><svg class="gi gi-br"><use href="#g-br"/></svg><svg class="gi gi-tag"><use href="#g-tag"/></svg><svg class="gi gi-rem"><use href="#g-rem"/></svg></span><span class="ref-section__label"><span class="lbl-long">{{s.long}}</span><span class="lbl-short">{{s.short}}</span></span><span class="ref-section__count">{{s.count}}</span></button><sc-if value="{{s.hasChips}}" hint-placeholder-val="{{ false }}"><span class="ref-section__chips"><sc-for list="{{s.chips}}" as="c" hint-placeholder-count="2"><button class="{{c.cls}}" data-rank="{{c.rank}}">{{c.text}}</button></sc-for></span></sc-if><sc-if value="{{s.hasOn}}" hint-placeholder-val="{{ false }}"><span class="ref-section__on"><span class="ref-section__on-text">on main</span></span></sc-if><sc-if value="{{s.hasTail}}" hint-placeholder-val="{{ false }}"><span class="tail"><sc-if value="{{s.hasRefresh}}" hint-placeholder-val="{{ false }}"><button class="ref-fetch-all"><svg width="12" height="12"><use href="#g-refresh"/></svg></button></sc-if><sc-if value="{{s.hasRecent}}" hint-placeholder-val="{{ false }}"><button class="wt-sort">Recent</button></sc-if></span></sc-if></div></div></sc-for></div></sc-if></div></div></sc-for></div>
+            <p class="note">Compact and steady, but at 330&nbsp;px it saves width nobody needs and makes five glyphs mandatory reading. It survives as a step on the 2c ladder.</p>
+          </div>
+
+        </div>
+        <p class="dv-next">Try next: &#8220;draw 2b with the cuts tuned for the quiet repository&#8221; &#183; &#8220;show 2c at the large text size&#8221;</p>
+      </section>
+
+      <!-- ================================ TURN 3 ================================ -->
+      <section class="dv-turn" id="t3">
+        <div class="dv-thd"><a class="dv-tid" href="#t3">3</a><span class="dv-tname">2c in detail: the ladder, its order, and where every hidden count still lives</span></div>
+        <p class="dv-sub">Information outlasts decoration: words go before counts, and a count that leaves the heading is still one hover and one click away. The steps apply to a whole repository block at once, so its five headings never mix words and glyphs. The block is measured on the section width the tree actually gives it; <code>.sidebar__tree-pane</code> already sizes the tree on its own, without the index.</p>
+        <div class="dv-opts">
+
+          <div class="dv-opt" id="3a" data-screen-label="3a Ladder">
+            <div class="dv-olabel"><a class="dv-oid" href="#3a">3a</a>The steps, in order</div>
+            <div class="tbl">
+              <div class="tr head"><span>Step</span><span>What gives way</span><span>Where it still is</span></div>
+              <div class="tr"><b>0</b><span>Nothing: every label in words</span><span>&#8212;</span></div>
+              <div class="tr"><b>&#8212;</b><span>&#8220;on main&#8221; leaves first, as it does today: it takes leftover room only, at least 6ch or nothing</span><span>The disclosure&#8217;s name, and the title bar&#8217;s branch</span></div>
+              <div class="tr"><b>1</b><span><code>fit-short</code>: &#8220;Pull requests&#8221; becomes &#8220;PRs&#8221; (&#8220;MRs&#8221; for GitLab)</span><span>The heading&#8217;s accessible name and its hover card keep the full noun</span></div>
+              <div class="tr"><b>2</b><span><code>fit-glyphs</code>: all five labels become their glyphs, beside their counts</span><span>Accessible names keep the words; hover reads &#8220;Branches &#183; 533&#8221;. The same drawings as everywhere else: <code>WorktreeGlyph</code>, the palette&#8217;s pull request mark, <code>BranchGlyph</code>, <code>TagGlyph</code>, and a new remote mark</span></div>
+              <div class="tr"><b>3</b><span><code>fit-fold-1</code>: &#8220;gone&#8221; folds into <b>+1</b></span><span>The +N chip: hover lists what it holds (&#8220;322 gone &#8212; show branches&#8221;), click opens the refs browser on Branches</span></div>
+              <div class="tr"><b>4</b><span><code>fit-fold-2</code>: &#8220;behind&#8221; folds too (<b>+2</b>)</span><span>Same chip, same card</span></div>
+              <div class="tr"><b>5</b><span><code>fit-fold-3</code>: &#8220;ahead&#8221; folds too (<b>+3</b>)</span><span>Same chip; in practice below 150&nbsp;px</span></div>
+              <div class="tr"><b>Never</b><span>The totals, &#8220;N failing&#8221;, &#10227; and Recent</span><span>&#8220;failing&#8221; is a filter toggle and the most urgent count; the rest are controls. Past step 5 a row clips at its own edge rather than overlap</span></div>
+            </div>
+            <p class="note" style="max-width:820px">Order of the folds: <b>gone</b> first because it means finished work, <b>behind</b> next, <b>ahead</b> last because it is the only one that says something here needs pushing. That matches the reasoning already written beside the chips: gone is deliberately not a warning.</p>
+          </div>
+
+          <div class="dv-opt" id="3b" data-screen-label="3b Block at four widths">
+            <div class="dv-olabel"><a class="dv-oid" href="#3b">3b</a>The busiest repository, at four widths</div>
+            <div class="cap-row"><sc-for list="{{c9}}" as="sp" hint-placeholder-count="4"><div class="cap-col"><span class="wcap">{{sp.cap}}</span><div class="{{sp.sbx}}"><sc-if value="{{sp.rr}}" hint-placeholder-val="{{ false }}"><div class="{{sp.cls}}" style="{{sp.style}}"><div class="rr"><span class="chev"></span><span class="nm">{{sp.name}}</span><svg class="mk"><use href="#g-gh"/></svg><svg class="mk"><use href="#g-globe"/></svg><span class="wc"><span class="w">{{sp.wtsText}}</span><span class="g"><svg class="gi"><use href="#g-wt"/></svg>{{sp.wts}}</span></span><svg class="star"><use href="#g-star"/></svg></div></div></sc-if><sc-if value="{{sp.sx}}" hint-placeholder-val="{{ true }}"><div class="{{sp.cls}}" style="{{sp.style}}"><sc-for list="{{sp.secs}}" as="s" hint-placeholder-count="2"><div class="ref-section"><div class="{{s.wrapCls}}"><button class="ref-section__head"><span class="ref-section__chev"></span><span class="glyph g-{{s.kind}}"><svg class="gi gi-wt"><use href="#g-wt"/></svg><svg class="gi gi-pr"><use href="#g-pr"/></svg><svg class="gi gi-br"><use href="#g-br"/></svg><svg class="gi gi-tag"><use href="#g-tag"/></svg><svg class="gi gi-rem"><use href="#g-rem"/></svg></span><span class="ref-section__label"><span class="lbl-long">{{s.long}}</span><span class="lbl-short">{{s.short}}</span></span><span class="ref-section__count">{{s.count}}</span></button><sc-if value="{{s.hasChips}}" hint-placeholder-val="{{ false }}"><span class="ref-section__chips"><sc-for list="{{s.chips}}" as="c" hint-placeholder-count="2"><button class="{{c.cls}}" data-rank="{{c.rank}}">{{c.text}}</button></sc-for></span></sc-if><sc-if value="{{s.hasOn}}" hint-placeholder-val="{{ false }}"><span class="ref-section__on"><span class="ref-section__on-text">on main</span></span></sc-if><sc-if value="{{s.hasTail}}" hint-placeholder-val="{{ false }}"><span class="tail"><sc-if value="{{s.hasRefresh}}" hint-placeholder-val="{{ false }}"><button class="ref-fetch-all"><svg width="12" height="12"><use href="#g-refresh"/></svg></button></sc-if><sc-if value="{{s.hasRecent}}" hint-placeholder-val="{{ false }}"><button class="wt-sort">Recent</button></sc-if></span></sc-if></div></div></sc-for></div></sc-if></div></div></sc-for></div>
+          </div>
+
+          <div class="dv-opt" id="3c" data-screen-label="3c Other repos">
+            <div class="dv-olabel"><a class="dv-oid" href="#3c">3c</a>The same 194&nbsp;px, three repositories, each on its own step</div>
+            <div class="cap-row"><sc-for list="{{c10}}" as="sp" hint-placeholder-count="3"><div class="cap-col"><span class="wcap">{{sp.cap}}</span><div class="{{sp.sbx}}"><sc-if value="{{sp.rr}}" hint-placeholder-val="{{ false }}"><div class="{{sp.cls}}" style="{{sp.style}}"><div class="rr"><span class="chev"></span><span class="nm">{{sp.name}}</span><svg class="mk"><use href="#g-gh"/></svg><svg class="mk"><use href="#g-globe"/></svg><span class="wc"><span class="w">{{sp.wtsText}}</span><span class="g"><svg class="gi"><use href="#g-wt"/></svg>{{sp.wts}}</span></span><svg class="star"><use href="#g-star"/></svg></div></div></sc-if><sc-if value="{{sp.sx}}" hint-placeholder-val="{{ true }}"><div class="{{sp.cls}}" style="{{sp.style}}"><sc-for list="{{sp.secs}}" as="s" hint-placeholder-count="2"><div class="ref-section"><div class="{{s.wrapCls}}"><button class="ref-section__head"><span class="ref-section__chev"></span><span class="glyph g-{{s.kind}}"><svg class="gi gi-wt"><use href="#g-wt"/></svg><svg class="gi gi-pr"><use href="#g-pr"/></svg><svg class="gi gi-br"><use href="#g-br"/></svg><svg class="gi gi-tag"><use href="#g-tag"/></svg><svg class="gi gi-rem"><use href="#g-rem"/></svg></span><span class="ref-section__label"><span class="lbl-long">{{s.long}}</span><span class="lbl-short">{{s.short}}</span></span><span class="ref-section__count">{{s.count}}</span></button><sc-if value="{{s.hasChips}}" hint-placeholder-val="{{ false }}"><span class="ref-section__chips"><sc-for list="{{s.chips}}" as="c" hint-placeholder-count="2"><button class="{{c.cls}}" data-rank="{{c.rank}}">{{c.text}}</button></sc-for></span></sc-if><sc-if value="{{s.hasOn}}" hint-placeholder-val="{{ false }}"><span class="ref-section__on"><span class="ref-section__on-text">on main</span></span></sc-if><sc-if value="{{s.hasTail}}" hint-placeholder-val="{{ false }}"><span class="tail"><sc-if value="{{s.hasRefresh}}" hint-placeholder-val="{{ false }}"><button class="ref-fetch-all"><svg width="12" height="12"><use href="#g-refresh"/></svg></button></sc-if><sc-if value="{{s.hasRecent}}" hint-placeholder-val="{{ false }}"><button class="wt-sort">Recent</button></sc-if></span></sc-if></div></div></sc-for></div></sc-if></div></div></sc-for></div>
+          </div>
+
+          <div class="dv-opt" id="3d" data-screen-label="3d Repo row ladder">
+            <div class="dv-olabel"><a class="dv-oid" href="#3d">3d</a>The repository row gets its own two steps before the name gives way</div>
+            <div class="cap-row"><sc-for list="{{c11}}" as="sp" hint-placeholder-count="4"><div class="cap-col"><span class="wcap">{{sp.cap}}</span><div class="{{sp.sbx}}"><sc-if value="{{sp.rr}}" hint-placeholder-val="{{ false }}"><div class="{{sp.cls}}" style="{{sp.style}}"><div class="rr"><span class="chev"></span><span class="nm">{{sp.name}}</span><svg class="mk"><use href="#g-gh"/></svg><svg class="mk"><use href="#g-globe"/></svg><span class="wc"><span class="w">{{sp.wtsText}}</span><span class="g"><svg class="gi"><use href="#g-wt"/></svg>{{sp.wts}}</span></span><svg class="star"><use href="#g-star"/></svg></div></div></sc-if><sc-if value="{{sp.sx}}" hint-placeholder-val="{{ true }}"><div class="{{sp.cls}}" style="{{sp.style}}"><sc-for list="{{sp.secs}}" as="s" hint-placeholder-count="2"><div class="ref-section"><div class="{{s.wrapCls}}"><button class="ref-section__head"><span class="ref-section__chev"></span><span class="glyph g-{{s.kind}}"><svg class="gi gi-wt"><use href="#g-wt"/></svg><svg class="gi gi-pr"><use href="#g-pr"/></svg><svg class="gi gi-br"><use href="#g-br"/></svg><svg class="gi gi-tag"><use href="#g-tag"/></svg><svg class="gi gi-rem"><use href="#g-rem"/></svg></span><span class="ref-section__label"><span class="lbl-long">{{s.long}}</span><span class="lbl-short">{{s.short}}</span></span><span class="ref-section__count">{{s.count}}</span></button><sc-if value="{{s.hasChips}}" hint-placeholder-val="{{ false }}"><span class="ref-section__chips"><sc-for list="{{s.chips}}" as="c" hint-placeholder-count="2"><button class="{{c.cls}}" data-rank="{{c.rank}}">{{c.text}}</button></sc-for></span></sc-if><sc-if value="{{s.hasOn}}" hint-placeholder-val="{{ false }}"><span class="ref-section__on"><span class="ref-section__on-text">on main</span></span></sc-if><sc-if value="{{s.hasTail}}" hint-placeholder-val="{{ false }}"><span class="tail"><sc-if value="{{s.hasRefresh}}" hint-placeholder-val="{{ false }}"><button class="ref-fetch-all"><svg width="12" height="12"><use href="#g-refresh"/></svg></button></sc-if><sc-if value="{{s.hasRecent}}" hint-placeholder-val="{{ false }}"><button class="wt-sort">Recent</button></sc-if></span></sc-if></div></div></sc-for></div></sc-if></div></div></sc-for></div>
+            <p class="note" style="max-width:820px"><code>rr-no-marks</code>: the forge and visibility marks leave first. They qualify the repository and are in its hover card and description. A fork mark that carries an upstream pull is an action, so it stays. <code>rr-short-count</code>: &#8220;279 wts&#8221; becomes the worktree glyph and 279. Only then does the name ellipsize. The star is a control and never leaves.</p>
+          </div>
+
+          <div class="dv-opt" id="3e" data-screen-label="3e Rules">
+            <div class="dv-olabel"><a class="dv-oid" href="#3e">3e</a>Rules, and the measured widths behind them</div>
+            <div class="tbl">
+              <div class="tr m head"><span>Heading (atlas)</span><span>Words</span><span>Glyph label</span><span>+1</span><span>+2</span><span>Fits at</span></div>
+              <div class="tr m"><b>Branches 533 &#183; 3 counts</b><span>306</span><span>256</span><span>220</span><span>152</span><span>222 needs +1, 194 needs +2</span></div>
+              <div class="tr m"><b>Pull requests 21 &#183; 5 failing</b><span>238</span><span>159 (PRs: 170)</span><span>&#8212;</span><span>&#8212;</span><span>never folds; fits at 170</span></div>
+              <div class="tr m"><b>Branches 133 &#183; 2 counts (beacon)</b><span>245</span><span>195</span><span>165</span><span>97</span><span>194 needs +1; &#8220;on main&#8221; only above about 290</span></div>
+            </div>
+            <div class="find" style="width:820px">
+              <div class="fitem"><span class="pin ok">&#10003;</span><div><h4>Everything a step acts on is rigid</h4><p><code>flex: 0 0 auto</code>, the hook&#8217;s own contract: a shrinkable item never overflows, so the block would read as fitting while it ellipsized. The total, every chip, &#10227; and Recent are rigid; only &#8220;on main&#8221; is leftover.</p></div></div>
+              <div class="fitem"><span class="pin ok">&#10003;</span><div><h4>Nothing wraps, nothing centres, nothing overlaps</h4><p><code>white-space: nowrap</code> and <code>text-align: start</code> on every label and count. The row is <code>overflow: hidden</code>, so even past the last step it clips at its own edge.</p></div></div>
+              <div class="fitem"><span class="pin ok">&#10003;</span><div><h4>Measured, never a constant</h4><p>A ResizeObserver on the block, plus a re-fit after every render, as <code>useStepLadder</code> already does. The steps follow the text size axis and every count without a single number in CSS.</p></div></div>
+              <div class="fitem"><span class="pin ok">&#10003;</span><div><h4>A hidden count is never silent</h4><p>A +N chip replaces whatever folded, says what it holds on hover, and opens the refs browser where every count is a filter.</p></div></div>
+            </div>
+            <p class="note" style="max-width:820px">Widths in px, measured in a Vite build of the real <code>app.css</code> with the bundled Geist Sans and Geist Mono. This artboard loads Google Fonts&#8217; Geist, which can differ by a few pixels. Its ladder specimens are not drawn at a fixed step: each one runs the ladder when the page loads and stops where it fits in this font, which is the point of measuring.</p>
+          </div>
+
+        </div>
+        <p class="dv-next">Try next: &#8220;draw the +N hover card&#8221; &#183; &#8220;try the steps across the whole tree instead of per repository&#8221;</p>
+      </section>
+
+      <!-- ================================ TURN 4 ================================ -->
+      <section class="dv-turn" id="t4">
+        <div class="dv-thd"><a class="dv-tid" href="#t4">4</a><span class="dv-tname">Live: change the tree width, the text size and the repository</span></div>
+        <p class="dv-sub">One repository block, rendered with the heading CSS from turn 1 (Now) or 2c (Proposed). In Proposed the ladder runs exactly as <code>useStepLadder</code> does: it removes every step class, then adds them one at a time until every heading in the block fits. The readout names the step it stopped on.</p>
+        <div class="dv-opts">
+          <div class="dv-opt" id="4a" data-screen-label="4a Prototype">
+            <div class="dv-olabel"><a class="dv-oid" href="#4a">4a</a>Prototype of 2c</div>
+            <div class="proto">
+              <div class="ctl">
+                <span class="ctl-l">CSS</span>
+                <span class="seg"><button class="{{modeNow}}" onClick="{{setNow}}">Now</button><button class="{{modeNew}}" onClick="{{setNew}}">Proposed</button></span>
+                <span class="ctl-l">Tree</span>
+                <span class="seg">
+                  <button class="{{w320}}" onClick="{{set320}}">320</button>
+                  <button class="{{w272}}" onClick="{{set272}}">272</button>
+                  <button class="{{w244}}" onClick="{{set244}}">244</button>
+                  <button class="{{w220}}" onClick="{{set220}}">220</button>
+                  <button class="{{w200}}" onClick="{{set200}}">200</button>
+                </span>
+                <span class="ctl-l">Text</span>
+                <span class="seg"><button class="{{t13}}" onClick="{{set13}}">13</button><button class="{{t15}}" onClick="{{set15}}">15</button></span>
+                <span class="ctl-l">Repo</span>
+                <span class="seg"><button class="{{rA}}" onClick="{{setA}}">atlas</button><button class="{{rB}}" onClick="{{setB}}">beacon</button><button class="{{rC}}" onClick="{{setC}}">cinder</button></span>
+              </div>
+              <div class="pv-stage">
+                <div class="sbx {{mode}}" style="{{sbxStyle}}">
+                  <div class="tree" style="{{treeStyle}}">
+                    <div class="rrbox" ref="{{rrRef}}">
+                      <div class="rr"><span class="chev"></span><span class="nm">{{pr.name}}</span><svg class="mk"><use href="#g-gh"/></svg><svg class="mk"><use href="#g-globe"/></svg><span class="wc"><span class="w">{{pr.wtsText}}</span><span class="g"><svg class="gi"><use href="#g-wt"/></svg>{{pr.wts}}</span></span><svg class="star"><use href="#g-star"/></svg></div>
+                    </div>
+                    <div class="secs" ref="{{secsRef}}">
+                      <sc-for list="{{secs}}" as="s" hint-placeholder-count="5"><div class="ref-section"><div class="{{s.wrapCls}}"><button class="ref-section__head"><span class="ref-section__chev"></span><span class="glyph g-{{s.kind}}"><svg class="gi gi-wt"><use href="#g-wt"/></svg><svg class="gi gi-pr"><use href="#g-pr"/></svg><svg class="gi gi-br"><use href="#g-br"/></svg><svg class="gi gi-tag"><use href="#g-tag"/></svg><svg class="gi gi-rem"><use href="#g-rem"/></svg></span><span class="ref-section__label"><span class="lbl-long">{{s.long}}</span><span class="lbl-short">{{s.short}}</span></span><span class="ref-section__count">{{s.count}}</span></button><sc-if value="{{s.hasChips}}" hint-placeholder-val="{{ false }}"><span class="ref-section__chips"><sc-for list="{{s.chips}}" as="c" hint-placeholder-count="2"><button class="{{c.cls}}" data-rank="{{c.rank}}">{{c.text}}</button></sc-for></span></sc-if><sc-if value="{{s.hasOn}}" hint-placeholder-val="{{ false }}"><span class="ref-section__on"><span class="ref-section__on-text">on main</span></span></sc-if><sc-if value="{{s.hasTail}}" hint-placeholder-val="{{ false }}"><span class="tail"><sc-if value="{{s.hasRefresh}}" hint-placeholder-val="{{ false }}"><button class="ref-fetch-all"><svg width="12" height="12"><use href="#g-refresh"/></svg></button></sc-if><sc-if value="{{s.hasRecent}}" hint-placeholder-val="{{ false }}"><button class="wt-sort">Recent</button></sc-if></span></sc-if></div></div></sc-for>
+                    </div>
+                  </div>
+                </div>
+                <div class="readout">{{readout}}</div>
+              </div>
+              <p class="hint">Start on Now at 244 (the 320&nbsp;px default with the index on), then switch to Proposed. Try 15 at 220: the steps move with the type, with no number in the CSS. Beacon shows &#8220;on main&#8221; leaving first. At 272, cinder still has every word while atlas has already folded a count.</p>
+            </div>
+          </div>
+        </div>
+        <p class="dv-next">Try next: &#8220;add a +N hover card to 4a&#8221; &#183; &#8220;run the ladder across two repositories in 4a&#8221;</p>
+      </section>
+
+      <!-- ================================ TURN 5 ================================ -->
+      <section class="dv-turn" id="t5">
+        <div class="dv-thd"><a class="dv-tid" href="#t5">5</a><span class="dv-tname">Build list, and three questions for the operator</span></div>
+        <p class="dv-sub">The CSS hygiene alone removes every overlap and wrap and can ship first; the ladder then stops anything falling off the edge.</p>
+        <div class="dv-opts">
+          <div class="dv-opt" id="5a" data-screen-label="5a Build">
+            <div class="dv-olabel"><a class="dv-oid" href="#5a">5a</a>Build, in order</div>
+            <div class="find" style="width:620px">
+              <div class="fitem"><span class="pin ok">1</span><div><h4>Heading hygiene (CSS only)</h4><p><code>.ref-section__head</code> stops shrinking (<code>flex: 1 0 auto</code>, <code>width: auto</code>); labels and counts take <code>nowrap</code> and <code>text-align: start</code>; the chips lose the &#8220;last resort&#8221; clip; the row clips at its own edge. Fixes 1a and 1c outright.</p></div></div>
+              <div class="fitem"><span class="pin ok">2</span><div><h4>One ladder per repository block</h4><p>Wrap the sections <code>RepoRow</code> draws (Worktrees, <code>RepoChangeRequestSection</code>, <code>RepoRefsSections</code>) in one <code>.repo-sections</code> element and run <code>useStepLadder</code> on it, with a fit test of &#8220;every <code>.ref-section__head-wrap</code> has its content inside its box&#8221;. The steps are the classes in 3a.</p></div></div>
+              <div class="fitem"><span class="pin ok">3</span><div><h4>Glyph labels and short nouns</h4><p>Each heading draws its glyph and its short noun hidden beside the words; the step classes swap which one shows. Move the palette&#8217;s pull request mark into <code>lib/</code>; draw a remote mark and check it as a 15&nbsp;px raster beside its neighbours (styles/AGENTS.md). Accessible names keep the full words.</p></div></div>
+              <div class="fitem"><span class="pin ok">4</span><div><h4>The +N chip</h4><p>A <code>ref-section__chip</code> that opens the refs browser on Branches; its hover card and <code>aria-label</code> list the folded counts.</p></div></div>
+              <div class="fitem"><span class="pin ok">5</span><div><h4>The repository row&#8217;s two steps</h4><p><code>useStepLadder</code> on the row with &#8220;the name is whole&#8221; as the fit test (the Worktree row&#8217;s branch name already works this way), steps <code>rr-no-marks</code>, <code>rr-short-count</code>.</p></div></div>
+              <div class="fitem"><span class="pin ok">6</span><div><h4>A harness test at 270, 222, 194 and 170</h4><p>Asserts no overlap, no wrapped label and no clipped chip, by laying each text out off-screen in its computed font and comparing with its box, not by <code>scrollWidth</code>, which rounds a sub-pixel ellipsis away.</p></div></div>
+            </div>
+          </div>
+          <div class="dv-opt" id="5b" data-screen-label="5b Questions">
+            <div class="dv-olabel"><a class="dv-oid" href="#5b">5b</a>Open questions</div>
+            <div class="find" style="width:440px">
+              <div class="fitem"><span class="pin q">?</span><div><h4>Steps per repository, or across the whole tree?</h4><p>Recommended per repository, as drawn: a quiet repository keeps its words. Across the tree, every block would switch to glyphs together whenever any one needed it, which is steadier but costs the quiet ones their words.</p></div></div>
+              <div class="fitem"><span class="pin q">?</span><div><h4>Does the index keep the tree&#8217;s 240&nbsp;px floor?</h4><p>With this ladder a 190&nbsp;px section row holds everything, so the floor becomes true. Recommended: keep 240.</p></div></div>
+              <div class="fitem"><span class="pin q">?</span><div><h4>What does +N open?</h4><p>Recommended: the refs browser on Branches, unfiltered, since +N can hold more than one status. The alternative is a small menu of the folded chips, each opening its own filter.</p></div></div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+    </x-dc>
+    <script
+      type="text/x-dc"
+      data-dc-script
+      data-props='{}'
+    >
+      const REPOS = {"atlas": {"name": "atlas-api-gateway", "wts": 279, "secs": [{"kind": "wt", "long": "Worktrees", "short": "Worktrees", "count": "279", "refresh": true, "recent": true}, {"kind": "pr", "long": "Pull requests", "short": "PRs", "count": "21", "chips": [["failing", "5 failing", 0]], "refresh": true}, {"kind": "br", "long": "Branches", "short": "Branches", "count": "533", "chips": [["ahead", "29 ahead", 1], ["behind", "32 behind", 2], ["gone", "322 gone", 3]]}, {"kind": "tag", "long": "Tags", "short": "Tags", "count": "102"}, {"kind": "rem", "long": "Remotes", "short": "Remotes", "count": "1", "refresh": true}]}, "beacon": {"name": "beacon-web", "wts": 36, "secs": [{"kind": "wt", "long": "Worktrees", "short": "Worktrees", "count": "36", "refresh": true, "recent": true}, {"kind": "pr", "long": "Pull requests", "short": "PRs", "count": "14", "chips": [["failing", "3 failing", 0]], "refresh": true}, {"kind": "br", "long": "Branches", "short": "Branches", "count": "133", "chips": [["behind", "15 behind", 2], ["gone", "43 gone", 3]], "on": "on main"}, {"kind": "tag", "long": "Tags", "short": "Tags", "count": "80"}, {"kind": "rem", "long": "Remotes", "short": "Remotes", "count": "1", "refresh": true}]}, "cinder": {"name": "cinder", "wts": 2, "secs": [{"kind": "wt", "long": "Worktrees", "short": "Worktrees", "count": "2", "refresh": true, "recent": true}, {"kind": "pr", "long": "Pull requests", "short": "PRs", "count": "0", "refresh": true}, {"kind": "br", "long": "Branches", "short": "Branches", "count": "6"}, {"kind": "tag", "long": "Tags", "short": "Tags", "count": "4"}, {"kind": "rem", "long": "Remotes", "short": "Remotes", "count": "1", "refresh": true}]}};
+      const CARDS = {"c1": [{"cap": "306px · fits", "mode": "now", "repo": "atlas", "only": ["br"], "cls": "secs", "rr": false, "w": 306}, {"cap": "270px · 32px overlap", "mode": "now", "repo": "atlas", "only": ["br"], "cls": "secs", "rr": false, "w": 270}, {"cap": "222px · 80px overlap", "mode": "now", "repo": "atlas", "only": ["br"], "cls": "secs", "rr": false, "w": 222}, {"cap": "194px · 94px overlap", "mode": "now", "repo": "atlas", "only": ["br"], "cls": "secs", "rr": false, "w": 194}], "c2": [{"cap": "270px", "mode": "now", "repo": "beacon", "only": ["br"], "cls": "secs", "rr": false, "w": 270}, {"cap": "222px · “43 gone” reads “43”", "mode": "now", "repo": "beacon", "only": ["br"], "cls": "secs", "rr": false, "w": 222}, {"cap": "194px · gone is gone", "mode": "now", "repo": "beacon", "only": ["br"], "cls": "secs", "rr": false, "w": 194}], "c3": [{"cap": "270px", "mode": "now", "repo": "atlas", "only": ["pr"], "cls": "secs", "rr": false, "w": 270}, {"cap": "210px · two lines (from 222 in the app’s font)", "mode": "now", "repo": "atlas", "only": ["pr"], "cls": "secs", "rr": false, "w": 210}, {"cap": "194px · two lines", "mode": "now", "repo": "atlas", "only": ["pr"], "cls": "secs", "rr": false, "w": 194}], "c4": [{"cap": "tree 320px", "mode": "now", "repo": "atlas", "only": null, "cls": "rrbox", "rr": true, "w": 304}, {"cap": "tree 244px · 320 sidebar + index", "mode": "now", "repo": "atlas", "only": null, "cls": "rrbox", "rr": true, "w": 228}, {"cap": "tree 220px", "mode": "now", "repo": "atlas", "only": null, "cls": "rrbox", "rr": true, "w": 204}], "c5": [{"cap": "222px", "mode": "new", "repo": "atlas", "only": ["pr", "br"], "cls": "secs", "rr": false, "w": 222}, {"cap": "194px", "mode": "new", "repo": "atlas", "only": ["pr", "br"], "cls": "secs", "rr": false, "w": 194}], "c6": [{"cap": "222px · below 240: glyphs", "mode": "new", "repo": "atlas", "only": ["pr", "br"], "cls": "secs fit-short fit-glyphs", "rr": false, "w": 222}, {"cap": "222px · quiet repo, glyphs anyway", "mode": "new", "repo": "cinder", "only": ["wt", "pr", "br"], "cls": "secs fit-short fit-glyphs", "rr": false, "w": 222}], "c7": [{"cap": "222px", "mode": "new", "repo": "atlas", "only": ["pr", "br"], "cls": "secs auto", "rr": false, "w": 222}, {"cap": "194px", "mode": "new", "repo": "atlas", "only": ["pr", "br"], "cls": "secs auto", "rr": false, "w": 194}, {"cap": "222px · quiet repo keeps words", "mode": "new", "repo": "cinder", "only": ["wt", "pr", "br"], "cls": "secs auto", "rr": false, "w": 222}], "c8": [{"cap": "330px · room to spare, still glyphs", "mode": "new", "repo": "atlas", "only": ["wt", "pr", "br", "tag", "rem"], "cls": "secs fit-short fit-glyphs", "rr": false, "w": 330}], "c9": [{"cap": "270px · main’s default", "mode": "new", "repo": "atlas", "only": null, "cls": "secs auto", "rr": false, "w": 270}, {"cap": "222px · the screenshot", "mode": "new", "repo": "atlas", "only": null, "cls": "secs auto", "rr": false, "w": 222}, {"cap": "194px · 320 + index", "mode": "new", "repo": "atlas", "only": null, "cls": "secs auto", "rr": false, "w": 194}, {"cap": "170px", "mode": "new", "repo": "atlas", "only": null, "cls": "secs auto", "rr": false, "w": 170}], "c10": [{"cap": "atlas · three counts", "mode": "new", "repo": "atlas", "only": null, "cls": "secs auto", "rr": false, "w": 194}, {"cap": "beacon · two counts + on main", "mode": "new", "repo": "beacon", "only": null, "cls": "secs auto", "rr": false, "w": 194}, {"cap": "cinder · quiet", "mode": "new", "repo": "cinder", "only": null, "cls": "secs auto", "rr": false, "w": 194}], "c11": [{"cap": "tree 320px", "mode": "new", "repo": "atlas", "only": null, "cls": "rrbox auto", "rr": true, "w": 304}, {"cap": "tree 244px", "mode": "new", "repo": "atlas", "only": null, "cls": "rrbox auto", "rr": true, "w": 228}, {"cap": "tree 220px", "mode": "new", "repo": "atlas", "only": null, "cls": "rrbox auto", "rr": true, "w": 204}, {"cap": "tree 190px · now the name gives", "mode": "new", "repo": "atlas", "only": null, "cls": "rrbox auto", "rr": true, "w": 174}]};
+      const STEPS = ["fit-short", "fit-glyphs", "fit-fold-1", "fit-fold-2", "fit-fold-3"];
+      const RR_STEPS = ["rr-no-marks", "rr-short-count"];
+      const STEP_NAMES = ["0 · words", "1 · short nouns", "2 · glyph labels", "3 · gone folded", "4 · behind folded", "5 · all folded"];
+      const RR_NAMES = ["whole", "marks hidden", "marks hidden, count as glyph"];
+
+      // useStepLadder: clear every step, then add them one at a time until it fits.
+      function ladder(el, steps, fits) {
+        if (!el) return 0;
+        el.classList.remove.apply(el.classList, steps);
+        for (let i = 0; i < steps.length; i++) {
+          if (fits(el)) return i;
+          el.classList.add(steps[i]);
+        }
+        return fits(el) ? steps.length : -1;
+      }
+      function blockFits(el) {
+        const wraps = el.querySelectorAll(".ref-section__head-wrap");
+        for (let i = 0; i < wraps.length; i++) {
+          if (wraps[i].scrollWidth > wraps[i].clientWidth + 0.5) return false;
+        }
+        return true;
+      }
+      function rowFits(el) {
+        const nm = el.querySelector(".nm");
+        return !nm || nm.scrollWidth <= nm.clientWidth + 0.5;
+      }
+      function mores(chips) {
+        const out = [];
+        for (let k = 1; k <= 3; k++) {
+          let n = 0;
+          for (let i = 0; i < chips.length; i++) if (chips[i][2] > 0 && chips[i][2] > 3 - k) n++;
+          if (n > 0) out.push({ cls: "ref-section__chip is-more more-" + k, rank: "", text: "+" + n });
+        }
+        return out;
+      }
+
+      function secData(repo, only) {
+        return REPOS[repo].secs.filter((x) => !only || only.indexOf(x.kind) !== -1).map((x) => {
+          const chips = (x.chips || []).map((c) => ({ cls: "ref-section__chip is-" + c[0], rank: String(c[2]), text: c[1] }));
+          const all = chips.concat(mores(x.chips || []));
+          return {
+            wrapCls: "ref-section__head-wrap hw" + (x.on ? " ref-section__head-wrap--on" : ""),
+            kind: x.kind,
+            long: x.long, short: x.short, count: x.count,
+            chips: all, hasChips: all.length > 0,
+            hasOn: Boolean(x.on),
+            hasTail: Boolean(x.refresh || x.recent), hasRefresh: Boolean(x.refresh), hasRecent: Boolean(x.recent)
+          };
+        });
+      }
+      // The specimens never change, so they are built once.
+      const CARD_VALS = {};
+      Object.keys(CARDS).forEach((k) => {
+        CARD_VALS[k] = CARDS[k].map((sp) => {
+          const r = REPOS[sp.repo];
+          return {
+            cap: sp.cap, sbx: "sbx " + sp.mode, cls: sp.cls, style: "width:" + sp.w + "px",
+            rr: sp.rr, sx: !sp.rr, secs: sp.rr ? [] : secData(sp.repo, sp.only),
+            name: r.name, wts: String(r.wts), wtsText: r.wts + " wts"
+          };
+        });
+      });
+
+      class Component extends DCLogic {
+        constructor(props) {
+          super(props);
+          this.secsRef = React.createRef();
+          this.rrRef = React.createRef();
+          this.state = { mode: "now", tree: 244, text: 13, repo: "atlas", step: -1, rrStep: -1 };
+        }
+        componentDidMount() {
+          // Ladder specimens step by measuring, here, in this font.
+          const autos = document.querySelectorAll(".secs.auto, .rrbox.auto");
+          for (let i = 0; i < autos.length; i++) {
+            const el = autos[i];
+            if (el.classList.contains("rrbox")) ladder(el, RR_STEPS, rowFits);
+            else ladder(el, STEPS, blockFits);
+          }
+          this.fit();
+        }
+        componentDidUpdate() { this.fit(); }
+        fit() {
+          const secs = this.secsRef.current;
+          const rr = this.rrRef.current;
+          let step = -1, rrStep = -1;
+          if (this.state.mode === "new") {
+            step = ladder(secs, STEPS, blockFits);
+            rrStep = ladder(rr, RR_STEPS, rowFits);
+          } else {
+            if (secs) secs.classList.remove.apply(secs.classList, STEPS);
+            if (rr) rr.classList.remove.apply(rr.classList, RR_STEPS);
+          }
+          if (step !== this.state.step || rrStep !== this.state.rrStep) this.setState({ step: step, rrStep: rrStep });
+        }
+        renderVals() {
+          const s = this.state;
+          const r = REPOS[s.repo];
+          const secs = secData(s.repo, null);
+          const set = (patch) => () => this.setState(patch);
+          const sec = s.tree - 50;
+          const readout = s.mode === "now"
+            ? "Now: today's CSS, no ladder\ntree " + s.tree + "px · section rows " + sec + "px · text " + s.text + "px"
+            : "Proposed\ntree " + s.tree + "px · section rows " + sec + "px · text " + s.text + "px\n" +
+              "sections: step " + (s.step < 0 ? "past the last (clipped)" : STEP_NAMES[s.step]) + "\n" +
+              "repo row: " + (s.rrStep < 0 ? "name ellipsized" : RR_NAMES[s.rrStep]);
+          return {
+            secs: secs,
+            secsRef: this.secsRef,
+            rrRef: this.rrRef,
+            pr: { name: r.name, wts: String(r.wts), wtsText: r.wts + (r.wts === 1 ? " wt" : " wts") },
+            mode: s.mode,
+            sbxStyle: "--sidebar-title-size:" + s.text + "px",
+            treeStyle: "width:" + s.tree + "px",
+            modeNow: s.mode === "now" ? "on" : "", modeNew: s.mode === "new" ? "on" : "",
+            setNow: set({ mode: "now" }), setNew: set({ mode: "new" }),
+            w320: s.tree === 320 ? "on" : "", w272: s.tree === 272 ? "on" : "", w244: s.tree === 244 ? "on" : "", w220: s.tree === 220 ? "on" : "", w200: s.tree === 200 ? "on" : "",
+            set320: set({ tree: 320 }), set272: set({ tree: 272 }), set244: set({ tree: 244 }), set220: set({ tree: 220 }), set200: set({ tree: 200 }),
+            t13: s.text === 13 ? "on" : "", t15: s.text === 15 ? "on" : "",
+            set13: set({ text: 13 }), set15: set({ text: 15 }),
+            rA: s.repo === "atlas" ? "on" : "", rB: s.repo === "beacon" ? "on" : "", rC: s.repo === "cinder" ? "on" : "",
+            setA: set({ repo: "atlas" }), setB: set({ repo: "beacon" }), setC: set({ repo: "cinder" }),
+            readout: readout,
+            ...CARD_VALS
+          };
+        }
+      }
+
+    </script>
+  </body>
+</html>

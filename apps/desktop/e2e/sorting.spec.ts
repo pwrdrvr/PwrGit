@@ -1,7 +1,7 @@
 import { expect, test } from "@playwright/test";
 import { launchApp, type AppHandle } from "./fixtures/electron-app";
 import { createGitSandbox, type GitSandbox } from "./fixtures/git-sandbox";
-import { lensChip } from "./fixtures/steps";
+import { lensChip, clickAddFolders } from "./fixtures/steps";
 
 let sandbox: GitSandbox | null = null;
 let handle: AppHandle | null = null;
@@ -25,7 +25,7 @@ test("repos sort case-insensitively, not uppercase-first", async () => {
   handle = await launchApp();
   const { window } = handle;
   await handle.setPickDirectory(sandbox.reposDir);
-  await window.getByRole("button", { name: /Add folders/i }).click();
+  await clickAddFolders(window);
   await lensChip(window, "All").click();
 
   const names = window.locator(".repo-row__name");

@@ -1,5 +1,5 @@
 import {
-  closeSync, existsSync, lstatSync, openSync, readFileSync,
+  closeSync, lstatSync, openSync, readFileSync,
   renameSync, unlinkSync, writeFileSync
 } from "node:fs";
 import { join } from "node:path";
@@ -10,11 +10,18 @@ import { requireExit0, type GitExec } from "./dugite";
 const refused = (code: string, message: string) =>
   err({ kind: "repo" as const, code, message });
 
+const STASH_PACKED_LINE = /^([0-9a-f]{40}|[0-9a-f]{64}) refs\/stash\r?$/;
+
 /**
  * files-backend.c takes refs/stash.lock for both ref and reflog mutations.
  * Hold the same lock from identity validation through optional apply and
- * removal. The packed-refs lock prevents a concurrent pack from resurrecting
- * the last entry. Unsupported layouts are refused before any checkout changes.
+ * removal. Unsupported layouts are refused before any checkout changes.
+ *
+ * refs/stash may be loose, packed, or both: `git gc` packs it, and the next
+ * `git stash` writes a loose ref that shadows the stale packed line. A loose
+ * ref wins, as in Git. Removing the last entry deletes both, like
+ * `git stash drop`, so the packed line cannot resurrect a dropped stash; the
+ * packed-refs lock keeps a concurrent pack out while we do that.
  */
 export async function removeStashByHash(
   git: GitExec,
@@ -50,11 +57,9 @@ export async function removeStashByHash(
     lock(ref + ".lock");
     lock(packed + ".lock");
     lock(log + ".lock");
-    if (
-      !existsSync(ref) || !existsSync(log) ||
-      !lstatSync(ref).isFile() || !lstatSync(log).isFile() ||
-      (existsSync(packed) && / refs\/stash(?:\r?\n|$)/.test(readFileSync(packed, "utf8")))
-    ) {
+    const layout = readStashLayout(ref, log, packed);
+    if (!layout.ok) {
+      logMain("warn", "stash", `refusing stash removal in ${common}: ${layout.reason}`);
       return refused("unsupported_stash_storage", "The stash uses an unsupported or changed ref layout. Refresh, or use Git to remove it. Apply remains available.");
     }
     const bytes = readFileSync(log);
@@ -76,7 +81,7 @@ export async function removeStashByHash(
       return refused(matches.length ? "ambiguous_stash" : "not_found",
         "The selected stash disappeared or has duplicate occurrences. Refresh before removing it.");
     }
-    if (readFileSync(ref, "utf8").trim() !== parsed.at(-1)?.hash) {
+    if (layout.tip !== parsed.at(-1)?.hash) {
       return refused("stash_changed", "The stash ref and log disagree. Use Git to inspect the stack before removing entries.");
     }
     const remaining = parsed.filter((entry) => entry.hash !== hash);
@@ -90,6 +95,10 @@ export async function removeStashByHash(
     // restore work and only then discover that removal cannot be prepared.
     writeFileSync(log + ".lock", rewritten);
     writeFileSync(ref + ".lock", previous + "\n");
+    const unpacked = !remaining.length && layout.packedLines
+      ? withoutStashLine(layout.packedLines)
+      : null;
+    if (unpacked !== null) writeFileSync(packed + ".lock", unpacked, "latin1");
     if (beforeRemove) {
       const restored = await beforeRemove();
       if (!restored.ok) return restored;
@@ -99,10 +108,16 @@ export async function removeStashByHash(
     owned.delete(log + ".lock");
     try {
       if (remaining.length) {
+        // A loose ref shadows any stale packed line, as in Git.
         renameSync(ref + ".lock", ref);
         owned.delete(ref + ".lock");
       } else {
-        unlinkSync(ref);
+        // Git's order: packed first, so the stale line never shows through.
+        if (unpacked !== null) {
+          renameSync(packed + ".lock", packed);
+          owned.delete(packed + ".lock");
+        }
+        if (layout.loose) unlinkSync(ref);
       }
     } catch (cause) {
       // Ref commit failed: restore the original stack while still locked.
@@ -133,4 +148,51 @@ export async function removeStashByHash(
       }
     }
   }
+}
+
+type StashLayout =
+  | { ok: true; tip: string; loose: boolean; packedLines: string[] | null }
+  | { ok: false; reason: string };
+
+/** Where refs/stash lives. `packedLines` is set only when it is packed. */
+function readStashLayout(ref: string, log: string, packed: string): StashLayout {
+  const logKind = pathKind(log);
+  if (logKind !== "file") return { ok: false, reason: `stash reflog is ${logKind}` };
+  const refKind = pathKind(ref);
+  if (refKind === "other") return { ok: false, reason: "refs/stash is not a regular file" };
+  const packedKind = pathKind(packed);
+  if (packedKind === "other") return { ok: false, reason: "packed-refs is not a regular file" };
+  let packedLines: string[] | null = null;
+  let packedTip: string | undefined;
+  if (packedKind === "file") {
+    // latin1 round-trips every byte: other refs' names need not be UTF-8.
+    const lines = readFileSync(packed, "latin1").split("\n");
+    const hits = lines.flatMap((line) => STASH_PACKED_LINE.exec(line)?.[1] ?? []);
+    if (hits.length > 1) return { ok: false, reason: "packed-refs lists refs/stash more than once" };
+    if (hits.length) {
+      packedLines = lines;
+      packedTip = hits[0];
+    }
+  }
+  if (refKind === "file") {
+    return { ok: true, tip: readFileSync(ref, "utf8").trim(), loose: true, packedLines };
+  }
+  if (packedTip) return { ok: true, tip: packedTip, loose: false, packedLines };
+  return { ok: false, reason: "refs/stash is neither loose nor packed" };
+}
+
+function pathKind(path: string): "file" | "missing" | "other" {
+  try {
+    return lstatSync(path).isFile() ? "file" : "other";
+  } catch (cause) {
+    if ((cause as NodeJS.ErrnoException).code === "ENOENT") return "missing";
+    throw cause;
+  }
+}
+
+/** packed-refs without refs/stash and its peeled (`^`) line, if any. */
+function withoutStashLine(lines: string[]): string {
+  const index = lines.findIndex((line) => STASH_PACKED_LINE.test(line));
+  const drop = lines[index + 1]?.startsWith("^") ? 2 : 1;
+  return [...lines.slice(0, index), ...lines.slice(index + drop)].join("\n");
 }

@@ -3,10 +3,10 @@ import { join } from "node:path";
 import {
   app,
   BrowserWindow,
-  clipboard,
   dialog,
   nativeImage,
   nativeTheme,
+  powerMonitor,
   protocol,
   safeStorage,
   shell,
@@ -24,10 +24,7 @@ import {
   type Profile,
   type BranchReveal
 } from "@pwrgit/shared";
-import {
-  readAppIdentity,
-  registerAppIdentityHandlers
-} from "./app-identity";
+import { registerAppIdentityHandlers } from "./app-identity";
 import { registerAppDocumentHandlers } from "./app-document-handlers";
 import { registerAgentHandlers } from "./ai/agent-handlers";
 import { LocalAgentSession } from "./ai/agent-session";
@@ -47,13 +44,19 @@ import {
 } from "./auto-updater";
 import { CommandBus, type CommandContext } from "./command-bus";
 import { registerClipboardHandlers } from "./clipboard-handlers";
+import {
+  captureDiagnosticsBuild,
+  copyDiagnosticsFromMenu,
+  registerDiagnosticsCopyHandler,
+  type DiagnosticsCopyDeps
+} from "./diagnostics-copy";
 import { registerDialogHandlers } from "./dialog-handlers";
 import { ArtifactsCredentials } from "./forge/artifacts/credentials";
 import { createArtifactsGitAuthentication } from "./forge/artifacts/git-auth";
 import { registerArtifactsAccountHandlers, registerArtifactsCredentialHandlers } from "./forge/artifacts/handlers";
 import { artifactsWrangler, wranglerClient } from "./forge/artifacts/wrangler";
-import { registerGitRuntimeHandlers } from "./git/runtime-status";
-import { configureBundledGit, configureBundledGitConfig, configureGitAuthentication, execGit, useInstalledGit } from "./git/dugite";
+import { refreshActiveGitReflink, registerGitRuntimeHandlers } from "./git/runtime-status";
+import { activeGitReflinkProbe, configureBundledGit, configureBundledGitConfig, configureGitAuthentication, execGit, useInstalledGit, useReflinkCheckout } from "./git/dugite";
 import { openExternalUrlFromMenu } from "./external-links";
 import { registerBranchHandlers } from "./git/branch-handlers";
 import { registerBulkSyncHandlers } from "./git/bulk-sync-handlers";
@@ -105,6 +108,7 @@ import { createForkSourceProbe } from "./git/fork-source-probe";
 import { VisibleWorktreeRefresher } from "./git/visible-refresh";
 import { registerWorktreeLifecycleHandlers } from "./git/worktree-lifecycle-handlers";
 import { createMissingRepoRescan } from "./git/missing-repo-rescan";
+import { createVanishedWorktreeRefresh } from "./git/vanished-worktrees";
 import { WorktreeStateService } from "./git/worktree-state";
 import {
   GITHUB_AVATAR_THUMBNAIL_PROTOCOL_SCHEME,
@@ -131,6 +135,7 @@ import {
   createRendererErrorLog,
   sanitizeRendererErrorReport
 } from "./renderer-errors";
+import { watchEventLoopStalls } from "./event-loop-stalls";
 import { watchProcessIds } from "./process-ids";
 import { watchSystemShutdown } from "./system-shutdown";
 import { ensureMacKeychainAccess } from "./mac-keychain-access";
@@ -256,6 +261,18 @@ const settings = new SettingsService(
 configureBundledGitConfig(join(app.getPath("userData"), "git"));
 const storedGitPath = settings.get().gitPath;
 useInstalledGit(typeof storedGitPath === "string" && storedGitPath.trim() !== "" ? storedGitPath : null);
+// Copy-on-write checkout: the switch is read now and on every settings write;
+// the Git's support arrives with `refreshActiveGitReflink` below.
+const applyReflinkCheckout = (): void =>
+  useReflinkCheckout(settings.get().general?.gitReflinkCheckout ?? GENERAL_DEFAULTS.gitReflinkCheckout);
+applyReflinkCheckout();
+settings.onWrite(applyReflinkCheckout);
+const probeReflink = (): void => {
+  void refreshActiveGitReflink().catch((cause: unknown) =>
+    logMain("warn", "git", `copy-on-write probe failed: ${cause instanceof Error ? cause.message : String(cause)}`)
+  );
+};
+probeReflink();
 const storedTheme = settings.get().general?.theme;
 // Assigned once the window registries exist (below). A window with a palette
 // of its own — a profile window, or an auxiliary window that borrowed a
@@ -395,7 +412,16 @@ if (!gotSingleInstanceLock) {
     // watchProcessIds sees them appear, so a copied log identifies its own
     // processes without a trip to Activity Monitor or Task Manager.
     logMain("info", "app", `PwrGit ${app.getVersion()} starting pid=${process.pid}`);
+    // The dev checkout's branch and commit as they were at launch.
+    void captureDiagnosticsBuild();
     watchProcessIds();
+    // Started once the log file is open, so a stall during the rest of startup
+    // lands in main.log. Sleep stops the clock the heartbeat reads on some
+    // platforms and not others; pausing across it keeps a closed lid from
+    // reading as a blocked main thread.
+    const eventLoopStalls = watchEventLoopStalls();
+    powerMonitor.on("suspend", () => eventLoopStalls.pause());
+    powerMonitor.on("resume", () => eventLoopStalls.resume());
     installDevelopmentDockIcon();
     installWindowDefaults();
     bus.register("logs:read", () => ok(readLogSnapshot()));
@@ -454,6 +480,10 @@ if (!gotSingleInstanceLock) {
       app.quit();
       return;
     }
+    // macOS's keychain prompt holds the main thread until it is answered, and
+    // the launch probe's Git runs time out behind it. Ask again once it's
+    // done, if that probe got no answer.
+    if (activeGitReflinkProbe() === null) probeReflink();
 
     const db = openDatabase(join(app.getPath("userData"), "pwrgit.db"));
     const diagnosticsOutputRoot = join(app.getPath("userData"), "diagnostics");
@@ -882,6 +912,37 @@ if (!gotSingleInstanceLock) {
       })
     );
 
+    // A linked worktree's folder was deleted: re-index its repo so git's
+    // stale record and the row go now, not at the next refresh
+    // (vanished-worktrees.ts says which ones stay).
+    stateService.onWorktreePathMissing(
+      createVanishedWorktreeRefresh({
+        refresh: (repoId) =>
+          indexer
+            .refreshRepoWorktrees(repoId, { refreshBranches: false })
+            .then((res) => {
+              if (!res.ok) throw new Error(res.error.message);
+              const refresh = res.value;
+              if (refresh.outcome === "deindexed") {
+                emitEvent("repo:changed", { profileId: refresh.profileId });
+              } else if (refresh.removed > 0) {
+                emitEvent("repo:changed", {
+                  profileId: refresh.repo.profileId,
+                  repoIds: [refresh.repo.id]
+                });
+              }
+            })
+            .catch((cause) => {
+              logMain(
+                "warn",
+                "worktree",
+                "re-index after a worktree folder vanished failed:",
+                cause
+              );
+            })
+      })
+    );
+
     // One window per profile. Opening a profile that already has a window
     // focuses it; cross-profile reveals are stashed until the new window asks.
     const appearanceForProfile = (profileId: string): AppAppearance =>
@@ -890,6 +951,19 @@ if (!gotSingleInstanceLock) {
         appearance.appearance()
       );
     const windows = createProfileWindows({ appearance: appearanceForProfile });
+    const diagnosticsCopy: DiagnosticsCopyDeps = {
+      profileName: (profileId) => profiles.get(profileId)?.name ?? null,
+      openProfileIds: () => windows.openProfileIds(),
+      profileFor: (window) => windows.profileFor(window),
+      windowFor: (profileId) => windows.windowFor(profileId),
+      paths: {
+        userData: app.getPath("userData"),
+        database: join(app.getPath("userData"), "pwrgit.db"),
+        settings: join(app.getPath("userData"), "settings.json"),
+        diagnosticsOutput: diagnosticsOutputRoot
+      }
+    };
+    registerDiagnosticsCopyHandler(bus, diagnosticsCopy);
     // Settings, Logs and the document viewers have no profile of their own, so
     // they render in the palette of the window that opened them.
     const windowAppearances = createWindowAppearances<BrowserWindow>({
@@ -983,16 +1057,15 @@ if (!gotSingleInstanceLock) {
             openAppDocumentWindow("changelog", palette)
           ),
         onCopyDiagnostics: () => {
-          clipboard.writeText(readAppIdentity().diagnosticsText);
-          const open = windows.openProfileIds();
-          const activeId = profiles.getActiveId();
-          emitEvent("ui:diagnosticsCopied", {
-            profileId:
-              windows.focusedProfileId() ??
-              (activeId !== null && open.includes(activeId)
-                ? activeId
-                : (open[0] ?? null))
-          });
+          void copyDiagnosticsFromMenu(
+            diagnosticsCopy,
+            {
+              focused: windows.focusedProfileId(),
+              activeId: profiles.getActiveId()
+            },
+            (profileId, copied) =>
+              emitEvent("ui:copyDiagnostics", { profileId, copied })
+          );
         },
         onOpenLicense: () =>
           openAuxiliaryWindow((palette) =>
@@ -1118,7 +1191,8 @@ if (!gotSingleInstanceLock) {
         worktreeChanged: (worktreeId) =>
           emitEvent("worktree:changed", { worktreeId }),
         graphChanged: (repoId) => emitEvent("graph:changed", { repoId }),
-        repoChanged: (profileId) => emitEvent("repo:changed", { profileId })
+        repoChanged: (profileId, repoIds) =>
+          emitEvent("repo:changed", { profileId, repoIds })
       },
       isFocused: () => BrowserWindow.getFocusedWindow() !== null
     });
@@ -1129,7 +1203,7 @@ if (!gotSingleInstanceLock) {
       }
       return ok(null);
     });
-    registerWorktreeLifecycleHandlers(bus, db, indexer, settings, stateService);
+    registerWorktreeLifecycleHandlers(bus, db, indexer, settings, stateService, worktreeOperations);
     // PWRGIT_E2E_TRASH_DIR (e2e seam): move removed folders into a test
     // directory instead of the machine's Trash.
     const e2eTrashDir = app.isPackaged
@@ -1214,7 +1288,10 @@ if (!gotSingleInstanceLock) {
       refresher,
       worktreeOperations
     );
-    const maintenanceHandlers = registerMaintenanceHandlers(bus, db, execGit, worktreeOperations, indexer, prService);
+    const maintenanceHandlers = registerMaintenanceHandlers(
+      bus, db, execGit, worktreeOperations, indexer, prService, Date.now,
+      async (repoId, repoPath) => (await stateService.resolveDefaultBranch(repoId, repoPath)).name || null
+    );
     registerGraphHandlers(bus, db, stateService);
     registerChangesHandlers(bus, db, refresher, worktreeOperations);
     registerRepositorySetupHandlers(bus, db, worktreeOperations);
@@ -1486,7 +1563,32 @@ if (!gotSingleInstanceLock) {
         logMain("warn", "state", "visible-row refresh failed:", cause)
       );
     }, 5_000);
+    // "Recent" is your own commits across every repo, not just the rows on
+    // screen (WorktreeStateService.sweepAuthored). Once soon after launch,
+    // then every 15 minutes; a sweep still running skips the next tick.
+    let authoredSweeping = false;
+    const sweepAuthored = (): void => {
+      if (authoredSweeping) return;
+      authoredSweeping = true;
+      void stateService
+        .sweepAuthored()
+        .then((moved) => {
+          for (const [profileId, repoIds] of moved) {
+            emitEvent("repo:changed", { profileId, repoIds });
+          }
+        })
+        .catch((cause: unknown) =>
+          logMain("warn", "state", "authored-commit sweep failed:", cause)
+        )
+        .finally(() => {
+          authoredSweeping = false;
+        });
+    };
+    const authoredSweepStart = setTimeout(sweepAuthored, 15_000);
+    const authoredSweepPoll = setInterval(sweepAuthored, 15 * 60_000);
     app.on("before-quit", () => {
+      clearTimeout(authoredSweepStart);
+      clearInterval(authoredSweepPoll);
       clearInterval(activeStatePoll);
       clearInterval(visibleStatePoll);
       remoteTipChecker.stop();

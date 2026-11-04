@@ -12,7 +12,7 @@ import {
 import { CommandBus } from "../command-bus";
 import { emitEvent } from "../ipc";
 import { openDatabase, type DB } from "../persistence/db";
-import type { GitExec } from "./dugite";
+import { activeGitPath, noteGitReflinkSupport, type GitExec } from "./dugite";
 import type { RepoIndexer } from "./repo-indexer";
 import * as maintenance from "./repository-maintenance";
 import {
@@ -492,7 +492,8 @@ describe("maintenance lifecycle and profile scope", () => {
       );
       expect(emitEvent).toHaveBeenCalledWith("graph:changed", { repoId: "a" });
       expect(emitEvent).toHaveBeenCalledWith("repo:changed", {
-        profileId: "one"
+        profileId: "one",
+        repoIds: ["a"]
       });
     }
   );
@@ -745,5 +746,66 @@ describe("finished-branch review", () => {
       ).ok
     ).toBe(false);
     expect(restore).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("maintenance › clones", () => {
+  const reshare: MaintenanceAction = { kind: "reshare", updateMain: false };
+  const porcelain = [
+    "reflink 1", "backend clone-replace", "",
+    "path f.bin", "status reshared", "reason fully-shared", "",
+    "summary", "reshared 1", "already-shared 0", "skipped 0", "failed 0", "observed-private-reduction 4096", "", ""
+  ].join("\0");
+
+  beforeEach(() => {
+    for (const [repo, id, primary] of [
+      ["a", "a-main", 1],
+      ["a", "a-wt", 0],
+      ["c", "c-main", 1],
+      ["c", "c-wt", 0]
+    ] as const) {
+      db.prepare(
+        "INSERT INTO worktrees (id, repo_id, branch, path, is_primary) VALUES (?, ?, ?, ?, ?)"
+      ).run(id, repo, id, join(root, id), primary);
+    }
+  });
+
+  it("refuses before touching a repository when the Git in use cannot re-share", async () => {
+    noteGitReflinkSupport(activeGitPath(), "git version 2.56.0", { checkout: false, reshare: false });
+    const result = await bus.dispatch("maintenance:run", { profileId: "one", operationId: "no", action: reshare });
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.error.code).toBe("reflink_unavailable");
+    expect(git).not.toHaveBeenCalled();
+  });
+
+  it("re-shares this profile's linked worktrees only", async () => {
+    noteGitReflinkSupport(activeGitPath(), "git version 2.56.0-dev-pwrgit.2", { checkout: true, reshare: true });
+    git.mockImplementation(async (args, cwd) => {
+      if (args[0] === "rev-parse") return output(join(cwd, ".git"));
+      if (args[0] === "worktree" && args[1] === "reflink") return output(porcelain);
+      return output();
+    });
+    const summary = value(
+      await bus.dispatch("maintenance:run", { profileId: "one", operationId: "yes", action: reshare })
+    );
+    const [a, ...rest] = summary.results;
+    expect(a).toMatchObject({ outcome: "success", reshare: { main: { outcome: "not_requested" } } });
+    expect(a?.reshare?.worktrees).toEqual([
+      expect.objectContaining({ worktreeId: "a-wt", outcome: "reshared", reshared: 1, sharedBytes: 4096 })
+    ]);
+    // `b` has no linked worktree: listed apart, never run or counted as skipped.
+    expect(rest).toEqual([]);
+    expect(summary.noWorktrees?.map((repo) => repo.id)).toEqual(["b"]);
+    const reflinkCwds = git.mock.calls.filter(([args]) => args[1] === "reflink").map(([, cwd]) => cwd);
+    expect(reflinkCwds).toEqual([join(root, "a-wt")]);
+  });
+
+  it("rejects a reshare request without updateMain", async () => {
+    const result = await bus.dispatch("maintenance:run", {
+      profileId: "one",
+      operationId: "bad",
+      action: { kind: "reshare" } as unknown as MaintenanceAction
+    });
+    expect(result.ok).toBe(false);
   });
 });

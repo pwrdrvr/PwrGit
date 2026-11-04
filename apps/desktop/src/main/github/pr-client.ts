@@ -16,6 +16,7 @@ import {
   buildOpenPrQuery,
   buildPrQuery,
   buildPrNumberQuery,
+  branchPrCursors,
   parseCommitPrResponse,
   parseOpenPrPage,
   parsePrNumberResponse,
@@ -128,6 +129,7 @@ export async function getGhStatus(): Promise<GhStatus> {
 
 // One request covers this many branches (aliased); 100 branches → 2 requests.
 const BATCH = 50;
+const BRANCH_PR_MAX_PAGES = 10;
 const MAX_RETRIES = 4;
 
 
@@ -251,17 +253,67 @@ export async function fetchPrsForRepo(
   repo: Pick<ForgeRepo, "host" | "port">,
   owner: string,
   name: string,
-  branches: string[]
+  branches: string[],
+  sourceRepoPaths: readonly string[] = [`${owner}/${name}`]
 ): Promise<Map<string, PrSummary | null>> {
   return await fetchInChunks(
     branches,
     BATCH,
     async (chunk) => {
-      const { query, variables } = buildPrQuery(owner, name, chunk);
-      return await runQuery(token, repo, query, variables);
+      return await newestPrsForSources(token, repo, owner, name, chunk, sourceRepoPaths);
     },
-    parsePrResponse
+    (_chunk, result) => result.found,
+    (result) => result.failed
   );
+}
+
+/**
+ * Walk newest-first until a source match or the end of each branch's list.
+ * Bound work on busy shared names (main); unresolved branches at the cap or a
+ * broken cursor are omitted, never negative-cached as a completed lookup.
+ */
+async function newestPrsForSources(
+  token: string,
+  repo: Pick<ForgeRepo, "host" | "port">,
+  owner: string,
+  name: string,
+  branches: string[],
+  sourceRepoPaths: readonly string[]
+): Promise<{ found: Map<string, PrSummary | null>; failed: boolean }> {
+  const found = new Map<string, PrSummary | null>();
+  let remaining = branches;
+  let after = new Map<string, string>();
+  const visited = new Map<string, Set<string>>();
+  for (let page = 0; page < BRANCH_PR_MAX_PAGES && remaining.length > 0; page += 1) {
+    const { query, variables } = buildPrQuery(owner, name, remaining, after);
+    let data: unknown;
+    try {
+      data = await runQuery(token, repo, query, variables);
+    } catch (error) {
+      // Keep completed branches, and tell the outer walk to stop too: a
+      // refusal must not spend another request budget on subsequent chunks.
+      if (found.size === 0) throw error;
+      return { found, failed: true };
+    }
+    const parsed = parsePrResponse(remaining, data, sourceRepoPaths);
+    const cursors = branchPrCursors(remaining, data);
+    const next = new Map<string, string>();
+    for (const [branch, pr] of parsed) {
+      if (pr !== null || !cursors.has(branch)) {
+        found.set(branch, pr);
+        continue;
+      }
+      const cursor = cursors.get(branch);
+      const seen = visited.get(branch) ?? new Set<string>();
+      if (cursor == null || seen.has(cursor)) continue;
+      seen.add(cursor);
+      visited.set(branch, seen);
+      next.set(branch, cursor);
+    }
+    after = next;
+    remaining = [...next.keys()];
+  }
+  return { found, failed: false };
 }
 
 /** Fetch the best PR associated with each exact commit in batched GraphQL calls. */

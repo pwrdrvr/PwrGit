@@ -21,6 +21,7 @@ import {
   createStash,
   dropStash,
   listStashes,
+  parseStashList,
   parseStashNumstat,
   popStash,
   readStashDetails,
@@ -28,6 +29,26 @@ import {
 } from "./stash-service";
 
 const systemGit = createSystemGit();
+
+describe("Pull recovery stash metadata", () => {
+  const token = "1068b16d-af82-47a9-85bc-a37a73ac310b";
+  it.each([
+    [PWRGIT_PULL_STASH_MESSAGE, "pwrgit-pull-recovery"],
+    [`${PWRGIT_PULL_STASH_MESSAGE} [${token}]`, "pwrgit-pull-recovery"],
+    ["ordinary user work", "ordinary"],
+    [`${PWRGIT_PULL_STASH_MESSAGE}-mine`, "ordinary"],
+    [`prefix ${PWRGIT_PULL_STASH_MESSAGE}`, "ordinary"],
+    [`${PWRGIT_PULL_STASH_MESSAGE} [${token}] extra`, "ordinary"],
+    [`${PWRGIT_PULL_STASH_MESSAGE} [${token}] [${token}]`, "ordinary"],
+    [`${PWRGIT_PULL_STASH_MESSAGE} [${token.slice(1)}]`, "ordinary"],
+    [`${PWRGIT_PULL_STASH_MESSAGE} [not-a-uuid]`, "ordinary"],
+    [`${PWRGIT_PULL_STASH_MESSAGE}[${token}]`, "ordinary"],
+    [`${PWRGIT_PULL_STASH_MESSAGE} [${token}`, "ordinary"]
+  ])("classifies only complete recovery names: %s", (name, kind) => {
+    const [entry] = parseStashList(["a".repeat(40), "aaaaaaa", "b".repeat(40), "2026-11-03T12:00:00Z", `On main: ${name}`].join("\x1f") + "\x1e");
+    expect(entry).toMatchObject({ name, kind });
+  });
+});
 
 function git(repo: string, args: string[]): string {
   const invocation = gitProcessInvocation(args, repo);
@@ -169,7 +190,47 @@ describe("stash service (system git)", () => {
     expect(readFileSync(join(repo, "README.md"), "utf8")).toBe("next\n");
   });
 
-  it("preserves foreign locks and refuses duplicate or packed stash refs", async () => {
+  // `git gc` runs `pack-refs --all`, which moves refs/stash into packed-refs.
+  // The next `git stash` writes a loose ref that shadows the stale packed one.
+  it("drops the top entry when a loose stash ref shadows a stale packed one", async () => {
+    const older = await save("older");
+    git(repo, ["pack-refs", "--all"]);
+    const selected = await save("selected", "other.txt");
+    const packed = join(repo, ".git", "packed-refs");
+    expect(readFileSync(packed, "utf8")).toContain(older + " refs/stash\n");
+    expect(existsSync(join(repo, ".git", "refs", "stash"))).toBe(true);
+    expect(await dropStash(systemGit, repo, selected)).toEqual(ok(undefined));
+    expect(git(repo, ["rev-parse", "refs/stash"])).toBe(older);
+    expect(git(repo, ["stash", "list", "--format=%H"])).toBe(older);
+    expect(await dropStash(systemGit, repo, older)).toEqual(ok(undefined));
+    expect(git(repo, ["stash", "list"])).toBe("");
+    // Dropping the last entry must not let the packed line resurrect it.
+    expect(readFileSync(packed, "utf8")).not.toContain("refs/stash");
+    expect(git(repo, ["show-ref"])).not.toContain("refs/stash");
+  });
+
+  it("pops and drops entries whose ref exists only in packed-refs", async () => {
+    const older = await save("older");
+    const selected = await save("selected", "other.txt");
+    git(repo, ["gc", "--quiet"]);
+    expect(existsSync(join(repo, ".git", "refs", "stash"))).toBe(false);
+    expect(await popStash(systemGit, repo, selected)).toEqual(ok(undefined));
+    expect(readFileSync(join(repo, "other.txt"), "utf8")).toBe("selected\n");
+    expect(git(repo, ["rev-parse", "refs/stash"])).toBe(older);
+    git(repo, ["reset", "--hard", "HEAD"]);
+    git(repo, ["pack-refs", "--all"]);
+    expect(existsSync(join(repo, ".git", "refs", "stash"))).toBe(false);
+    expect(await dropStash(systemGit, repo, older)).toEqual(ok(undefined));
+    expect(git(repo, ["stash", "list"])).toBe("");
+    expect(git(repo, ["show-ref"])).not.toContain("refs/stash");
+    expect(git(repo, ["show-ref", "--heads"])).toContain("refs/heads/main");
+    // Ordinary Git still works on the emptied stack.
+    await save("next");
+    git(repo, ["stash", "pop"]);
+    expect(readFileSync(join(repo, "README.md"), "utf8")).toBe("next\n");
+  });
+
+  it("preserves foreign locks and refuses duplicate stash entries", async () => {
     const selected = await save("selected");
     const lock = join(repo, ".git", "refs", "stash.lock");
     writeFileSync(lock, "foreign lock");
@@ -182,14 +243,44 @@ describe("stash service (system git)", () => {
       ok: false, error: { code: "ambiguous_stash" }
     });
     expect(readFileSync(join(repo, "README.md"), "utf8")).toBe("baseline\n");
-    git(repo, ["stash", "drop"]);
-    git(repo, ["stash", "drop"]);
+  });
+
+  it("refuses packed-refs that list refs/stash twice", async () => {
+    const selected = await save("selected");
+    rmSync(join(repo, ".git", "refs", "stash"));
+    writeFileSync(join(repo, ".git", "packed-refs"),
+      `${selected} refs/stash\n${selected} refs/stash\n`);
+    expect(await dropStash(systemGit, repo, selected)).toMatchObject({
+      ok: false, error: { code: "unsupported_stash_storage" }
+    });
+  });
+
+  it("keeps other packed refs byte for byte when dropping the last stash", async () => {
+    const selected = await save("selected");
     git(repo, ["pack-refs", "--all"]);
+    const packed = join(repo, ".git", "packed-refs");
+    const head = git(repo, ["rev-parse", "HEAD"]);
+    // A non-UTF-8 ref name, as a Linux remote can deliver.
+    const foreign = Buffer.concat([
+      Buffer.from(head + " refs/tags/caf"), Buffer.from([0xe9]), Buffer.from("\n")
+    ]);
+    const before = Buffer.concat([readFileSync(packed), foreign]);
+    writeFileSync(packed, before);
+    expect(await dropStash(systemGit, repo, selected)).toEqual(ok(undefined));
+    const stashLine = Buffer.from(selected + " refs/stash\n");
+    const at = before.indexOf(stashLine);
+    expect(readFileSync(packed)).toEqual(Buffer.concat([
+      before.subarray(0, at), before.subarray(at + stashLine.length)
+    ]));
+  });
+
+  it("refuses a stash ref that is neither loose nor packed", async () => {
+    const selected = await save("selected");
+    rmSync(join(repo, ".git", "refs", "stash"));
     expect(await popStash(systemGit, repo, selected)).toMatchObject({
       ok: false, error: { code: "unsupported_stash_storage" }
     });
     expect(readFileSync(join(repo, "README.md"), "utf8")).toBe("baseline\n");
-    expect(git(repo, ["stash", "list", "--format=%H"])).toBe(selected);
   });
 
   it("lists one shared ordered stack from multiple worktrees with metadata and details", async () => {

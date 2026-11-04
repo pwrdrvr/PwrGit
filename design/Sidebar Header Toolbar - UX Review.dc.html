@@ -1,0 +1,544 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <script src="./support.js"></script>
+  </head>
+  <body>
+    <x-dc>
+      <helmet data-dc-atomics>
+        <meta name="design_doc_mode" content="canvas" />
+        <link href="https://fonts.googleapis.com/css2?family=Geist:wght@400..700&amp;family=Geist+Mono:wght@400..700&amp;display=swap" rel="stylesheet" />
+        <style>
+          :root {
+            --line: rgba(247, 243, 235, 0.1); --line2: rgba(247, 243, 235, 0.14);
+            --t1: #f7f3eb; --t2: #b8b0a5; --t3: #8c857a; --tsub: rgba(247, 243, 235, 0.54);
+            --acc: #ff8a1f; --accb: #ffb35c; --accon: #160a00;
+            --asoft: rgba(255, 138, 31, 0.12); --abord: rgba(255, 138, 31, 0.42);
+            --ok: #5fa969; --okt: #9ce5b3; --bad: #b94232; --badt: #ffb0a1;
+            --sans: "Geist", "SF Pro Text", "Inter", system-ui, sans-serif;
+            --mono: "Geist Mono", "SF Mono", "JetBrains Mono", Consolas, monospace;
+          }
+          *, *::before, *::after { box-sizing: border-box; }
+          html { background: #050505; }
+          body { margin: 0; background: #050505; font-family: var(--sans); }
+          a { color: var(--accb); text-decoration: none; } a:hover { color: var(--acc); }
+          code { font: 500 10px/1.4 var(--mono); color: var(--t2); }
+
+          /* ---- review chrome (matches "Tag Chips and Locate") ---- */
+          .dv-turn { padding: 40px 44px 32px; background: #050505; }
+          .dv-thd { display: flex; align-items: baseline; gap: 10px; margin: 0 0 6px; }
+          .dv-tid { font: 600 10px var(--mono); padding: 3px 7px; background: var(--t1); color: #050505; border-radius: 4px; text-decoration: none; }
+          .dv-tname { font: 600 13px/1.2 var(--sans); color: var(--t1); }
+          .dv-sub { margin: 0 0 22px; font: 400 11.5px/1.5 var(--sans); color: var(--t3); max-width: 820px; text-wrap: pretty; }
+          .dv-sub b { color: var(--t2); }
+          .dv-opts { display: flex; flex-wrap: wrap; gap: 28px; align-items: flex-start; }
+          .dv-opt { flex: none; display: flex; flex-direction: column; gap: 9px; scroll-margin-top: 16px; }
+          .dv-oid { font: 600 10.5px var(--mono); padding: 3px 7px; background: rgba(247, 243, 235, 0.08); color: var(--t1); border-radius: 5px; text-decoration: none; }
+          .dv-opt:target .dv-oid { background: var(--acc); color: var(--accon); }
+          .dv-olabel { display: flex; align-items: baseline; gap: 8px; font: 400 11px/1.3 var(--sans); color: var(--tsub); max-width: 700px; }
+          .dv-rec { font: 700 8.5px/1 var(--sans); letter-spacing: .06em; text-transform: uppercase; padding: 3px 6px; border-radius: 999px; background: var(--asoft); border: 1px solid var(--abord); color: var(--accb); }
+          .dv-next { margin: 22px 0 0; font: 12px/1.5 var(--sans); color: var(--t3); }
+          .note { margin: 0; font: 400 10.5px/1.5 var(--sans); color: var(--t3); text-wrap: pretty; max-width: 100%; }
+          .note b { color: var(--t2); font-weight: 600; }
+          .wlab { font: 600 9.5px/1 var(--mono); color: var(--tsub); }
+
+          /* ---- findings ---- */
+          .pin { display: inline-flex; align-items: center; justify-content: center; flex: none; width: 15px; height: 15px; border-radius: 999px; background: var(--bad); color: #fff; font: 700 9px/1 var(--mono); }
+          .pin.ok { background: var(--ok); color: #050505; }
+          .pin.q { background: var(--t3); color: #050505; }
+          .find { width: 430px; display: flex; flex-direction: column; gap: 12px; }
+          .fitem { display: grid; grid-template-columns: 15px minmax(0, 1fr); gap: 9px; align-items: start; }
+          .fitem h4 { margin: 0 0 3px; font: 650 11.5px/1.3 var(--sans); color: var(--t1); }
+          .fitem p { margin: 0; font: 400 10.5px/1.5 var(--sans); color: var(--t3); text-wrap: pretty; }
+          .tbl { border: 1px solid var(--line); border-radius: 9px; background: #0a0a0a; overflow: hidden; }
+          .tr { display: grid; grid-template-columns: 170px 150px minmax(0, 1fr); gap: 12px; align-items: center; padding: 8px 12px; border-bottom: 1px solid var(--line); font: 500 10.5px/1.4 var(--sans); color: var(--t2); }
+          .tr.c4 { grid-template-columns: 150px 120px 120px minmax(0, 1fr); }
+          .tr:last-child { border-bottom: 0; }
+          .tr.head { font: 600 9.5px/1.3 var(--sans); letter-spacing: .04em; text-transform: uppercase; color: var(--t3); background: rgba(247, 243, 235, .03); }
+          .tr b { color: var(--t1); font-weight: 600; }
+          .st { display: inline-flex; width: fit-content; padding: 2px 6px; border-radius: 999px; font: 700 8.5px/1.35 var(--sans); letter-spacing: .05em; text-transform: uppercase; }
+          .st.hi { background: rgba(95, 169, 105, .16); color: var(--okt); }
+          .st.mid { background: var(--asoft); color: var(--accb); }
+          .st.lo { background: rgba(247, 243, 235, .06); color: var(--t3); }
+
+          /* ---- light-theme specimens (Harold's screenshot is light) ---- */
+          .lt {
+            --s-bg: #f7f4ef; --s-panel: #fdfcfa; --s-input: #ffffff; --s-elev: #ffffff;
+            --s-hover: #ebe5da; --s-phover: #f4f0e8; --s-b1: rgba(0, 0, 0, .08); --s-b2: rgba(0, 0, 0, .12); --s-b3: rgba(0, 0, 0, .18);
+            --s-t1: #1a1612; --s-t2: #524a40; --s-t3: #736c64; --s-tsub: rgba(26, 22, 18, .68);
+            --s-acc: #b74c00; --s-accb: #994c00; --s-abord: rgba(183, 76, 0, .42); --s-row: #fff5e9; --s-app: #ffffff;
+            color: var(--s-t1);
+          }
+          .sb { position: relative; display: flex; flex-direction: column; background: var(--s-bg); border: 1px solid var(--line2); border-radius: 8px; overflow: hidden; }
+          .sb-prof { padding: 14px 12px 10px; border-bottom: 1px solid var(--s-b1); }
+          .pchip { display: flex; align-items: center; gap: 10px; padding: 7px 8px; border: 1px solid var(--s-b1); border-radius: 9px; }
+          .mono { width: 30px; height: 30px; flex: none; display: flex; align-items: center; justify-content: center; border-radius: 8px; background: var(--s-hover); font: 800 14px/1 var(--sans); color: var(--s-t2); }
+          .pid { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 3px; }
+          .pid b { font: 650 13px/1.1 var(--sans); }
+          .pid em { font: 400 10.5px/1.1 var(--mono); font-style: normal; color: var(--s-t3); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+          .pcar { color: var(--s-t3); display: inline-flex; }
+
+          /* today's stack */
+          .sb-search { padding: 10px 12px 8px; }
+          .jump { height: 34px; display: flex; align-items: center; gap: 8px; padding: 0 10px; background: var(--s-input); border: 1px solid var(--s-b2); border-radius: 8px; color: var(--s-t3); font: 500 12px/1 var(--sans); }
+          .jump .jl { flex: 1; }
+          .kbd { font: 600 10px/1 var(--mono); color: var(--s-tsub); border: 1px solid var(--s-b2); border-radius: 4px; padding: 3px 5px; }
+          .acts { display: flex; flex-direction: column; gap: 8px; margin-top: 8px; }
+          .acts .r { display: flex; gap: 6px; }
+          .gb { flex: 1 1 auto; height: 32px; display: flex; align-items: center; gap: 7px; padding: 0 8px; border: 1px solid var(--s-b2); border-radius: 7px; background: var(--s-elev); color: var(--s-t2); font: 600 11px/1 var(--sans); white-space: nowrap; }
+          .bk { flex: 1 1 0; height: 30px; display: flex; align-items: center; justify-content: center; gap: 6px; padding: 0 7px; border: 1px solid var(--s-b1); border-radius: 7px; color: var(--s-t3); font: 600 10.5px/1 var(--sans); white-space: nowrap; }
+          .gb svg, .bk svg { flex: none; }
+
+          /* lens row (unchanged by this review) */
+          .sb-lens { display: flex; gap: 6px; padding: 0 12px 10px; }
+          .sb-lens.top { padding-top: 0; }
+          .lensf { flex: 1; display: flex; align-items: center; gap: 2px; padding: 3px; border: 1px solid var(--s-b1); border-radius: 9px; background: var(--s-panel); }
+          .lc { flex: 1 1 0; min-width: 26px; height: 26px; display: flex; align-items: center; justify-content: center; border-radius: 7px; border: 1px solid transparent; color: var(--s-t3); }
+          .lc.on { border-color: var(--s-acc); background: var(--s-row); color: var(--s-accb); }
+          .lcount { padding: 0 6px 0 4px; font: 600 11px/1 var(--mono); color: var(--s-tsub); }
+          .kebab { width: 32px; flex: none; display: flex; align-items: center; justify-content: center; border: 1px solid var(--s-b1); border-radius: 9px; background: var(--s-panel); color: var(--s-t3); }
+
+          /* list */
+          .sb-list { flex: 1; padding: 4px 8px 8px; display: flex; flex-direction: column; gap: 1px; overflow: hidden; }
+          .rr { display: flex; align-items: center; gap: 7px; min-height: 30px; padding: 0 6px; border-radius: 6px; font: 600 13px/1 var(--sans); color: var(--s-t1); white-space: nowrap; }
+          .rr .nm { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+          .rr .rm { margin-left: auto; font: 500 10.5px/1 var(--mono); color: var(--s-t3); }
+          .rr.sel .nm { color: var(--s-acc); }
+          .tri { flex: none; width: 0; height: 0; border-left: 4px solid transparent; border-right: 4px solid transparent; border-top: 5px solid var(--s-t2); }
+          .tri.c { border-top: 4px solid transparent; border-bottom: 4px solid transparent; border-left: 5px solid var(--s-t2); border-right: 0; }
+          .sec { display: flex; gap: 8px; align-items: center; min-height: 28px; margin-left: 16px; padding: 0 6px; font: 600 9.5px/1 var(--mono); letter-spacing: .08em; color: var(--s-t3); text-transform: uppercase; }
+          .sec .tri.c { border-left-color: var(--s-t3); }
+          .fade { height: 24px; margin-top: -24px; background: linear-gradient(transparent, var(--s-bg)); position: relative; }
+
+          /* proposed: one action row of house .wt-btn-shaped buttons */
+          .sbar { display: flex; gap: 6px; padding: 10px 12px; }
+          .wb { flex: 0 0 auto; height: 30px; display: inline-flex; align-items: center; justify-content: center; gap: 6px; padding: 0 9px; border: 1px solid var(--s-b2); border-radius: 7px; background: var(--s-elev); color: var(--s-t2); font: 600 11px/1 var(--sans); white-space: nowrap; }
+          .wb svg { flex: none; }
+          .wb .car { margin-left: -2px; color: var(--s-t3); }
+          .wb.grow { flex: 1 1 auto; }
+          .wb.ic { width: 30px; padding: 0; }
+          .wb.hov { border-color: var(--s-abord); color: var(--s-t1); }
+          .wb.open { background: var(--s-hover); color: var(--s-t1); }
+          .wb.off { opacity: .42; }
+          .sbar.s1 .wb.add .lb { display: none; }
+          .sbar.s1 .wb.add { padding: 0 7px; }
+          .sbar.s2 .wb .lb { display: none; }
+          .sbar.s2 .wb.add { padding: 0 7px; }
+          .sbar.s2 .wb.grow { padding: 0; }
+          .sbar.s2 .wb.add, .sbar.s2 .wb.ic { flex: 1 1 0; }
+          .sbar.zero { display: none; }
+
+          /* one-row variant that keeps search in the sidebar (2a) */
+          .jump.inrow { flex: 1 1 auto; min-width: 0; height: 30px; padding: 0 9px; gap: 7px; font-size: 11.5px; }
+          .jump.inrow .jl { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+          /* menus (.pop-menu at true size) */
+          .pm { width: 224px; padding: 5px; background: var(--s-elev); border: 1px solid var(--s-b2); border-radius: 10px; box-shadow: 0 10px 30px rgba(0, 0, 0, .16), 0 2px 6px rgba(0, 0, 0, .08); }
+          .pm.float { position: absolute; z-index: 5; }
+          .pmi { display: flex; align-items: center; gap: 8px; padding: 8px 9px; border-radius: 7px; color: var(--s-t2); font: 500 12px/1 var(--sans); }
+          .pmi svg { flex: none; color: var(--s-t3); }
+          .pmi.hov { background: var(--s-hover); color: var(--s-t1); }
+          .pmi.dis { color: var(--s-tsub); }
+          .pmi .stk { display: flex; flex-direction: column; gap: 4px; }
+          .pmi .hint { color: var(--s-tsub); font: 500 10.5px/1.3 var(--sans); }
+          .pmsep { height: 1px; margin: 4px; background: var(--s-b1); }
+          .tip { position: absolute; z-index: 6; padding: 6px 8px; border-radius: 6px; background: #1a1612; color: #f7f4ef; font: 500 10.5px/1.35 var(--sans); max-width: 230px; box-shadow: 0 6px 18px rgba(0, 0, 0, .2); }
+
+          /* empty state */
+          .empty { margin: 14px 8px 0; padding: 14px 12px; border: 1px dashed var(--s-b2); border-radius: 9px; display: flex; flex-direction: column; gap: 9px; align-items: flex-start; }
+          .empty p { margin: 0; font: 500 11.5px/1.45 var(--sans); color: var(--s-t3); }
+          .empty .gb { flex: none; padding: 0 11px; border-color: var(--s-abord); color: var(--s-t1); }
+          .empty small { font: 500 9.5px/1.3 var(--sans); color: var(--s-tsub); }
+
+          /* title strip (Pwr-family 40px band + 1px divider) */
+          .tb { position: relative; height: 41px; display: flex; align-items: center; padding: 0 16px; background: var(--s-bg); border: 1px solid var(--line2); border-bottom-color: var(--s-b1); border-radius: 8px 8px 0 0; overflow: hidden; }
+          .lights { display: flex; gap: 8px; width: 80px; flex: none; }
+          .lights i { width: 12px; height: 12px; border-radius: 50%; background: #ff5f57; }
+          .lights i:nth-child(2) { background: #febc2e; } .lights i:nth-child(3) { background: #28c840; }
+          .brand { flex: none; display: flex; align-items: center; gap: 8px; color: var(--s-acc); }
+          .brand b { font: 700 17px/1 var(--sans); letter-spacing: -.01em; color: var(--s-t1); }
+          .brand b span { color: var(--s-acc); }
+          .hist { flex: none; display: flex; gap: 2px; margin-left: 12px; color: var(--s-t3); }
+          .hist span { width: 28px; height: 24px; display: flex; align-items: center; justify-content: center; }
+          .tid { display: flex; align-items: center; gap: 8px; min-width: 0; margin-left: 10px; }
+          .crumb { font: 650 13px/1 var(--sans); color: var(--s-acc); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+          .tsep { color: var(--s-t3); font: 500 13px/1 var(--sans); }
+          .brc { flex: none; display: inline-flex; align-items: center; gap: 6px; height: 24px; padding: 0 9px; border-radius: 999px; background: var(--s-hover); font: 600 11.5px/1 var(--mono); color: var(--s-t1); }
+          .brc i { width: 7px; height: 7px; border-radius: 50%; background: var(--s-acc); }
+          .pch { flex: 0 1 auto; min-width: 0; display: inline-flex; align-items: center; gap: 5px; height: 22px; padding: 0 8px; border: 1px solid var(--s-b2); border-radius: 999px; font: 500 10.5px/1 var(--mono); color: var(--s-t3); white-space: nowrap; overflow: hidden; }
+          .pch.ico { padding: 0 6px; }
+          .tsp { flex: 1; min-width: 12px; }
+          .tb.whole .crumb, .tb.whole .pch { flex: none; }
+          .tjump { flex: 0 0 auto; display: inline-flex; align-items: center; gap: 7px; height: 26px; width: 236px; padding: 0 6px 0 9px; background: var(--s-input); border: 1px solid var(--s-b2); border-radius: 7px; color: var(--s-t3); font: 500 12px/1 var(--sans); }
+          .tjump .jl { flex: 1; white-space: nowrap; }
+          .tjump .kbd { padding: 2px 4px; font-size: 9.5px; }
+          .tjump.k0 .kbd { display: none; }
+          .tjump.k0 { width: 168px; padding-right: 9px; }
+          .tjump.k1 { width: 30px; padding: 0; justify-content: center; }
+          .tjump.k1 .jl, .tjump.k1 .kbd { display: none; }
+          .tjump.hov { border-color: var(--s-abord); }
+          .cnav { flex: none; width: 28px; height: 24px; margin-left: 8px; display: flex; align-items: center; justify-content: center; color: var(--s-t3); }
+          .winbody { display: flex; border: 1px solid var(--line2); border-top: 0; border-radius: 0 0 8px 8px; overflow: hidden; background: var(--s-app); }
+          .winbody .sb { border: 0; border-right: 1px solid var(--s-b1); border-radius: 0; }
+          .winmain { flex: 1; padding: 14px 18px; display: flex; flex-direction: column; gap: 9px; }
+          .ghostline { height: 9px; border-radius: 4px; background: var(--s-phover); }
+          .measure { position: absolute; left: -46px; display: flex; align-items: center; justify-content: flex-end; width: 40px; border-right: 2px solid var(--bad); font: 700 9.5px/1.1 var(--mono); color: var(--badt); padding-right: 5px; text-align: right; }
+          .measure.ok { border-right-color: var(--ok); color: var(--okt); }
+          .shot-wrap { position: relative; margin-left: 46px; }
+
+          /* prototype controls */
+          .proto { display: flex; flex-direction: column; gap: 12px; padding: 14px; border: 1px solid var(--line); border-radius: 10px; background: #0a0a0a; }
+          .pchips { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; font: 500 10.5px/1 var(--sans); color: var(--t3); }
+          .pchips button { height: 24px; padding: 0 9px; border: 1px solid var(--line2); border-radius: 6px; background: transparent; color: var(--t2); font: 600 10.5px/1 var(--sans); cursor: pointer; }
+          .pchips button.on { border-color: var(--acc); color: var(--accb); background: var(--asoft); }
+          .pstage { position: relative; display: flex; gap: 24px; align-items: flex-start; }
+          .readout { min-height: 34px; padding: 8px 10px; border-radius: 7px; background: rgba(247, 243, 235, .04); font: 500 10.5px/1.5 var(--mono); color: var(--t2); }
+          .hide { display: none !important; }
+          .clk { cursor: pointer; }
+        </style>
+      </helmet>
+
+      <!-- ================================ TURN 1 ================================ -->
+      <svg width="0" height="0" style="position:absolute" aria-hidden="true"><symbol id="g-search" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/></symbol><symbol id="g-plus" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M5 12h14"/><path d="M12 5v14"/></symbol><symbol id="g-caret" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></symbol><symbol id="g-refresh" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/><path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"/><path d="M8 16H3v5"/></symbol><symbol id="g-pull" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 4v11"/><path d="m7 10 5 5 5-5"/><path d="M5 20h14"/></symbol><symbol id="g-wrench" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/></symbol><symbol id="g-trash" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18M8 6V4h8v2M19 6l-1 14H6L5 6M10 11v5M14 11v5"/></symbol><symbol id="g-clone" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 13v8l-4-4"/><path d="m12 21 4-4"/><path d="M4.393 15.269A7 7 0 1 1 15.71 8h1.79a4.5 4.5 0 0 1 2.436 8.284"/></symbol><symbol id="g-fork" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="18" r="3"/><circle cx="6" cy="6" r="3"/><circle cx="18" cy="6" r="3"/><path d="M18 9v2c0 .6-.4 1-1 1H7c-.6 0-1-.4-1-1V9"/><path d="M12 12v3"/></symbol><symbol id="g-folderplus" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 10v6"/><path d="M9 13h6"/><path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z"/></symbol><symbol id="g-chart" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3v16a2 2 0 0 0 2 2h16"/><path d="M18 17V9"/><path d="M13 17V5"/><path d="M8 17v-3"/></symbol><symbol id="g-folder" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.7-.9l-.8-1.2A2 2 0 0 0 7.9 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z"/></symbol><symbol id="g-mark" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><circle cx="6" cy="5" r="2.4"/><circle cx="6" cy="19" r="2.4"/><circle cx="18" cy="8" r="2.4"/><path d="M6 7.4v9.2"/><path d="M18 10.4c0 4-6 3.6-11 7"/></symbol><symbol id="g-lens0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="8"/><circle cx="12" cy="12" r="2.5"/></symbol><symbol id="g-lens1" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l2.7 5.6 6.1.9-4.4 4.3 1 6.1L12 17l-5.4 2.9 1-6.1L3.2 9.5l6.1-.9z"/></symbol><symbol id="g-lens2" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M12 4v11"/><path d="m7 10 5 5 5-5"/><path d="M5 20h14"/></symbol><symbol id="g-lens3" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M6 3h12M6 21h12M7 3c0 5 10 6 10 9s-10 4-10 9M17 3c0 5-10 6-10 9"/></symbol><symbol id="g-lens4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M4 6h16M4 12h16M4 18h16"/></symbol></svg>
+      <section class="dv-turn" id="t1">
+        <div class="dv-thd"><a class="dv-tid" href="#t1">1</a><span class="dv-tname">Findings &#8212; seven buttons, five rows, four looks</span></div>
+        <p class="dv-sub">Harold: <i>&#8220;The buttons above the repo list&#8230; they are just&#8230; all over the place. We need to tighten this up and stop reserving so much vertical space for them. Search can maybe be moved up to the chrome if we have room?&#8221;</i> Every specimen here is redrawn at shipped size from <code>app.css</code> in the light theme his screenshot uses. Names and data are contrived. The lens row is out of scope and drawn unchanged. The repo list below it is the subject of the sibling review, <i>Sidebar Repo Index</i>.</p>
+        <div class="dv-opts">
+
+          <div class="dv-opt" id="1a" data-screen-label="1a Today">
+            <div class="dv-olabel"><a class="dv-oid" href="#1a">1a</a>Today, at the 320px default</div>
+            <div class="shot-wrap lt">
+              <div class="measure" style="top:79px;height:252px">252px</div>
+              <div class="sb" style="width:320px;height:560px">
+                <div class="sb-prof"><div class="pchip"><span class="mono">N</span><span class="pid"><b>Northwind</b><em>you@northwind.dev</em></span><span class="pcar"><svg class="car" width="10" height="10"><use href="#g-caret"/></svg></span></div></div>
+                <div class="sb-search">
+                  <div class="jump"><svg width="13" height="13"><use href="#g-search"/></svg><span class="jl">Jump to repo&#8230;</span><span class="kbd">&#8984;F</span></div>
+                  <div class="acts">
+                    <div class="gb"><svg width="12" height="12"><use href="#g-plus"/></svg> Add folders&#8230;</div>
+                    <div class="r"><div class="gb"><svg width="12" height="12"><use href="#g-clone"/></svg> Clone&#8230;</div><div class="gb"><svg width="12" height="12"><use href="#g-fork"/></svg> Fork&#8230;</div></div>
+                    <div class="r"><div class="bk"><svg width="12" height="12"><use href="#g-refresh"/></svg> Fetch all repos</div><div class="bk"><svg width="12" height="12"><use href="#g-pull"/></svg> Try pull all</div></div>
+                    <div class="r"><div class="bk"><svg width="12" height="12"><use href="#g-trash"/></svg> Repository maintenance&#8230;</div></div>
+                  </div>
+                </div>
+                <div class="sb-lens"><div class="lensf"><span class="lc"><svg width="14" height="14"><use href="#g-lens0"/></svg></span><span class="lc on"><svg width="14" height="14"><use href="#g-lens1"/></svg></span><span class="lc"><svg width="14" height="14"><use href="#g-lens2"/></svg></span><span class="lc"><svg width="14" height="14"><use href="#g-lens3"/></svg></span><span class="lc"><svg width="14" height="14"><use href="#g-lens4"/></svg></span><span class="lcount">26</span></div><span class="kebab"><svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><circle cx="12" cy="5" r="2"/><circle cx="12" cy="12" r="2"/><circle cx="12" cy="19" r="2"/></svg></span></div>
+                <div class="sb-list"><div class="rr"><span class="tri"></span><span class="nm">atlas-web</span><span class="rm">12 wts</span></div><div class="sec"><span class="tri c"></span>Worktrees 12</div><div class="sec"><span class="tri c"></span>Branches 48</div><div class="sec"><span class="tri c"></span>Tags 9</div><div class="rr sel"><span class="tri c"></span><span class="nm">atlas-api</span><span class="rm">4 wts</span></div><div class="rr"><span class="tri c"></span><span class="nm">ledger</span><span class="rm">2 wts</span></div><div class="rr"><span class="tri c"></span><span class="nm">homebrew-tap</span><span class="rm">1 wt</span></div><div class="rr"><span class="tri c"></span><span class="nm">infra-kit</span><span class="rm">3 wts</span></div><div class="rr"><span class="tri c"></span><span class="nm">design-tokens</span><span class="rm">1 wt</span></div><div class="rr"><span class="tri c"></span><span class="nm">mobile-shell</span><span class="rm">5 wts</span></div><div class="rr"><span class="tri c"></span><span class="nm">docs-site</span><span class="rm">2 wts</span></div><div class="rr"><span class="tri c"></span><span class="nm">billing-worker</span><span class="rm">1 wt</span></div><div class="rr"><span class="tri c"></span><span class="nm">search-index</span><span class="rm">2 wts</span></div></div>
+              </div>
+            </div>
+          </div>
+
+          <div class="dv-opt" id="1b" data-screen-label="1b What is wrong">
+            <div class="dv-olabel"><a class="dv-oid" href="#1b">1b</a>What is wrong with it</div>
+            <div class="find">
+              <div class="fitem"><span class="pin">1</span><div><h4>252px of controls before the first repository</h4><p>Search 52, the action block 156, the lens row 44. On an 800px-tall window that is about a third of the sidebar, or eight collapsed repository rows. The list is the sidebar&#8217;s job, and it starts below the fold of its own pane.</p></div></div>
+              <div class="fitem"><span class="pin">2</span><div><h4>Four button treatments for one tier of action</h4><p>A search field, solid ghost buttons (Add folders, then Clone and Fork once a folder exists), quiet hairline buttons (Fetch, Pull) and a full-width row for Maintenance alone. Heights are 34, 32 and 30. Nothing says these are one toolbar, so the eye reads them as five unrelated things.</p></div></div>
+              <div class="fitem"><span class="pin">3</span><div><h4>Frequency runs backwards</h4><p>Add folders is done once per profile and owns the top full-width slot. Maintenance is weekly at most and owns a whole row. Fetch all and Pull all are daily and sit lowest. Jump has &#8984;F and &#8984;K and still takes a full row.</p></div></div>
+              <div class="fitem"><span class="pin">4</span><div><h4>Search is not a sidebar control</h4><p>The palette it opens searches repositories, worktrees, branches, pull requests, commits and files, and it is not a filter on this list. Its natural home is window chrome, which still shows when Contributions replaces the panes.</p></div></div>
+              <div class="fitem"><span class="pin ok">&#10003;</span><div><h4>The title strip has room</h4><p>At the 1560px window in the screenshot, roughly 800px of the strip between the crumbs and Contributions is empty drag region. Even at the 940px minimum window, 200px or more is free once the path chip has collapsed to its folder.</p></div></div>
+            </div>
+          </div>
+
+          <div class="dv-opt" id="1c" data-screen-label="1c Frequency">
+            <div class="dv-olabel"><a class="dv-oid" href="#1c">1c</a>How often each one is used, and where that says it goes</div>
+            <div class="tbl" style="width:640px">
+              <div class="tr head"><span>Control</span><span>Use</span><span>Where it belongs</span></div>
+              <div class="tr"><span><b>Jump to repo&#8230;</b></span><span><span class="st hi">many times a day</span></span><span>Window chrome. It also has &#8984;F and &#8984;K.</span></div>
+              <div class="tr"><span><b>Fetch all repos</b></span><span><span class="st hi">daily</span></span><span>One click, labelled while there is room</span></div>
+              <div class="tr"><span><b>Try pull all</b></span><span><span class="st hi">daily</span></span><span>One click, labelled while there is room</span></div>
+              <div class="tr"><span><b>Clone&#8230; / Fork&#8230;</b></span><span><span class="st mid">now and then</span></span><span>Behind one Add menu. Both bring a repository in.</span></div>
+              <div class="tr"><span><b>Repository maintenance&#8230;</b></span><span><span class="st lo">weekly or less</span></span><span>One icon button, with its name in the tooltip</span></div>
+              <div class="tr"><span><b>Add folders&#8230;</b></span><span><span class="st lo">once per profile</span></span><span>The Add menu, and the empty list on day one (3d)</span></div>
+            </div>
+          </div>
+
+        </div>
+      </section>
+
+      <!-- ================================ TURN 2 ================================ -->
+      <section class="dv-turn" id="t2">
+        <div class="dv-thd"><a class="dv-tid" href="#t2">2</a><span class="dv-tname">Three ways to tighten it</span></div>
+        <p class="dv-sub">All three keep every action reachable in at most two clicks, keep the lens row as it is, and use only house parts: <code>.wt-btn</code>&#8217;s shape for buttons, <code>ContextMenu</code> for menus, and <code>hoverTooltip</code> for names and shortcuts. The red or green bar on each one measures the controls between the profile chip and the list, against 1a&#8217;s 252px.</p>
+        <div class="dv-opts">
+
+          <div class="dv-opt" id="2a" data-screen-label="2a One row, search stays">
+            <div class="dv-olabel"><a class="dv-oid" href="#2a">2a</a>One row, search stays in the sidebar</div>
+            <div class="shot-wrap lt">
+              <div class="measure ok" style="top:79px;height:94px">94px</div>
+              <div class="sb" style="width:320px;height:440px">
+                <div class="sb-prof"><div class="pchip"><span class="mono">N</span><span class="pid"><b>Northwind</b><em>you@northwind.dev</em></span><span class="pcar"><svg class="car" width="10" height="10"><use href="#g-caret"/></svg></span></div></div>
+                <div class="sbar s2">
+                  <span class="jump inrow"><svg width="13" height="13"><use href="#g-search"/></svg><span class="jl">Jump to repo&#8230;</span></span>
+                  <span class="wb add"><svg width="12" height="12"><use href="#g-plus"/></svg><svg class="car" width="10" height="10"><use href="#g-caret"/></svg></span>
+                  <span class="wb ic"><svg width="12" height="12"><use href="#g-refresh"/></svg></span>
+                  <span class="wb ic"><svg width="12" height="12"><use href="#g-pull"/></svg></span>
+                  <span class="wb ic"><svg width="13" height="13"><use href="#g-wrench"/></svg></span>
+                </div>
+                <div class="sb-lens"><div class="lensf"><span class="lc"><svg width="14" height="14"><use href="#g-lens0"/></svg></span><span class="lc on"><svg width="14" height="14"><use href="#g-lens1"/></svg></span><span class="lc"><svg width="14" height="14"><use href="#g-lens2"/></svg></span><span class="lc"><svg width="14" height="14"><use href="#g-lens3"/></svg></span><span class="lc"><svg width="14" height="14"><use href="#g-lens4"/></svg></span><span class="lcount">26</span></div><span class="kebab"><svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><circle cx="12" cy="5" r="2"/><circle cx="12" cy="12" r="2"/><circle cx="12" cy="19" r="2"/></svg></span></div>
+                <div class="sb-list"><div class="rr"><span class="tri"></span><span class="nm">atlas-web</span><span class="rm">12 wts</span></div><div class="sec"><span class="tri c"></span>Worktrees 12</div><div class="sec"><span class="tri c"></span>Branches 48</div><div class="sec"><span class="tri c"></span>Tags 9</div><div class="rr sel"><span class="tri c"></span><span class="nm">atlas-api</span><span class="rm">4 wts</span></div><div class="rr"><span class="tri c"></span><span class="nm">ledger</span><span class="rm">2 wts</span></div><div class="rr"><span class="tri c"></span><span class="nm">homebrew-tap</span><span class="rm">1 wt</span></div><div class="rr"><span class="tri c"></span><span class="nm">infra-kit</span><span class="rm">3 wts</span></div><div class="rr"><span class="tri c"></span><span class="nm">design-tokens</span><span class="rm">1 wt</span></div><div class="rr"><span class="tri c"></span><span class="nm">mobile-shell</span><span class="rm">5 wts</span></div><div class="rr"><span class="tri c"></span><span class="nm">docs-site</span><span class="rm">2 wts</span></div><div class="rr"><span class="tri c"></span><span class="nm">billing-worker</span><span class="rm">1 wt</span></div><div class="rr"><span class="tri c"></span><span class="nm">search-index</span><span class="rm">2 wts</span></div></div>
+              </div>
+            </div>
+            <p class="note" style="width:366px;margin-left:46px">Saves 158px and leaves the title strip alone. The cost is that the search field and four buttons share 296px, so <b>Fetch all and Pull all are icons at every width</b>, and at the 240px floor the field is down to about 70px. It is the fallback if the strip should stay as it is.</p>
+          </div>
+
+          <div class="dv-opt" id="2b" data-screen-label="2b Search to the strip">
+            <div class="dv-olabel"><a class="dv-oid" href="#2b">2b</a>Search moves to the title strip, and one labelled row stays <span class="dv-rec">recommended</span></div>
+            <div class="shot-wrap lt">
+              <div class="measure ok" style="top:120px;height:94px">94px</div>
+              <div class="tb" style="width:760px">
+                <span class="lights"><i></i><i></i><i></i></span>
+                <span class="brand"><svg width="20" height="20"><use href="#g-mark"/></svg><b>Pwr<span>Git</span></b></span>
+                <span class="hist"><span>&#8249;</span><span>&#8250;</span></span>
+                <span class="tid"><span class="crumb">atlas-web</span><span class="tsep">&#8250;</span><span class="brc"><i></i>main<svg class="car" width="10" height="10"><use href="#g-caret"/></svg></span><span class="pch ico"><svg width="10" height="10"><use href="#g-folder"/></svg></span></span>
+                <span class="tsp"></span>
+                <span class="tjump"><svg width="13" height="13"><use href="#g-search"/></svg><span class="jl">Jump to repo&#8230;</span><span class="kbd">&#8984;F</span></span>
+                <span class="cnav"><svg width="15" height="15"><use href="#g-chart"/></svg></span>
+              </div>
+              <div class="winbody" style="width:760px">
+                <div class="sb" style="width:320px;height:400px">
+                  <div class="sb-prof"><div class="pchip"><span class="mono">N</span><span class="pid"><b>Northwind</b><em>you@northwind.dev</em></span><span class="pcar"><svg class="car" width="10" height="10"><use href="#g-caret"/></svg></span></div></div>
+                  <div class="sbar">
+                    <span class="wb add"><svg width="12" height="12"><use href="#g-plus"/></svg><span class="lb">Add</span><svg class="car" width="10" height="10"><use href="#g-caret"/></svg></span>
+                    <span class="wb grow"><svg width="12" height="12"><use href="#g-refresh"/></svg><span class="lb">Fetch all</span></span>
+                    <span class="wb grow"><svg width="12" height="12"><use href="#g-pull"/></svg><span class="lb">Pull all</span></span>
+                    <span class="wb ic"><svg width="13" height="13"><use href="#g-wrench"/></svg></span>
+                  </div>
+                  <div class="sb-lens"><div class="lensf"><span class="lc"><svg width="14" height="14"><use href="#g-lens0"/></svg></span><span class="lc on"><svg width="14" height="14"><use href="#g-lens1"/></svg></span><span class="lc"><svg width="14" height="14"><use href="#g-lens2"/></svg></span><span class="lc"><svg width="14" height="14"><use href="#g-lens3"/></svg></span><span class="lc"><svg width="14" height="14"><use href="#g-lens4"/></svg></span><span class="lcount">26</span></div><span class="kebab"><svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><circle cx="12" cy="5" r="2"/><circle cx="12" cy="12" r="2"/><circle cx="12" cy="19" r="2"/></svg></span></div>
+                  <div class="sb-list"><div class="rr"><span class="tri"></span><span class="nm">atlas-web</span><span class="rm">12 wts</span></div><div class="sec"><span class="tri c"></span>Worktrees 12</div><div class="sec"><span class="tri c"></span>Branches 48</div><div class="sec"><span class="tri c"></span>Tags 9</div><div class="rr sel"><span class="tri c"></span><span class="nm">atlas-api</span><span class="rm">4 wts</span></div><div class="rr"><span class="tri c"></span><span class="nm">ledger</span><span class="rm">2 wts</span></div><div class="rr"><span class="tri c"></span><span class="nm">homebrew-tap</span><span class="rm">1 wt</span></div><div class="rr"><span class="tri c"></span><span class="nm">infra-kit</span><span class="rm">3 wts</span></div><div class="rr"><span class="tri c"></span><span class="nm">design-tokens</span><span class="rm">1 wt</span></div><div class="rr"><span class="tri c"></span><span class="nm">mobile-shell</span><span class="rm">5 wts</span></div><div class="rr"><span class="tri c"></span><span class="nm">docs-site</span><span class="rm">2 wts</span></div><div class="rr"><span class="tri c"></span><span class="nm">billing-worker</span><span class="rm">1 wt</span></div><div class="rr"><span class="tri c"></span><span class="nm">search-index</span><span class="rm">2 wts</span></div></div>
+                </div>
+                <div class="winmain"><div class="ghostline" style="width:40%"></div><div class="ghostline" style="width:92%"></div><div class="ghostline" style="width:85%"></div><div class="ghostline" style="width:88%"></div><div class="ghostline" style="width:70%"></div><div class="ghostline" style="width:90%"></div><div class="ghostline" style="width:82%"></div><div class="ghostline" style="width:76%"></div><div class="ghostline" style="width:91%"></div><div class="ghostline" style="width:60%"></div><div class="ghostline" style="width:86%"></div><div class="ghostline" style="width:79%"></div></div>
+              </div>
+            </div>
+            <p class="note" style="width:760px;margin-left:46px">Saves 158px, about five repository rows, and the daily actions keep their words. Search sits at the strip&#8217;s right end, beside Contributions, in the drag region that is empty today. &#8984;F and &#8984;K are unchanged. The row is one tier of buttons: <b>Add &#9662;</b> opens Add folders, Clone and Fork, Fetch all and Pull all are one click each, and the wrench opens Repository maintenance. Turn 3 draws it at narrower widths.</p>
+          </div>
+
+          <div class="dv-opt" id="2c" data-screen-label="2c No row at all">
+            <div class="dv-olabel"><a class="dv-oid" href="#2c">2c</a>No row: everything behind the lens row&#8217;s &#8943;</div>
+            <div class="shot-wrap lt">
+              <div class="measure ok" style="top:79px;height:44px">44px</div>
+              <div class="sb" style="width:320px;height:440px">
+                <div class="sb-prof"><div class="pchip"><span class="mono">N</span><span class="pid"><b>Northwind</b><em>you@northwind.dev</em></span><span class="pcar"><svg class="car" width="10" height="10"><use href="#g-caret"/></svg></span></div></div>
+                <div style="height:10px"></div>
+                <div class="sb-lens"><div class="lensf"><span class="lc"><svg width="14" height="14"><use href="#g-lens0"/></svg></span><span class="lc on"><svg width="14" height="14"><use href="#g-lens1"/></svg></span><span class="lc"><svg width="14" height="14"><use href="#g-lens2"/></svg></span><span class="lc"><svg width="14" height="14"><use href="#g-lens3"/></svg></span><span class="lc"><svg width="14" height="14"><use href="#g-lens4"/></svg></span><span class="lcount">26</span></div><span class="kebab" style="background:var(--s-hover);color:var(--s-t1)"><svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><circle cx="12" cy="5" r="2"/><circle cx="12" cy="12" r="2"/><circle cx="12" cy="19" r="2"/></svg></span></div>
+                <div class="sb-list"><div class="rr"><span class="tri"></span><span class="nm">atlas-web</span><span class="rm">12 wts</span></div><div class="sec"><span class="tri c"></span>Worktrees 12</div><div class="sec"><span class="tri c"></span>Branches 48</div><div class="sec"><span class="tri c"></span>Tags 9</div><div class="rr sel"><span class="tri c"></span><span class="nm">atlas-api</span><span class="rm">4 wts</span></div><div class="rr"><span class="tri c"></span><span class="nm">ledger</span><span class="rm">2 wts</span></div><div class="rr"><span class="tri c"></span><span class="nm">homebrew-tap</span><span class="rm">1 wt</span></div><div class="rr"><span class="tri c"></span><span class="nm">infra-kit</span><span class="rm">3 wts</span></div><div class="rr"><span class="tri c"></span><span class="nm">design-tokens</span><span class="rm">1 wt</span></div><div class="rr"><span class="tri c"></span><span class="nm">mobile-shell</span><span class="rm">5 wts</span></div><div class="rr"><span class="tri c"></span><span class="nm">docs-site</span><span class="rm">2 wts</span></div><div class="rr"><span class="tri c"></span><span class="nm">billing-worker</span><span class="rm">1 wt</span></div><div class="rr"><span class="tri c"></span><span class="nm">search-index</span><span class="rm">2 wts</span></div></div>
+                <div class="pm float" style="top:126px;right:12px">
+                  <div class="pmi"><svg width="12" height="12"><use href="#g-folderplus"/></svg>Add folders&#8230;</div>
+                  <div class="pmi"><svg width="12" height="12"><use href="#g-clone"/></svg>Clone&#8230;</div>
+                  <div class="pmi"><svg width="12" height="12"><use href="#g-fork"/></svg>Fork&#8230;</div>
+                  <div class="pmsep"></div>
+                  <div class="pmi hov"><svg width="12" height="12"><use href="#g-refresh"/></svg>Fetch all repos</div>
+                  <div class="pmi"><svg width="12" height="12"><use href="#g-pull"/></svg>Try pull all</div>
+                  <div class="pmi"><svg width="13" height="13"><use href="#g-wrench"/></svg>Repository maintenance&#8230;</div>
+                  <div class="pmsep"></div>
+                  <div class="pmi"><span style="width:12px"></span>Group by folder</div>
+                </div>
+              </div>
+            </div>
+            <p class="note" style="width:366px;margin-left:46px">The most room, 208px, but it is the wrong trade. Fetch all and Pull all take two clicks, a menu called &#8220;display options&#8221; becomes a junk drawer, and on day one nothing visible says how to add a folder. <b>Not recommended.</b></p>
+          </div>
+
+        </div>
+      </section>
+
+      <!-- ================================ TURN 3 ================================ -->
+      <section class="dv-turn" id="t3">
+        <div class="dv-thd"><a class="dv-tid" href="#t3">3</a><span class="dv-tname">2b in detail &#8212; narrow widths, menus, day one</span></div>
+        <p class="dv-sub">Nothing here steps at a fixed width. Each row steps down on <b>measured</b> fit (<code>useFitLadder</code> / <code>useStepLadder</code> with a <code>ResizeObserver</code>), in the order stated, so a longer label, a larger text size or a translation moves the step rather than overflowing. The pixel widths named below are where the steps land with today&#8217;s labels in Geist Sans. They are not constants to build.</p>
+        <div class="dv-opts">
+
+          <div class="dv-opt" id="3a" data-screen-label="3a The strip">
+            <div class="dv-olabel"><a class="dv-oid" href="#3a">3a</a>The strip&#8217;s search, as the window narrows</div>
+            <div class="lt" style="display:flex;flex-direction:column;gap:14px">
+              <div><div class="wlab" style="margin-bottom:6px">wide: field, label and key cap</div>
+              <div class="tb" style="width:1100px;border-radius:8px"><span class="lights"><i></i><i></i><i></i></span><span class="brand"><svg width="20" height="20"><use href="#g-mark"/></svg><b>Pwr<span>Git</span></b></span><span class="hist"><span>&#8249;</span><span>&#8250;</span></span><span class="tid"><span class="crumb">atlas-web</span><span class="tsep">&#8250;</span><span class="brc"><i></i>main<svg class="car" width="10" height="10"><use href="#g-caret"/></svg></span><span class="pch"><svg width="10" height="10"><use href="#g-folder"/></svg> northwind/atlas-web</span></span><span class="tsp"></span><span class="tjump hov"><svg width="13" height="13"><use href="#g-search"/></svg><span class="jl">Jump to repo&#8230;</span><span class="kbd">&#8984;F</span></span><span class="cnav"><svg width="15" height="15"><use href="#g-chart"/></svg></span>
+                </div></div>
+              <div><div class="wlab" style="margin-bottom:6px">step 1: the key cap goes first; it is also in the tooltip</div>
+              <div class="tb whole" style="width:920px;border-radius:8px"><span class="lights"><i></i><i></i><i></i></span><span class="brand"><svg width="20" height="20"><use href="#g-mark"/></svg><b>Pwr<span>Git</span></b></span><span class="hist"><span>&#8249;</span><span>&#8250;</span></span><span class="tid"><span class="crumb">atlas-web</span><span class="tsep">&#8250;</span><span class="brc"><i></i>main<svg class="car" width="10" height="10"><use href="#g-caret"/></svg></span><span class="pch"><svg width="10" height="10"><use href="#g-folder"/></svg> northwind/atlas-web</span></span><span class="tsp"></span><span class="tjump k0"><svg width="13" height="13"><use href="#g-search"/></svg><span class="jl">Jump to repo&#8230;</span><span class="kbd">&#8984;F</span></span><span class="cnav"><svg width="15" height="15"><use href="#g-chart"/></svg></span></div></div>
+              <div><div class="wlab" style="margin-bottom:6px">step 2: then the label, before any crumb gives up a character</div>
+              <div class="tb whole" style="width:790px;border-radius:8px"><span class="lights"><i></i><i></i><i></i></span><span class="brand"><svg width="20" height="20"><use href="#g-mark"/></svg><b>Pwr<span>Git</span></b></span><span class="hist"><span>&#8249;</span><span>&#8250;</span></span><span class="tid"><span class="crumb">atlas-web</span><span class="tsep">&#8250;</span><span class="brc"><i></i>main<svg class="car" width="10" height="10"><use href="#g-caret"/></svg></span><span class="pch"><svg width="10" height="10"><use href="#g-folder"/></svg> northwind/atlas-web</span></span><span class="tsp"></span><span class="tjump k1"><svg width="13" height="13"><use href="#g-search"/></svg><span class="jl">Jump to repo&#8230;</span><span class="kbd">&#8984;F</span></span><span class="cnav"><svg width="15" height="15"><use href="#g-chart"/></svg></span></div></div>
+              <p class="note" style="width:1100px">Order: <b>key cap &#8594; label &#8594; then the crumbs&#8217; existing shrink</b> (the path chip to its folder, then the repository name&#8217;s ellipsis). The crumbs name where you are, and the field is decoration once you know &#8984;F. So the field gives way first: a step is taken while the crumb row is truncated, measured as natural width against box width, not by window width. At the 940px minimum window with a long branch name it lands on the 30px icon. That square is still a field-shaped button, with the same border and the same hover, and its name stays &#8220;Jump to repo&#8230;&#8221; for assistive tech and E2E. On Windows it sits left of the 150px caption-button reserve, and on Linux left of <code>WindowControls</code>. Like every strip control it opts out of the drag region.</p>
+            </div>
+          </div>
+
+          <div class="dv-opt" id="3b" data-screen-label="3b The row">
+            <div class="dv-olabel"><a class="dv-oid" href="#3b">3b</a>The action row from 420px to the 240px floor</div>
+            <div class="lt" style="display:flex;flex-direction:column;gap:12px">
+              <div><div class="wlab" style="margin-bottom:6px">420px &#183; everything labelled; Fetch and Pull divide the surplus</div>
+              <div class="sb" style="width:420px"><div class="sbar"><span class="wb add"><svg width="12" height="12"><use href="#g-plus"/></svg><span class="lb">Add</span><svg class="car" width="10" height="10"><use href="#g-caret"/></svg></span><span class="wb grow"><svg width="12" height="12"><use href="#g-refresh"/></svg><span class="lb">Fetch all</span></span><span class="wb grow"><svg width="12" height="12"><use href="#g-pull"/></svg><span class="lb">Pull all</span></span><span class="wb ic"><svg width="13" height="13"><use href="#g-wrench"/></svg></span></div></div></div>
+              <div><div class="wlab" style="margin-bottom:6px">320px default &#183; the same</div>
+              <div class="sb" style="width:320px"><div class="sbar"><span class="wb add"><svg width="12" height="12"><use href="#g-plus"/></svg><span class="lb">Add</span><svg class="car" width="10" height="10"><use href="#g-caret"/></svg></span><span class="wb grow"><svg width="12" height="12"><use href="#g-refresh"/></svg><span class="lb">Fetch all</span></span><span class="wb grow"><svg width="12" height="12"><use href="#g-pull"/></svg><span class="lb">Pull all</span></span><span class="wb ic"><svg width="13" height="13"><use href="#g-wrench"/></svg></span></div></div></div>
+              <div><div class="wlab" style="margin-bottom:6px">~280px &#183; step 1: Add&#8217;s word goes; the + and the caret still say &#8220;add, more inside&#8221;</div>
+              <div class="sb" style="width:280px"><div class="sbar s1"><span class="wb add"><svg width="12" height="12"><use href="#g-plus"/></svg><span class="lb">Add</span><svg class="car" width="10" height="10"><use href="#g-caret"/></svg></span><span class="wb grow"><svg width="12" height="12"><use href="#g-refresh"/></svg><span class="lb">Fetch all</span></span><span class="wb grow"><svg width="12" height="12"><use href="#g-pull"/></svg><span class="lb">Pull all</span></span><span class="wb ic"><svg width="13" height="13"><use href="#g-wrench"/></svg></span></div></div></div>
+              <div><div class="wlab" style="margin-bottom:6px">240px floor &#183; step 2: Fetch and Pull become their glyphs; four equal buttons, like the lens chips below</div>
+              <div class="sb" style="width:240px"><div class="sbar s2"><span class="wb add"><svg width="12" height="12"><use href="#g-plus"/></svg><span class="lb">Add</span><svg class="car" width="10" height="10"><use href="#g-caret"/></svg></span><span class="wb grow"><svg width="12" height="12"><use href="#g-refresh"/></svg><span class="lb">Fetch all</span></span><span class="wb grow"><svg width="12" height="12"><use href="#g-pull"/></svg><span class="lb">Pull all</span></span><span class="wb ic"><svg width="13" height="13"><use href="#g-wrench"/></svg></span></div><div class="sb-lens"><div class="lensf"><span class="lc"><svg width="14" height="14"><use href="#g-lens0"/></svg></span><span class="lc on"><svg width="14" height="14"><use href="#g-lens1"/></svg></span><span class="lc"><svg width="14" height="14"><use href="#g-lens2"/></svg></span><span class="lc"><svg width="14" height="14"><use href="#g-lens3"/></svg></span><span class="lc"><svg width="14" height="14"><use href="#g-lens4"/></svg></span><span class="lcount">26</span></div><span class="kebab"><svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><circle cx="12" cy="5" r="2"/><circle cx="12" cy="12" r="2"/><circle cx="12" cy="19" r="2"/></svg></span></div></div></div>
+              <p class="note" style="width:420px">Fetch and Pull lose their words together, never one of them alone, because a labelled Fetch beside a bare arrow reads as two tiers. The glyphs are the worktree toolbar&#8217;s own Fetch and Pull marks, so even bare they read as the same verbs. Visible labels shorten to <b>Fetch all</b> and <b>Pull all</b>, but the accessible names stay &#8220;Fetch all repos&#8221; and &#8220;Try pull all&#8221;. Each contains its visible label (SC 2.5.3), and the tooltips keep today&#8217;s sentences.</p>
+            </div>
+          </div>
+
+          <div class="dv-opt" id="3c" data-screen-label="3c Menus and tooltips">
+            <div class="dv-olabel"><a class="dv-oid" href="#3c">3c</a>Add &#9662;, and the wrench&#8217;s tooltip</div>
+            <div class="lt" style="display:flex;gap:22px;align-items:flex-start">
+              <div class="sb" style="width:320px;height:300px">
+                <div class="sb-prof"><div class="pchip"><span class="mono">N</span><span class="pid"><b>Northwind</b><em>you@northwind.dev</em></span><span class="pcar"><svg class="car" width="10" height="10"><use href="#g-caret"/></svg></span></div></div>
+                <div class="sbar"><span class="wb add open"><svg width="12" height="12"><use href="#g-plus"/></svg><span class="lb">Add</span><svg class="car" width="10" height="10"><use href="#g-caret"/></svg></span><span class="wb grow"><svg width="12" height="12"><use href="#g-refresh"/></svg><span class="lb">Fetch all</span></span><span class="wb grow"><svg width="12" height="12"><use href="#g-pull"/></svg><span class="lb">Pull all</span></span><span class="wb ic"><svg width="13" height="13"><use href="#g-wrench"/></svg></span></div>
+                <div class="sb-lens"><div class="lensf"><span class="lc"><svg width="14" height="14"><use href="#g-lens0"/></svg></span><span class="lc on"><svg width="14" height="14"><use href="#g-lens1"/></svg></span><span class="lc"><svg width="14" height="14"><use href="#g-lens2"/></svg></span><span class="lc"><svg width="14" height="14"><use href="#g-lens3"/></svg></span><span class="lc"><svg width="14" height="14"><use href="#g-lens4"/></svg></span><span class="lcount">26</span></div><span class="kebab"><svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><circle cx="12" cy="5" r="2"/><circle cx="12" cy="12" r="2"/><circle cx="12" cy="19" r="2"/></svg></span></div>
+                <div class="pm float" style="top:122px;left:12px">
+                  <div class="pmi"><svg width="12" height="12"><use href="#g-folderplus"/></svg>Add folders&#8230;</div>
+                  <div class="pmi hov"><svg width="12" height="12"><use href="#g-clone"/></svg>Clone&#8230;</div>
+                  <div class="pmi"><svg width="12" height="12"><use href="#g-fork"/></svg>Fork&#8230;</div>
+                </div>
+              </div>
+              <div class="sb" style="width:320px;height:300px">
+                <div class="sb-prof"><div class="pchip"><span class="mono">N</span><span class="pid"><b>Northwind</b><em>you@northwind.dev</em></span><span class="pcar"><svg class="car" width="10" height="10"><use href="#g-caret"/></svg></span></div></div>
+                <div class="sbar"><span class="wb add open"><svg width="12" height="12"><use href="#g-plus"/></svg><span class="lb">Add</span><svg class="car" width="10" height="10"><use href="#g-caret"/></svg></span><span class="wb grow off"><svg width="12" height="12"><use href="#g-refresh"/></svg><span class="lb">Fetch all</span></span><span class="wb grow off"><svg width="12" height="12"><use href="#g-pull"/></svg><span class="lb">Pull all</span></span><span class="wb ic"><svg width="13" height="13"><use href="#g-wrench"/></svg></span></div>
+                <div class="sb-lens"><div class="lensf"><span class="lc"><svg width="14" height="14"><use href="#g-lens0"/></svg></span><span class="lc on"><svg width="14" height="14"><use href="#g-lens1"/></svg></span><span class="lc"><svg width="14" height="14"><use href="#g-lens2"/></svg></span><span class="lc"><svg width="14" height="14"><use href="#g-lens3"/></svg></span><span class="lc"><svg width="14" height="14"><use href="#g-lens4"/></svg></span><span class="lcount">26</span></div><span class="kebab"><svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><circle cx="12" cy="5" r="2"/><circle cx="12" cy="12" r="2"/><circle cx="12" cy="19" r="2"/></svg></span></div>
+                <div class="pm float" style="top:122px;left:12px;width:250px">
+                  <div class="pmi hov"><svg width="12" height="12"><use href="#g-folderplus"/></svg>Add folders&#8230;</div>
+                  <div class="pmi dis"><svg width="12" height="12"><use href="#g-clone"/></svg><span class="stk">Clone&#8230;<span class="hint">Add a repo folder before cloning</span></span></div>
+                  <div class="pmi dis"><svg width="12" height="12"><use href="#g-fork"/></svg><span class="stk">Fork&#8230;<span class="hint">Add a repo folder before forking</span></span></div>
+                </div>
+              </div>
+              <div class="sb" style="width:320px;height:300px">
+                <div class="sb-prof"><div class="pchip"><span class="mono">N</span><span class="pid"><b>Northwind</b><em>you@northwind.dev</em></span><span class="pcar"><svg class="car" width="10" height="10"><use href="#g-caret"/></svg></span></div></div>
+                <div class="sbar"><span class="wb add"><svg width="12" height="12"><use href="#g-plus"/></svg><span class="lb">Add</span><svg class="car" width="10" height="10"><use href="#g-caret"/></svg></span><span class="wb grow"><svg width="12" height="12"><use href="#g-refresh"/></svg><span class="lb">Fetch all</span></span><span class="wb grow"><svg width="12" height="12"><use href="#g-pull"/></svg><span class="lb">Pull all</span></span><span class="wb ic hov"><svg width="13" height="13"><use href="#g-wrench"/></svg></span></div>
+                <div class="sb-lens"><div class="lensf"><span class="lc"><svg width="14" height="14"><use href="#g-lens0"/></svg></span><span class="lc on"><svg width="14" height="14"><use href="#g-lens1"/></svg></span><span class="lc"><svg width="14" height="14"><use href="#g-lens2"/></svg></span><span class="lc"><svg width="14" height="14"><use href="#g-lens3"/></svg></span><span class="lc"><svg width="14" height="14"><use href="#g-lens4"/></svg></span><span class="lcount">26</span></div><span class="kebab"><svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><circle cx="12" cy="5" r="2"/><circle cx="12" cy="12" r="2"/><circle cx="12" cy="19" r="2"/></svg></span></div>
+                <div class="tip" style="top:124px;right:8px">Repository maintenance&#8230; &#8212; collect Git garbage, prune finished worktrees, and review leftover local branches</div>
+              </div>
+            </div>
+            <p class="note" style="width:1004px">Left: the menu with a folder added. Middle: no folder yet. Clone and Fork stay in the menu, disabled, with the reason as <code>ContextMenu</code>&#8217;s <code>hint</code> line, the menu&#8217;s own way to explain a disabled entry. Right: the wrench names itself on hover and in its accessible name. It is a wrench and not today&#8217;s bin because, as a bare icon, a bin on a profile-wide action reads as &#8220;delete everything&#8221;. The menu opens under its trigger (<code>triggerRef</code>, so a second click closes it), and arrow keys walk it (<code>useMenuNavigation</code>).</p>
+          </div>
+
+          <div class="dv-opt" id="3d" data-screen-label="3d Day one">
+            <div class="dv-olabel"><a class="dv-oid" href="#3d">3d</a>Day one: the empty list carries Add folders</div>
+            <div class="lt" style="display:flex;gap:22px;align-items:flex-start">
+              <div class="sb" style="width:320px;height:330px">
+                <div class="sb-prof"><div class="pchip"><span class="mono">N</span><span class="pid"><b>Northwind</b><em>you@northwind.dev</em></span><span class="pcar"><svg class="car" width="10" height="10"><use href="#g-caret"/></svg></span></div></div>
+                <div class="sbar"><span class="wb add"><svg width="12" height="12"><use href="#g-plus"/></svg><span class="lb">Add</span><svg class="car" width="10" height="10"><use href="#g-caret"/></svg></span><span class="wb grow off"><svg width="12" height="12"><use href="#g-refresh"/></svg><span class="lb">Fetch all</span></span><span class="wb grow off"><svg width="12" height="12"><use href="#g-pull"/></svg><span class="lb">Pull all</span></span><span class="wb ic"><svg width="13" height="13"><use href="#g-wrench"/></svg></span></div>
+                <div class="sb-lens"><div class="lensf"><span class="lc"><svg width="14" height="14"><use href="#g-lens0"/></svg></span><span class="lc on"><svg width="14" height="14"><use href="#g-lens1"/></svg></span><span class="lc"><svg width="14" height="14"><use href="#g-lens2"/></svg></span><span class="lc"><svg width="14" height="14"><use href="#g-lens3"/></svg></span><span class="lc"><svg width="14" height="14"><use href="#g-lens4"/></svg></span><span class="lcount">26</span></div><span class="kebab"><svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><circle cx="12" cy="5" r="2"/><circle cx="12" cy="12" r="2"/><circle cx="12" cy="19" r="2"/></svg></span></div>
+                <div class="empty">
+                  <p>No repositories yet. Add a folder that holds your checkouts, and PwrGit finds the repositories inside it.</p>
+                  <span class="gb"><svg width="12" height="12"><use href="#g-folderplus"/></svg> Add folders&#8230;</span>
+                  <small>Clone and Fork, under Add &#9662;, open once a folder exists.</small>
+                </div>
+              </div>
+              <p class="note" style="width:300px">Today Add folders leads the stack because on a new profile it is the only control that works. With the stack gone, the empty list takes over that job, as PwrAgent&#8217;s <code>SidebarStartActions</code> did for its own empty list. A profile with no folders gets the button and the sentence in the list. Once a folder exists, the button leaves the list and Add folders lives in Add &#9662;. The old hint under the stack (&#8220;Add a repo folder to enable clone and fork&#8221;) moves into this card.</p>
+            </div>
+          </div>
+
+        </div>
+      </section>
+
+      <!-- ================================ TURN 4 ================================ -->
+      <section class="dv-turn" id="t4">
+        <div class="dv-thd"><a class="dv-tid" href="#t4">4</a><span class="dv-tname">Live: drag the sidebar, open Add, flip day one</span></div>
+        <p class="dv-sub">Pick a sidebar width and watch the row step down. Click <b>Add</b> to open its menu, and switch <b>Folders</b> to <b>none</b> for the day-one state. The prototype picks its step from the specimen buttons&#8217; natural widths, the same test the build makes with a <code>ResizeObserver</code>, rather than from the width chips.</p>
+        <div class="dv-opts">
+          <div class="dv-opt" id="4a" data-screen-label="4a Live">
+            <div class="dv-olabel"><a class="dv-oid" href="#4a">4a</a>Live prototype</div>
+            <div class="proto" style="width:700px">
+              <div class="pchips">Width <sc-for list="{{widths}}" as="w" hint-placeholder-count="4"><button class="{{w.cls}}" onClick="{{w.on}}">{{w.label}}</button></sc-for> &#183; Folders <sc-for list="{{folderModes}}" as="f" hint-placeholder-count="2"><button class="{{f.cls}}" onClick="{{f.on}}">{{f.label}}</button></sc-for></div>
+              <div class="pstage lt">
+                <div class="sb" style="{{sbStyle}}">
+                  <div class="sb-prof"><div class="pchip"><span class="mono">N</span><span class="pid"><b>Northwind</b><em>you@northwind.dev</em></span><span class="pcar"><svg class="car" width="10" height="10"><use href="#g-caret"/></svg></span></div></div>
+                  <div class="{{barCls}}">
+                    <span class="{{addCls}}" onClick="{{toggleAdd}}"><svg width="12" height="12"><use href="#g-plus"/></svg><span class="lb">Add</span><svg class="car" width="10" height="10"><use href="#g-caret"/></svg></span>
+                    <span class="{{syncCls}}" onClick="{{fetchAll}}"><svg width="12" height="12"><use href="#g-refresh"/></svg><span class="lb">Fetch all</span></span>
+                    <span class="{{syncCls}}" onClick="{{pullAll}}"><svg width="12" height="12"><use href="#g-pull"/></svg><span class="lb">Pull all</span></span>
+                    <span class="wb ic clk" onClick="{{maintain}}"><svg width="13" height="13"><use href="#g-wrench"/></svg></span>
+                  </div>
+                  <div class="sb-lens"><div class="lensf"><span class="lc"><svg width="14" height="14"><use href="#g-lens0"/></svg></span><span class="lc on"><svg width="14" height="14"><use href="#g-lens1"/></svg></span><span class="lc"><svg width="14" height="14"><use href="#g-lens2"/></svg></span><span class="lc"><svg width="14" height="14"><use href="#g-lens3"/></svg></span><span class="lc"><svg width="14" height="14"><use href="#g-lens4"/></svg></span><span class="lcount">26</span></div><span class="kebab"><svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><circle cx="12" cy="5" r="2"/><circle cx="12" cy="12" r="2"/><circle cx="12" cy="19" r="2"/></svg></span></div>
+                  <sc-if value="{{hasFolders}}" hint-placeholder-val="{{ true }}"><div class="sb-list"><div class="rr"><span class="tri"></span><span class="nm">atlas-web</span><span class="rm">12 wts</span></div><div class="sec"><span class="tri c"></span>Worktrees 12</div><div class="sec"><span class="tri c"></span>Branches 48</div><div class="sec"><span class="tri c"></span>Tags 9</div><div class="rr sel"><span class="tri c"></span><span class="nm">atlas-api</span><span class="rm">4 wts</span></div><div class="rr"><span class="tri c"></span><span class="nm">ledger</span><span class="rm">2 wts</span></div><div class="rr"><span class="tri c"></span><span class="nm">homebrew-tap</span><span class="rm">1 wt</span></div><div class="rr"><span class="tri c"></span><span class="nm">infra-kit</span><span class="rm">3 wts</span></div><div class="rr"><span class="tri c"></span><span class="nm">design-tokens</span><span class="rm">1 wt</span></div><div class="rr"><span class="tri c"></span><span class="nm">mobile-shell</span><span class="rm">5 wts</span></div><div class="rr"><span class="tri c"></span><span class="nm">docs-site</span><span class="rm">2 wts</span></div><div class="rr"><span class="tri c"></span><span class="nm">billing-worker</span><span class="rm">1 wt</span></div><div class="rr"><span class="tri c"></span><span class="nm">search-index</span><span class="rm">2 wts</span></div></div></sc-if>
+                  <sc-if value="{{noFolders}}" hint-placeholder-val="{{ false }}">
+                    <div class="empty"><p>No repositories yet. Add a folder that holds your checkouts.</p><span class="gb clk" onClick="{{addFolder}}"><svg width="12" height="12"><use href="#g-folderplus"/></svg> Add folders&#8230;</span><small>Clone and Fork, under Add &#9662;, open once a folder exists.</small></div>
+                  </sc-if>
+                  <sc-if value="{{menuOpen}}" hint-placeholder-val="{{ false }}">
+                    <div class="pm float" style="top:122px;left:12px;width:240px">
+                      <div class="pmi clk" onClick="{{addFolder}}"><svg width="12" height="12"><use href="#g-folderplus"/></svg>Add folders&#8230;</div>
+                      <div class="{{cloneCls}}" onClick="{{clone}}"><svg width="12" height="12"><use href="#g-clone"/></svg><span class="stk">Clone&#8230;<span class="{{hintCls}}">Add a repo folder before cloning</span></span></div>
+                      <div class="{{cloneCls}}" onClick="{{fork}}"><svg width="12" height="12"><use href="#g-fork"/></svg><span class="stk">Fork&#8230;<span class="{{hintCls}}">Add a repo folder before forking</span></span></div>
+                    </div>
+                  </sc-if>
+                </div>
+              </div>
+              <div class="readout">{{readout}}</div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ================================ TURN 5 ================================ -->
+      <section class="dv-turn" id="t5">
+        <div class="dv-thd"><a class="dv-tid" href="#t5">5</a><span class="dv-tname">What gets built</span></div>
+        <p class="dv-sub">One PR. The repo list&#8217;s navigation (the sibling review) touches <code>.sidebar__list</code>, so the two can land in either order.</p>
+        <div class="dv-opts">
+          <div class="dv-opt" id="5a" data-screen-label="5a Plan">
+            <div class="tbl" style="width:900px">
+              <div class="tr head"><span>Where</span><span>What</span><span>Kept</span></div>
+              <div class="tr"><span><code>TitleBar.tsx</code>, <code>App.tsx</code></span><span>A <code>.titlebar-jump</code> button before Contributions, with an <code>onOpenSearch</code> prop</span><span>Name &#8220;Jump to repo&#8230;&#8221;, &#8984;F / &#8984;K tooltip, no-drag, the strip&#8217;s 40px band</span></div>
+              <div class="tr"><span><code>Sidebar.tsx</code></span><span><code>.sidebar__search</code> and <code>.sidebar__actions</code> become one <code>.sidebar__toolbar</code>: Add &#9662; (<code>ContextMenu</code>), Fetch all, Pull all, and the wrench, stepped by <code>useFitLadder</code></span><span>Every disabled reason, every accessible name, <code>openFork()</code>, <code>BulkSyncDialog</code>, <code>MaintenanceDialog</code></span></div>
+              <div class="tr"><span><code>Sidebar.tsx</code> empty state</span><span>Add folders&#8230; plus the clone and fork hint, while the profile has no folder</span><span>The <code>role="tree"</code> wrapper owns only rows. The card sits in <code>.sidebar__empty</code>, outside it.</span></div>
+              <div class="tr"><span><code>lib/WrenchGlyph.tsx</code></span><span>Lucide <code>wrench</code>, drawn like the other glyphs</span><span>SVG, not a text character</span></div>
+              <div class="tr"><span><code>e2e/</code></span><span>An <code>openAddMenu()</code> helper for Clone&#8230; and Fork&#8230; and for a second folder. <code>sidebar-actions.spec</code> re-asserts one row and its seams.</span><span>Specs that add a first folder still find the &#8220;Add folders&#8230;&#8221; button, now in the empty list</span></div>
+            </div>
+          </div>
+        </div>
+        <p class="dv-next">Try next: &#8220;put the strip&#8217;s field in the centre instead&#8221; &#183; &#8220;keep search in the sidebar (2a)&#8221; &#183; &#8220;show it at large text size&#8221;</p>
+      </section>
+    </x-dc>
+    <script
+      type="text/x-dc"
+      data-dc-script
+      data-props='{}'
+    >
+      // Natural widths of the specimen buttons (px), as drawn above in Geist Sans.
+      const PAD = 24, GAP = 6;
+      const ADD_FULL = 62, ADD_ICON = 40, FETCH = 80, PULL = 72, ICON = 30;
+      function stepFor(width) {
+        const inner = width - PAD;
+        if (ADD_FULL + FETCH + PULL + ICON + 3 * GAP <= inner) return 0;
+        if (ADD_ICON + FETCH + PULL + ICON + 3 * GAP <= inner) return 1;
+        return 2;
+      }
+      class Component extends DCLogic {
+        constructor(props) {
+          super(props);
+          this.state = { width: 320, folders: true, menu: false, log: "320px: everything labelled. Click Add." };
+        }
+        renderVals() {
+          const s = this.state;
+          const step = stepFor(s.width);
+          const stepWord = ["no step: all labels", "step 1: Add's word dropped", "step 2: Fetch and Pull are glyphs"][step];
+          const say = (log) => this.setState({ log: log, menu: false });
+          return {
+            widths: [420, 320, 280, 240].map((w) => ({
+              label: w + "px",
+              cls: s.width === w ? "on" : "",
+              on: () => this.setState({ width: w, menu: false, log: w + "px: " + ["no step: all labelled", "step 1: Add's word dropped", "step 2: Fetch and Pull are glyphs"][stepFor(w)] + "." })
+            })),
+            folderModes: [
+              { label: "some", cls: s.folders ? "on" : "", on: () => this.setState({ folders: true, menu: false, log: "Folders added: the list shows repositories; Clone and Fork are live in Add." }) },
+              { label: "none", cls: s.folders ? "" : "on", on: () => this.setState({ folders: false, menu: false, log: "Day one: the empty list carries Add folders; Fetch and Pull are disabled." }) }
+            ],
+            sbStyle: "width:" + s.width + "px;height:420px",
+            barCls: "sbar" + (step === 1 ? " s1" : step === 2 ? " s2" : ""),
+            addCls: "wb add clk" + (s.menu ? " open" : ""),
+            syncCls: "wb grow clk" + (s.folders ? "" : " off"),
+            toggleAdd: () => this.setState({ menu: !s.menu, log: s.menu ? "Closed Add." : "Add is open: Add folders, Clone, Fork." }),
+            fetchAll: () => say(s.folders ? "Fetch all repos: opens BulkSyncDialog in fetch mode." : "Disabled: no repositories yet."),
+            pullAll: () => say(s.folders ? "Try pull all: opens BulkSyncDialog; fast-forwards clean, safe worktrees only." : "Disabled: no repositories yet."),
+            maintain: () => say("Repository maintenance: opens MaintenanceDialog."),
+            addFolder: () => this.setState({ folders: true, menu: false, log: "Add folders: the folder picker; once a folder exists the list fills and the card leaves." }),
+            clone: () => say(s.folders ? "Clone: opens CloneRepoDialog." : "Disabled: add a repo folder before cloning."),
+            fork: () => say(s.folders ? "Fork: opens ForkRepoDialog on the selected repository." : "Disabled: add a repo folder before forking."),
+            cloneCls: "pmi clk" + (s.folders ? "" : " dis"),
+            hintCls: s.folders ? "hide" : "hint",
+            hasFolders: s.folders,
+            noFolders: !s.folders,
+            menuOpen: s.menu,
+            readout: s.log + "  [" + stepWord + "]"
+          };
+        }
+      }
+    </script>
+  </body>
+</html>

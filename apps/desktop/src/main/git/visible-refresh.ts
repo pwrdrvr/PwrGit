@@ -33,7 +33,8 @@ export type VisibleRefreshDeps = {
   emit: {
     worktreeChanged: (worktreeId: string) => void;
     graphChanged: (repoId: string) => void;
-    repoChanged: (profileId: string) => void;
+    /** The repositories whose rows moved, grouped by profile. */
+    repoChanged: (profileId: string, repoIds: string[]) => void;
   };
   isFocused: () => boolean;
   now?: () => number;
@@ -178,14 +179,18 @@ export class VisibleWorktreeRefresher {
     // for the whole round: the per-worktree refresher emits all three for each
     // row, which for a batch of eight is eight full sidebar reloads.
     const repos = new Set<string>();
-    const profiles = new Set<string>();
+    const profiles = new Map<string, Set<string>>();
     for (const row of changed) {
       this.deps.emit.worktreeChanged(row.id);
       repos.add(row.repo_id);
-      profiles.add(row.profile_id);
+      const ids = profiles.get(row.profile_id) ?? new Set<string>();
+      ids.add(row.repo_id);
+      profiles.set(row.profile_id, ids);
     }
     for (const repoId of repos) this.deps.emit.graphChanged(repoId);
-    for (const profileId of profiles) this.deps.emit.repoChanged(profileId);
+    for (const [profileId, ids] of profiles) {
+      this.deps.emit.repoChanged(profileId, [...ids]);
+    }
   }
 }
 

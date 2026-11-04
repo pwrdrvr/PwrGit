@@ -97,6 +97,9 @@ type Pin = {
   startedAt: number;
   /** Set once the operation ends; the card becomes its receipt. */
   outcome: RemoteActivityOutcome | null;
+  /** A question the receipt asks. The card stands until it is answered or
+   *  dismissed: a countdown would take the question away mid-read. */
+  prompt?: ReactNode;
 };
 
 /**
@@ -116,6 +119,9 @@ export type RemoteActivitySettlement = {
   summary: string;
   /** Shown only when the live record left no Git output — an error body. */
   detail?: string;
+  /** A question for the receipt to ask, under its steps. Its answer should
+   *  `dismiss` the card; until then the card has no rail. */
+  prompt?: ReactNode;
 };
 
 export type RemoteActivityPopover = {
@@ -406,6 +412,7 @@ export function useRemoteActivityPopover(
         .filter((line) => line.trim() !== "");
       setPin({
         ...open,
+        ...(settlement.prompt === undefined ? {} : { prompt: settlement.prompt }),
         outcome: {
           ...open.scope,
           status: settlement.status,
@@ -629,7 +636,10 @@ export function useRemoteActivityPopover(
   // A failure has no rail at all: a bar that is not draining cannot be
   // mistaken for one that is, and nothing but the user ends it.
   const draining =
-    pin !== null && pin.outcome !== null && pin.outcome.status !== "error";
+    pin !== null &&
+    pin.outcome !== null &&
+    pin.outcome.status !== "error" &&
+    pin.prompt === undefined;
   const paused = within || railHeld;
   const railLeft = (): number => {
     const { remaining, since } = rail.current;
@@ -673,7 +683,9 @@ export function useRemoteActivityPopover(
               the record: two pulls in a row are the same React element in the
               same portal, so a stall in the first would otherwise leave the
               second drawing a health line it never earned. */}
-          <RemoteActivityCard key={pin.id} view={pinView} onClose={dismiss} />
+          <RemoteActivityCard key={pin.id} view={pinView} onClose={dismiss}>
+            {pin.prompt}
+          </RemoteActivityCard>
         </div>
         {draining && (
           <span

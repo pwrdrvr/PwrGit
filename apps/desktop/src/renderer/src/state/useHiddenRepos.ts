@@ -42,6 +42,8 @@ export function useHiddenRepos(profileId: string | null | undefined): {
     let timer: ReturnType<typeof setTimeout> | undefined;
     const off = subscribe("repo:changed", (p) => {
       if (profileId !== null && p.profileId !== profileId) return;
+      // Named repositories changed in place; the hidden list did not move.
+      if (p.repoIds !== undefined) return;
       clearTimeout(timer);
       timer = setTimeout(reload, HIDDEN_RELOAD_DEBOUNCE_MS);
     });

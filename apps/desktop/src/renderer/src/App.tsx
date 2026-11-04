@@ -14,6 +14,7 @@ import type {
   Worktree
 } from "@pwrgit/shared";
 import { showErrorToast, showInfoToast } from "./lib/toast";
+import { diagnosticsCopiedToast, diagnosticsRepository } from "./lib/diagnosticsCopy";
 import { useAgentOffered } from "./features/agent/agent-store";
 import { ChangeRequestRail } from "./features/change-request/ChangeRequestRail";
 import { ChangeRequestView } from "./features/change-request/ChangeRequestView";
@@ -64,6 +65,11 @@ import {
   type PendingRepoReveal
 } from "./features/sidebar/search-reveal";
 import { Sidebar } from "./features/sidebar/Sidebar";
+import {
+  SIDEBAR_DEFAULT_WIDTH,
+  SIDEBAR_MAX_WIDTH,
+  SIDEBAR_MIN_WIDTH
+} from "./features/sidebar/repo-index";
 import { requestSidebarReveal } from "./features/sidebar/sidebar-reveal";
 import {
   restoreSidebarAnchor,
@@ -90,7 +96,13 @@ import { useWorktreeState } from "./state/useWorktreeState";
 
 export function App() {
   const [contributionsOpen, setContributionsOpen] = useState(false);
-  const sidebar = useColumnResize("pwrgit.sidebarWidth", 320, 240, 520, "left");
+  const sidebar = useColumnResize(
+    "pwrgit.sidebarWidth",
+    SIDEBAR_DEFAULT_WIDTH,
+    SIDEBAR_MIN_WIDTH,
+    SIDEBAR_MAX_WIDTH,
+    "left"
+  );
   const rail = useColumnResize("pwrgit.railWidth", 344, 280, 560, "right");
   const [railCollapsed, setRailCollapsed] = useState(false);
   const showRail = useCallback(() => setRailCollapsed(false), []);
@@ -472,18 +484,6 @@ export function App() {
     const offNew = subscribe("ui:newProfile", () => {
       if (document.hasFocus()) setProfileModal({ mode: "create" });
     });
-    const offCopied = subscribe("ui:diagnosticsCopied", ({ profileId }) => {
-      // Main picks the window, so the toast shows even when Settings or Logs
-      // has focus — and shows once, not in every window.
-      if (profileId !== null && profileId === windowProfileId()) {
-        showInfoToast({
-          key: "diagnostics-copied",
-          title: "Diagnostics info copied",
-          message:
-            "PwrGit's version, build and platform are on the clipboard, ready to paste into an issue."
-        });
-      }
-    });
     // Replay is a look, not a reset: it re-opens the wizard without ever
     // clearing `onboardingCompleted`, so the next launch stays quiet.
     const offReplay = subscribe("ui:replayOnboarding", () => {
@@ -494,7 +494,6 @@ export function App() {
     });
     return () => {
       offNew();
-      offCopied();
       offReplay();
     };
   }, []);
@@ -665,6 +664,35 @@ export function App() {
   );
   const selectedWorktree =
     selectedRepo?.worktrees.find((w) => w.id === selection?.worktreeId) ?? null;
+
+  // Help → Copy Diagnostics Info: main has already copied the app report and
+  // names one window to add the repository it shows and confirm. Main picks,
+  // so the toast shows even when Settings or Logs has focus, and only once.
+  useEffect(
+    () =>
+      subscribe("ui:copyDiagnostics", ({ profileId, copied }) => {
+        if (profileId === null || profileId !== windowProfileId()) return;
+        void dispatch("app:copyDiagnostics", {
+          repository: diagnosticsRepository(selectedRepo, selectedWorktree)
+        }).then((result) => {
+          const toast = diagnosticsCopiedToast(copied, result);
+          if (toast === null) return;
+          if (toast.tone === "error") {
+            showErrorToast({
+              title: "Could not copy diagnostics info",
+              message: toast.message
+            });
+          } else {
+            showInfoToast({
+              key: "diagnostics-copied",
+              title: "Diagnostics info copied",
+              message: toast.message
+            });
+          }
+        });
+      }),
+    [selectedRepo, selectedWorktree]
+  );
 
   const changeRequestRepo = useMemo(
     () =>
@@ -963,6 +991,7 @@ export function App() {
   return (
     <div className="app">
       <TitleBar
+        onOpenSearch={() => setOverlayOpen(true)}
         contributionsOpen={contributionsOpen}
         {...(activeProfile ? { onOpenContributions: () => setContributionsOpen(open => !open) } : {})}
         repo={contributionsOpen ? null : shownChangeRequest === null ? selectedRepo : changeRequestRepo}
@@ -1052,7 +1081,6 @@ export function App() {
           onForkCheckout={openForkCheckout}
           onOpenRepoSetup={setSetupRepo}
           onAddFolder={() => void addFolders()}
-          onOpenSearch={() => setOverlayOpen(true)}
           onNewProfile={() => setProfileModal({ mode: "create" })}
           onManageProfile={() =>
             activeProfile !== null &&

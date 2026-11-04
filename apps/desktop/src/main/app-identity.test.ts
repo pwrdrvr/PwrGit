@@ -98,4 +98,50 @@ describe("app identity", () => {
       value: expected
     });
   });
+
+  it("serves the live process table with the identity it belongs to", async () => {
+    const identity = createAppIdentity({
+      name: "PwrGit",
+      version: "1.0.0",
+      packaged: true,
+      platform: "darwin",
+      platformVersion: "26.1",
+      arch: "arm64",
+      electronVersion: "41.0.0"
+    });
+    const bus = new CommandBus();
+    registerAppIdentityHandlers(
+      bus,
+      () => identity,
+      () => "main=311 gpu=315 renderer=330,341"
+    );
+
+    const result = await bus.dispatch("app:readProcessIds", undefined);
+    expect(result).toEqual({
+      ok: true,
+      value: {
+        line: "main=311 gpu=315 renderer=330,341",
+        diagnosticsText: `${identity.diagnosticsText}\nProcesses: main=311 gpu=315 renderer=330,341`
+      }
+    });
+  });
+
+  it("says the process table is unavailable rather than pasting a blank", async () => {
+    const bus = new CommandBus();
+    const identity = createAppIdentity({
+      name: "PwrGit",
+      version: "1.0.0",
+      packaged: false,
+      platform: "linux",
+      platformVersion: "6.8.0",
+      arch: "x64",
+      electronVersion: "41.0.0"
+    });
+    registerAppIdentityHandlers(bus, () => identity, () => "");
+
+    const result = await bus.dispatch("app:readProcessIds", undefined);
+    expect(result.ok && result.value.diagnosticsText).toMatch(
+      /\nProcesses: unavailable$/
+    );
+  });
 });

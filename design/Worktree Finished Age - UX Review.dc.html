@@ -1,0 +1,240 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <script src="./support.js"></script>
+  </head>
+  <body>
+    <x-dc>
+      <helmet data-dc-atomics>
+        <link href="https://fonts.googleapis.com/css2?family=Geist:wght@400..700&amp;family=Geist+Mono:wght@400..700&amp;display=swap" rel="stylesheet" />
+        <style>
+          :root {
+            --rv-bg: #050505; --rv-line: rgba(247, 243, 235, 0.1);
+            --rv-t1: #f7f3eb; --rv-t2: #b8b0a5; --rv-t3: #8c857a; --rv-tsub: rgba(247, 243, 235, 0.54);
+            --rv-acc: #ff8a1f; --rv-accb: #ffb35c; --rv-accon: #160a00;
+            --rv-bad: #b94232; --rv-ok: #5fa969;
+            --font-sans: "Geist", "SF Pro Text", system-ui, sans-serif;
+            --font-mono: "Geist Mono", "SF Mono", "JetBrains Mono", Consolas, monospace;
+          }
+          *, *::before, *::after { box-sizing: border-box; }
+          html { background: var(--rv-bg); }
+          body { margin: 0; background: var(--rv-bg); font-family: var(--font-sans); }
+          a { color: var(--rv-accb); text-decoration: none; } a:hover { color: var(--rv-acc); }
+
+          .dv-turn { padding: 40px 44px 32px; background: var(--rv-bg); border-bottom: 1px solid var(--rv-line); }
+          .dv-thd { display: flex; align-items: baseline; gap: 10px; margin: 0 0 6px; }
+          .dv-tid { font: 600 10px var(--font-mono); padding: 3px 7px; background: var(--rv-t1); color: var(--rv-bg); border-radius: 4px; }
+          .dv-tname { font: 600 13px/1.2 var(--font-sans); color: var(--rv-t1); }
+          .dv-sub { margin: 0 0 22px; font: 400 11.5px/1.5 var(--font-sans); color: var(--rv-t3); max-width: 860px; text-wrap: pretty; }
+          .dv-sub b { color: var(--rv-t2); font-weight: 600; }
+          .dv-opts { display: flex; flex-wrap: wrap; gap: 28px; align-items: flex-start; }
+          .dv-opt { flex: 0 1 auto; min-width: 0; display: flex; flex-direction: column; gap: 9px; }
+          .dv-oid { font: 600 10.5px var(--font-mono); padding: 3px 7px; background: rgba(247, 243, 235, 0.08); color: var(--rv-t1); border-radius: 5px; }
+          .dv-olabel { display: flex; align-items: baseline; gap: 8px; font: 400 11px/1.3 var(--font-sans); color: var(--rv-tsub); max-width: 860px; }
+          .dv-olabel b { color: var(--rv-accb); font-weight: 600; }
+          .note { margin: 0; font: 400 10.5px/1.5 var(--font-sans); color: var(--rv-t3); text-wrap: pretty; max-width: 820px; }
+          .note b { color: var(--rv-t2); font-weight: 600; }
+          .pin { display: inline-flex; align-items: center; justify-content: center; flex: none; width: 15px; height: 15px; border-radius: 999px; background: var(--rv-bad); color: #fff; font: 700 9px/1 var(--font-mono); }
+          .find { max-width: 520px; display: flex; flex-direction: column; gap: 14px; padding: 16px; border: 1px solid var(--rv-line); border-radius: 9px; background: #0a0a0a; }
+          .fitem { display: grid; grid-template-columns: 15px minmax(0, 1fr); gap: 9px; align-items: start; }
+          .fitem h4 { margin: 0 0 3px; font: 650 11.5px/1.3 var(--font-sans); color: var(--rv-t1); }
+          .fitem p { margin: 0; font: 400 10.5px/1.5 var(--font-sans); color: var(--rv-t3); text-wrap: pretty; }
+          .fitem b { color: var(--rv-t2); font-weight: 600; }
+
+          .th-light {
+            --bg-stage: #efe9df; --bg-panel: #fdfcfa; --bg-menu: #ffffff; --bg-panel-elevated: #ffffff; --bg-input: #ffffff;
+            --border-faint: rgba(0, 0, 0, 0.05); --border-subtle: rgba(0, 0, 0, 0.08); --border-default: rgba(0, 0, 0, 0.12); --border-strong: rgba(0, 0, 0, 0.18);
+            --text-primary: #1a1612; --text-secondary: #524a40; --text-muted: #736c64; --text-subtle: rgba(26, 22, 18, 0.68);
+            --accent: #b74c00; --accent-bright: #994c00; --accent-on: #ffffff;
+            --danger-text: #8a1f12; --danger-base: #8a1f12; --status-warning: #805200;
+            --shadow-overlay: 0 24px 60px rgba(40, 28, 12, 0.18);
+            --accent-tint: color-mix(in srgb, var(--accent) 8%, transparent);
+            --accent-border: color-mix(in srgb, var(--accent) 42%, transparent);
+          }
+          .stage { position: relative; padding: 22px; border-radius: 10px; background: var(--bg-stage); }
+          .bs { width: 820px; max-width: 100%; display: flex; flex-direction: column; overflow: hidden; background: var(--bg-menu); border: 1px solid var(--border-strong); border-radius: 14px; box-shadow: var(--shadow-overlay); }
+          .mt-tabs { display: flex; gap: 8px; padding: 12px 18px 0; }
+          .mt-tab { padding: 7px 10px; border: 1px solid var(--border-subtle); border-radius: 6px; background: var(--bg-panel); color: var(--text-secondary); font: 600 12px/1 var(--font-sans); }
+          .mt-tab.on { border-color: var(--accent-border); background: var(--accent-tint); color: var(--text-primary); }
+          .mt-body { display: flex; flex-direction: column; gap: 12px; padding: 12px 18px; color: var(--text-primary); font: 400 12px/1.5 var(--font-sans); }
+          .mt-help { margin: 0; color: var(--text-muted); font: 400 11px/1.5 var(--font-sans); }
+          .box { position: relative; flex: none; width: 14px; height: 14px; border: 1px solid var(--border-strong); border-radius: 3px; background: var(--bg-input); }
+          .box.on { border-color: var(--accent); background: var(--accent); }
+          .box.on::after { content: ""; position: absolute; left: 4px; top: 1px; width: 3px; height: 7px; border: solid var(--accent-on); border-width: 0 2px 2px 0; transform: rotate(45deg); }
+          .sel { display: inline-flex; align-items: center; height: 26px; padding: 0 26px 0 9px; border: 1px solid var(--border-default); border-radius: 6px; background: var(--bg-input); color: var(--text-primary); font: 600 11.5px/1 var(--font-sans); background-image: linear-gradient(45deg, transparent 50%, var(--text-muted) 50%), linear-gradient(135deg, var(--text-muted) 50%, transparent 50%); background-position: calc(100% - 13px) 11px, calc(100% - 9px) 11px; background-size: 4px 4px; background-repeat: no-repeat; white-space: nowrap; }
+          .sel.dis { opacity: .5; }
+          .sel.focus { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent-border); }
+          .fixed { display: flex; flex-direction: column; gap: 6px; padding: 10px 12px; border-radius: 8px; background: var(--bg-panel); border: 1px solid var(--border-faint); }
+          .fixed > span { display: flex; align-items: baseline; gap: 8px; color: var(--text-secondary); font: 500 11px/1.45 var(--font-sans); }
+          .fixed > span::before { content: ""; flex: none; width: 5px; height: 5px; border-radius: 50%; background: var(--danger-base); transform: translateY(-1px); }
+          .fixed > em { font: 700 9px/1 var(--font-sans); font-style: normal; letter-spacing: .07em; text-transform: uppercase; color: var(--text-subtle); }
+
+          .num { flex: none; width: 20px; height: 20px; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center; border: 1px solid var(--accent); background: var(--accent); color: var(--accent-on); font: 700 10px/1 var(--font-mono); }
+          .pstep { display: grid; grid-template-columns: 14px 20px minmax(0, 1fr); gap: 10px; align-items: start; padding: 12px; border: 1px solid var(--border-subtle); border-radius: 8px; background: var(--bg-panel); }
+          .pstep .box { margin-top: 3px; }
+          .phd { display: flex; align-items: baseline; gap: 8px; }
+          .pstep h3 { margin: 0; color: var(--text-primary); font: 650 12.5px/1.3 var(--font-sans); }
+          .pstep p { margin: 2px 0 0; color: var(--text-muted); font: 400 11px/1.45 var(--font-sans); text-wrap: pretty; }
+          .ptag { margin-left: auto; flex: none; padding: 3px 7px; border: 1px solid var(--accent-border); border-radius: 999px; color: var(--accent-bright); background: var(--accent-tint); font: 600 9.5px/1.2 var(--font-sans); white-space: nowrap; }
+          .prules { display: flex; flex-direction: column; gap: 8px; margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--border-faint); }
+          .prule { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; color: var(--text-secondary); font: 500 11.5px/1.3 var(--font-sans); }
+          .prule .hint { color: var(--text-subtle); font: 400 10.5px/1.3 var(--font-sans); }
+          .prule .spacer { width: 14px; flex: none; }
+          .hl { outline: 2px dashed var(--rv-acc); outline-offset: 3px; border-radius: 4px; }
+
+          .menu { position: absolute; z-index: 2; min-width: 150px; padding: 4px; border: 1px solid var(--border-strong); border-radius: 8px; background: var(--bg-menu); box-shadow: var(--shadow-overlay); display: flex; flex-direction: column; }
+          .menu span { display: flex; align-items: center; gap: 8px; padding: 6px 9px; border-radius: 5px; color: var(--text-primary); font: 500 11.5px/1 var(--font-sans); }
+          .menu span.on { background: var(--accent); color: var(--accent-on); }
+          .menu span small { margin-left: auto; color: var(--text-subtle); font: 500 10px/1 var(--font-sans); }
+          .menu span.on small { color: var(--accent-on); }
+
+          .pf { display: flex; flex-direction: column; gap: 10px; margin: 0; padding: 12px; border: 1px solid var(--border-subtle); border-radius: 8px; }
+          .pf legend { padding: 0 4px; color: var(--text-secondary); font: 600 11px/1 var(--font-sans); }
+          .pf-fixed { display: grid; grid-template-columns: 8px minmax(0, 1fr); gap: 4px 8px; padding: 10px; border-radius: 6px; background: var(--bg-panel); }
+          .pf-fixed > span { width: 6px; height: 6px; margin-top: 5px; border-radius: 50%; background: var(--accent); }
+          .pf-fixed strong { color: var(--text-primary); font: 650 12px/1.4 var(--font-sans); }
+          .pf-fixed p { grid-column: 2; margin: 0; color: var(--text-muted); font: 400 11px/1.45 var(--font-sans); }
+          .pf > p { margin: 0; color: var(--text-muted); font: 400 10.5px/1.45 var(--font-sans); }
+          .pf > p b { color: var(--text-secondary); font-weight: 600; }
+
+          .applied { display: flex; flex-direction: column; gap: 5px; padding: 8px 12px; border: 1px solid var(--border-subtle); border-radius: 8px; background: var(--bg-panel); }
+          .applied > div { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; color: var(--text-secondary); font: 500 10.5px/1.4 var(--font-sans); }
+          .applied em { flex: none; width: 56px; font: 700 9px/1.4 var(--font-sans); font-style: normal; letter-spacing: .07em; text-transform: uppercase; color: var(--text-subtle); }
+          .applied b { color: var(--text-primary); font-weight: 600; }
+          .applied .sep { color: var(--text-subtle); }
+          .applied .never b { color: var(--danger-text); }
+          .applied .lnk { margin-left: auto; color: var(--accent); font: 600 10.5px/1 var(--font-sans); }
+          .bs-actions { display: flex; justify-content: flex-end; align-items: center; gap: 8px; padding: 12px 18px 16px; border-top: 1px solid var(--border-subtle); }
+          .bs-actions .lead { margin-right: auto; color: var(--text-muted); font: 500 10.5px/1.3 var(--font-sans); }
+          .bs-btn { height: 28px; padding: 0 14px; border: 1px solid var(--border-strong); border-radius: 7px; background: var(--bg-panel-elevated); color: var(--text-primary); font: 600 11.5px/1 var(--font-sans); white-space: nowrap; }
+          .bs-btn.primary { border-color: transparent; background: var(--accent); color: var(--accent-on); }
+        </style>
+      </helmet>
+
+      <!-- ============================ TURN 1 ============================ -->
+      <section class="dv-turn" id="t1" data-screen-label="Turn 1 As built">
+        <div class="dv-thd"><a class="dv-tid" href="#t1">1</a><span class="dv-tname">As built — “merged 14 days ago” is a rule you can read but not change</span></div>
+        <p class="dv-sub">A worktree counts as finished when its pull request merged (any age), or when its branch is merged into the default branch <b>and</b> has had no commits for 14 days. The 14 is the constant <b>STALE_AGE_DAYS</b>, shared by the sidebar’s Stale lens and the sweep. Someone who merges and wants the checkout gone today has no way to say so. The recent-activity guard can be switched off, but it resets to 7 days every time the dialog opens.</p>
+        <div class="dv-opts">
+          <div class="dv-opt" id="1a" data-screen-label="1a Combined step 1 as built">
+            <div class="dv-olabel"><a class="dv-oid" href="#1a">1a</a>Combined › step 1, today</div>
+            <div class="stage th-light">
+              <section class="bs">
+                <div class="mt-body">
+                  <div class="pstep">
+                    <span class="box on"></span><span class="num">1</span>
+                    <div>
+                      <div class="phd"><h3>Remove finished worktrees</h3><span class="ptag">Pauses for review</span></div>
+                      <p><span class="hl">Clean worktrees whose branch merged, or that have been inactive for 14 days after merging into the default branch.</span> <span class="pin">1</span></p>
+                      <div class="prules">
+                        <div class="prule"><span class="box on"></span>Keep worktrees touched in the last <span class="sel">7 days</span><span class="hint">commits and file changes, ignored files included</span> <span class="pin">2</span></div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </section>
+            </div>
+          </div>
+          <div class="dv-opt" id="1b" data-screen-label="1b Findings">
+            <div class="dv-olabel"><a class="dv-oid" href="#1b">1b</a>Findings</div>
+            <div class="find">
+              <div class="fitem"><span class="pin">1</span><div><h4>The 14 days is fixed</h4><p>No control anywhere changes it. The Worktrees tab states it in a grey “Finished means merged” card; the review strip says <b>merged 14 days ago</b>. The wording is also off: the clock is the branch’s <b>last commit</b>, not when it merged.</p></div></div>
+              <div class="fitem"><span class="pin">2</span><div><h4>The guard forgets</h4><p>Unchecking “Keep worktrees touched…” works for one run only. Branch rules beside it are saved; this one resets to 7 days on every open.</p></div></div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ============================ TURN 2 ============================ -->
+      <section class="dv-turn" id="t2" data-screen-label="Turn 2 Proposed">
+        <div class="dv-thd"><a class="dv-tid" href="#t2">2</a><span class="dv-tname">Proposed — a second rule under step 1, saved like the branch rules</span></div>
+        <p class="dv-sub">One new select, <b>Count a branch merged into the default branch as finished</b>: <b>right away</b>, 1, 3, 7, <b>14 (default)</b> or 30 days without commits. Both worktree rules are saved in settings and come back on the next open. The sidebar’s Stale lens reads the same setting, so the lens and the sweep still agree. A merged pull request stays finished at any age. Worktrees that share <b>no</b> history with the default branch keep the fixed 14 days: nothing proves they merged.</p>
+        <div class="dv-opts">
+          <div class="dv-opt" id="2a" data-screen-label="2a Combined step 1 proposed">
+            <div class="dv-olabel"><a class="dv-oid" href="#2a">2a</a><b>Combined › step 1</b> — set to “right away”, recent guard off</div>
+            <div class="stage th-light">
+              <section class="bs">
+                <div class="mt-body">
+                  <div class="pstep">
+                    <span class="box on"></span><span class="num">1</span>
+                    <div>
+                      <div class="phd"><h3>Remove finished worktrees</h3><span class="ptag">Pauses for review</span></div>
+                      <p>Clean worktrees whose pull request merged, or whose branch is merged into the default branch.</p>
+                      <div class="prules">
+                        <div class="prule"><span class="box"></span>Keep worktrees touched in the last <span class="sel dis">7 days</span><span class="hint">commits and file changes, ignored files included</span></div>
+                        <div class="prule"><span class="spacer"></span>Count a branch merged into the default branch as finished <span class="sel">right away</span></div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </section>
+            </div>
+            <p class="note">The step’s sentence follows the select: at 14 days it reads “…or whose branch is merged into the default branch and has had no commits for <b>14 days</b>.” The new rule has no checkbox; it is never off, only shorter or longer.</p>
+          </div>
+
+          <div class="dv-opt" id="2b" data-screen-label="2b Select open">
+            <div class="dv-olabel"><a class="dv-oid" href="#2b">2b</a>The select, open</div>
+            <div class="stage th-light" style="width:420px;height:250px">
+              <div class="prule" style="padding:6px 0 0 6px">Count … as finished <span class="sel focus">14 days</span></div>
+              <div class="menu" style="left:150px;top:62px">
+                <span>right away</span>
+                <span>after 1 day</span>
+                <span>after 3 days</span>
+                <span>after 7 days</span>
+                <span class="on">after 14 days<small>default</small></span>
+                <span>after 30 days</span>
+              </div>
+            </div>
+            <p class="note">“After N days” means N days since the branch’s last commit, the same clock as today.</p>
+          </div>
+
+          <div class="dv-opt" id="2c" data-screen-label="2c Worktrees tab">
+            <div class="dv-olabel"><a class="dv-oid" href="#2c">2c</a><b>Worktrees tab</b> — the grey card keeps the fixed parts; the age moves into the controls</div>
+            <div class="stage th-light">
+              <section class="bs">
+                <div class="mt-tabs"><span class="mt-tab">Combined</span><span class="mt-tab on">Worktrees</span><span class="mt-tab">Local branches</span><span class="mt-tab">Garbage collection</span></div>
+                <div class="mt-body">
+                  <p class="mt-help">Every repository in this window’s profile.</p>
+                  <fieldset class="pf">
+                    <legend>Finished worktrees</legend>
+                    <div class="pf-fixed"><span></span><strong>Finished means merged</strong><p>A merged pull request, or a branch merged into the default branch. Worktrees that share no history with the default branch count after 14 days without commits.</p></div>
+                    <div class="prule"><span class="box"></span>Keep worktrees touched in the last <span class="sel dis">7 days</span></div>
+                    <div class="prule"><span class="spacer"></span>Count a branch merged into the default branch as finished <span class="sel">right away</span></div>
+                    <p>Touched is the newest commit or file change, ignored files included. <b>Both rules are saved</b> and also decide the sidebar’s Stale lens.</p>
+                  </fieldset>
+                  <div class="fixed"><em>Never offered</em><span>Worktrees with uncommitted or untracked changes</span><span>The repository’s main checkout, and worktrees on the default branch</span><span>Worktrees whose activity could not be fully read</span></div>
+                </div>
+                <div class="bs-actions"><span class="lead">86 repositories</span><button class="bs-btn">Close</button><button class="bs-btn primary">Find finished worktrees</button></div>
+              </section>
+            </div>
+          </div>
+
+          <div class="dv-opt" id="2d" data-screen-label="2d Rules strip">
+            <div class="dv-olabel"><a class="dv-oid" href="#2d">2d</a>The review’s Rules strip says what was used</div>
+            <div class="stage th-light">
+              <section class="bs">
+                <div class="mt-body">
+                  <div class="applied">
+                    <div><em>Rules</em><span><b>Recent protection off</b></span><span class="sep">·</span><span>finished = <b>merged PR</b> or <b>merged into the default branch</b></span><span class="lnk">Change</span></div>
+                    <div class="never"><em>Never</em><span><b>uncommitted changes</b></span><span class="sep">·</span><span><b>main checkout</b></span><span class="sep">·</span><span><b>activity unreadable</b></span></div>
+                  </div>
+                  <div class="applied">
+                    <div><em>Rules</em><span>Keep if touched in the last <b>7 days</b></span><span class="sep">·</span><span>finished = <b>merged PR</b> or <b>merged, no commits for 14 days</b></span><span class="lnk">Change</span></div>
+                  </div>
+                </div>
+              </section>
+            </div>
+            <p class="note">Top: the operator’s settings. Bottom: the defaults, with the wording fixed to name the real clock.</p>
+          </div>
+        </div>
+      </section>
+    </x-dc>
+    <script type="text/x-dc" data-dc-script data-props='{}'>
+      class Component extends DCLogic {
+        renderVals() { return {}; }
+      }
+    </script>
+  </body>
+</html>

@@ -42,6 +42,7 @@ import {
   type CreateWorktreeFromRef
 } from "./RepoChangeRequests";
 import { SectionChevron } from "./SectionChevron";
+import { SectionGlyph, steppedTooltip, useRefitSections } from "./section-fit";
 import { WorktreeHolderChip } from "./WorktreeHolderChip";
 
 /**
@@ -146,6 +147,10 @@ export function RepoChangeRequestSection({
   const selection = useChangeRequestSelection();
   const keyboardSelect = useRef<number | undefined>(undefined);
   useEffect(() => () => window.clearTimeout(keyboardSelect.current), []);
+  // This section's list lands on its own state; the block's heading ladder
+  // has to hear about a count that grew. Before the early return below, so
+  // a section that appears or leaves re-fits too.
+  useRefitSections();
 
   // No forge on origin: no section at all, rather than a heading that can only
   // ever say 0. Before this session's first answer, origin's identity predicts
@@ -168,7 +173,7 @@ export function RepoChangeRequestSection({
   // A checkout on GitHub with a GitLab mirror lists both kinds; the heading
   // names both only then.
   const mixed = new Set(shown.remotes.map((remote) => remote.forge)).size > 1;
-  const { plural, noun } = changeRequestWords(shown, forge);
+  const { plural, short, noun } = changeRequestWords(shown, forge);
   // The lens appears only with two or more remotes that have something open,
   // and a remembered remote that no longer has any reads as All.
   const lensOptions = lensRemotes(shown, repo.identity?.parent?.nameWithOwner);
@@ -193,6 +198,7 @@ export function RepoChangeRequestSection({
   // Nothing cached yet: the repo sweep lists it shortly, or ⟳ does now. Not a
   // spinner — with the forge unreachable it would spin forever.
   const unlisted = !loading && shown.fetchedAt === null && shown.entries.length === 0;
+  const count = loading ? "…" : unlisted ? "–" : String(visible.length);
   const failure = shown.failure;
   const since = (at: number): string => {
     const ago = shortWhen(new Date(at).toISOString(), now);
@@ -469,16 +475,21 @@ export function RepoChangeRequestSection({
         <button
           className="ref-section__head"
           aria-expanded={open}
+          // From "PRs" on, the card keeps the full noun.
+          {...steppedTooltip(tip, `${plural} · ${count}`, "fit-short")}
           onClick={(event) => {
             event.stopPropagation();
+            tip.hide();
             setOpen(!open);
           }}
         >
           <SectionChevron open={open} />
-          <span className="ref-section__label">{plural}</span>
-          <span className="ref-section__count">
-            {loading ? "…" : unlisted ? "–" : visible.length}
+          <SectionGlyph kind="changeRequests" />
+          <span className="ref-section__label">
+            <span className="ref-section__label-full">{plural}</span>
+            <span className="ref-section__label-short">{short}</span>
           </span>
+          <span className="ref-section__count">{count}</span>
         </button>
         {/* Kept while the filter is on even after a refresh leaves nothing
             failing: it is the only way to turn the filter back off. */}

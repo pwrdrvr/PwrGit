@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
   applySidebarAnchor,
   keepSidebarAnchorForSelection,
+  releaseSidebarAnchor,
   restoreSidebarAnchor,
   resetSidebarAnchorForTests,
   sidebarAnchorHeld,
@@ -101,6 +102,28 @@ describe("sidebar-anchor", () => {
     applySidebarAnchor(view.list);
     expect(view.list.scrollTop).toBe(0);
     // So the sidebar's own reveal of the new selection is free to scroll.
+    expect(sidebarAnchorHeld()).toBe(false);
+    stop();
+  });
+
+  it("lets a repository-index jump end a hold, as a wheel would", () => {
+    const view = fakeList([
+      { attr: ["data-wt-id", "wt-1"], y: 0 },
+      { attr: ["data-nav-anchor", "cr:r:2525"], y: 300 }
+    ]);
+    const stop = trackSidebarAnchors(view.list);
+    view.row('[data-nav-anchor="cr:r:2525"]').dispatchEvent(
+      new Event("pointerdown", { bubbles: true })
+    );
+    keepSidebarAnchorForSelection();
+    applySidebarAnchor(view.list);
+    expect(sidebarAnchorHeld()).toBe(true);
+
+    // The index jump scrolls the list; the hold must not pull it back.
+    releaseSidebarAnchor();
+    view.list.scrollTop = 800;
+    applySidebarAnchor(view.list);
+    expect(view.list.scrollTop).toBe(800);
     expect(sidebarAnchorHeld()).toBe(false);
     stop();
   });

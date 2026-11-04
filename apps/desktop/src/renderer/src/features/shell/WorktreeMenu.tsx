@@ -1,24 +1,17 @@
-import {
-  useEffect,
-  useRef,
-  useState,
-  type MouseEvent as ReactMouseEvent
-} from "react";
-import { createPortal } from "react-dom";
+import { useRef, useState, type MouseEvent as ReactMouseEvent } from "react";
 import type { Worktree } from "@pwrgit/shared";
-import { copyText } from "../../lib/copyText";
-import { revealLabel, revealPath } from "./reveal";
-import { useDismissable } from "../../lib/useDismissable";
-import { useMenuNavigation } from "../../lib/useMenuNavigation";
+import { ContextMenu } from "./ContextMenu";
+import { worktreeMenuItems } from "./worktree-menu-items";
 import {
   hoverTooltip,
   useViewportTooltip
 } from "../../lib/useViewportTooltip";
 
 /**
- * A "⋯" actions menu for a worktree: copy branch/path, reveal in the OS file
- * manager, and caller-provided fork/reset/removal actions. The dropdown is
- * portalled to <body> so the sidebar's scroll container can't clip it.
+ * A "⋯" actions menu for a worktree. Its entries come from
+ * `worktreeMenuItems`, the same list the sidebar row's right-click draws, and
+ * it opens through the shared `ContextMenu` (portalled to <body>, so the
+ * sidebar's scroll container can't clip it).
  */
 export function WorktreeMenu({
   worktree,
@@ -30,9 +23,6 @@ export function WorktreeMenu({
 }: {
   worktree: Worktree;
   className?: string;
-  /** Fork the repository this worktree belongs to. The header's menu is where
-   *  people look when they are "on main" and want a copy of their own, and
-   *  the read-only chip beside it only appears once the forge has answered. */
   fork?: { label: string; onSelect: () => void };
   onResetToRemote?: () => void;
   onRemove?: () => void;
@@ -41,137 +31,55 @@ export function WorktreeMenu({
 }) {
   const tip = useViewportTooltip();
   const btnRef = useRef<HTMLButtonElement>(null);
-  const menuRef = useRef<HTMLDivElement>(null);
-  const [pos, setPos] = useState<{ top: number; right: number } | null>(null);
-  const open = pos !== null;
+  const [pos, setPos] = useState<{ x: number; y: number } | null>(null);
 
-  const close = (): void => setPos(null);
   const toggle = (e: ReactMouseEvent): void => {
     e.stopPropagation();
     e.preventDefault();
-    if (open) {
-      close();
+    tip.hide();
+    if (pos !== null) {
+      setPos(null);
       return;
     }
-    const r = btnRef.current?.getBoundingClientRect();
-    if (r) setPos({ top: r.bottom + 4, right: window.innerWidth - r.right });
-  };
-
-  // Escape + focus back to the kebab, and the arrow/typeahead contract this
-  // menu's role="menu" already promised. The menu portals to <body>, which is
-  // why useDismissable resolves Escape by focus rather than DOM containment.
-  useDismissable({ open, onDismiss: close, triggerRef: btnRef, surfaceRef: menuRef });
-  useMenuNavigation({ open, menuRef, onClose: close });
-
-  useEffect(() => {
-    if (!open) return;
-    const onDown = (e: MouseEvent): void => {
-      const t = e.target as Node;
-      if (btnRef.current?.contains(t) || menuRef.current?.contains(t)) return;
-      close();
-    };
-    window.addEventListener("mousedown", onDown, true);
-    window.addEventListener("scroll", close, true);
-    window.addEventListener("resize", close);
-    return () => {
-      window.removeEventListener("mousedown", onDown, true);
-      window.removeEventListener("scroll", close, true);
-      window.removeEventListener("resize", close);
-    };
-  }, [open]);
-
-  const pick = (e: ReactMouseEvent, fn: () => void): void => {
-    e.stopPropagation();
-    e.preventDefault();
-    fn();
-    close();
+    const r = e.currentTarget.getBoundingClientRect();
+    setPos({ x: r.right, y: r.bottom + 4 });
   };
 
   return (
     <div className={`kebab${className ? ` ${className}` : ""}`}>
       <button
         ref={btnRef}
+        type="button"
         className="kebab__btn"
         aria-label="Worktree actions"
         aria-haspopup="menu"
-        aria-expanded={open}
+        aria-expanded={pos !== null}
         {...hoverTooltip(tip, "More actions")}
         onClick={toggle}
       >
-        <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
           <circle cx="12" cy="5" r="2.3" />
           <circle cx="12" cy="12" r="2.3" />
           <circle cx="12" cy="19" r="2.3" />
         </svg>
       </button>
-      {open &&
-        createPortal(
-          <div
-            ref={menuRef}
-            className="pop-menu"
-            role="menu"
-            style={{ position: "fixed", top: pos.top, right: pos.right }}
-          >
-            <button
-              className="pop-menu__item"
-              role="menuitem"
-              onClick={(e) => pick(e, () => void copyText(worktree.branch))}
-            >
-              Copy branch name
-            </button>
-            <button
-              className="pop-menu__item"
-              role="menuitem"
-              onClick={(e) => pick(e, () => void copyText(worktree.path))}
-            >
-              Copy path
-            </button>
-            <button
-              className="pop-menu__item"
-              role="menuitem"
-              onClick={(e) => pick(e, () => revealPath(worktree.path))}
-            >
-              {revealLabel(platform)}
-            </button>
-            {fork !== undefined && (
-              <>
-                <div className="pop-menu__sep" />
-                <button
-                  className="pop-menu__item"
-                  role="menuitem"
-                  onClick={(e) => pick(e, fork.onSelect)}
-                >
-                  {fork.label}
-                </button>
-              </>
-            )}
-            {onResetToRemote !== undefined && (
-              <>
-                <div className="pop-menu__sep" />
-                <button
-                  className="pop-menu__item"
-                  role="menuitem"
-                  onClick={(e) => pick(e, onResetToRemote)}
-                >
-                  Reset to remote branch…
-                </button>
-              </>
-            )}
-            {onRemove !== undefined && (
-              <>
-                <div className="pop-menu__sep" />
-                <button
-                  className="pop-menu__item pop-menu__item--danger"
-                  role="menuitem"
-                  onClick={(e) => pick(e, onRemove)}
-                >
-                  Remove worktree…
-                </button>
-              </>
-            )}
-          </div>,
-          document.body
-        )}
+      {pos !== null && (
+        <ContextMenu
+          x={pos.x}
+          y={pos.y}
+          align="end"
+          label="Worktree actions"
+          triggerRef={btnRef}
+          items={worktreeMenuItems({
+            worktree,
+            ...(platform === undefined ? {} : { platform }),
+            ...(fork === undefined ? {} : { fork }),
+            ...(onResetToRemote === undefined ? {} : { onResetToRemote }),
+            ...(onRemove === undefined ? {} : { onRemove })
+          })}
+          onClose={() => setPos(null)}
+        />
+      )}
       {tip.tooltipNode}
     </div>
   );

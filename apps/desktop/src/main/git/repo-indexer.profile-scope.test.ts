@@ -235,3 +235,28 @@ describe("searchAll focused repository", () => {
     expect(hits[0]).toMatchObject({ kind: "local_branch", repoId: focused });
   });
 });
+
+// `repo:changed` can name repositories; the sidebar then re-reads only them.
+describe("listRepos with repoIds", () => {
+  it("reads only the named repositories, and only the asking profile's", () => {
+    const second = "repo-ours-2";
+    db.prepare(
+      "INSERT INTO repos (id, profile_id, name, path) VALUES (?, ?, ?, ?)"
+    ).run(second, mine, "second", "/checkouts/ours/second");
+
+    expect(indexer.listRepos(mine).map((repo) => repo.id).sort()).toEqual([
+      "repo-ours",
+      second
+    ]);
+    expect(
+      indexer.listRepos(mine, { repoIds: [second] }).map((repo) => repo.id)
+    ).toEqual([second]);
+    // Another profile's id is not this profile's to hand out.
+    expect(
+      indexer
+        .listRepos(mine, { repoIds: ["repo-theirs", "repo-ours"] })
+        .map((repo) => repo.id)
+    ).toEqual(["repo-ours"]);
+    expect(indexer.listRepos(mine, { repoIds: [] })).toEqual([]);
+  });
+});

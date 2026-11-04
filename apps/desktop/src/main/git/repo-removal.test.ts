@@ -31,6 +31,8 @@ import {
   type RemovalExecuteDeps
 } from "./repo-removal";
 import { createSystemGit } from "./test-support/system-git";
+import { WorktreeOperationQueue } from "./worktree-operation-queue";
+import { WorktreeStateService } from "./worktree-state";
 
 const systemGit: GitExec = createSystemGit();
 
@@ -66,6 +68,12 @@ type Fixture = {
 };
 
 const roots: string[] = [];
+function deferred(): { promise: Promise<void>; resolve: () => void } {
+  let resolve!: () => void;
+  const promise = new Promise<void>((done) => { resolve = done; });
+  return { promise, resolve };
+}
+
 afterEach(() => {
   for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
 });
@@ -275,9 +283,11 @@ describe("reviewRepoRemoval", () => {
       } catch {
         // The conflict is the point: the rebase stops half way.
       }
-      const gone = pushedWorktree(repo, root, "gone");
-      rmSync(gone, { recursive: true, force: true });
+      pushedWorktree(repo, root, "gone");
     });
+    // Deleted after indexing: an index pass drops an unlocked worktree whose
+    // folder is gone, so the review meets one only before the next pass.
+    rmSync(f.wt("gone"), { recursive: true, force: true });
     const r = await review(f);
     expect(byBranch(r, "feat/locked")).toMatchObject({ locked: true });
     expect(checkoutVerdict(byBranch(r, "feat/locked"))).toBe("blocked");
@@ -294,8 +304,8 @@ describe("reviewRepoRemoval", () => {
       const gone = pushedWorktree(repo, root, "gone");
       commit(gone, "b.txt", "one\n", "only here");
       commit(gone, "c.txt", "two\n", "also only here");
-      rmSync(gone, { recursive: true, force: true });
     });
+    rmSync(f.wt("gone"), { recursive: true, force: true });
     const r = await review(f);
     expect(byBranch(r, "feat/gone")).toMatchObject({ missing: true, unpushed: 2 });
     // Its branch is a checkout's, not a loose one: it is not listed twice.
@@ -350,6 +360,84 @@ describe("reviewRepoRemoval", () => {
 });
 
 describe("executeRepoRemoval", () => {
+  it("lets a repository owner finish its worktree operation before primary removal", async () => {
+    const f = await fixture();
+    const r = await review(f);
+    const primary = byBranch(r, "main");
+    const operations = new WorktreeOperationQueue();
+    const continuePull = deferred();
+    const removalQueued = deferred();
+    const stateGit = vi.fn(systemGit);
+    const state = new WorktreeStateService(f.db, stateGit, operations);
+    const entered: string[] = [];
+    const pull = operations.runRepository(f.repoId, async () => {
+      await continuePull.promise;
+      return operations.run(primary.worktreeId, async () => { entered.push("pull"); });
+    });
+    const { deps, trashed } = executeDeps(f, {
+      lockForRemoval: (id) => state.lockForRemoval(id),
+      runWorktree: (id, op) => {
+        const pending = operations.run(id, op);
+        removalQueued.resolve();
+        return pending;
+      },
+      runRepository: (id, op) => {
+        const pending = operations.runRepository(id, op);
+        removalQueued.resolve();
+        return pending;
+      }
+    });
+    const removal = executeRepoRemoval(deps, {
+      repoId: f.repoId, decisions: { checkouts: {}, branches: {} }
+    });
+    // Observe rejection too, so a lock-order guard cannot hide an unfixed
+    // removal path by releasing the worktree after refusing its inner lock.
+    void removal.catch(() => undefined);
+    await removalQueued.promise;
+    // Probes stay blocked even while removal is waiting for the repository.
+    expect(await state.compute(primary.worktreeId)).toBeNull();
+    expect(stateGit).not.toHaveBeenCalled();
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    continuePull.resolve();
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    expect(entered).toEqual(["pull"]);
+    await pull;
+    const result = await removal;
+    expect(result.ok && result.value.outcome).toBe("removed");
+    expect(trashed).toEqual([f.repo]);
+  });
+
+  it.each([false, true])("does not deadlock with a status probe queued behind removal (linked: %s)", async (linked) => {
+    const f = await fixture(({ repo, root }) => {
+      if (linked) pushedWorktree(repo, root, "done");
+    });
+    const operations = new WorktreeOperationQueue();
+    const stateGit = vi.fn(systemGit);
+    const state = new WorktreeStateService(f.db, stateGit, operations);
+    const probes: ReturnType<WorktreeStateService["compute"]>[] = [];
+    const { deps, trashed } = executeDeps(f, {
+      lockForRemoval: (id) => state.lockForRemoval(id),
+      runWorktree: (id, op) => {
+        const removal = operations.run(id, op);
+        // A renderer poll can arrive after removal takes its queue slot.
+        // Draining that poll from inside the slot waits on removal itself.
+        probes.push(state.compute(id));
+        return removal;
+      },
+      runRepository: (id, op) => operations.runRepository(id, op)
+    });
+
+    const result = await executeRepoRemoval(deps, {
+      repoId: f.repoId,
+      decisions: { checkouts: {}, branches: {} }
+    });
+
+    expect(result.ok && result.value.outcome).toBe("removed");
+    expect(trashed).toEqual(linked ? [f.wt("done"), f.repo] : [f.repo]);
+    expect(await Promise.all(probes)).toEqual(linked ? [null, null] : [null]);
+    expect(stateGit).not.toHaveBeenCalled();
+  });
+
   it("moves every worktree, then the main checkout, to the Trash and forgets the repository", async () => {
     const f = await fixture(({ repo, root }) => {
       pushedWorktree(repo, root, "one");
@@ -406,10 +494,10 @@ describe("executeRepoRemoval", () => {
 
   it("clears a missing worktree's record without touching the Trash", async () => {
     const f = await fixture(({ repo, root }) => {
-      const gone = pushedWorktree(repo, root, "gone");
-      rmSync(gone, { recursive: true, force: true });
+      pushedWorktree(repo, root, "gone");
       pushedWorktree(repo, root, "keep");
     });
+    rmSync(f.wt("gone"), { recursive: true, force: true });
     const r = await review(f);
     const decisions: RemovalDecisions = {
       checkouts: {

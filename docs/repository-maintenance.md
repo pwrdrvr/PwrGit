@@ -28,6 +28,19 @@ repository does not stop the others. Another window cannot start an overlapping
 maintenance run. **Cancel** finishes active local operations and skips
 remaining work. Closing the owning window also requests cancellation.
 
+In **Combined** maintenance, a repository's branch review or deletion failure
+does not prevent other repositories or the garbage collection phase from
+running. Branches that cannot be safely deleted are retained. Each step that
+left something behind gets one card above the successful results, Local
+branches first, then Garbage collection, headed by a count such as "1 branch
+wasn’t deleted". It has one row per retained branch, with the tip it was
+reviewed at, and one row per repository that could not be reviewed or
+collected, with the reason. Git's own error text is behind **Details**. A long
+list scrolls inside its card. The cards appear as soon as a step finishes, so
+branch problems are already visible while garbage collection runs.
+Cancellation, or a command that fails without returning repository results,
+stops the combined run.
+
 The before/after figures are the sizes of loose objects and packs reported by
 `git count-objects -v`, in KiB, MiB, or GiB. They do not measure free space on the
 volume. Filesystem snapshots and shared blocks can delay reclamation; repacking

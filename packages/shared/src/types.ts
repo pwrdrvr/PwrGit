@@ -91,6 +91,10 @@ export type Worktree = {
   isDefaultBranch: boolean;
   /** ISO-8601 time of the worktree branch's last commit (staleness signal). */
   lastActivityAt?: string;
+  /** ISO-8601 author time of the newest commit on HEAD by you (the repo's
+   *  user.email) within `RECENT_DAYS`; absent when there is none. What makes
+   *  a repo "recent": `lastActivityAt` moves with every pull. */
+  lastAuthoredAt?: string;
   /** Full object name of HEAD when state was last computed. Absent until then.
    *  Compared with a merged change request's `headOid`: after a squash merge
    *  that equality is the only proof the checkout holds nothing the merge did
@@ -148,7 +152,91 @@ export type BranchRef = {
   /** ISO-8601 time of the ref's tip commit (recency sort). */
   lastCommitAt?: string;
   subject?: string;
+  /** Remote-tracking refs only: the configured remote it belongs to, and the
+   *  branch name on that remote. Resolved against `git remote`, longest name
+   *  first, because a remote name can contain a slash and `name` alone cannot
+   *  say where the remote ends. Absent for a ref no configured remote owns. */
+  remote?: string;
+  remoteBranch?: string;
 };
+
+/**
+ * One remote-tracking branch a local branch could track instead: the same
+ * name on another remote, or the one it tracks now. What the switcher's
+ * tracking chip lists.
+ */
+export type TrackingOption = {
+  remote: string;
+  /** The branch's name on that remote. */
+  remoteBranch: string;
+  /** `remote/branch`, as Git prints it. */
+  ref: string;
+  head: string;
+  /** `owner/name` when the remote's fetch URL is a known forge. */
+  nameWithOwner?: string;
+  /** Known only for `origin`, from the forge identity. Absent is not known. */
+  canPush?: boolean;
+  /** Commits on the local branch this ref lacks. */
+  ahead: number;
+  /** Commits on this ref the local branch lacks. */
+  behind: number;
+  /** The branch tracks this ref now. */
+  tracked: boolean;
+};
+
+export type TrackingChoices = {
+  branch: string;
+  head: string;
+  /** `remote/branch` the branch tracks now, when it tracks a remote ref. */
+  upstream?: string;
+  /** The tracked ref first, then the others by remote name. */
+  options: TrackingOption[];
+};
+
+/** Where a branch is checked out, as far as moving its tip is concerned. */
+export type RetrackCheckout =
+  /** In the worktree that asked. `dirty` counts uncommitted entries. */
+  | { kind: "here"; dirty: number }
+  /** In another worktree: Git refuses to move a branch tip there. */
+  | { kind: "elsewhere"; path: string }
+  | { kind: "free" };
+
+/** Everything the switcher's review step draws before a tracking change. */
+export type RetrackReview = {
+  branch: string;
+  /** Full object name the review was drawn against. */
+  head: string;
+  /** Full upstream refname now (`refs/remotes/origin/main`), or null. */
+  upstreamRef: string | null;
+  /** The option the branch tracks now, when it is a remote-tracking ref. */
+  from: TrackingOption | null;
+  target: TrackingOption;
+  /** Of the commits only the branch has (`target.ahead`), how many no
+   *  remote-tracking ref has either. Moving the tip would lose those. */
+  unpushed: number;
+  /** When every leaving commit is on the branch's current upstream, its
+   *  `remote/branch`. Null when there is nothing leaving, or the commits are
+   *  spread over other refs. */
+  leavingOn: string | null;
+  /** Newest first, at most three, of the `target.behind` commits. */
+  arriving: { hash: string; subject: string }[];
+  checkout: RetrackCheckout;
+  /** A `branch.<name>.pushRemote` or `remote.pushDefault` that keeps sending
+   *  pushes somewhere else after the change. */
+  pushOverride: { key: string; remote: string } | null;
+  /** An unused branch name for keeping the old tip, e.g. `main-before-pwrdisk`. */
+  copyName: string;
+};
+
+/** How a tracking change moves the branch tip, if at all. */
+export type RetrackMove =
+  /** Tracking only. */
+  | "none"
+  /** Fast-forward to the target; refused unless the target contains the tip. */
+  | "forward"
+  /** Move the tip to the target. Refused while any commit would be lost,
+   *  unless `copy` keeps it on a new branch. */
+  | "reset";
 
 export type BranchTrackingStatus =
   | "up_to_date"
@@ -355,6 +443,8 @@ export type ForkSyncOutcome = {
   stashed: boolean;
   /** Reapplying the stashed work after the fast-forward hit conflicts. */
   reappliedWithConflicts: boolean;
+  /** Verified recovery commit retained in Stashes after restoring local work. */
+  recoveryStash?: string;
   push: ForkSyncPush;
 };
 
@@ -531,16 +621,45 @@ export type GitRuntimeProblem =
   /** Git runs, `git lfs` does not: LFS repositories would check out pointers. */
   | "lfs_missing";
 
+/**
+ * What a Git can do with copy-on-write clones, read from `git worktree -h`.
+ * Only PwrGit's own Git (the huntharo/git runtime) answers either today.
+ */
+export type GitReflinkSupport = {
+  /** `checkout.reflink`: checkout, reset and `worktree add` clone files the
+   *  main checkout holds unchanged. Runtime `2.56.0-dev-pwrgit.1` and newer. */
+  checkout: boolean;
+  /** `git worktree reflink`: re-share an existing worktree's files.
+   *  Runtime `.2` and newer. */
+  reshare: boolean;
+};
+
 export type GitRuntimeCandidate = {
   /** The executable, absolute. */
   path: string;
   source: GitRuntimeSource;
+  /** Absent when it was not asked (a Git that did not run). */
+  reflink?: GitReflinkSupport;
   /** What `git --version` and `git lfs version` printed; null when it did
    *  not answer. The renderer parses the version out (`describeVersion`). */
   git: string | null;
   lfs: string | null;
   /** Null when this Git can be chosen. */
   problem: GitRuntimeProblem | null;
+};
+
+/** The Git in use, as copy-on-write cloning sees it. */
+export type GitReflinkStatus = {
+  /** The executable every repository command runs. */
+  path: string;
+  /** What `git --version` printed, or null before the probe answered. */
+  version: string | null;
+  support: GitReflinkSupport;
+  /** Settings › General › Git runtime › Copy-on-write checkout. */
+  enabled: boolean;
+  /** True when PwrGit turns `checkout.reflink` on right now: the switch is
+   *  on and this Git supports it. */
+  active: boolean;
 };
 
 /** Which Git PwrGit runs, and every one it could run instead. */
@@ -1646,9 +1765,20 @@ export type PartialFileDiff = {
   counterpartChanges: boolean;
 };
 
-/** The name pull gives the stash it makes before a fast-forward. The stash
- *  list recognizes it by this exact text; nothing else marks the entry. */
+/** Pull's recovery stash name prefix. New entries append ` [<UUID>]` to prove
+ *  transaction ownership; the stash list also recognizes the exact legacy name. */
 export const PWRGIT_PULL_STASH_MESSAGE = "pwrgit: auto-stash before pull";
+
+/**
+ * The name a branch switch gives the stash it makes when the reader chose to
+ * leave their uncommitted changes on the branch they were leaving. Coming back
+ * to that branch looks for this exact text to offer the changes back, so main
+ * (which writes it) and the renderer (which looks for it) share one spelling.
+ * Git records "On <branch>:" itself; this says why the entry exists.
+ */
+export function pwrgitLeftOnStashMessage(branch: string): string {
+  return `pwrgit: left on ${branch}`;
+}
 
 /** One entry in Git's repository-wide `refs/stash` reflog, newest first. */
 export type StashEntry = {
@@ -1883,6 +2013,8 @@ export type WorktreeState = {
   isDefaultBranch: boolean;
   /** ISO-8601 time of the branch's last commit. */
   lastActivityAt?: string;
+  /** See `Worktree.lastAuthoredAt`. */
+  lastAuthoredAt?: string;
   /** ISO-8601 time the snapshot was computed. */
   updatedAt: string;
   /** The checkout's directory is gone (see `Worktree.missing`); the counts
@@ -1963,6 +2095,9 @@ export type BulkSyncCounts = {
   worktrees: {
     updated: number;
     upToDate: number;
+    /** Skipped with nothing to pull (detached, no upstream, ahead): not
+     *  in `skipped`, which counts only worktrees held back from commits. */
+    nothingToPull: number;
     skipped: number;
     failed: number;
     cancelled: number;

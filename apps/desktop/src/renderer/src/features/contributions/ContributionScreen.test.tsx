@@ -130,6 +130,36 @@ function blobText(blob: Blob): Promise<string> {
 }
 
 describe("Contributions integrated screen", () => {
+  it("names skipped SSO organizations and distinguishes accessible completion from full coverage", async () => {
+    Object.assign(snapshot, {
+      status: "partial",
+      accessibleComplete: true,
+      blockedOrganizations: [
+        { id: "42", login: "blocked-org" },
+        { id: "99", login: null }
+      ],
+      blockedRepoIds: [snapshot.repos[0]!.id]
+    });
+    Object.assign(snapshot.authoredInventory, {
+      complete: false,
+      skipped: 7,
+      exhausted: true
+    });
+    await mount();
+    const coverage = container.querySelector(
+      "[aria-label='Collection coverage']"
+    )!;
+    expect(coverage.textContent).toContain("Accessible activity collected");
+    expect(coverage.textContent).toContain("blocked-org");
+    expect(coverage.textContent).toContain("Organization ID 99");
+    expect(coverage.textContent).toContain("7 authored PRs skipped");
+    expect(coverage.textContent).toContain("1 repository skipped");
+    expect(coverage.textContent).not.toContain(
+      "Finished for visible inventory"
+    );
+    expect(container.textContent).toContain("Resume collection");
+    expect(container.textContent).toContain("Historical backlog and");
+  });
   it("starts from local account selection, advertises only supported hosts and never collects on chart/filter renders", async () => {
     await mount();
     expect(container.textContent).not.toContain("gitlab.com");

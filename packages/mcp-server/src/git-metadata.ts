@@ -2,6 +2,7 @@ import { access, realpath } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 import { git, requireSuccess, type CommandRunner } from "./command.js";
 import { summarizeRemotes } from "./remote.js";
+import { nestedWorktreePathspec } from "./nested-worktrees.js";
 import type {
   RemoteSummary,
   RepositoryInfo,
@@ -144,7 +145,14 @@ export async function readSafeStatus(
 ): Promise<SafeStatusSummary> {
   const result = await git(
     cwd,
-    ["status", "--porcelain=v2", "--branch", "-z", "--untracked-files=normal"],
+    [
+      "status",
+      "--porcelain=v2",
+      "--branch",
+      "-z",
+      "--untracked-files=normal",
+      ...(await nestedWorktreePathspec(cwd))
+    ],
     runner
   );
   const parsed = parsePorcelainStatus(requireSuccess(result, "reading git status"));
@@ -261,7 +269,7 @@ async function resolveDefaultBranch(
  * the rejection waits for the reads already running: a failed call must not
  * return while git still works in a checkout its caller may remove next —
  * Windows refuses to remove a directory a process is working in. */
-async function mapLimit<T, R>(
+export async function mapLimit<T, R>(
   values: readonly T[],
   limit: number,
   mapper: (value: T, index: number) => Promise<R>

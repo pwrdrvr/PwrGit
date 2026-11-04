@@ -20,7 +20,12 @@ export function registerRepoHandlers(
   bus.register("repo:list", (req) => {
     const profileId = req.profileId ?? profiles.getActiveId();
     if (profileId === null) return ok([]);
-    return ok(indexer.listRepos(profileId));
+    return ok(
+      indexer.listRepos(
+        profileId,
+        req.repoIds === undefined ? {} : { repoIds: req.repoIds }
+      )
+    );
   });
 
   bus.register("repo:refreshWorktrees", async (req) => {
@@ -128,7 +133,10 @@ export function registerRepoHandlers(
           if (value.outcome === "deindexed") {
             emitEvent("repo:changed", { profileId: value.profileId });
           } else if (value.added || value.removed || value.updated) {
-            emitEvent("repo:changed", { profileId: value.repo.profileId });
+            emitEvent("repo:changed", {
+              profileId: value.repo.profileId,
+              repoIds: [value.repo.id]
+            });
           }
         }
         return result;

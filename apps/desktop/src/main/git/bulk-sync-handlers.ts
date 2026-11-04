@@ -23,7 +23,11 @@ type WorktreeRow = {
   path: string;
 };
 
-export function profileRepos(db: DB, profileId: string): BulkSyncRepoInput[] | null {
+export function profileRepos(
+  db: DB,
+  profileId: string,
+  repoIds?: readonly string[]
+): BulkSyncRepoInput[] | null {
   const profile = db
     .prepare("SELECT id FROM profiles WHERE id = ?")
     .get(profileId) as { id: string } | undefined;
@@ -53,12 +57,15 @@ export function profileRepos(db: DB, profileId: string): BulkSyncRepoInput[] | n
     rows.push(worktree);
     byRepo.set(worktree.repoId, rows);
   }
-  return repos.map((repo) => ({
-    ...repo,
-    worktrees: (byRepo.get(repo.id) ?? []).map(({ repoId: _repoId, ...row }) =>
-      row
-    )
-  }));
+  const wanted = repoIds === undefined ? null : new Set(repoIds);
+  return repos
+    .filter((repo) => wanted === null || wanted.has(repo.id))
+    .map((repo) => ({
+      ...repo,
+      worktrees: (byRepo.get(repo.id) ?? []).map(
+        ({ repoId: _repoId, ...row }) => row
+      )
+    }));
 }
 
 /** Profile-wide fetch and conservative pull handlers with cooperative cancel. */
@@ -108,7 +115,7 @@ export function registerBulkSyncHandlers(
         message: "This bulk synchronization is already running."
       });
     }
-    const repos = profileRepos(db, req.profileId);
+    const repos = profileRepos(db, req.profileId, req.repoIds);
     if (repos === null) {
       return err({
         kind: "profile",

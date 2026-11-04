@@ -51,24 +51,25 @@ export function createForkSourceProbe(
   const remotes = new Map<string, CachedRemotes>();
 
   const endpointsOf = async (
-    repoPath: string
+    repoPath: string,
+    readGit: GitExec
   ): Promise<RemoteEndpoint[] | null> => {
     const cached = remotes.get(repoPath);
     if (cached !== undefined && now() - cached.at < REMOTE_LIST_TTL_MS) {
       return cached.endpoints;
     }
-    const read = await listRemoteEndpoints(git, repoPath);
+    const read = await listRemoteEndpoints(readGit, repoPath);
     if (!read.ok) return null;
     remotes.set(repoPath, { at: now(), endpoints: read.value });
     return read.value;
   };
 
-  return async (repoId, repoPath, worktreePath) => {
-    const endpoints = await endpointsOf(repoPath);
+  return async (repoId, repoPath, worktreePath, readGit = git) => {
+    const endpoints = await endpointsOf(repoPath, readGit);
     if (endpoints === null) return null;
     const parent = forkParentOf(repoId);
     if (!mayHaveForkSource(endpoints, parent)) return null;
-    const status = await resolveForkStatus(git, worktreePath, parent);
+    const status = await resolveForkStatus(readGit, worktreePath, parent);
     if (!status.ok || status.value === null) return null;
     const target = status.value.source;
     if (target === null) return null;

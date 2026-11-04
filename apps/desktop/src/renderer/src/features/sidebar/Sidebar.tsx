@@ -21,25 +21,25 @@ import type {
 } from "@pwrgit/shared";
 import { announce, mountLiveRegion, movedMessage } from "../../lib/announce";
 import type { ReadState } from "../../state/readState";
-import type { RemoveWorktreesOptions } from "../../state/useRepoTree";
+import type {
+  RemoveWorktreesOptions,
+  RemoveWorktreesOutcome
+} from "../../state/useRepoTree";
 import { copyText } from "../../lib/copyText";
 import {
   currentPlatform,
-  hasPrimaryModifier,
-  shortcutLabel
+  hasPrimaryModifier
 } from "../../lib/platform";
-import { CloneGlyph } from "../../lib/CloneGlyph";
 import { PlusGlyph } from "../../lib/PlusGlyph";
-import { PullGlyph } from "../../lib/PullGlyph";
-import { RefreshGlyph } from "../../lib/RefreshGlyph";
 import {
   hoverTooltip,
   useViewportTooltip
 } from "../../lib/useViewportTooltip";
 import { useRelativeClock } from "../../lib/useRelativeClock";
 import { ContextMenu, type MenuItem } from "../shell/ContextMenu";
+import { forkMenuLabel, worktreeMenuItems } from "../shell/worktree-menu-items";
+import { openResetToRemote } from "../graph/reset-to-remote";
 import { ReadError } from "../shell/ReadError";
-import { revealLabel, revealPath } from "../shell/reveal";
 import {
   parseFocusVisits,
   recordFocusVisit,
@@ -51,14 +51,33 @@ import { LensFilter } from "./LensFilter";
 import { NewWorktreeModal } from "./NewWorktreeModal";
 import { ProfileChip } from "./ProfileChip";
 import { RepoRow } from "./RepoRow";
+import { SidebarToolbar } from "./SidebarToolbar";
 import { settleSidebarReveal, useSidebarReveal } from "./sidebar-reveal";
 import {
   applySidebarAnchor,
   keepSidebarAnchorForSelection,
+  releaseSidebarAnchor,
   sidebarAnchorHeld,
   trackSidebarAnchors
 } from "./sidebar-anchor";
+import {
+  RepoIndex,
+  stickyLineOf,
+  type RepoIndexGroup,
+  type RepoIndexReorder
+} from "./RepoIndex";
+import {
+  jumpScrollPlan,
+  readRepoIndexEnabled,
+  repoIndexFit,
+  repoIndexMenuHint,
+  spacerIsOffscreen,
+  writeRepoIndexEnabled,
+  type RepoIndexFit
+} from "./repo-index";
 import { BulkSyncDialog } from "./BulkSyncDialog";
+import { FIRST_RUN_MINIMIZE_MS } from "./bulk-sync-prefs";
+import { useBulkSyncRun } from "./useBulkSyncRun";
 import { MaintenanceDialog } from "./MaintenanceDialog";
 import { HiddenReposButton } from "./HiddenReposButton";
 import { RemoveRepositoryDialog } from "./RemoveRepositoryDialog";
@@ -70,6 +89,7 @@ import {
   filterReposByLens,
   FOCUS_REPO_LIMIT,
   focusedRepoPage,
+  focusedRepos,
   focusReasonForRepo,
   groupReposByRoot,
   LENS_EMPTY_COPY,
@@ -83,6 +103,7 @@ import {
 import { AiFeaturesSwitch } from "./AiFeaturesSwitch";
 import { useHoverStableOrder } from "./useHoverStableOrder";
 import { useListReorder } from "./useListReorder";
+import { FinishedAfterDaysContext, useFinishedAfterDaysSetting } from "./finished-after";
 
 /** Distinguishes repo drags from worktree drags (see useListReorder). */
 const REPO_MIME = "application/x-pwrgit-repo";
@@ -130,7 +151,7 @@ const REPO_TREE_ID = "sidebar-repo-tree";
 // Multi-selection is scoped to a single repo's worktrees (a range needs one
 // ordering). `anchor` is the pivot for shift-click ranges.
 type Selection = { repoId: string; ids: Set<string>; anchor: string | null };
-type ContextState = { x: number; y: number; targets: Worktree[] };
+type ContextState = { x: number; y: number; repo: Repo; targets: Worktree[] };
 type OptionsState = { x: number; y: number };
 type NewWorktreeState = {
   repo: Repo;
@@ -140,48 +161,6 @@ type NewWorktreeState = {
   /** The open PR whose head this is, when it came from the PR section. */
   changeRequest?: OpenChangeRequest;
 };
-
-/** Lucide `trash-2`, at the size the sidebar's bulk-action buttons use. */
-function PruneGlyph() {
-  return (
-    <svg
-      width="12"
-      height="12"
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="2"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      aria-hidden="true"
-    >
-      <path d="M3 6h18M8 6V4h8v2M19 6l-1 14H6L5 6M10 11v5M14 11v5" />
-    </svg>
-  );
-}
-
-/** Lucide `git-fork`, at the size the sidebar's ghost buttons use. */
-function ForkGlyph() {
-  return (
-    <svg
-      width="12"
-      height="12"
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="2"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      aria-hidden="true"
-    >
-      <circle cx="12" cy="18" r="3" />
-      <circle cx="6" cy="6" r="3" />
-      <circle cx="18" cy="6" r="3" />
-      <path d="M18 9v2c0 .6-.4 1-1 1H7c-.6 0-1-.4-1-1V9" />
-      <path d="M12 12v3" />
-    </svg>
-  );
-}
 
 export function Sidebar({
   profiles,
@@ -211,7 +190,6 @@ export function Sidebar({
   onForkCheckout,
   onOpenRepoSetup,
   onAddFolder,
-  onOpenSearch,
   onExpandRepo,
   onNewProfile,
   onManageProfile,
@@ -235,7 +213,7 @@ export function Sidebar({
   onRemoveWorktrees: (
     worktreeIds: string[],
     options?: RemoveWorktreesOptions
-  ) => Promise<void>;
+  ) => Promise<RemoveWorktreesOutcome>;
   onCreateWorktree: (
     repoId: string,
     branch: string,
@@ -261,7 +239,6 @@ export function Sidebar({
   onForkCheckout: (repo: Repo) => void;
   onOpenRepoSetup?: (repo: Repo) => void;
   onAddFolder: () => void;
-  onOpenSearch: () => void;
   onExpandRepo: (repoId: string) => void;
   onNewProfile: () => void;
   onManageProfile: () => void;
@@ -269,6 +246,7 @@ export function Sidebar({
   platform?: string;
 }) {
   const now = useRelativeClock();
+  const finishedAfterDays = useFinishedAfterDaysSetting();
   // The reorder gestures announce through a shared live region. Put it in the
   // DOM now, while nothing is being said, so the screen reader has registered
   // it long before the first ⌘⇧↑/↓ — see lib/announce.
@@ -356,9 +334,6 @@ export function Sidebar({
   const [sortByRepo, setSortByRepo] = useState<Record<string, WorktreeSort>>({});
   const [orderByRepo, setOrderByRepo] = useState<Record<string, string[]>>({});
   const [newWorktree, setNewWorktree] = useState<NewWorktreeState | null>(null);
-  const [bulkSyncMode, setBulkSyncMode] = useState<
-    "fetch" | "soft-pull" | null
-  >(null);
   /** The maintenance dialog, and — when the refs browser opened it — the one
    *  repository it reviews, or the Prune worktrees tab it opens on. Prune
    *  has no repository scope; it reviews the whole profile. */
@@ -393,6 +368,7 @@ export function Sidebar({
       // ignore private-mode/quota failures
     }
   }, [groupByFolder]);
+  const [repoIndexEnabled, setRepoIndexEnabled] = useState(readRepoIndexEnabled);
 
   // Seed the drag order from persisted custom_order for repos not yet
   // reordered this session.
@@ -443,7 +419,7 @@ export function Sidebar({
       filterReposByLens([repo], lens, now, {
         selectedWorktreeId,
         visits: focusVisits
-      }).length === 0
+      }, finishedAfterDays).length === 0
     ) {
       setLens("Focused");
     }
@@ -503,6 +479,99 @@ export function Sidebar({
     applySidebarAnchor(listRef.current);
   });
 
+  // ---- Repository index (RepoIndex.tsx, repo-index.ts) ----
+  // A jump puts a repository's block at the top of the readable area and
+  // opens it. A repository near the end cannot get there on its own, so the
+  // list grows a blank tail of exactly the missing height; the tail is dropped
+  // once it scrolls out of view, which moves nothing on screen.
+  const spacerRef = useRef<HTMLDivElement>(null);
+  const pendingJumpRef = useRef<string | null>(null);
+  const scrollRepoToTop = (repoId: string): void => {
+    const list = listRef.current;
+    const spacer = spacerRef.current;
+    if (list === null || spacer === null) return;
+    const place = (): number | null => {
+      const row =
+        [...list.querySelectorAll<HTMLElement>(".repo-row[data-repo-id]")].find(
+          (el) => el.dataset["repoId"] === repoId
+        ) ?? null;
+      if (row === null) return null;
+      // The block, not the sticky header: a stuck header reports where it is
+      // stuck, not where its repository starts.
+      const block = row.closest<HTMLElement>(".repo-block") ?? row;
+      const group = block.closest(".repo-group");
+      const plan = jumpScrollPlan({
+        scrollTop: list.scrollTop,
+        blockTop:
+          block.getBoundingClientRect().top - list.getBoundingClientRect().top,
+        line: group === null ? 0 : stickyLineOf(group as HTMLElement),
+        scrollHeight: list.scrollHeight,
+        clientHeight: list.clientHeight,
+        spacerHeight: spacer.offsetHeight
+      });
+      if (plan.spacerHeight !== spacer.offsetHeight) {
+        spacer.style.height = `${plan.spacerHeight}px`;
+      }
+      list.scrollTop = plan.scrollTop;
+      return list.scrollTop;
+    };
+    const landed = place();
+    if (landed === null) return;
+    // One more look a frame later — a font or a lazily drawn section above can
+    // still settle — unless the reader has scrolled since.
+    window.requestAnimationFrame(() => {
+      if (list.scrollTop === landed) place();
+    });
+  };
+  const jumpToRepo = (repoId: string): void => {
+    const repo = filtered.find((r) => r.id === repoId);
+    if (repo === undefined) return;
+    releaseSidebarAnchor();
+    // Tab from the index lands on the repository just jumped to.
+    setFocusedRepoId(repoId);
+    // A name in the index selects the way its tree row does: the selection
+    // moves to the repository's primary worktree unless it is already in
+    // that repository. A jump that only scrolled left the old repository
+    // drawn selected beside the one just picked, which read as two
+    // selections at once. The jump owns the scroll, so the selection's own
+    // reveal stands down: it would pull a primary row drawn below the fold
+    // into view and move the repository off the top.
+    const selected = selectPrimaryUnlessHeld(repo);
+    if (selected !== null) lastRevealedRef.current = selected;
+    if (expanded.has(repoId)) {
+      scrollRepoToTop(repoId);
+      return;
+    }
+    // The scroll waits for the opened block to render.
+    pendingJumpRef.current = repoId;
+    setExpanded((prev) => new Set(prev).add(repoId));
+    onExpandRepo(repoId);
+  };
+  useLayoutEffect(() => {
+    const id = pendingJumpRef.current;
+    if (id === null) return;
+    pendingJumpRef.current = null;
+    scrollRepoToTop(id);
+  });
+  useEffect(() => {
+    const list = listRef.current;
+    if (list === null) return undefined;
+    const onScroll = (): void => {
+      const spacer = spacerRef.current;
+      if (spacer === null || spacer.offsetHeight === 0) return;
+      if (
+        spacerIsOffscreen(
+          spacer.getBoundingClientRect().top,
+          list.getBoundingClientRect().bottom
+        )
+      ) {
+        spacer.style.height = "";
+      }
+    };
+    list.addEventListener("scroll", onScroll, { passive: true });
+    return () => list.removeEventListener("scroll", onScroll);
+  }, []);
+
   // A plain row click seeds the batch (shift-range) set — but selection can
   // also move WITHOUT a row click (⌘F/⌘K pick, expanding a repo auto-selects
   // its primary). Re-seed the batch to the new selection then, or the old
@@ -545,7 +614,19 @@ export function Sidebar({
     setSel({ repoId: "", ids: EMPTY_IDS, anchor: null });
 
   const focusContext = { selectedWorktreeId, visits: focusVisits };
-  const counts = lensCounts(repos, now, focusContext);
+  // Fetch recent fetches the Focused list, every page of it; the lens count
+  // reads the same list rather than walking the ladder again.
+  const recentRepos = useMemo(
+    () =>
+      focusedRepos(repos, { selectedWorktreeId, visits: focusVisits }, now),
+    [focusVisits, now, repos, selectedWorktreeId]
+  );
+  const counts = lensCounts(repos, now, focusContext, recentRepos, finishedAfterDays);
+  const bulk = useBulkSyncRun({
+    profileId: activeProfile?.id ?? null,
+    repos,
+    recentRepos
+  });
   // Where a window with no remembered lens lands, decided once — the first
   // time repos actually arrive, because until then every count is 0 and
   // "empty" and "not read yet" look identical.
@@ -572,7 +653,7 @@ export function Sidebar({
     landedRef.current = true;
     if (counts.Focused > 0) setLens("Focused");
   }, [repos.length, counts.Focused]);
-  const lensRepos = filterReposByLens(repos, lens, now, focusContext);
+  const lensRepos = filterReposByLens(repos, lens, now, focusContext, finishedAfterDays);
   // Selecting a worktree makes its repo `current` — rank 0 of the Focus ladder
   // — so without this the row the user just clicked would leave from under the
   // cursor. The lens keeps answering the question; the answer is only *shown*
@@ -658,10 +739,70 @@ export function Sidebar({
   };
   const filteredIds = filtered.map((repo) => repo.id);
 
+  // Whether the index fits: the sidebar's width past the tree's floor, against
+  // the measured width of the index's shortest useful truncation (the probe,
+  // which carries the index's own font and min-width). Only the shown/hidden
+  // answer is React state; the width cap is written straight to a custom
+  // property, so dragging the sidebar's edge re-renders nothing.
+  const asideRef = useRef<HTMLElement>(null);
+  const indexProbeRef = useRef<HTMLSpanElement>(null);
+  const fitInputs = useRef({ enabled: repoIndexEnabled, repoCount: filtered.length });
+  fitInputs.current = { enabled: repoIndexEnabled, repoCount: filtered.length };
+  const [indexFit, setIndexFit] = useState<RepoIndexFit>({
+    shown: false,
+    reason: "narrow"
+  });
+  const measureIndexFit = useCallback((): void => {
+    const aside = asideRef.current;
+    const probe = indexProbeRef.current;
+    if (aside === null || probe === null) return;
+    const fit = repoIndexFit({
+      ...fitInputs.current,
+      sidebarWidth: aside.getBoundingClientRect().width,
+      minWidth: probe.getBoundingClientRect().width
+    });
+    if (fit.shown) aside.style.setProperty("--repo-index-max", `${fit.maxWidth}px`);
+    // Only shown/hidden and the reason matter here; maxWidth is the CSS var.
+    const key = (f: RepoIndexFit): string => (f.shown ? "shown" : f.reason);
+    setIndexFit((prev) => (key(prev) === key(fit) ? prev : fit));
+  }, []);
+  useLayoutEffect(measureIndexFit, [
+    measureIndexFit,
+    repoIndexEnabled,
+    filtered.length
+  ]);
+  useEffect(() => {
+    const aside = asideRef.current;
+    const probe = indexProbeRef.current;
+    if (aside === null || probe === null || typeof ResizeObserver !== "function") {
+      return undefined;
+    }
+    // The probe resizes with the text-size axis, the aside with its edge.
+    const observer = new ResizeObserver(measureIndexFit);
+    observer.observe(aside);
+    observer.observe(probe);
+    return () => observer.disconnect();
+  }, [measureIndexFit]);
+
   const roots = activeProfile?.roots ?? [];
   const canGroup = roots.length > 1;
   const grouped = groupByFolder && canGroup;
   const groups = grouped ? groupReposByRoot(filtered, roots) : [];
+  // Built only while the column is drawn: it scans every worktree.
+  const indexSource = grouped
+    ? groups.map((g) => ({ key: g.root || "__other", label: g.label, repos: g.repos }))
+    : [{ key: "__all", label: null, repos: filtered }];
+  const indexGroups: RepoIndexGroup[] = !indexFit.shown
+    ? []
+    : indexSource.map(({ key, label, repos: groupRepos }) => ({
+        key,
+        label,
+        entries: groupRepos.map((repo) => ({
+          id: repo.id,
+          name: repo.name,
+          containsSelection: repo.worktrees.some((w) => w.id === selectedWorktreeId)
+        }))
+      }));
 
   // Which folder group each repo renders under, so a drag can be kept inside
   // its own group. Dragging across groups would reorder the flat list while the
@@ -773,6 +914,67 @@ export function Sidebar({
     settleSidebarReveal(pending.seq);
   });
 
+  const moveKeyDirection = (event: ReactKeyboardEvent): "up" | "down" | null => {
+    if (!hasPrimaryModifier(event, platform) || !event.shiftKey) return null;
+    if (event.key === "ArrowUp") return "up";
+    if (event.key === "ArrowDown") return "down";
+    return null;
+  };
+
+  /**
+   * ⌘⇧↑/↓ on a repository, from its tree row or its index name: one step to
+   * the nearest neighbour in its own folder group, so a key move obeys the
+   * boundary the drag does. False when there is nowhere to go.
+   */
+  const moveRepo = (repoId: string, direction: "up" | "down"): boolean => {
+    const index = filteredIds.indexOf(repoId);
+    if (index === -1) return false;
+    const step = direction === "up" ? -1 : 1;
+    let to = index + step;
+    if (grouped) {
+      while (
+        filteredIds[to] !== undefined &&
+        groupOfRepo.get(filteredIds[to] as string) !== groupOfRepo.get(repoId)
+      ) {
+        to += step;
+      }
+    }
+    const neighbor = filteredIds[to];
+    if (neighbor === undefined) return false;
+    const moved = reorder(
+      filteredIds,
+      repoId,
+      neighbor,
+      direction === "up" ? "before" : "after"
+    );
+    // Same reason as the drag's onCommit: the move is the user's, so it is
+    // shown even if the pointer happens to be parked on the list.
+    held.release();
+    onPersistRepoOrder(moved);
+    // Focus stays on what moved, so nothing is re-announced on its own — see
+    // lib/announce (SC 4.1.3). Announce against the group the repository is
+    // actually listed in, which is what its posinset counts within.
+    const siblings = grouped
+      ? moved.filter((id) => groupOfRepo.get(id) === groupOfRepo.get(repoId))
+      : moved;
+    const name = filtered.find((r) => r.id === repoId)?.name ?? repoId;
+    announce(movedMessage(name, siblings.indexOf(repoId) + 1, siblings.length));
+    return true;
+  };
+
+  // The index moves names with the tree's own drag and key move, only where
+  // the tree's rows move (the Pinned lens).
+  const indexReorder: RepoIndexReorder | undefined = arrangeable
+    ? {
+        rowProps: (id) => repoDrag.rowProps(id, true),
+        dragId: repoDrag.dragId,
+        target: repoDrag.target,
+        isPostDragClick: repoDrag.isPostDragClick,
+        moveKey: moveKeyDirection,
+        onMove: moveRepo
+      }
+    : undefined;
+
   const handleRepoKeyDown = (repo: Repo, event: ReactKeyboardEvent): void => {
     // Keydown from the pin button (or anything else focusable inside the row)
     // bubbles to here. Acting on it swallowed the button: a `<button>` fires
@@ -784,44 +986,10 @@ export function Sidebar({
     const index = filteredIds.indexOf(repo.id);
     if (index === -1) return;
     if (hasPrimaryModifier(event, platform) && event.shiftKey) {
-      if (event.key !== "ArrowUp" && event.key !== "ArrowDown") return;
-      if (!arrangeable) return;
-      const step = event.key === "ArrowUp" ? -1 : 1;
-      // Step to the nearest neighbor in the SAME group, so keyboard moves obey
-      // the boundary the drag does.
-      let to = index + step;
-      if (grouped) {
-        while (
-          filteredIds[to] !== undefined &&
-          groupOfRepo.get(filteredIds[to] as string) !== groupOfRepo.get(repo.id)
-        ) {
-          to += step;
-        }
-      }
-      const neighbor = filteredIds[to];
-      if (neighbor === undefined) return;
+      const direction = moveKeyDirection(event);
+      if (direction === null || !arrangeable) return;
+      if (!moveRepo(repo.id, direction)) return;
       event.preventDefault();
-      const moved = reorder(
-        filteredIds,
-        repo.id,
-        neighbor,
-        event.key === "ArrowUp" ? "before" : "after"
-      );
-      // Same reason as the drag's onCommit: the move is the user's, so it is
-      // shown even if the pointer happens to be parked on the list.
-      held.release();
-      onPersistRepoOrder(moved);
-      // Focus stays on the row that moved, so nothing is re-announced on its
-      // own — see lib/announce (SC 4.1.3). Announce against the group the row
-      // is actually listed in, which is what its posinset counts within.
-      const siblings = grouped
-        ? moved.filter(
-            (id) => groupOfRepo.get(id) === groupOfRepo.get(repo.id)
-          )
-        : moved;
-      announce(
-        movedMessage(repo.name, siblings.indexOf(repo.id) + 1, siblings.length)
-      );
       // Keep focus on the row that moved, not the slot it left.
       window.requestAnimationFrame(() => {
         document
@@ -853,13 +1021,20 @@ export function Sidebar({
     // Compute this repo's worktree badges lazily on first look — state isn't
     // computed for every repo up front.
     if (willExpand) onExpandRepo(repo.id);
-    const hasSelection = repo.worktrees.some((w) => w.id === selectedWorktreeId);
-    if (!hasSelection && repo.worktrees.length > 0) {
-      const primary =
-        repo.worktrees.find((w) => w.isPrimary) ?? repo.worktrees[0];
-      if (primary !== undefined) onSelectWorktree(repo, primary);
-    }
+    selectPrimaryUnlessHeld(repo);
   };
+
+  /** A repo row click, or a name in the index: select the repository's
+   *  primary worktree, unless the selection is already one of its own. */
+  function selectPrimaryUnlessHeld(repo: Repo): string | null {
+    const hasSelection = repo.worktrees.some((w) => w.id === selectedWorktreeId);
+    if (hasSelection) return null;
+    const primary =
+      repo.worktrees.find((w) => w.isPrimary) ?? repo.worktrees[0];
+    if (primary === undefined) return null;
+    onSelectWorktree(repo, primary);
+    return primary.id;
+  }
 
   // Plain click selects one (and drives the main pane). ⌘/Ctrl-click toggles a
   // row in the batch set; Shift-click extends a range from the anchor. Both
@@ -922,10 +1097,10 @@ export function Sidebar({
       targets = [w];
       setSel({ repoId: repo.id, ids: EMPTY_IDS, anchor: w.id });
     }
-    setCtx({ x: e.clientX, y: e.clientY, targets });
+    setCtx({ x: e.clientX, y: e.clientY, repo, targets });
   };
 
-  const contextItems = (targets: Worktree[]): MenuItem[] => {
+  const contextItems = (repo: Repo, targets: Worktree[]): MenuItem[] => {
     if (targets.length > 1) {
       const ids = targets.map((t) => t.id);
       return [
@@ -946,27 +1121,13 @@ export function Sidebar({
     }
     const w = targets[0];
     if (w === undefined) return [];
-    return [
-      {
-        type: "item",
-        label: "Copy branch name",
-        onSelect: () => void copyText(w.branch)
-      },
-      { type: "item", label: "Copy path", onSelect: () => void copyText(w.path) },
-      {
-        type: "item",
-        label: revealLabel(platform),
-        onSelect: () => revealPath(w.path)
-      },
-      { type: "sep" },
-      {
-        type: "item",
-        label: "Remove worktree",
-        danger: true,
-        disabled: w.isPrimary,
-        onSelect: () => onRemoveWorktree(w.id)
-      }
-    ];
+    return worktreeMenuItems({
+      worktree: w,
+      platform,
+      fork: { label: forkMenuLabel(repo), onSelect: () => onForkCheckout(repo) },
+      onResetToRemote: () => openResetToRemote({ worktree: w }),
+      onRemove: () => onRemoveWorktree(w.id)
+    });
   };
 
   const cycleSort = (repoId: string): void => {
@@ -1124,7 +1285,8 @@ export function Sidebar({
   };
 
   return (
-    <aside className="pane pane--sidebar" data-testid="sidebar">
+    <FinishedAfterDaysContext.Provider value={finishedAfterDays}>
+    <aside ref={asideRef} className="pane pane--sidebar" data-testid="sidebar">
       <div className="sidebar__profile">
         {profileLoadState.status === "error" ? (
           <ReadError
@@ -1160,165 +1322,31 @@ export function Sidebar({
         )}
       </div>
 
-      <div className="sidebar__search">
-        <button className="jump-btn" onClick={onOpenSearch}>
-          <svg
-            width="14"
-            height="14"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="1.8"
-            strokeLinecap="round"
-          >
-            <circle cx="11" cy="11" r="7" />
-            <path d="m21 21-4.3-4.3" />
-          </svg>
-          <span className="jump-btn__label">Jump to repo…</span>
-          {/* Find is advertised; the K chord stays as a silent alias. */}
-          <span
-            className="kbd"
-            {...hoverTooltip(
-              tip,
-              `${shortcutLabel({ key: "F" }, platform)} or ${shortcutLabel(
-                { key: "K" },
-                platform
-              )}`
-            )}
-          >
-            {shortcutLabel({ key: "F" }, platform)}
-          </span>
-        </button>
-        {/* Add folders is the prerequisite for everything else — Clone is
-            disabled until a root exists — so it sits beside Clone rather than
-            at the bottom of the list, where it was the quietest control on a
-            first-run sidebar whose only working action it was. */}
-        <div className="sidebar__actions">
-          <button
-            className="add-folder"
-            onClick={onAddFolder}
-            disabled={activeProfile === null}
-            /* The reason goes in the NAME as well as the card: a disabled
-               button still announces its name, and AT reads that over a card.
-               Chromium does still fire hover on a disabled control, so the
-               pointer gets the sentence the old `title` gave it.
-               The visible label is repeated VERBATIM, ellipsis and all, because
-               an aria-label replaces the button's contents rather than adding
-               to them: drop a character and the name no longer contains the
-               label the user can see, which is SC 2.5.3 and which is what
-               voice control ("click Add folders") matches on. */
-            aria-label={
-              activeProfile === null
-                ? "Add folders… — unavailable, load or create a profile first"
-                : undefined
-            }
-            {...hoverTooltip(
-              tip,
-              activeProfile === null
-                ? "Load or create a profile before adding folders"
-                : undefined
-            )}
-          >
-            <PlusGlyph /> Add folders…
-          </button>
-          {/* Clone and fork share their own row beneath Add folders. Three
-              labels do not fit one row at the 240px width floor — the sizing
-              note above was tuned for two — and both of these bring a
-              repository in, so they read as peers. */}
-          <div className="clone-repo-row">
-            <button
-              className="clone-repo"
-              onClick={onCloneRepo}
-              disabled={
-                activeProfile === null || activeProfile.roots.length === 0
-              }
-              /* The unavailable reason is the NAME as well as the card — a
-                 disabled button announces its name, and AT reads that over any
-                 card. The card carries whichever sentence applies. The visible
-                 label is repeated verbatim; see .add-folder above for why. */
-              aria-label={
-                activeProfile !== null && activeProfile.roots.length === 0
-                  ? "Clone… — unavailable, add a repo folder before cloning"
-                  : undefined
-              }
-              {...hoverTooltip(
-                tip,
-                activeProfile !== null && activeProfile.roots.length === 0
-                  ? "Add a repo folder before cloning"
-                  : "Clone a repository from GitHub or GitLab"
-              )}
-            >
-              <CloneGlyph /> Clone…
-            </button>
-            <button
-              className="fork-repo"
-              onClick={() => void openFork()}
-              disabled={
-                activeProfile === null || activeProfile.roots.length === 0
-              }
-              /* See .clone-repo above. */
-              aria-label={
-                activeProfile !== null && activeProfile.roots.length === 0
-                  ? "Fork… — unavailable, add a repo folder before forking"
-                  : undefined
-              }
-              {...hoverTooltip(
-                tip,
-                activeProfile !== null && activeProfile.roots.length === 0
-                  ? "Add a repo folder before forking"
-                  : "Fork a repository, then check out your copy"
-              )}
-            >
-              <ForkGlyph /> Fork…
-            </button>
-          </div>
-          <div className="bulk-sync-actions" aria-label="Synchronize repositories">
-            {/* "Fetch all repos", not "Fetch all": the Remotes heading in
-                every RepoRow carries a button of the same name that fetches
-                all remotes of ONE repo. Same words, two blast radii — so the
-                wider one states its scope.
-
-                The glyphs are the worktree toolbar's own Fetch and Pull marks,
-                so each bulk action reads as the same verb as the single one.
-                They used to be `↻` / `↓` text, kept on the reasoning that
-                --font-sans resolves U+21BB. It only ever did through the OS
-                font: the bundled Geist Sans has no U+21BB, so once Geist
-                actually loaded, the arrow drew in a different face from its
-                label. Neither button animates; each opens BulkSyncDialog,
-                which owns the progress. */}
-            <button
-              className="bulk-sync-action"
-              disabled={activeProfile === null || repos.length === 0}
-              {...hoverTooltip(tip, "Fetch and prune stale remote-tracking references in every repository; local branches are kept")}
-              onClick={() => setBulkSyncMode("fetch")}
-            >
-              <RefreshGlyph size={12} />
-              <span className="bulk-sync-action__label">Fetch all repos</span>
-            </button>
-            <button
-              className="bulk-sync-action"
-              disabled={activeProfile === null || repos.length === 0}
-              {...hoverTooltip(tip, "Fast-forward only clean, safe tracked worktrees")}
-              onClick={() => setBulkSyncMode("soft-pull")}
-            >
-              <PullGlyph size={12} />
-              <span className="bulk-sync-action__label">Try pull all</span>
-            </button>
-          </div>
-          <div className="prune-actions" aria-label="Maintain repositories">
-            <button className="bulk-sync-action" disabled={activeProfile === null}
-              {...hoverTooltip(tip, "Collect Git garbage, prune finished worktrees, and review leftover local branches")}
-              onClick={() => setMaintenance({})}>
-              <PruneGlyph /><span className="bulk-sync-action__label">Repository maintenance…</span>
-            </button>
-          </div>
-          {activeProfile !== null && activeProfile.roots.length === 0 && (
-            <span className="sidebar__actions-hint">
-              Add a repo folder to enable clone and fork.
-            </span>
-          )}
-        </div>
-      </div>
+      {/* One row of profile-wide actions. The jump field that used to lead
+          this block lives in the title strip now (TitleBar's .titlebar-jump);
+          Add folders, Clone and Fork sit behind Add ▾, and on a profile with
+          no folder yet the empty list carries Add folders itself. Design:
+          design/Sidebar Header Toolbar - UX Review.dc.html, 2b and 3. */}
+      <SidebarToolbar
+        hasProfile={activeProfile !== null}
+        rootCount={activeProfile?.roots.length ?? 0}
+        repoCount={repos.length}
+        onAddFolder={onAddFolder}
+        onClone={onCloneRepo}
+        onFork={() => void openFork()}
+        recentCount={recentRepos.length}
+        syncVerb={bulk.verb}
+        syncScope={bulk.scope}
+        fetchInterval={bulk.interval}
+        syncBusy={bulk.busy}
+        lastAutoRun={bulk.lastAutoRun}
+        lastRun={bulk.lastRun}
+        onShowRun={bulk.showRun}
+        onSync={bulk.runFace}
+        onPickSync={bulk.pick}
+        onPickFetchInterval={bulk.pickInterval}
+        onMaintenance={() => setMaintenance({})}
+      />
 
       <div className="sidebar__lens">
         <LensFilter
@@ -1327,34 +1355,33 @@ export function Sidebar({
           onChange={chooseLens}
           controlsId={REPO_TREE_ID}
         />
-        {canGroup && (
-          <button
-            ref={optionsTriggerRef}
-            type="button"
-            className="sidebar-options"
-            aria-label="Sidebar display options"
-            aria-haspopup="menu"
-            aria-expanded={options !== null}
-            {...hoverTooltip(tip, "Sidebar display options")}
-            onClick={(event) => {
-              const rect = event.currentTarget.getBoundingClientRect();
-              setOptions((current) =>
-                current === null
-                  ? {
-                      x: Math.max(8, rect.right - 190),
-                      y: rect.bottom + 4
-                    }
-                  : null
-              );
-            }}
-          >
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
-              <circle cx="12" cy="5" r="2" />
-              <circle cx="12" cy="12" r="2" />
-              <circle cx="12" cy="19" r="2" />
-            </svg>
-          </button>
-        )}
+        {/* Always drawn: Repo index lives here even with one folder. */}
+        <button
+          ref={optionsTriggerRef}
+          type="button"
+          className="sidebar-options"
+          aria-label="Sidebar display options"
+          aria-haspopup="menu"
+          aria-expanded={options !== null}
+          {...hoverTooltip(tip, "Sidebar display options")}
+          onClick={(event) => {
+            const rect = event.currentTarget.getBoundingClientRect();
+            setOptions((current) =>
+              current === null
+                ? {
+                    x: Math.max(8, rect.right - 190),
+                    y: rect.bottom + 4
+                  }
+                : null
+            );
+          }}
+        >
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
+            <circle cx="12" cy="5" r="2" />
+            <circle cx="12" cy="12" r="2" />
+            <circle cx="12" cy="19" r="2" />
+          </svg>
+        </button>
       </div>
 
       {showFocusNote && (
@@ -1394,61 +1421,120 @@ export function Sidebar({
           that button now lives up in .sidebar__actions, but the empty state
           still needs to sit outside the tree. The wrapper below owns only rows
           and folder groups. It is a plain static block, so it changes no layout
-          and the rows still stick to .sidebar__list's scrollport. */}
-      <div className="sidebar__list" ref={listRef}>
-        {repoLoadState.status === "error" && (
-          <ReadError
-            compact
-            title="Repositories couldn’t be loaded"
-            message={repoLoadState.message}
-            onRetry={onRetryRepos}
+          and the rows still stick to .sidebar__list's scrollport.
+
+          The repository index sits beside the scrollport, not in it, so it
+          stays put while the tree scrolls; it is a separate nav, never part of
+          the tree. The hover hold spans both, so the index cannot re-sort
+          under a pointer crossing from one to the other. .sidebar__tree-pane
+          is the tree's own size container: its narrow-width rules follow the
+          tree's width, which the index takes from. */}
+      <span ref={indexProbeRef} className="repo-index__probe" aria-hidden="true" />
+      <div className="sidebar__body" {...held.containerProps}>
+        {indexFit.shown && (
+          <RepoIndex
+            groups={indexGroups}
+            listRef={listRef}
+            treeId={REPO_TREE_ID}
+            onJump={jumpToRepo}
+            {...(indexReorder === undefined ? {} : { reorder: indexReorder })}
           />
         )}
-        <div
-          className="sidebar__tree"
-          id={REPO_TREE_ID}
-          role="tree"
-          aria-label="Repositories"
-          {...held.containerProps}
-        >
-          {grouped
-            ? groups.map((g) => (
-                // A `tree` may own `group`s of treeitems, so the folder buckets
-                // are groups rather than bare divs — otherwise the repo rows
-                // are treeitems with no owning structure. The visual heading is
-                // then decorative, but its count has to survive into the
-                // group's name or screen-reader users simply lose it.
-                <div
-                  className="repo-group"
-                  key={g.root || "__other"}
-                  role="group"
-                  aria-label={`${g.label} (${g.repos.length} ${
-                    g.repos.length === 1 ? "repo" : "repos"
-                  })`}
-                >
-                  <div
-                    className="repo-group__head"
-                    {...hoverTooltip(tip, g.root || "Not under any added folder")}
-                    aria-hidden="true"
-                  >
-                    <span className="repo-group__label">{g.label}</span>
-                    <span className="repo-group__count">{g.repos.length}</span>
-                  </div>
-                  {g.repos.map(renderRepo)}
-                </div>
-              ))
-            : filtered.map(renderRepo)}
-        </div>
+        <div className="sidebar__tree-pane">
+          <div className="sidebar__list" ref={listRef}>
+            {repoLoadState.status === "error" && (
+              <ReadError
+                compact
+                title="Repositories couldn’t be loaded"
+                message={repoLoadState.message}
+                onRetry={onRetryRepos}
+              />
+            )}
+            <div
+              className="sidebar__tree"
+              id={REPO_TREE_ID}
+              role="tree"
+              aria-label="Repositories"
+            >
+              {grouped
+                ? groups.map((g) => (
+                    // A `tree` may own `group`s of treeitems, so the folder buckets
+                    // are groups rather than bare divs — otherwise the repo rows
+                    // are treeitems with no owning structure. The visual heading is
+                    // then decorative, but its count has to survive into the
+                    // group's name or screen-reader users simply lose it.
+                    <div
+                      className="repo-group"
+                      key={g.root || "__other"}
+                      role="group"
+                      aria-label={`${g.label} (${g.repos.length} ${
+                        g.repos.length === 1 ? "repo" : "repos"
+                      })`}
+                    >
+                      <div
+                        className="repo-group__head"
+                        {...hoverTooltip(tip, g.root || "Not under any added folder")}
+                        aria-hidden="true"
+                      >
+                        <span className="repo-group__label">{g.label}</span>
+                        <span className="repo-group__count">{g.repos.length}</span>
+                      </div>
+                      {g.repos.map(renderRepo)}
+                    </div>
+                  ))
+                : filtered.map(renderRepo)}
+            </div>
 
-        {filtered.length === 0 && (
-          <div className="sidebar__empty">
-            {repoLoadState.status === "loading"
-              ? "Scanning…"
-              : repoLoadState.status === "error"
-                ? "The last repository list is still shown above, if one was available."
-                : LENS_EMPTY_COPY[lens]}
+            {filtered.length === 0 && (
+              <div className="sidebar__empty">
+                <p className="sidebar__empty-text">
+                  {repoLoadState.status === "loading"
+                    ? "Scanning…"
+                    : repoLoadState.status === "error"
+                      ? "The last repository list is still shown above, if one was available."
+                      : LENS_EMPTY_COPY[lens]}
+                </p>
+                {/* Day one. Add folders is the prerequisite for everything else
+                    and, with no folder yet, the only action that works — so while
+                    the profile has none, the empty list carries it rather than
+                    leaving it inside Add ▾. Disabled, with its reason in the name
+                    and the card, while no profile has loaded. */}
+                {(activeProfile === null || activeProfile.roots.length === 0) && (
+                  <div className="sidebar__start">
+                    <button
+                      type="button"
+                      className="sidebar__start-add"
+                      onClick={onAddFolder}
+                      disabled={activeProfile === null}
+                      /* The visible label is repeated verbatim, ellipsis and all:
+                         an aria-label replaces the button's contents, so dropping
+                         a character would break SC 2.5.3 and voice control. */
+                      aria-label={
+                        activeProfile === null
+                          ? "Add folders… — unavailable, load or create a profile first"
+                          : undefined
+                      }
+                      {...hoverTooltip(
+                        tip,
+                        activeProfile === null
+                          ? "Load or create a profile before adding folders"
+                          : undefined
+                      )}
+                    >
+                      <PlusGlyph /> Add folders…
+                    </button>
+                    {activeProfile !== null && (
+                      <span className="sidebar__start-hint">
+                        Clone and Fork, under Add, open once a folder exists.
+                      </span>
+                    )}
+                  </div>
+                )}
+              </div>
+            )}
+            <div ref={spacerRef} className="sidebar__jump-room" aria-hidden="true" />
           </div>
-        )}
+        </div>
       </div>
 
       {/* The profile's AI switch, under the list rather than in it: the tree
@@ -1481,13 +1567,25 @@ export function Sidebar({
         />
       )}
 
-      {bulkSyncMode !== null && activeProfile !== null && (
+      {bulk.run !== null && activeProfile !== null && (
         <BulkSyncDialog
+          key={bulk.run.key}
           profileId={activeProfile.id}
-          repos={repos}
-          mode={bulkSyncMode}
+          repos={bulk.run.repos}
+          {...(bulk.run.repoIds === undefined
+            ? {}
+            : { repoIds: bulk.run.repoIds })}
+          scope={bulk.run.scope}
+          mode={bulk.run.mode}
           platform={platform}
-          onClose={() => setBulkSyncMode(null)}
+          view={bulk.run.view}
+          autoMinimizeMs={
+            bulk.run.autoMinimize ? FIRST_RUN_MINIMIZE_MS : null
+          }
+          {...(bulk.run.replay === undefined ? {} : { replay: bulk.run.replay })}
+          onViewChange={bulk.setView}
+          onFinished={bulk.finish}
+          onClose={bulk.close}
         />
       )}
       {maintenance !== null && activeProfile !== null && (
@@ -1495,7 +1593,14 @@ export function Sidebar({
           profileId={activeProfile.id}
           platform={platform}
           onClose={() => setMaintenance(null)}
-          onRemoveWorktrees={(ids) => onRemoveWorktrees(ids, { confirmed: true })}
+          onRemoveWorktrees={(ids, options) =>
+            // The dialog renders the outcome inline, so no second notice.
+            onRemoveWorktrees(ids, {
+              confirmed: true,
+              reportFailures: false,
+              ...(options?.force === true ? { force: true } : {})
+            })
+          }
           {...(maintenance.worktrees === true
             ? { initialTab: "worktrees" as const }
             : maintenance.repo === undefined
@@ -1525,7 +1630,7 @@ export function Sidebar({
         <ContextMenu
           x={ctx.x}
           y={ctx.y}
-          items={contextItems(ctx.targets)}
+          items={contextItems(ctx.repo, ctx.targets)}
           onClose={() => setCtx(null)}
         />
       )}
@@ -1537,11 +1642,28 @@ export function Sidebar({
           label="Sidebar display options"
           triggerRef={optionsTriggerRef}
           items={[
+            ...(canGroup
+              ? [
+                  {
+                    type: "item" as const,
+                    label: "Group by folder",
+                    checked: groupByFolder,
+                    onSelect: () => setGroupByFolder((value) => !value)
+                  }
+                ]
+              : []),
             {
               type: "item",
-              label: "Group by folder",
-              checked: groupByFolder,
-              onSelect: () => setGroupByFolder((value) => !value)
+              label: "Repo index",
+              checked: repoIndexEnabled,
+              ...(repoIndexEnabled && repoIndexMenuHint(indexFit) !== undefined
+                ? { hint: repoIndexMenuHint(indexFit) as string }
+                : {}),
+              onSelect: () =>
+                setRepoIndexEnabled((value) => {
+                  writeRepoIndexEnabled(!value);
+                  return !value;
+                })
             }
           ]}
           onClose={() => setOptions(null)}
@@ -1549,5 +1671,6 @@ export function Sidebar({
       )}
       {tip.tooltipNode}
     </aside>
+    </FinishedAfterDaysContext.Provider>
   );
 }

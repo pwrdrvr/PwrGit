@@ -431,7 +431,10 @@ export class OpenPrService {
     }
     const all = (await this.forgeRemotes(path)) ?? [];
     const target = this.targetFor(repoId, number, all, forgeRepo);
-    const pr = target === null ? null : await this.findByNumber(repoId, number, target);
+    const [pr, refs] = await Promise.all([
+      target === null ? Promise.resolve(null) : this.findByNumber(repoId, number, target),
+      this.checkoutRefs(repoId, path, all)
+    ]);
     if (target === null || pr === null) {
       return err({
         kind: "remote",
@@ -443,7 +446,7 @@ export class OpenPrService {
     const location = locateChangeRequest(
       pr,
       target.forge.repo.kind,
-      await this.checkoutRefs(repoId, path, all),
+      refs,
       place
     );
     let fetched = false;
@@ -656,21 +659,23 @@ export class OpenPrService {
     if (from === "") {
       return unavailable(`${base.name} and this head share no history here. The checkout may be shallow.`);
     }
-    const log = await this.git(
-      [
-        "log",
-        "--no-color",
-        `--max-count=${VIEW_COMMITS_MAX + 1}`,
-        "--format=%H%x1f%an%x1f%at%x1f%s",
-        `${from}..${head.oid}`
-      ],
-      path
-    );
+    const [log, diff] = await Promise.all([
+      this.git(
+        [
+          "log",
+          "--no-color",
+          `--max-count=${VIEW_COMMITS_MAX + 1}`,
+          "--format=%H%x1f%an%x1f%at%x1f%s",
+          `${from}..${head.oid}`
+        ],
+        path
+      ),
+      this.git(["diff", "--no-color", "--no-ext-diff", "-M", from, head.oid], path)
+    ]);
     if (!log.ok || log.value.exitCode !== 0) {
       return unavailable("git could not list this change request's commits.");
     }
     const commits = parseViewLog(log.value.stdout);
-    const diff = await this.git(["diff", "--no-color", "--no-ext-diff", "-M", from, head.oid], path);
     if (!diff.ok || diff.value.exitCode !== 0) {
       return unavailable("git could not diff this change request.");
     }

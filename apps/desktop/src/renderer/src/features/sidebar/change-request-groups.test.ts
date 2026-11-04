@@ -7,6 +7,7 @@ import type {
   OpenChangeRequest
 } from "@pwrgit/shared";
 import {
+  changeRequestWords,
   forkOwner,
   groupChangeRequests,
   isFailingChangeRequest,
@@ -158,5 +159,18 @@ describe("forkOwner", () => {
     expect(forkOwner("octo-contrib/orbit")).toBe("octo-contrib");
     expect(forkOwner("group/sub/project")).toBe("group");
     expect(forkOwner("loner")).toBe("loner");
+  });
+});
+
+describe("changeRequestWords", () => {
+  it("has a short plural for a narrow sidebar heading", () => {
+    expect(changeRequestWords(null, "github").short).toBe("PRs");
+    expect(changeRequestWords(null, "gitlab").short).toBe("MRs");
+    expect(
+      changeRequestWords(
+        { remotes: [{ forge: "github" }, { forge: "gitlab" }] as ChangeRequestRemote[] },
+        "github"
+      ).short
+    ).toBe("PRs & MRs");
   });
 });

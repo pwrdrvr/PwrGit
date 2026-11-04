@@ -1606,7 +1606,14 @@ export async function installDownloadedAppUpdate(): Promise<AppUpdateInstallResu
       app.quit();
     } else {
       await beforeQuitAndInstall?.();
-      autoUpdater.quitAndInstall();
+      if (process.platform === "win32") {
+        // The NSIS installer is assisted (oneClick: false in
+        // electron-builder.yml), so a non-silent install shows its whole
+        // wizard. Install silently and relaunch the updated app afterwards.
+        autoUpdater.quitAndInstall(true, true);
+      } else {
+        autoUpdater.quitAndInstall();
+      }
     }
     return { status: "restarting" };
   } catch (err) {

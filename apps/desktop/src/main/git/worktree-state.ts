@@ -1,8 +1,13 @@
-import type { WorktreeForkSource, WorktreeState } from "@pwrgit/shared";
+import {
+  RECENT_MS,
+  type WorktreeForkSource,
+  type WorktreeState
+} from "@pwrgit/shared";
 import type { DB } from "../persistence/db";
-import { mapLimit } from "../util/map-limit";
+import { limitConcurrency, mapLimit } from "../util/map-limit";
 import { NO_OPTIONAL_LOCKS, requireExit0, type GitExec } from "./dugite";
 import { checkoutExists } from "./worktree-liveness";
+import { nestedWorktreePathspec } from "@pwrgit/mcp-server/nested-worktrees";
 import { WorktreeOperationQueue } from "./worktree-operation-queue";
 
 /** A probe found `branch`'s configured upstream deleted. */
@@ -95,6 +100,7 @@ type StateRow = {
   diverged_from_default: number;
   is_default_branch: number;
   last_activity_at: string | null;
+  last_authored_at: string | null;
   updated_at: string;
   upstream_gone: number;
   source_remote: string | null;
@@ -133,6 +139,7 @@ function rowToState(r: StateRow): WorktreeState {
     updatedAt: r.updated_at
   };
   if (r.last_activity_at !== null) s.lastActivityAt = r.last_activity_at;
+  if (!missing && r.last_authored_at !== null) s.lastAuthoredAt = r.last_authored_at;
   if (missing) s.missing = true;
   if (!missing && r.upstream_gone === 1) s.upstreamGone = true;
   const source = missing ? undefined : forkSourceFromRow(r);
@@ -167,7 +174,9 @@ export function forkSourceFromRow(r: {
 export type ForkSourceProbe = (
   repoId: string,
   repoPath: string,
-  worktreePath: string
+  worktreePath: string,
+  /** Use the state service's shared subprocess ceiling when supplied. */
+  git?: GitExec
 ) => Promise<WorktreeForkSource | null>;
 
 /** Did anything a surface draws move between two snapshots? */
@@ -193,6 +202,7 @@ export function stateChanged(a: WorktreeState, b: WorktreeState): boolean {
     a.divergedFromDefault !== b.divergedFromDefault ||
     a.isDefaultBranch !== b.isDefaultBranch ||
     a.lastActivityAt !== b.lastActivityAt ||
+    a.lastAuthoredAt !== b.lastAuthoredAt ||
     a.missing !== b.missing
   );
 }
@@ -217,14 +227,22 @@ export class WorktreeStateService {
 
   /** Worktrees whose removal is underway; counted so overlapping batches nest. */
   private readonly removalLocks = new Map<string, number>();
+  private readonly git: GitExec;
 
   constructor(
     private readonly db: DB,
-    private readonly git: GitExec,
+    git: GitExec,
     private readonly operations = new WorktreeOperationQueue()
-  ) {}
+  ) {
+    // Independent reads overlap without multiplying refreshMany's eight slots
+    // into eight subprocesses per worktree.
+    this.git = limitConcurrency(git, 8);
+  }
 
   private repoPathMissing: ((repoId: string) => void) | null = null;
+  private worktreePathMissing:
+    | ((worktreeId: string, repoId: string) => void)
+    | null = null;
   private upstreamGone: ((change: UpstreamGoneChange) => void) | null = null;
   private forkSource: ForkSourceProbe | null = null;
 
@@ -241,6 +259,17 @@ export class WorktreeStateService {
    */
   onRepoPathMissing(listener: (repoId: string) => void): void {
     this.repoPathMissing = listener;
+  }
+
+  /**
+   * Hear about a probe that finds a LINKED worktree's checkout gone. The
+   * row is flagged either way; the listener is how a repo re-index hears
+   * that git's record may now be one to drop (vanished-worktrees.ts).
+   */
+  onWorktreePathMissing(
+    listener: (worktreeId: string, repoId: string) => void
+  ): void {
+    this.worktreePathMissing = listener;
   }
 
   /**
@@ -282,16 +311,18 @@ export class WorktreeStateService {
   /**
    * The probe found no checkout behind the row. Flag it; `rowToState` reads
    * the counts as zero while the flag is set, and the stored snapshot is kept
-   * so a remounted volume resumes from it. Not pruned: a volume that is
-   * merely unmounted reads the same way, and the next successful probe
-   * clears the flag. A row that never had a snapshot gets a blank one — the
-   * refresher announces a flip by comparing snapshots, and null-to-null is
-   * not a change it can see.
+   * so a remounted volume resumes from it. The row itself is not dropped
+   * here: a linked worktree's listener re-indexes the repo, which drops it
+   * unless the folder may come back (vanished-worktrees.ts), and the next
+   * successful probe clears the flag. A row that never had a snapshot gets a
+   * blank one — the refresher announces a flip by comparing snapshots, and
+   * null-to-null is not a change it can see.
    */
   private markMissing(wt: WorktreeRow): WorktreeState | null {
     // A background rescan may already have pruned this row while Git ran.
     if (this.worktreeRow(wt.id) === null) return null;
     if (wt.is_primary === 1) this.repoPathMissing?.(wt.repo_id);
+    else this.worktreePathMissing?.(wt.id, wt.repo_id);
     this.db.transaction(() => {
       this.db
         .prepare("UPDATE worktrees SET missing = 1 WHERE id = ?")
@@ -495,7 +526,10 @@ export class WorktreeStateService {
         // Coarse dirtiness is also a checkout-safety signal. Dirty initialized
         // children must keep this count nonzero or a cached clean state can
         // suppress the branch-switch confirmation.
-        "--ignore-submodules=none"
+        "--ignore-submodules=none",
+        // An agent's worktree nested in this one (`.claude/worktrees/x`) is
+        // another checkout with its own row, not this one's dirt.
+        ...(await nestedWorktreePathspec(wt.path))
       ],
       wt.path,
       NO_OPTIONAL_LOCKS
@@ -534,7 +568,11 @@ export class WorktreeStateService {
     }
 
     let lastActivityAt: string | undefined;
-    const logRaw = await this.git(["log", "-1", "--format=%cI"], wt.path);
+    const [logRaw, lastAuthoredAt, def] = await Promise.all([
+      this.git(["log", "-1", "--format=%cI"], wt.path),
+      this.readLastAuthoredAt(wt.path),
+      this.resolveDefaultBranch(wt.repo_id, wt.repo_path)
+    ]);
     if (logRaw.ok && logRaw.value.exitCode === 0) {
       const iso = logRaw.value.stdout.trim();
       if (iso !== "") lastActivityAt = iso;
@@ -557,7 +595,6 @@ export class WorktreeStateService {
 
     // Staleness vs the repo's default branch.
     const branchName = liveBranch !== "" ? liveBranch : wt.branch;
-    const def = await this.resolveDefaultBranch(wt.repo_id, wt.repo_path);
     const isDefaultBranch = branchName === def.name;
     let behindDefault = 0;
     let mergedIntoDefault = false;
@@ -571,17 +608,13 @@ export class WorktreeStateService {
       if (!hasMergeBase) {
         divergedFromDefault = true;
       } else {
-        const bd = await this.git(
-          ["rev-list", "--count", `HEAD..${def.ref}`],
-          wt.path
-        );
+        const [bd, anc] = await Promise.all([
+          this.git(["rev-list", "--count", `HEAD..${def.ref}`], wt.path),
+          this.git(["merge-base", "--is-ancestor", "HEAD", def.ref], wt.path)
+        ]);
         if (bd.ok && bd.value.exitCode === 0) {
           behindDefault = Number(bd.value.stdout.trim()) || 0;
         }
-        const anc = await this.git(
-          ["merge-base", "--is-ancestor", "HEAD", def.ref],
-          wt.path
-        );
         mergedIntoDefault = anc.ok && anc.value.exitCode === 0;
       }
     }
@@ -591,7 +624,7 @@ export class WorktreeStateService {
     const source =
       this.forkSource === null
         ? null
-        : await this.forkSource(wt.repo_id, wt.repo_path, wt.path).catch(
+        : await this.forkSource(wt.repo_id, wt.repo_path, wt.path, this.git).catch(
             () => null
           );
 
@@ -615,6 +648,7 @@ export class WorktreeStateService {
       updatedAt: new Date().toISOString()
     };
     if (lastActivityAt !== undefined) state.lastActivityAt = lastActivityAt;
+    if (lastAuthoredAt !== undefined) state.lastAuthoredAt = lastAuthoredAt;
     if (parsed.upstreamGone) state.upstreamGone = true;
     if (source !== null) state.source = source;
 
@@ -641,6 +675,80 @@ export class WorktreeStateService {
     return state;
   }
 
+  /**
+   * Author time of the newest commit on HEAD by the repo's user.email within
+   * `RECENT_DAYS`, or undefined. HEAD's own date (`lastActivityAt`) moves
+   * with every pull, so it cannot say whether *you* worked here. The log is
+   * bounded by the window, and the identity is read only when it has rows.
+   */
+  private async readLastAuthoredAt(path: string): Promise<string | undefined> {
+    const sinceMs = Date.now() - RECENT_MS;
+    const since = new Date(sinceMs).toISOString();
+    const log = await this.git(
+      // %ae, not the mailmapped %aE: it is compared with the raw user.email.
+      ["log", `--since=${since}`, "--max-count=2000", "--format=%ae%x09%aI", "HEAD"],
+      path,
+      NO_OPTIONAL_LOCKS
+    );
+    if (!log.ok || log.value.exitCode !== 0) return undefined;
+    const rows = log.value.stdout.split("\n").filter((row) => row !== "");
+    if (rows.length === 0) return undefined;
+    const email = await this.git(["config", "--get", "user.email"], path, NO_OPTIONAL_LOCKS);
+    if (!email.ok || email.value.exitCode !== 0) return undefined;
+    const me = email.value.stdout.trim().toLowerCase();
+    if (me === "") return undefined;
+    for (const row of rows) {
+      const [author, at] = row.split("\t");
+      // `--since` filters by commit date; a rebased or amended old commit can
+      // carry an author date outside the window, which is not recent work.
+      if (author?.trim().toLowerCase() !== me || at === undefined) continue;
+      const authoredAt = Date.parse(at.trim());
+      // Newest first by commit date, so the first of yours in the window wins.
+      if (Number.isFinite(authoredAt) && authoredAt >= sinceMs) return at.trim();
+    }
+    return undefined;
+  }
+
+  /**
+   * Re-read `lastAuthoredAt` for every indexed worktree, on screen or not.
+   * `compute` runs for visible rows, and the Focused list decides what is
+   * visible, so without this a repo you committed in from a terminal never
+   * became Focused (nor joined Fetch/Pull recent). Cheap: one bounded log per
+   * worktree, plus `user.email` only when the window has commits. Returns the
+   * repos whose value moved, by profile, for `repo:changed`.
+   */
+  async sweepAuthored(concurrency = 4): Promise<Map<string, string[]>> {
+    const rows = this.db
+      .prepare(
+        `SELECT w.id, w.path, w.repo_id, r.profile_id, s.last_authored_at
+         FROM worktrees w
+         JOIN repos r ON r.id = w.repo_id
+         JOIN worktree_state s ON s.worktree_id = w.id
+         WHERE w.missing = 0`
+      )
+      .all() as {
+      id: string;
+      path: string;
+      repo_id: string;
+      profile_id: string;
+      last_authored_at: string | null;
+    }[];
+    const moved = new Map<string, Set<string>>();
+    const update = this.db.prepare(
+      "UPDATE worktree_state SET last_authored_at = ? WHERE worktree_id = ?"
+    );
+    await mapLimit(rows, concurrency, async (row) => {
+      if (!checkoutExists(row.path)) return;
+      const next = (await this.readLastAuthoredAt(row.path)) ?? null;
+      if (next === row.last_authored_at) return;
+      update.run(next, row.id);
+      const repos = moved.get(row.profile_id) ?? new Set<string>();
+      repos.add(row.repo_id);
+      moved.set(row.profile_id, repos);
+    });
+    return new Map([...moved].map(([profile, repos]) => [profile, [...repos]]));
+  }
+
   /** Background refresh for many worktrees, concurrency-bounded. */
   async refreshMany(worktreeIds: string[], concurrency = 8): Promise<void> {
     await mapLimit(worktreeIds, concurrency, async (id) => {
@@ -654,11 +762,11 @@ export class WorktreeStateService {
         `INSERT INTO worktree_state
            (worktree_id, branch, head, has_upstream, ahead, behind, dirty,
             behind_default, default_branch, merged_into_default, diverged_from_default,
-            is_default_branch, last_activity_at, updated_at, upstream_gone,
+            is_default_branch, last_activity_at, last_authored_at, updated_at, upstream_gone,
             source_remote, source_label, source_parent, source_ahead, source_behind)
          VALUES (@worktree_id, @branch, @head, @has_upstream, @ahead, @behind, @dirty,
                  @behind_default, @default_branch, @merged_into_default, @diverged_from_default,
-                 @is_default_branch, @last_activity_at, @updated_at, @upstream_gone,
+                 @is_default_branch, @last_activity_at, @last_authored_at, @updated_at, @upstream_gone,
                  @source_remote, @source_label, @source_parent, @source_ahead, @source_behind)
          ON CONFLICT(worktree_id) DO UPDATE SET
            branch = excluded.branch, head = excluded.head,
@@ -669,7 +777,8 @@ export class WorktreeStateService {
            merged_into_default = excluded.merged_into_default,
            diverged_from_default = excluded.diverged_from_default,
            is_default_branch = excluded.is_default_branch,
-           last_activity_at = excluded.last_activity_at, updated_at = excluded.updated_at,
+           last_activity_at = excluded.last_activity_at,
+           last_authored_at = excluded.last_authored_at, updated_at = excluded.updated_at,
            upstream_gone = excluded.upstream_gone,
            source_remote = excluded.source_remote, source_label = excluded.source_label,
            source_parent = excluded.source_parent, source_ahead = excluded.source_ahead,
@@ -689,6 +798,7 @@ export class WorktreeStateService {
         diverged_from_default: s.divergedFromDefault ? 1 : 0,
         is_default_branch: s.isDefaultBranch ? 1 : 0,
         last_activity_at: s.lastActivityAt ?? null,
+        last_authored_at: s.lastAuthoredAt ?? null,
         updated_at: s.updatedAt,
         upstream_gone: s.upstreamGone === true ? 1 : 0,
         source_remote: s.source?.remote ?? null,
