@@ -560,6 +560,10 @@ describe("dryRunRebase (disposable clone)", () => {
     chmodSync(hook, 0o755);
     git(repo, ["config", "commit.gpgSign", "true"]);
     git(repo, ["config", "user.signingKey", "missing-test-key"]);
+    // Node rejects GPG's flags immediately on every platform. This controlled
+    // signer refusal keeps the test independent of GPG agents and keyrings.
+    git(repo, ["config", "gpg.format", "openpgp"]);
+    git(repo, ["config", "gpg.program", process.execPath]);
     const commits = topCommits(repo, 3);
 
     // The check's commits are thrown away, so it never asks the signer.
@@ -590,6 +594,7 @@ describe("dryRunRebase (disposable clone)", () => {
     expect(applied.ok).toBe(false);
     if (applied.ok) return;
     expect(applied.error.code).toBe("signing_failed");
+    expect(applied.error.detail).toContain("bad option: --status-fd");
     expect(applied.error.message).toMatch(/restored unchanged/);
     expect(gitOut(repo, ["rev-parse", "HEAD"])).toBe(checked.value.sourceHead);
     expect(gitOut(repo, ["status", "--porcelain"])).toBe("");
