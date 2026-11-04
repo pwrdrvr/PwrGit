@@ -366,3 +366,52 @@ describe("GitRuntimeSettings", () => {
     expect(status?.classList.contains("settings-empty")).toBe(true);
   });
 });
+
+describe("Copy-on-write checkout", () => {
+  const PWRGIT_BUNDLE: Status = {
+    ...HEALTHY,
+    candidates: HEALTHY.candidates.map((candidate) =>
+      candidate.source === "bundled"
+        ? { ...candidate, git: "git version 2.56.0-dev-pwrgit.2", reflink: { checkout: true, reshare: true } }
+        : { ...candidate, reflink: { checkout: false, reshare: false } }
+    )
+  };
+  const onChange = vi.fn<(enabled: boolean) => void>();
+
+  async function renderSwitch(status: Status, enabled = true): Promise<HTMLButtonElement> {
+    mocks.dispatch.mockResolvedValue(ok(status));
+    await act(async () => {
+      root.render(<GitRuntimeSettings reflinkCheckout={{ enabled, saving: false, onChange }} />);
+    });
+    return field("Copy-on-write checkout").querySelector<HTMLButtonElement>("[role=switch]")!;
+  }
+
+  it("works while PwrGit's Git is in use, and tags the installs that can clone", async () => {
+    const toggle = await renderSwitch(PWRGIT_BUNDLE);
+    expect(toggle.disabled).toBe(false);
+    expect(toggle.getAttribute("aria-checked")).toBe("true");
+    expect(rows()[0]?.meta).toBe("Bundled · 2.56.0-dev-pwrgit.2 · LFS 3.6.9 · Copy-on-write");
+    expect(rows()[1]?.meta).toBe("Homebrew · 2.40.9 · LFS 3.5.9");
+    await act(async () => toggle.click());
+    expect(onChange).toHaveBeenCalledWith(false);
+  });
+
+  it("is shown off and disabled with another Git, and offers PwrGit's", async () => {
+    const toggle = await renderSwitch({ ...PWRGIT_BUNDLE, active: "installed", path: "/fixture/homebrew/bin/git" });
+    expect(toggle.disabled).toBe(true);
+    expect(toggle.getAttribute("aria-checked")).toBe("false");
+    expect(field("Copy-on-write checkout").textContent).toContain(
+      "Needs PwrGit’s Git. The Git in use (2.40.9, Homebrew) can’t clone files."
+    );
+    mocks.dispatch.mockResolvedValue(ok(PWRGIT_BUNDLE));
+    await act(async () => button("Use PwrGit’s Git").click());
+    expect(mocks.dispatch).toHaveBeenCalledWith("git:selectRuntime", { path: null });
+  });
+
+  it("says so when no Git here can clone", async () => {
+    const toggle = await renderSwitch(HEALTHY);
+    expect(toggle.disabled).toBe(true);
+    expect(field("Copy-on-write checkout").textContent).toContain("no Git found here can");
+    expect(container.textContent).not.toContain("Use PwrGit’s Git");
+  });
+});

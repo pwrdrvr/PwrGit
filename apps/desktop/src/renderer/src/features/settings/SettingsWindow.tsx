@@ -519,6 +519,9 @@ function SettingsSectionBody(props: {
         onSidebarDensityChange={(sidebarDensity) => {
           update({ general: { sidebarDensity } });
         }}
+        onReflinkCheckoutChange={(gitReflinkCheckout) => {
+          update({ general: { gitReflinkCheckout } });
+        }}
       />
     );
   }

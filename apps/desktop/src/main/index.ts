@@ -51,8 +51,8 @@ import {
   type DiagnosticsCopyDeps
 } from "./diagnostics-copy";
 import { registerDialogHandlers } from "./dialog-handlers";
-import { registerGitRuntimeHandlers } from "./git/runtime-status";
-import { configureBundledGit, configureBundledGitConfig, execGit, useInstalledGit } from "./git/dugite";
+import { refreshActiveGitReflink, registerGitRuntimeHandlers } from "./git/runtime-status";
+import { configureBundledGit, configureBundledGitConfig, execGit, useInstalledGit, useReflinkCheckout } from "./git/dugite";
 import { openExternalUrlFromMenu } from "./external-links";
 import { registerBranchHandlers } from "./git/branch-handlers";
 import { registerBulkSyncHandlers } from "./git/bulk-sync-handlers";
@@ -257,6 +257,15 @@ const settings = new SettingsService(
 configureBundledGitConfig(join(app.getPath("userData"), "git"));
 const storedGitPath = settings.get().gitPath;
 useInstalledGit(typeof storedGitPath === "string" && storedGitPath.trim() !== "" ? storedGitPath : null);
+// Copy-on-write checkout: the switch is read now and on every settings write;
+// the Git's support arrives with `refreshActiveGitReflink` below.
+const applyReflinkCheckout = (): void =>
+  useReflinkCheckout(settings.get().general?.gitReflinkCheckout ?? GENERAL_DEFAULTS.gitReflinkCheckout);
+applyReflinkCheckout();
+settings.onWrite(applyReflinkCheckout);
+void refreshActiveGitReflink().catch((cause: unknown) =>
+  logMain("warn", "git", `copy-on-write probe failed: ${cause instanceof Error ? cause.message : String(cause)}`)
+);
 const storedTheme = settings.get().general?.theme;
 // Assigned once the window registries exist (below). A window with a palette
 // of its own — a profile window, or an auxiliary window that borrowed a
@@ -1243,7 +1252,10 @@ if (!gotSingleInstanceLock) {
       refresher,
       worktreeOperations
     );
-    const maintenanceHandlers = registerMaintenanceHandlers(bus, db, execGit, worktreeOperations, indexer, prService);
+    const maintenanceHandlers = registerMaintenanceHandlers(
+      bus, db, execGit, worktreeOperations, indexer, prService, Date.now,
+      async (repoId, repoPath) => (await stateService.resolveDefaultBranch(repoId, repoPath)).name || null
+    );
     registerGraphHandlers(bus, db, stateService);
     registerChangesHandlers(bus, db, refresher, worktreeOperations);
     registerRepositorySetupHandlers(bus, db, worktreeOperations);

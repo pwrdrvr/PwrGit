@@ -25,6 +25,7 @@ import { useModal } from "../../lib/useModal";
 import type { RemoveWorktreesOutcome } from "../../state/useRepoTree";
 import { MaintenancePlanForm, MaintenanceSteps, MaintenanceRulesApplied, type MaintenancePlan, type StepKey, type StepResult } from "./MaintenancePlan";
 import { PruneWorktreesPanel } from "./PruneWorktreesPanel";
+import { ClonesPanel } from "./ClonesPanel";
 import { BulkSyncStatus, StatusMark } from "./BulkSyncStatus";
 import { countOutcomes } from "./bulk-sync-progress";
 import {
@@ -129,7 +130,7 @@ export function MaintenanceDialog({
     ids: string[],
     options?: { force?: boolean }
   ) => Promise<RemoveWorktreesOutcome>;
-  initialTab?: "combined" | "gc" | "branches" | "worktrees";
+  initialTab?: "combined" | "gc" | "branches" | "worktrees" | "clones";
   /** Review one repository only — the refs browser's "Clean up finished
    *  branches…" opens the dialog on the repository it was showing. */
   repoScope?: { id: string; name: string } | undefined;
@@ -138,8 +139,11 @@ export function MaintenanceDialog({
   autoReview?: boolean;
   now?: () => number;
 }) {
-  const [tab, setTab] = useState<"combined" | "gc" | "branches" | "worktrees">(initialTab);
-  const [worktreesBusy, setWorktreesBusy] = useState(false);
+  const [tab, setTab] = useState<"combined" | "gc" | "branches" | "worktrees" | "clones">(initialTab);
+  const [prunerBusy, setWorktreesBusy] = useState(false);
+  const [clonesBusy, setClonesBusy] = useState(false);
+  /** A panel that owns its own run (the pruner, Clones) holds the tabs. */
+  const worktreesBusy = prunerBusy || clonesBusy;
   const [worktreeCandidateCount, setWorktreeCandidateCount] = useState<number | null>(null);
   const [scopeRepoCount, setScopeRepoCount] = useState<number | null>(null);
   const [plan, setPlan] = useState<MaintenancePlan>({ worktrees: true, branches: true, gc: true });
@@ -735,6 +739,11 @@ export function MaintenanceDialog({
               disabled={running || worktreesBusy || workflowActive}
               onClick={() => setTab("worktrees")}>Worktrees</button>
           )}
+          {repoScope === undefined && (
+            <button aria-pressed={tab === "clones"}
+              disabled={running || worktreesBusy || workflowActive}
+              onClick={() => setTab("clones")}>Clones</button>
+          )}
           <button
             aria-pressed={tab === "branches"}
             disabled={running || worktreesBusy || workflowActive}
@@ -766,6 +775,8 @@ export function MaintenanceDialog({
                 onClick={analyze}>Start</button>
             </div>
           </>
+        ) : tab === "clones" ? (
+          <ClonesPanel profileId={profileId} platform={platform} onClose={onClose} onBusyChange={setClonesBusy} />
         ) : tab === "worktrees" || (tab === "combined" && workflowStep === "worktrees") ? (
           <PruneWorktreesPanel
             profileId={profileId}

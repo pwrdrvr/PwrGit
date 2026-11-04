@@ -5,11 +5,14 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import type { PwrGitError } from "@pwrgit/shared";
 import {
+  activeGitPath,
   execGit,
   execGitRecords,
   gitExecutionEnvironment,
   gitProcessInvocation,
-  sanitizeGitLogDetail
+  noteGitReflinkSupport,
+  sanitizeGitLogDetail,
+  useReflinkCheckout
 } from "./dugite";
 
 describe("gitExecutionEnvironment", () => {
@@ -48,6 +51,34 @@ describe("gitProcessInvocation", () => {
       args: ["-C", worktree, "status", "--short"],
       processCwd: tmpdir()
     });
+  });
+});
+
+describe("copy-on-write checkout flag", () => {
+  const worktree = join(tmpdir(), "fixture", "worktree");
+  const capable = { checkout: true, reshare: true };
+
+  it("prefixes -c checkout.reflink=true only while the switch is on and the Git in use supports it", () => {
+    try {
+      noteGitReflinkSupport(activeGitPath(), "git version 2.56.0-dev-pwrgit.2", capable);
+      useReflinkCheckout(true);
+      expect(gitProcessInvocation(["switch", "x"], worktree).args).toEqual([
+        "-c", "checkout.reflink=true", "-C", worktree, "switch", "x"
+      ]);
+      // Switched off: nothing, so the reader's own config decides.
+      useReflinkCheckout(false);
+      expect(gitProcessInvocation(["switch", "x"], worktree).args[0]).toBe("-C");
+      // A Git without support never gets the flag.
+      useReflinkCheckout(true);
+      noteGitReflinkSupport(activeGitPath(), "git version 2.56.0", { checkout: false, reshare: false });
+      expect(gitProcessInvocation(["switch", "x"], worktree).args[0]).toBe("-C");
+      // A probe of some other Git says nothing about the one in use.
+      noteGitReflinkSupport("/elsewhere/git", "git version 2.56.0-dev-pwrgit.2", capable);
+      expect(gitProcessInvocation(["switch", "x"], worktree).args[0]).toBe("-C");
+    } finally {
+      useReflinkCheckout(false);
+      noteGitReflinkSupport("/nowhere", null, { checkout: false, reshare: false });
+    }
   });
 });
 

@@ -105,6 +105,12 @@ export type MaintenanceAction =
        *  receipt can offer the clean-up. Absent: no count. */
       branchOptions?: BranchCleanupOptions;
     }
+  | {
+      /** Maintenance › Clones: `git worktree reflink` on every linked
+       *  worktree, after optionally fast-forwarding each main checkout. */
+      kind: "reshare";
+      updateMain: boolean;
+    }
   | { kind: "scan-branches"; options?: BranchCleanupOptions }
   | {
       kind: "delete-branches";
@@ -120,6 +126,46 @@ export type DeletedBranchResult = {
   message: string;
 };
 
+/** What happened to the main checkout (the clone source) before sharing. */
+export type ReshareMainCheckout = {
+  outcome:
+    /** Fast-forwarded to its upstream. */
+    | "updated"
+    | "up_to_date"
+    /** Deliberately not touched: off the default branch, dirty, diverged… */
+    | "left"
+    | "failed"
+    /** The reader unticked "Update main checkouts first". */
+    | "not_requested";
+  /** The branch the main checkout is on; absent when detached. */
+  branch?: string;
+  defaultBranch?: string;
+  message: string;
+};
+
+/** One linked worktree's `git worktree reflink --porcelain` answer. */
+export type ReshareWorktreeResult = {
+  worktreeId: string;
+  path: string;
+  branch: string;
+  outcome: "reshared" | "already_shared" | "skipped" | "failed";
+  message: string;
+  /** Files Git turned back into clones. */
+  reshared: number;
+  alreadyShared: number;
+  /** Files left as they are: edited, no matching donor, unsupported. */
+  skipped: number;
+  failed: number;
+  /** Git's `observed-private-reduction`: file data that stopped being
+   *  private. Null when Git could not measure allocation. Not free space. */
+  sharedBytes: number | null;
+};
+
+export type ReshareRepoReport = {
+  main: ReshareMainCheckout;
+  worktrees: ReshareWorktreeResult[];
+};
+
 export type MaintenanceRepoResult = {
   repo: MaintenanceRepo;
   outcome: "success" | "partial" | "skipped" | "failed" | "cancelled";
@@ -130,6 +176,7 @@ export type MaintenanceRepoResult = {
   /** Gone branches the review did not offer, each with its reason. */
   kept?: KeptBranch[];
   branches?: DeletedBranchResult[];
+  reshare?: ReshareRepoReport;
 };
 export type MaintenanceSummary = {
   operationId: string;

@@ -16,7 +16,7 @@ import {
   useInstalledGit,
   type GitLaunch
 } from "./dugite";
-import { probeGitRuntime, readGitRuntimeStatus, selectGitRuntime, type GitDiscoveryDeps } from "./runtime-status";
+import { parseReflinkSupport, probeGitRuntime, readGitRuntimeStatus, selectGitRuntime, type GitDiscoveryDeps } from "./runtime-status";
 
 const posix = process.platform !== "win32";
 const scratch: string[] = [];
@@ -328,5 +328,21 @@ describe("selectGitRuntime", () => {
       expect(store.update).toHaveBeenCalledWith({ gitPath: undefined });
       expect(installedGitSelection()).toBeNull();
     }
+  });
+});
+
+describe("parseReflinkSupport", () => {
+  it("reads checkout and re-share support from git worktree -h", () => {
+    const runtime2 = [
+      "usage: git worktree add [-f] [--detach] [--checkout] [--lock [--reason <string>]]",
+      "                        [--[no-]reflink] [--reflink-source=<worktree>]",
+      "   or: git worktree list [-v | --porcelain [-z]]",
+      "   or: git worktree reflink [-n] [-v | --porcelain [-z]]"
+    ].join("\n");
+    expect(parseReflinkSupport(runtime2)).toEqual({ checkout: true, reshare: true });
+    expect(parseReflinkSupport(runtime2.split("\n").slice(0, 3).join("\n"))).toEqual({ checkout: true, reshare: false });
+    expect(
+      parseReflinkSupport("usage: git worktree add [-f] [--detach] [--checkout]\n   or: git worktree list")
+    ).toEqual({ checkout: false, reshare: false });
   });
 });

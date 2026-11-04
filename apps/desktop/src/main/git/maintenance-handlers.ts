@@ -31,6 +31,9 @@ import {
   type BranchPrEvidence
 } from "./repository-maintenance";
 import { visibleRepoSql } from "./hidden-repos";
+import { activeGitReflinkProbe } from "./dugite";
+import { refreshActiveGitReflink } from "./runtime-status";
+import { refreshRepositoryClones, softPullMainCheckout, type ReshareWorktreeRow } from "./worktree-reshare";
 
 export function maintenanceRepos(
   db: DB,
@@ -127,7 +130,10 @@ export function registerMaintenanceHandlers(
   operations: WorktreeOperationQueue,
   indexer: Pick<RepoIndexer, "refreshRepoWorktrees">,
   prs?: Pick<PrService, "refreshRepo">,
-  now: () => number = Date.now
+  now: () => number = Date.now,
+  /** The repository's default branch name, for Clones' main-checkout
+   *  update. Null leaves every main checkout as it is. */
+  defaultBranch: (repoId: string, repoPath: string) => Promise<string | null> = async () => null
 ): { releaseWebContents: (id: number) => void } {
   // One sweep across all windows, regardless of operation ids or profiles.
   // Renderer bugs cannot create an unbounded GC process/queue per click.
@@ -174,7 +180,8 @@ export function registerMaintenanceHandlers(
   bus.register("maintenance:run", async (req, ctx) => {
     if (
       !req.operationId?.trim() ||
-      !["gc", "scan-branches", "delete-branches"].includes(req.action?.kind) ||
+      !["gc", "scan-branches", "delete-branches", "reshare"].includes(req.action?.kind) ||
+      (req.action.kind === "reshare" && typeof req.action.updateMain !== "boolean") ||
       (req.action.kind === "gc" &&
         !["standard", "keep-largest", "aggressive"].includes(req.action.mode))
     ) {
@@ -191,6 +198,18 @@ export function registerMaintenanceHandlers(
         message:
           "Repository maintenance is already running in another dialog. Wait for it to finish."
       });
+    if (req.action.kind === "reshare") {
+      // Ask the Git in use, not the renderer: Settings can switch it between
+      // the tab opening and Start.
+      if (activeGitReflinkProbe() === null) await refreshActiveGitReflink();
+      if (activeGitReflinkProbe()?.support.reshare !== true)
+        return err({
+          kind: "git",
+          code: "reflink_unavailable",
+          message:
+            "Refreshing clones needs PwrGit’s Git with git worktree reflink. Choose it in Settings › General › Git runtime."
+        });
+    }
     const knownRepos = maintenanceRepos(db, req);
     if (knownRepos === null)
       return err({
@@ -324,6 +343,46 @@ export function registerMaintenanceHandlers(
                     prs: branchPrEvidence(db, repo.id),
                     now: now()
                   });
+                if (action.kind === "reshare") {
+                  const rows = db
+                    .prepare(
+                      `SELECT id, path, branch, is_primary AS isPrimary, missing, locked
+                       FROM worktrees WHERE repo_id = ? ORDER BY is_primary DESC, path`
+                    )
+                    .all(repo.id) as Array<{
+                    id: string;
+                    path: string;
+                    branch: string;
+                    isPrimary: number;
+                    missing: number;
+                    locked: number;
+                  }>;
+                  const worktrees: ReshareWorktreeRow[] = rows.map((row) => ({
+                    id: row.id,
+                    path: row.path,
+                    branch: row.branch,
+                    isPrimary: row.isPrimary === 1,
+                    missing: row.missing === 1,
+                    locked: row.locked === 1
+                  }));
+                  return refreshRepositoryClones({
+                    git,
+                    repo,
+                    worktrees,
+                    updateMain: action.updateMain,
+                    signal: controller.signal,
+                    report,
+                    defaultBranch: () => defaultBranch(repo.id, repo.path),
+                    softPull: (primary) =>
+                      softPullMainCheckout(git, repo, primary, {
+                        operationId: `${req.operationId}:${repo.id}`,
+                        signal: controller.signal,
+                        runWorktree: (worktreeId, operation) => operations.run(worktreeId, operation),
+                        report
+                      }),
+                    runWorktree: (worktreeId, operation) => operations.run(worktreeId, operation)
+                  });
+                }
                 if (action.kind === "gc") {
                   report("Measuring object storage before collection…");
                   const beforeBytes = await objectStorageBytes(git, repo.path);
@@ -488,6 +547,16 @@ export function registerMaintenanceHandlers(
                 });
               }
             );
+            if (action.kind === "reshare" && result.reshare?.main.outcome === "updated") {
+              // The main checkout moved; let the sidebar and graph catch up.
+              try {
+                await indexer.refreshRepoWorktrees(repo.id);
+              } catch {
+                // Best effort: the re-share already finished.
+              }
+              emitEvent("graph:changed", { repoId: repo.id });
+              emitEvent("repo:changed", { profileId: repo.profileId, repoIds: [repo.id] });
+            }
             if (action.kind === "delete-branches") {
               // A failed metadata cleanup can follow a successful ref change,
               // so refresh even when the deletion result was not successful.
