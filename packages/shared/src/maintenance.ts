@@ -191,11 +191,121 @@ export type MaintenanceSummary = {
 export type MaintenanceProgress = {
   operationId: string;
   profileId: string;
-  phase: "starting" | "repo_started" | "repo_progress" | "repo_completed";
+  phase:
+    | "starting"
+    | "repo_started"
+    | "repo_progress"
+    | "repo_completed"
+    /** The run is over. Carries the summary `maintenance:run` returns, for a
+     *  window that reattached and so is not awaiting that answer. No summary:
+     *  the run stopped on an error. */
+    | "finished";
+  /** Counts up from 1 within a run. A reattaching window skips any event at
+   *  or below its snapshot's `seq`: the snapshot already holds it. */
+  seq?: number;
   repos?: MaintenanceRepo[];
   /** With `starting`, Clones only: see `MaintenanceSummary.noWorktrees`. */
   noWorktrees?: MaintenanceRepo[];
   repo?: MaintenanceRepo;
   detail?: string;
   result?: MaintenanceRepoResult;
+  summary?: MaintenanceSummary;
 };
+
+/**
+ * A run as its progress events have drawn it so far. Main keeps one for the
+ * live run so a window that reloads mid-run can draw what it missed; the
+ * dialog folds the same events into the same shape. Plain arrays and
+ * records, so it crosses IPC as is.
+ */
+export type MaintenanceRunView = {
+  repos: MaintenanceRepo[];
+  noWorktrees?: MaintenanceRepo[];
+  /** Repositories running now, in the order they started. */
+  running: string[];
+  /** Each repository's latest progress line, by repository id. */
+  details: Record<string, string>;
+  /** Finished repositories, in the order they finished. */
+  results: MaintenanceRepoResult[];
+  /** `seq` of the last event folded in; 0 before any. */
+  seq: number;
+};
+
+export const EMPTY_MAINTENANCE_RUN_VIEW: MaintenanceRunView = {
+  repos: [],
+  running: [],
+  details: {},
+  results: [],
+  seq: 0
+};
+
+/** Fold one progress event into a run's view. An event the view already
+ *  holds (`seq` at or below the view's) changes nothing. */
+export function foldMaintenanceProgress(
+  view: MaintenanceRunView,
+  event: MaintenanceProgress
+): MaintenanceRunView {
+  if (event.seq !== undefined && event.seq <= view.seq) return view;
+  let next: MaintenanceRunView = { ...view, seq: event.seq ?? view.seq };
+  if (event.repos !== undefined) next.repos = event.repos;
+  if (event.noWorktrees !== undefined) next.noWorktrees = event.noWorktrees;
+  const repo = event.repo;
+  if (event.phase === "repo_started" && repo !== undefined && !next.running.includes(repo.id))
+    next.running = [...next.running, repo.id];
+  if (repo !== undefined && event.detail !== undefined)
+    next.details = { ...next.details, [repo.id]: event.detail };
+  const result = event.result;
+  if (result !== undefined) {
+    next = {
+      ...next,
+      results: [...next.results.filter((row) => row.repo.id !== result.repo.id), result],
+      running: next.running.filter((id) => id !== result.repo.id)
+    };
+  }
+  return next;
+}
+
+/** A finished run's view: its summary's rows, nothing running. Keeps the
+ *  progress lines already drawn. */
+export function maintenanceViewFromSummary(
+  summary: MaintenanceSummary,
+  prior: MaintenanceRunView = EMPTY_MAINTENANCE_RUN_VIEW
+): MaintenanceRunView {
+  return {
+    repos: summary.results.map((result) => result.repo),
+    ...(summary.noWorktrees === undefined ? {} : { noWorktrees: summary.noWorktrees }),
+    running: [],
+    details: prior.details,
+    results: summary.results,
+    seq: prior.seq
+  };
+}
+
+/** What `maintenance:current` knows about a run besides its progress. */
+export type MaintenanceRunRecord = {
+  operationId: string;
+  profileId: string;
+  allProfiles: boolean;
+  repoIds?: string[];
+  action: MaintenanceAction;
+  startedAt: string;
+  /** Started by the window asking. Only that window can cancel it, and it
+   *  reopens the dialog by itself after a reload. */
+  ownWindow: boolean;
+};
+
+/**
+ * The run a Maintenance dialog should reattach to, for one profile's window.
+ * `finished` is the profile's last run, kept in memory; `seen` turns true
+ * once a dialog has drawn its receipt, so a run that ended while no dialog
+ * was attached is shown once.
+ */
+export type MaintenanceCurrent =
+  | { state: "running"; run: MaintenanceRunRecord; view: MaintenanceRunView }
+  | {
+      state: "finished";
+      run: MaintenanceRunRecord;
+      summary: MaintenanceSummary;
+      seen: boolean;
+    }
+  | null;

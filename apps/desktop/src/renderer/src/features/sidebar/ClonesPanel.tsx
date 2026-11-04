@@ -1,11 +1,16 @@
-import { useEffect, useRef, useState } from "react";
-import type {
-  GitReflinkStatus,
-  MaintenanceRepo,
-  MaintenanceRepoResult,
-  MaintenanceSummary
+import { useEffect, useMemo, useRef, useState } from "react";
+import {
+  EMPTY_MAINTENANCE_RUN_VIEW,
+  foldMaintenanceProgress,
+  maintenanceViewFromSummary,
+  type GitReflinkStatus,
+  type MaintenanceRepo,
+  type MaintenanceRepoResult,
+  type MaintenanceRunView,
+  type MaintenanceSummary
 } from "@pwrgit/shared";
 import { dispatch, subscribe } from "../../lib/pwrgit";
+import { attachMaintenanceRun, markMaintenanceSeen } from "./maintenance-attach";
 import { displayPath } from "../../lib/platform";
 import { formatElapsed } from "../remote/remote-activity";
 import { BulkSyncStatus, StatusMark } from "./BulkSyncStatus";
@@ -87,16 +92,24 @@ export function ClonesPanel({
   const [allProfiles, setAllProfiles] = useState(false);
   const [running, setRunning] = useState(false);
   const [cancelling, setCancelling] = useState(false);
-  const [repos, setRepos] = useState<MaintenanceRepo[]>([]);
-  const [noWorktrees, setNoWorktrees] = useState<MaintenanceRepo[]>([]);
-  const [current, setCurrent] = useState<Set<string>>(new Set());
-  const [details, setDetails] = useState<Map<string, string>>(new Map());
-  const [results, setResults] = useState<Map<string, MaintenanceRepoResult>>(new Map());
+  /** The run as its progress events drew it: the same fold main keeps for
+   *  a window that reattaches. */
+  const [view, setView] = useState<MaintenanceRunView>(EMPTY_MAINTENANCE_RUN_VIEW);
   const [summary, setSummary] = useState<MaintenanceSummary | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [startedAt, setStartedAt] = useState(0);
+  /** Main has said whether a run is here to reattach to. */
+  const [attachChecked, setAttachChecked] = useState(false);
   const operation = useRef<string | null>(null);
   const live = useRef(true);
+  const repos = view.repos;
+  const noWorktrees = view.noWorktrees ?? [];
+  const current = useMemo(() => new Set(view.running), [view.running]);
+  const details = useMemo(() => new Map(Object.entries(view.details)), [view.details]);
+  const results = useMemo(
+    () => new Map(view.results.map((result) => [result.repo.id, result])),
+    [view.results]
+  );
 
   useEffect(() => {
     live.current = true;
@@ -118,6 +131,45 @@ export function ClonesPanel({
 
   useEffect(() => onBusyChange(running), [running, onBusyChange]);
 
+  // A window reload loses this panel but not main's run: pick a live
+  // Clones run up again, or show the receipt of one that ended unattended.
+  useEffect(
+    () =>
+      attachMaintenanceRun(profileId, {
+        claim: (found) => {
+          setAttachChecked(true);
+          return found?.run.action.kind === "reshare";
+        },
+        running: (run, seeded) => {
+          operation.current = run.operationId;
+          if (run.action.kind === "reshare") setUpdateMain(run.action.updateMain);
+          setAllProfiles(run.allProfiles);
+          setRunning(true);
+          setCancelling(false);
+          setSummary(null);
+          setError(null);
+          setStartedAt(Date.parse(run.startedAt));
+          setView(seeded);
+        },
+        progress: setView,
+        finished: (run, finishedSummary) => {
+          operation.current = null;
+          if (run.action.kind === "reshare") setUpdateMain(run.action.updateMain);
+          setAllProfiles(run.allProfiles);
+          setRunning(false);
+          setStartedAt(Date.parse(run.startedAt));
+          if (finishedSummary === null) {
+            setView((old) => ({ ...old, running: [] }));
+            setError("Refreshing clones stopped before it finished. See Help › Logs.");
+          } else {
+            setSummary(finishedSummary);
+            setView((old) => maintenanceViewFromSummary(finishedSummary, old));
+          }
+        }
+      }),
+    [profileId]
+  );
+
   const start = async (): Promise<void> => {
     if (operation.current !== null) return;
     const operationId = crypto.randomUUID();
@@ -126,31 +178,11 @@ export function ClonesPanel({
     setCancelling(false);
     setSummary(null);
     setError(null);
-    setRepos([]);
-    setNoWorktrees([]);
-    setCurrent(new Set());
-    setDetails(new Map());
-    setResults(new Map());
+    setView(EMPTY_MAINTENANCE_RUN_VIEW);
     setStartedAt(Date.now());
     const off = subscribe("maintenance:progress", (event) => {
       if (!live.current || event.operationId !== operationId || event.profileId !== profileId) return;
-      if (event.repos !== undefined) setRepos(event.repos);
-      if (event.noWorktrees !== undefined) setNoWorktrees(event.noWorktrees);
-      const repo = event.repo;
-      if (event.phase === "repo_started" && repo !== undefined) setCurrent((old) => new Set(old).add(repo.id));
-      if (repo !== undefined && event.detail !== undefined) {
-        const detail = event.detail;
-        setDetails((old) => new Map(old).set(repo.id, detail));
-      }
-      const result = event.result;
-      if (result !== undefined) {
-        setResults((old) => new Map(old).set(result.repo.id, result));
-        setCurrent((old) => {
-          const next = new Set(old);
-          next.delete(result.repo.id);
-          return next;
-        });
-      }
+      setView((old) => foldMaintenanceProgress(old, event));
     });
     try {
       const response = await dispatch("maintenance:run", {
@@ -161,10 +193,9 @@ export function ClonesPanel({
       });
       if (!live.current) return;
       if (response.ok) {
-        setSummary(response.value);
-        setRepos(response.value.results.map((result) => result.repo));
-        setNoWorktrees(response.value.noWorktrees ?? []);
-        setResults(new Map(response.value.results.map((result) => [result.repo.id, result])));
+        const finished = response.value;
+        setSummary(finished);
+        setView((old) => maintenanceViewFromSummary(finished, old));
       } else {
         setError(response.error.message);
       }
@@ -173,9 +204,12 @@ export function ClonesPanel({
     } finally {
       off();
       operation.current = null;
+      // This window heard the answer, so the receipt is not shown again on
+      // the next open — also when the dialog closed (and cancelled) first.
+      markMaintenanceSeen(profileId, operationId);
       if (live.current) {
         setRunning(false);
-        setCurrent(new Set());
+        setView((old) => (old.running.length === 0 ? old : { ...old, running: [] }));
       }
     }
   };
@@ -346,7 +380,7 @@ export function ClonesPanel({
             </button>
             <button
               className={summary === null ? "modal__create" : "modal__cancel"}
-              disabled={support === null || unavailable}
+              disabled={support === null || unavailable || !attachChecked}
               onClick={() => void start()}
             >
               {summary === null ? "Refresh clones" : "Run again"}

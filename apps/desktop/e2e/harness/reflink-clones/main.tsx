@@ -1,7 +1,10 @@
 import { createRoot, type Root } from "react-dom/client";
 import {
+  EMPTY_MAINTENANCE_RUN_VIEW,
+  foldMaintenanceProgress,
   ok,
   type GitReflinkStatus,
+  type MaintenanceCurrent,
   type GitRuntimeStatus,
   type MaintenanceProgress,
   type MaintenanceRepo,
@@ -70,6 +73,9 @@ const queuedOnly = ["ingest", "ledger", "mapper", "notifier", "orbit", "pager", 
 const runRepos = [...repos.filter((r) => r.id !== "notes"), ...queuedOnly];
 
 let reflink = capable;
+/** What main answers `maintenance:current`: a run this window started
+ *  before it reloaded, still going or finished while no dialog was open. */
+let current: MaintenanceCurrent = null;
 let finish: ((summary: MaintenanceSummary) => void) | null = null;
 const listeners = new Set<(event: MaintenanceProgress) => void>();
 let operationId = "";
@@ -80,6 +86,7 @@ const bridge = {
     if (name === "git:runtimeStatus") return ok(runtime(reflink.path));
     if (name === "git:reflinkSupport") return ok(reflink);
     if (name === "settings:read") return ok({ general: { maintenanceBranchMode: "review", branchCleanupPrProof: true, branchCleanupKeepDays: 7 } });
+    if (name === "maintenance:current") return ok(current);
     if (name === "maintenance:run") {
       operationId = req.operationId ?? "";
       return new Promise((resolve) => {
@@ -98,9 +105,33 @@ document.documentElement.dataset["theme"] = "light";
 document.documentElement.dataset["platform"] = "darwin";
 
 let root: Root | null = null;
+let seq = 0;
 const emit = (event: Omit<MaintenanceProgress, "operationId" | "profileId">): void => {
-  for (const listener of listeners) listener({ ...event, operationId, profileId: "demo" });
+  for (const listener of listeners) listener({ ...event, operationId, profileId: "demo", seq: ++seq });
 };
+/** The mid-run events `progress()` sends: three done, two running. */
+const midRun = (): Omit<MaintenanceProgress, "operationId" | "profileId">[] => [
+  { phase: "starting", repos: runRepos, noWorktrees },
+  ...[0, 2, 6].flatMap((index) => [
+    { phase: "repo_started" as const, repo: repos[index]! },
+    { phase: "repo_completed" as const, repo: repos[index]!, result: results.find((r) => r.repo.id === repos[index]!.id)! }
+  ]),
+  { phase: "repo_started", repo: repos[1]! },
+  { phase: "repo_progress", repo: repos[1]!, detail: "Worktree 2 of 3 · fix/retry-jitter" },
+  { phase: "repo_started", repo: repos[5]! },
+  { phase: "repo_progress", repo: repos[5]!, detail: "Updating the main checkout: origin: fetching…" }
+];
+const reloadedRun = {
+  operationId: "before-reload",
+  profileId: "demo",
+  allProfiles: false,
+  action: { kind: "reshare" as const, updateMain: true },
+  startedAt: new Date(Date.now() - 9 * 60_000).toISOString(),
+  ownWindow: true
+};
+const summaryOf = (id: string): MaintenanceSummary => ({
+  operationId: id, startedAt: "2026-11-04T12:00:00Z", finishedAt: "2026-11-04T12:16:42Z", cancelled: false, results, noWorktrees
+});
 const harness = {
   ready: (async () => {
     await Promise.all([
@@ -109,10 +140,26 @@ const harness = {
     ].map((font) => document.fonts.load(font)));
     await document.fonts.ready;
   })(),
-  mount(view: "settings-pwrgit" | "settings-homebrew" | "settings-before" | "clones" | "clones-unavailable"): void {
+  mount(view: "settings-pwrgit" | "settings-homebrew" | "settings-before" | "clones" | "clones-unavailable" | "reattach-running" | "reattach-finished"): void {
     root?.unmount();
     root = createRoot(document.getElementById("root")!);
     reflink = view === "settings-homebrew" || view === "clones-unavailable" ? homebrew : capable;
+    current = null;
+    if (view === "reattach-running") {
+      // Main's snapshot is the fold of the events the lost dialog was sent.
+      operationId = reloadedRun.operationId;
+      seq = 0;
+      const sent = midRun().map((event) => ({ ...event, operationId, profileId: "demo", seq: ++seq }));
+      current = { state: "running", run: reloadedRun, view: sent.reduce(foldMaintenanceProgress, EMPTY_MAINTENANCE_RUN_VIEW) };
+    }
+    if (view === "reattach-finished")
+      current = { state: "finished", run: reloadedRun, summary: summaryOf(reloadedRun.operationId), seen: false };
+    if (view.startsWith("reattach")) {
+      // As the sidebar reopens it after a reload: no tab named.
+      root.render(<MaintenanceDialog profileId="demo" platform="darwin"
+        onClose={() => undefined} onRemoveWorktrees={async () => ({ removed: [], keptDirty: [], failed: [] })} />);
+      return;
+    }
     if (view.startsWith("settings")) {
       root.render(
         <div className="settings-harness" style={{ width: 760, padding: 20 }}>
@@ -128,18 +175,18 @@ const harness = {
   },
   /** Mid-run: three repositories done, two running, one queued. */
   progress(): void {
-    emit({ phase: "starting", repos: runRepos, noWorktrees });
-    for (const index of [0, 2, 6]) {
-      const result = results.find((r) => r.repo.id === repos[index]!.id)!;
-      emit({ phase: "repo_started", repo: repos[index]! });
-      emit({ phase: "repo_completed", repo: repos[index]!, result });
-    }
-    emit({ phase: "repo_started", repo: repos[1]! });
-    emit({ phase: "repo_progress", repo: repos[1]!, detail: "Worktree 2 of 3 · fix/retry-jitter" });
-    emit({ phase: "repo_started", repo: repos[5]! });
-    emit({ phase: "repo_progress", repo: repos[5]!, detail: "Updating the main checkout: origin: fetching…" });
+    seq = 0;
+    for (const event of midRun()) emit(event);
+  },
+  /** After a reattach: the next line for a running repository. */
+  advance(): void {
+    emit({ phase: "repo_progress", repo: repos[1]!, detail: "Worktree 3 of 3 · spike/grpc" });
   },
   finish(): void {
+    if (current?.state === "running") {
+      emit({ phase: "finished", summary: summaryOf(operationId) });
+      return;
+    }
     finish?.({ operationId, startedAt: "2026-11-04T12:00:00Z", finishedAt: "2026-11-04T12:02:14Z", cancelled: false, results, noWorktrees });
   }
 };

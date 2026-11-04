@@ -225,6 +225,28 @@ match the face. Verb, scope, interval and view live in
 
 Design: `design/Fetch Toast and Scope - UX Review.dc.html`.
 
+## A Maintenance run outlives its dialog
+
+A reload keeps the webContents id, so main's `maintenance:run` goes on
+after the dialog is gone. `maintenance:current` (scoped by the window's
+`profileId`) hands the dialog back the live run or the profile's last
+finished one; `maintenance-attach.ts` is the one way to use it.
+
+- **Main and the dialog fold the same events** (`foldMaintenanceProgress`
+  in `@pwrgit/shared`). Main's snapshot is that fold, updated in
+  `progress()`. Don't keep run rows in hand-written `useState` again.
+- **Subscribe before asking.** Events that arrive before the answer are
+  held and folded after the snapshot; each carries `seq`.
+  `maintenance-attach.property.test.ts` reloads at every point of random
+  runs and checks the result against a window that watched it all.
+- **A receipt is shown once.** `maintenance:seen` marks it: on a dialog's
+  own answer (even after a close cancelled it) and when a reattach draws
+  it. The Sidebar reopens the dialog by itself only for a run this window
+  started (`ownWindow`).
+- **A Combined plan does not resume.** Its steps lived in the lost dialog;
+  the running step reattaches on its own tab. The Worktrees pruner runs
+  `prune:*`, not `maintenance:run`, and does not reattach.
+
 ## The sidebar footer holds the profile's AI switch
 
 `.sidebar__footer` sits under `.sidebar__list` and carries `AiFeaturesSwitch`.

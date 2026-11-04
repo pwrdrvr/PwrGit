@@ -12,7 +12,7 @@ type Harness = {
   progress: () => void;
   finish: () => void;
 };
-const call = (page: Page, method: "mount" | "progress" | "finish", arg?: string): Promise<void> =>
+const call = (page: Page, method: "mount" | "progress" | "advance" | "finish", arg?: string): Promise<void> =>
   page.evaluate(
     ([name, value]) => {
       const h = (window as unknown as { __harness: Record<string, (v?: string) => void> }).__harness;
@@ -114,6 +114,25 @@ test("copy-on-write switch and Maintenance › Clones lay out without overflow",
     await expect(page.getByText("Refreshing clones needs PwrGit’s Git")).toBeVisible();
     await expect(page.getByRole("button", { name: "Refresh clones" })).toBeDisabled();
     await shoot("clones-unavailable", ".modal");
+
+    // After a window reload: main's run went on without a dialog. The
+    // reopened dialog (no tab named) finds it and picks it up.
+    await call(page, "mount", "reattach-running");
+    await expect(dialog.getByRole("button", { name: "Clones", exact: true })).toHaveAttribute("aria-pressed", "true");
+    await expect(dialog).toContainText("Refreshing clones in 2 repositories");
+    await expect(dialog).toContainText("3 of 14 repositories");
+    await expect(dialog).toContainText("Worktree 2 of 3 · fix/retry-jitter");
+    await expect(dialog.getByRole("button", { name: "Cancel" })).toBeVisible();
+    await call(page, "advance");
+    await expect(dialog).toContainText("Worktree 3 of 3 · spike/grpc");
+    await shoot("reattach-running", ".modal");
+    await call(page, "finish");
+    await expect(dialog.locator(".maintenance__done-status")).toContainText("987.0 MiB of file data now shared with main checkouts");
+    // A run that ended while no dialog was open shows the same receipt.
+    await call(page, "mount", "reattach-finished");
+    await expect(dialog.locator(".maintenance__done-status")).toContainText("987.0 MiB of file data now shared with main checkouts");
+    await expect(dialog.locator(".maintenance__done-status")).toContainText("took 16m 42s");
+    await shoot("reattach-finished", ".modal");
   } finally {
     await app.close();
     rmSync(out, { recursive: true, force: true });

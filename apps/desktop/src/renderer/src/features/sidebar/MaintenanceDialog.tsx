@@ -1,8 +1,11 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   BRANCH_CLEANUP_KEEP_DAYS,
   DEFAULT_BRANCH_CLEANUP_OPTIONS,
+  EMPTY_MAINTENANCE_RUN_VIEW,
   STALE_AGE_DAYS,
+  foldMaintenanceProgress,
+  maintenanceViewFromSummary,
   isBranchCleanupKeepDays,
   isWorktreeFinishedAfterDays,
   type BranchCleanupKeepDays,
@@ -12,8 +15,8 @@ import {
   type KeptBranch,
   type KeptBranchReason,
   type MaintenanceAction,
-  type MaintenanceRepo,
   type MaintenanceRepoResult,
+  type MaintenanceRunView,
   type MaintenanceSummary,
   type StaleBranch,
   type AppSettingsPatch,
@@ -28,6 +31,7 @@ import { PruneWorktreesPanel } from "./PruneWorktreesPanel";
 import { ClonesPanel, clonesBytes as bytes } from "./ClonesPanel";
 import { BulkSyncStatus, StatusMark } from "./BulkSyncStatus";
 import { countOutcomes } from "./bulk-sync-progress";
+import { attachMaintenanceRun, markMaintenanceSeen } from "./maintenance-attach";
 import {
   branchCardCopy,
   branchStepLine,
@@ -164,12 +168,19 @@ export function MaintenanceDialog({
   const [action, setAction] = useState<MaintenanceAction | null>(null);
   const [running, setRunning] = useState(false);
   const [cancelling, setCancelling] = useState(false);
-  const [repos, setRepos] = useState<MaintenanceRepo[]>([]);
-  const [current, setCurrent] = useState<Set<string>>(new Set());
-  const [details, setDetails] = useState<Map<string, string>>(new Map());
-  const [results, setResults] = useState<Map<string, MaintenanceRepoResult>>(
-    new Map()
+  /** The run as its progress events drew it: the same fold main keeps for
+   *  a window that reattaches. */
+  const [view, setView] = useState<MaintenanceRunView>(EMPTY_MAINTENANCE_RUN_VIEW);
+  const repos = view.repos;
+  const current = useMemo(() => new Set(view.running), [view.running]);
+  const details = useMemo(() => new Map(Object.entries(view.details)), [view.details]);
+  const results = useMemo(
+    () => new Map(view.results.map((result) => [result.repo.id, result])),
+    [view.results]
   );
+  /** Main has said whether a run is here to reattach to. Nothing starts,
+   *  and no setup is drawn, until it has. */
+  const [attachChecked, setAttachChecked] = useState(false);
   const [summary, setSummary] = useState<MaintenanceSummary | null>(null);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [options, setOptions] = useState<BranchCleanupOptions>(
@@ -311,9 +322,7 @@ export function MaintenanceDialog({
 
   const reset = (): void => {
     setSummary(null);
-    setResults(new Map());
-    setDetails(new Map());
-    setRepos([]);
+    setView(EMPTY_MAINTENANCE_RUN_VIEW);
     setSelected(new Set());
     setExpanded(new Set());
     setShowQuietRepos(false);
@@ -331,10 +340,7 @@ export function MaintenanceDialog({
     setCancelling(false);
     setAction(next);
     setSummary(null);
-    setResults(new Map());
-    setDetails(new Map());
-    setRepos([]);
-    setCurrent(new Set());
+    setView(EMPTY_MAINTENANCE_RUN_VIEW);
     setError(null);
     runError.current = null;
     setSelected(new Set());
@@ -349,24 +355,7 @@ export function MaintenanceDialog({
         event.profileId !== profileId
       )
         return;
-      if (event.repos !== undefined) setRepos(event.repos);
-      if (event.phase === "repo_started" && event.repo !== undefined) {
-        const id = event.repo.id;
-        setCurrent((old) => new Set(old).add(id));
-      }
-      if (event.repo !== undefined && event.detail !== undefined) {
-        const { repo, detail } = event;
-        setDetails((old) => new Map(old).set(repo.id, detail));
-      }
-      if (event.result !== undefined) {
-        const result = event.result;
-        setResults((old) => new Map(old).set(result.repo.id, result));
-        setCurrent((old) => {
-          const next = new Set(old);
-          next.delete(result.repo.id);
-          return next;
-        });
-      }
+      setView((old) => foldMaintenanceProgress(old, event));
     });
     try {
       const response = await dispatch("maintenance:run", {
@@ -378,23 +367,7 @@ export function MaintenanceDialog({
       });
       if (!live.current) return null;
       if (response.ok) {
-        setSummary(response.value);
-        setRepos(response.value.results.map((result) => result.repo));
-        setResults(
-          new Map(
-            response.value.results.map((result) => [result.repo.id, result])
-          )
-        );
-        // Finished is checked by default: each row carries its proof, and
-        // the reader came here to clear them. Unticking is the exception.
-        if (next.kind === "scan-branches")
-          setSelected(
-            new Set(
-              response.value.results.flatMap((result) =>
-                (result.candidates ?? []).map(branchKey)
-              )
-            )
-          );
+        showSummary(next, response.value);
         return response.value;
       } else {
         runError.current = response.error.message;
@@ -411,12 +384,85 @@ export function MaintenanceDialog({
       offProgress.current?.();
       offProgress.current = null;
       active.current = null;
+      // This window heard the answer, so the receipt is not shown again on
+      // the next open — also when the dialog closed (and cancelled) first.
+      markMaintenanceSeen(profileId, operationId);
       if (live.current) {
         setRunning(false);
-        setCurrent(new Set());
+        setView((old) => (old.running.length === 0 ? old : { ...old, running: [] }));
       }
     }
   };
+
+  /** Draw a finished run's answer: from this dialog's own run, or from a
+   *  run it reattached to after a reload. */
+  const showSummary = (done: MaintenanceAction, finished: MaintenanceSummary): void => {
+    setSummary(finished);
+    setView((old) => maintenanceViewFromSummary(finished, old));
+    // Finished is checked by default: each row carries its proof, and
+    // the reader came here to clear them. Unticking is the exception.
+    if (done.kind === "scan-branches")
+      setSelected(
+        new Set(
+          finished.results.flatMap((result) =>
+            (result.candidates ?? []).map(branchKey)
+          )
+        )
+      );
+  };
+
+  // A window reload loses this dialog but not main's run. Reattach: a live
+  // run keeps streaming into its card, and a run that ended while no dialog
+  // was open shows its receipt. Clones draws its own (ClonesPanel), so
+  // this only switches to its tab. A Combined plan's later steps do not
+  // resume: their plan lived in the dialog that was lost.
+  useEffect(
+    () =>
+      attachMaintenanceRun(profileId, {
+        claim: (found) => {
+          setAttachChecked(true);
+          if (found === null) return false;
+          const kind = found.run.action.kind;
+          if (kind === "reshare") {
+            setTab("clones");
+            return false;
+          }
+          setTab(kind === "gc" ? "gc" : "branches");
+          setAllProfiles(found.run.allProfiles);
+          return true;
+        },
+        running: (run, seeded) => {
+          active.current = run.operationId;
+          if (run.action.kind === "gc") setMode(run.action.mode);
+          setAction(run.action);
+          setRunning(true);
+          setCancelling(false);
+          setSummary(null);
+          setError(null);
+          runError.current = null;
+          setSelected(new Set());
+          setRestores(new Map());
+          setStartedAt(Date.parse(run.startedAt));
+          setView(seeded);
+        },
+        progress: setView,
+        finished: (run, finished) => {
+          active.current = null;
+          if (run.action.kind === "gc") setMode(run.action.mode);
+          setAction(run.action);
+          setRunning(false);
+          setCancelling(false);
+          setStartedAt(Date.parse(run.startedAt));
+          if (finished === null) {
+            setView((old) => ({ ...old, running: [] }));
+            setError("Maintenance stopped before it finished. See Help › Logs.");
+          } else showSummary(run.action, finished);
+        }
+      }),
+    // `showSummary` only calls setters.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [profileId]
+  );
 
   const recordStep = (key: StepKey, result: StepResult): void =>
     setStepResults((old) => ({ ...old, [key]: result }));
@@ -543,11 +589,11 @@ export function MaintenanceDialog({
 
   useEffect(() => {
     // The refs browser's hand-off: review on open, once the saved rules are in.
-    if (!autoReview || !optionsLoaded || action !== null || running) return;
+    if (!autoReview || !optionsLoaded || !attachChecked || action !== null || running) return;
     void run({ kind: "scan-branches", options });
     // Only ever the first review: `action` is set from here on.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [autoReview, optionsLoaded]);
+  }, [autoReview, optionsLoaded, attachChecked]);
 
   const candidates =
     action?.kind === "scan-branches" && summary !== null
@@ -584,7 +630,7 @@ export function MaintenanceDialog({
     setTab("branches");
     setAction({ kind: "scan-branches", options });
     setSummary({ ...summary, results: seeded });
-    setResults(new Map(seeded.map((result) => [result.repo.id, result])));
+    setView((old) => ({ ...old, results: seeded }));
     setSelected(
       new Set(seeded.flatMap((result) => (result.candidates ?? []).map(branchKey)))
     );
@@ -753,7 +799,9 @@ export function MaintenanceDialog({
         {tab === "combined" && workflowStep !== "setup" && workflowStep !== "done" &&
           <MaintenanceSteps plan={plan} current={workflowStep} results={stepResults} branchMode={branchMode}
             gcMode={mode} progress={railProgress} />}
-        {tab === "combined" && workflowStep === "setup" ? (
+        {!attachChecked ? (
+          <div className="maintenance__body" aria-busy="true" />
+        ) : tab === "combined" && workflowStep === "setup" ? (
           <>
             <MaintenancePlanForm plan={plan} onChange={setPlan}
               branchMode={branchMode} onBranchMode={changeBranchMode}
