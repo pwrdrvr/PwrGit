@@ -127,3 +127,30 @@ host context explicitly. Initialization instructions, serverInfo and negotiated
 capabilities are session metadata, without a general refresh notification in
 this SDK protocol. A new initialization after a manual reconnect refreshes them;
 never restart an active session merely to force new metadata into the host.
+
+## Property, model and oracle validation
+
+`desktop-mcp-relay.property.test.ts` exercises the production admission and
+stdio parsing paths against a small connection-set model. Generated client
+commands cover connection batches, credential issuance/revocation, tool calls,
+protocol overflow, disconnect, stop and restart. A fast-check scheduler varies
+backend construction and cleanup completion order, including shutdown while
+construction and upgrades are pending. The oracle requires valid credentials,
+at most 16 live backends, cleanup before slot reuse, no execution after
+revocation, and no surviving backends after shutdown. Network delivery and the
+backend factory are controlled test seams; real WebSocket/server integration
+remains covered in the named example tests.
+
+Both boundary models failed on the code before the lifecycle fixes, with no
+extra generated commands needed: a fragmented oversized message left its peer
+open, and revoking the full pool still caused a valid replacement to receive
+429. The shrunk overflow case (1 KiB plus an allowed 64 KiB frame) is retained
+as a named integration regression. Seeds are reported on failure, not pinned.
+
+`stdio-relay.property.test.ts` uses a real loopback WebSocket and compares both
+directions with direct byte copying for generated binary payloads and independent
+fragment boundaries. This differential oracle does not decode JSON, Unicode or
+MCP messages. It also checks that desktop disconnect stops forwarding and that
+new input does not reconnect or replay. Each property uses fast-check's default
+100 runs. These tests do not establish native IPC or OS permission behavior;
+they validate this PR's existing loopback transport and lifecycle contract.

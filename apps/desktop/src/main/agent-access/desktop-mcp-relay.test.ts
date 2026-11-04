@@ -103,8 +103,10 @@ it("tears down the desktop server and frees its slot when stdio input overflows 
   await initialized;
   // Each WebSocket message is below the frame limit; the unfinished stdio
   // message exceeds the read buffer only after the second message arrives.
-  socket.send("x".repeat(48 * 1024));
-  socket.send("x".repeat(48 * 1024));
+  // Minimal generated counterexample: 1 KiB followed by a permitted 64 KiB
+  // frame crosses the stdio limit without crossing the WebSocket limit.
+  socket.send("x".repeat(1024));
+  socket.send("x".repeat(64 * 1024));
   await vi.waitFor(() => {
     expect(socket.readyState).toBe(WebSocket.CLOSED);
     expect(closeFinished).toHaveBeenCalledTimes(1);
