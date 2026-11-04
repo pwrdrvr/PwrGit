@@ -121,6 +121,13 @@ missing names. A tag re-cut on origin therefore stays at its old object here.
 - `tag-sources.test.ts` pins first-run conflicts, primary vs other remotes,
   tag-only history, `--no-tags`, kind changes, stale reviews and the
   20,000-tag cost. Its cost line prints with `--reporter=verbose`.
+- The rules themselves are property and model tests, with git as the oracle:
+  `fetch-tags.property.test.ts` (no sync rewrites a tag, follows tag-only
+  history or ignores `--no-tags`), `tag-sources.git.property.test.ts`
+  (statuses, the stored count, Take and Keep through the handlers) and
+  `tag-sources.property.test.ts` (parsing, classification, the sidebar and
+  Tags tab naming one publisher, concurrent and stopped listings). Run them
+  after any change here.
 
 ## Which Git runs: the bundle, set up the way an installed Git would be
 
