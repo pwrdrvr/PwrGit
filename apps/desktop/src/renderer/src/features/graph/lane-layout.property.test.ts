@@ -1,5 +1,7 @@
 import fc from "fast-check";
 import { describe, expect, it } from "vitest";
+import type { Commit } from "@pwrgit/shared";
+import { topoMergeCommits } from "../../../../main/git/git-service";
 import {
   layoutLanes,
   type LaneCommit,
@@ -10,9 +12,8 @@ import {
 // Properties of the lineage layout over generated repository histories.
 // Histories are built the way users build them: a list of git operations
 // (commit, branch, merge, pull, push, checkout) replayed into commits, then
-// ordered the way the app orders them (topoMergeCommits: newest committer
-// date first among commits whose children are all drawn) and optionally cut
-// to a window, as `git log -n` would.
+// ordered by the app's own topoMergeCommits and optionally cut to a window,
+// as `git log -n` would.
 
 const LOCAL = ["main", "f1", "f2", "f3"] as const;
 const REMOTE = ["origin/main", "origin/team"] as const;
@@ -136,23 +137,22 @@ function view(repo: Repo, s: Scenario): View {
     return s.skew === null ? i : i - (s.skew[i % s.skew.length] ?? 0);
   };
 
-  // topoMergeCommits: Kahn's algorithm, newest committer date first.
-  const childCount = new Map<string, number>();
-  for (const c of repo.commits) {
-    for (const p of c.parents) childCount.set(p, (childCount.get(p) ?? 0) + 1);
-  }
-  const ready = repo.commits.filter((c) => !childCount.has(c.hash)).reverse();
-  const ordered: LaneCommit[] = [];
-  while (ready.length > 0) {
-    ready.sort((a, b) => date(b.hash) - date(a.hash));
-    const c = ready.shift() as LaneCommit;
-    ordered.push(c);
-    for (const p of c.parents) {
-      const n = (childCount.get(p) ?? 0) - 1;
-      childCount.set(p, n);
-      if (n === 0) ready.push(byHash.get(p) as LaneCommit);
-    }
-  }
+  // The app's own ordering, fed the way graph-handlers feeds it: a log,
+  // newest first, carrying committer dates.
+  const log: Commit[] = [...repo.commits].reverse().map((c) => ({
+    hash: c.hash,
+    shortHash: c.hash,
+    parents: c.parents,
+    subject: c.hash,
+    authorName: "",
+    authorEmail: "",
+    committedAt: new Date(date(c.hash) * 60_000).toISOString(),
+    isMerge: c.parents.length > 1
+  }));
+  const ordered: LaneCommit[] = topoMergeCommits([log]).map((c) => ({
+    hash: c.hash,
+    parents: c.parents
+  }));
   const commits =
     s.window === null ? ordered : ordered.slice(0, (s.window % ordered.length) + 1);
 
@@ -194,11 +194,11 @@ function describeView(v: View): string {
 }
 
 const anyRef = fc.constantFrom(...REFS);
-const feature = fc.constantFrom("f1", "f2", "f3", "origin/team" as const);
+const feature = fc.constantFrom("f1", "f2", "f3", "origin/team");
 const weighted = <T,>(...xs: [T, number][]) =>
   fc.oneof(...xs.map(([v, weight]) => ({ arbitrary: fc.constant(v), weight })));
 const kind = <K extends Op["kind"]>(k: K) => fc.constant(k);
-const merge = (into: fc.Arbitrary<Ref>, from: fc.Arbitrary<Ref>) =>
+const mergeOp = (into: fc.Arbitrary<Ref>, from: fc.Arbitrary<Ref>) =>
   fc.record({ kind: kind("merge"), into, from, noFf: fc.boolean() });
 // Weighted like a team's day: PRs land on origin/main, features update from a
 // local main that is often stale, and pulls are occasional. That staleness is
@@ -222,9 +222,9 @@ const op: fc.Arbitrary<Op> = fc.oneof(
     arbitrary: fc.record({ kind: kind("branch"), ref: feature, from: anyRef }),
     weight: 1
   },
-  { arbitrary: merge(feature, fc.constant("main")), weight: 4 },
-  { arbitrary: merge(fc.constant("origin/main"), feature), weight: 3 },
-  { arbitrary: merge(anyRef, anyRef), weight: 2 },
+  { arbitrary: mergeOp(feature, fc.constant("main")), weight: 4 },
+  { arbitrary: mergeOp(fc.constant("origin/main"), feature), weight: 3 },
+  { arbitrary: mergeOp(anyRef, anyRef), weight: 2 },
   { arbitrary: fc.record({ kind: kind("pull") }), weight: 1 },
   { arbitrary: fc.record({ kind: kind("push") }), weight: 1 },
   {
@@ -258,9 +258,12 @@ function check(v: View, body: () => void): void {
 const lanesOf = (v: View) =>
   new Map(v.commits.map((c, i) => [c.hash, v.layout.rows[i].lane]));
 
-/** Replay, then bring main and origin/main together the way a user does. */
-const replaySynced = (ops: readonly Op[]) =>
-  replay([...ops, { kind: "pull" }, { kind: "push" }]);
+/** Scenarios that end by bringing main and origin/main together the way a
+ *  user does, so a printed counterexample is exactly what was replayed. */
+const synced: fc.Arbitrary<Scenario> = scenario.map((s) => ({
+  ...s,
+  ops: [...s.ops, { kind: "pull" }, { kind: "push" }]
+}));
 
 describe("layoutLanes properties", () => {
   it("dashes a commit's first-parent line exactly when it is fetched but not applied", () => {
@@ -286,9 +289,9 @@ describe("layoutLanes properties", () => {
             const unapplied =
               (fromOrigin.has(c.hash) && !fromMain.has(c.hash)) ||
               (fromTeam.has(c.hash) && !fromLocal.has(c.hash));
-            expect(line?.dashed !== undefined, `${c.hash}'s first-parent line`).toBe(
-              unapplied
-            );
+            const msg = `${c.hash}'s first-parent line`;
+            expect(line, msg).toBeDefined();
+            expect(line?.dashed !== undefined, msg).toBe(unapplied);
           });
         });
       })
@@ -347,8 +350,8 @@ describe("layoutLanes properties", () => {
     // The promise: "lane 0 begins at its real tip and remains an honest
     // spine". With main == origin/main the spine starts at main's tip.
     fc.assert(
-      fc.property(scenario, (s) => {
-        const repo = replaySynced(s.ops);
+      fc.property(synced, (s) => {
+        const repo = replay(s.ops);
         const v = view(repo, s);
         const lane = lanesOf(v);
         check(v, () => {
@@ -369,8 +372,8 @@ describe("layoutLanes properties", () => {
     // tip". Its own line is its first-parent chain down to the spine or to
     // another drawn branch's tip. Main is synced so the spine is main's chain.
     fc.assert(
-      fc.property(scenario, (s) => {
-        const repo = replaySynced(s.ops);
+      fc.property(synced, (s) => {
+        const repo = replay(s.ops);
         const v = view(repo, s);
         const lane = lanesOf(v);
         const headTip = repo.refs[repo.head];

@@ -273,9 +273,10 @@ export function layoutLanes(commits: LaneCommit[], refs?: LaneRefs): LaneLayout 
       laneReservedFor[1] = head;
     }
   }
-  // A reserved line starts at its owner's first drawn commit (the spine's tip,
-  // the head's tip). Until that row, only an edge INTO that commit may take
-  // the lane. Otherwise a newer merge's side line into older trunk history
+  // A reserved line starts at its owner's first drawn commit: spineStart for
+  // the trunk (origin/main's tip when local main is behind it), and the head's
+  // tip or its fast-forward upstream for lane 1. Until that row, only an edge
+  // INTO that commit may take the lane. Otherwise a newer merge's side line into older trunk history
   // would claim lane 0 first and push the trunk's own tip to the right.
   const pendingStart: (string | undefined)[] = laneReservedFor.map(
     (o) => commits.find((c) => owners.get(c.hash) === o)?.hash
