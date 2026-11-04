@@ -283,6 +283,16 @@ export function registerMaintenanceHandlers(
           message:
             "Refreshing clones needs PwrGit’s Git with git worktree reflink. Choose it in Settings › General › Git runtime."
         });
+      // Another Start may have taken the slot while this one waited for the
+      // probe. From here to `active = current` nothing awaits, so this check
+      // holds: one run at a time is what a reloaded window reattaches to.
+      if (active !== undefined)
+        return err({
+          kind: "repo",
+          code: "maintenance_running",
+          message:
+            "Repository maintenance is already running in another dialog. Wait for it to finish."
+        });
     }
     const knownRepos = maintenanceRepos(db, req);
     if (knownRepos === null)

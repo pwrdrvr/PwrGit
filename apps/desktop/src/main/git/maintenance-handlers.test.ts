@@ -18,6 +18,7 @@ import { openDatabase, type DB } from "../persistence/db";
 import { activeGitPath, noteGitReflinkSupport, type GitExec } from "./dugite";
 import type { RepoIndexer } from "./repo-indexer";
 import * as maintenance from "./repository-maintenance";
+import { refreshActiveGitReflink } from "./runtime-status";
 import {
   branchPrEvidence,
   maintenanceRepos,
@@ -31,6 +32,8 @@ vi.mock("node:os", async (importOriginal) => ({
 }));
 vi.mock("../ipc", () => ({ emitEvent: vi.fn() }));
 vi.mock("../logs", () => ({ logMain: vi.fn() }));
+// The real probe runs Git; a test that needs one supplies its answer.
+vi.mock("./runtime-status", () => ({ refreshActiveGitReflink: vi.fn(async () => undefined) }));
 
 let root: string;
 let db: DB;
@@ -801,6 +804,28 @@ describe("maintenance › clones", () => {
     expect(summary.noWorktrees?.map((repo) => repo.id)).toEqual(["b"]);
     const reflinkCwds = git.mock.calls.filter(([args]) => args[1] === "reflink").map(([, cwd]) => cwd);
     expect(reflinkCwds).toEqual([join(root, "a-wt")]);
+  });
+
+  it("starts one run when two Starts both wait for the copy-on-write probe", async () => {
+    // The Git in use has not answered yet, so each Start probes it first.
+    noteGitReflinkSupport("/not/the/git/in/use", null, { checkout: true, reshare: true });
+    let release!: () => void;
+    const probed = new Promise<void>((resolve) => (release = resolve)).then(() =>
+      noteGitReflinkSupport(activeGitPath(), "git version 2.56.0-dev-pwrgit.2", { checkout: true, reshare: true })
+    );
+    vi.mocked(refreshActiveGitReflink).mockReturnValue(probed);
+    try {
+      const first = bus.dispatch("maintenance:run", { profileId: "one", operationId: "first", action: reshare }, { webContentsId: 1 });
+      const second = bus.dispatch("maintenance:run", { profileId: "two", operationId: "second", action: reshare }, { webContentsId: 2 });
+      release();
+      const answers = await Promise.all([first, second]);
+      // One run at a time is what lets a reloaded window find "the" run.
+      expect(answers.map((answer) => answer.ok)).toEqual([true, false]);
+      const refused = answers[1]!;
+      if (!refused.ok) expect(refused.error.code).toBe("maintenance_running");
+    } finally {
+      vi.mocked(refreshActiveGitReflink).mockImplementation(async () => undefined);
+    }
   });
 
   it("rejects a reshare request without updateMain", async () => {
