@@ -123,9 +123,37 @@ describe("published tag handlers", () => {
     expect((await bus.dispatch("remote:fetchRepo", { repoId: "repo-1", remote: "origin" })).ok).toBe(true);
     const sources = tagSourcesFor(db);
     await vi.waitFor(() => expect(sources.store.snapshot("repo-1", "origin")?.checked_at_ms).toBeTypeOf("number"), { timeout: 10_000 });
-    await vi.waitFor(() => expect(sources.store.attention("repo-1")).toEqual({ remote: "origin", differs: 1 }));
+    await vi.waitFor(() => expect(sources.store.attention("repo-1", ["origin"])).toEqual({ remote: "origin", differs: 1 }));
     // The fetch itself changed no tag.
     expect(git(local, "tag", "--points-at", "HEAD")).toBe("v1.0.0");
+  });
+
+  it("re-counts when a local tag is created or deleted, and forgets a removed remote", async () => {
+    const { local, oldHead } = fixture();
+    register(local);
+    expect((await bus.dispatch("tag:refreshRemote", { repoId: "repo-1", mode: "explicit" })).ok).toBe(true);
+    const sources = tagSourcesFor(db);
+    expect(sources.store.attention("repo-1", ["origin"])).toEqual({ remote: "origin", differs: 1 });
+
+    const deleted = await bus.dispatch("tag:deleteLocal", {
+      repoId: "repo-1",
+      name: "v1.0.0",
+      expectedObjectId: git(local, "rev-parse", "v1.0.0")
+    });
+    expect(deleted.ok).toBe(true);
+    expect(sources.store.attention("repo-1", ["origin"])).toBeUndefined();
+
+    const created = await bus.dispatch("tag:create", {
+      repoId: "repo-1",
+      name: "v1.0.0",
+      targetCommit: oldHead,
+      kind: "lightweight"
+    });
+    expect(created.ok).toBe(true);
+    expect(sources.store.attention("repo-1", ["origin"])).toEqual({ remote: "origin", differs: 1 });
+
+    expect((await bus.dispatch("remote:remove", { repoId: "repo-1", remote: "origin" })).ok).toBe(true);
+    expect(sources.store.snapshot("repo-1", "origin")).toBeNull();
   });
 
   it("refuses an unconfigured remote as the publisher", async () => {

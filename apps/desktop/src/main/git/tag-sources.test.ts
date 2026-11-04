@@ -189,7 +189,7 @@ describe("published tags", () => {
     expect(row.local?.targetId).toBe(oldHead);
     expect(row.published).toMatchObject({ remote: "origin", targetId: newHead, kind: "annotated", available: true });
     expect(listed.rows.find((candidate) => candidate.name === "local-only")?.status).toBe("local_only");
-    expect(sources.store.attention("repo-1")).toEqual({ remote: "origin", differs: 1 });
+    expect(sources.store.attention("repo-1", ["origin"])).toEqual({ remote: "origin", differs: 1 });
 
     const adopted = await sources.adopt(systemGit, "repo-1", local, {
       name: "v1.2.3",
@@ -204,7 +204,7 @@ describe("published tags", () => {
     expect(git(local, "rev-parse", adopted.value.replacedRef!)).toBe(oldObject);
     expect(git(local, "for-each-ref", "refs/pwrgit/incoming-tags")).toBe("");
     expect((await page(sources, local)).counts.differs).toBe(0);
-    expect(sources.store.attention("repo-1")).toBeUndefined();
+    expect(sources.store.attention("repo-1", ["origin"])).toBeUndefined();
 
     // The pin is a real ref: an aggressive gc keeps the replaced tag object.
     git(local, "reflog", "expire", "--expire=now", "--all");
@@ -230,9 +230,18 @@ describe("published tags", () => {
     const { sources } = service();
     await sources.refresh(systemGit, "repo-1", local, "origin");
     const row = (await page(sources, local, "differs")).rows[0]!;
-    sources.keepLocal("repo-1", {
+    const refused = await sources.keepLocal(systemGit, "repo-1", local, {
+      name: row.name, remote: "gone", localObjectId: row.local!.objectId, remoteObjectId: row.published!.objectId, keep: true
+    });
+    expect(refused.ok ? null : refused.error.code).toBe("invalid_remote");
+    const short = await sources.keepLocal(systemGit, "repo-1", local, {
+      name: row.name, remote: "origin", localObjectId: row.local!.objectId.slice(0, 12), remoteObjectId: row.published!.objectId, keep: true
+    });
+    expect(short.ok ? null : short.error.code).toBe("invalid_tag_object");
+    const recorded = await sources.keepLocal(systemGit, "repo-1", local, {
       name: row.name, remote: "origin", localObjectId: row.local!.objectId, remoteObjectId: row.published!.objectId, keep: true
     });
+    expect(recorded.ok).toBe(true);
     const kept = await page(sources, local);
     expect(kept.rows.find((candidate) => candidate.name === "v1.2.3")?.status).toBe("kept_local");
     expect(kept.counts).toMatchObject({ differs: 0, keptLocal: 1 });
@@ -372,6 +381,49 @@ describe("published tags", () => {
     expect(unset.rows.every((row) => row.status === "unchecked")).toBe(true);
     sources.setPrimary("repo-1", "github");
     expect((await page(sources, local)).source).toMatchObject({ primary: "github", chosen: true, stale: true });
+  });
+});
+
+describe("listing lifecycle", () => {
+  it("a stopped listing records no failure, and an asker joining it lists again", async () => {
+    const { local } = fixture(false);
+    const { sources } = service();
+    // Stops at ls-remote, the way a background check yields to a user's Fetch.
+    const controller = new AbortController();
+    const stopAtListing: GitExec = (args, cwd, options) => {
+      if (args[0] === "ls-remote") controller.abort();
+      return systemGit(args, cwd, { ...options, signal: controller.signal });
+    };
+    const stopped = await sources.refresh(stopAtListing, "repo-1", local, "origin");
+    expect(stopped.ok ? null : stopped.error.code).toBe("aborted");
+    expect(sources.store.snapshot("repo-1", "origin")).toBeNull();
+
+    const second = new AbortController();
+    const yielding: GitExec = (args, cwd, options) => {
+      if (args[0] === "ls-remote") second.abort();
+      return systemGit(args, cwd, { ...options, signal: second.signal });
+    };
+    const background = sources.refresh(yielding, "repo-1", local, "origin");
+    const explicit = sources.refresh(systemGit, "repo-1", local, "origin");
+    expect((await background).ok).toBe(false);
+    const answered = await explicit;
+    expect(answered.ok).toBe(true);
+    expect(sources.store.snapshot("repo-1", "origin")).toMatchObject({ error: null, tag_count: 1 });
+  });
+
+  it("the sidebar line follows the configured remotes, and a removed remote is forgotten", () => {
+    const { sources } = service();
+    const tag = { name: "v1", objectId: "a".repeat(40), targetId: "a".repeat(40), annotated: false };
+    sources.store.recordListing("repo-1", "upstream", "/up.git", [tag], 1);
+    sources.store.setDiffers("repo-1", "upstream", 2);
+    sources.setPrimary("repo-1", "upstream");
+    expect(sources.store.attention("repo-1", ["origin", "upstream"])).toEqual({ remote: "upstream", differs: 2 });
+    // upstream removed outside PwrGit: origin publishes now, as the tab says.
+    expect(sources.store.attention("repo-1", ["origin"])).toBeUndefined();
+    sources.store.forgetRemote("repo-1", "upstream");
+    expect(sources.store.chosenPrimary("repo-1")).toBeNull();
+    expect(sources.store.snapshot("repo-1", "upstream")).toBeNull();
+    expect(sources.store.tags("repo-1", "upstream")).toBeNull();
   });
 });
 

@@ -169,7 +169,10 @@ export function registerBranchHandlers(
     const listed = await listRepoRefs(execGit, repo.path, checkedOut);
     if (!listed.ok) return listed;
     // The stored comparison count only: the sidebar runs no extra Git for it.
-    const tagAttention = tagSourcesFor(db).store.attention(req.repoId);
+    const tagAttention = tagSourcesFor(db).store.attention(
+      req.repoId,
+      listed.value.remotes.map((remote) => remote.name)
+    );
     const refs = tagAttention === undefined ? listed : ok({ ...listed.value, tagAttention });
     const prs = localBranchPrs(req.repoId);
     const pinned = indexer.pinnedBranchNames(req.repoId);

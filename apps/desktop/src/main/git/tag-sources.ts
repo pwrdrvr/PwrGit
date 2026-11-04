@@ -230,6 +230,11 @@ async function updateRefs(git: GitExec, cwd: string, lines: string[]): Promise<R
   return ok(undefined);
 }
 
+/** Git stopped by its caller (a cancel, a yield or a timeout), not refused by the remote. */
+export function wasStopped(error: { code: string }): boolean {
+  return error.code === "aborted" || error.code === "canceled";
+}
+
 function zeroLike(id: string): string {
   return "0".repeat(id.length);
 }
@@ -492,6 +497,16 @@ export class TagSourceStore {
       .run(repoId, remote, at, message);
   }
 
+  /** A removed remote's listing, decisions and publisher choice. */
+  forgetRemote(repoId: string, remote: string): void {
+    this.db.transaction(() => {
+      this.db.prepare("DELETE FROM remote_tag_snapshots WHERE repo_id = ? AND remote = ?").run(repoId, remote);
+      this.db.prepare("DELETE FROM tag_keep_local WHERE repo_id = ? AND remote = ?").run(repoId, remote);
+      this.db.prepare("DELETE FROM repo_tag_source WHERE repo_id = ? AND primary_remote = ?").run(repoId, remote);
+    })();
+    this.cache.delete(`${repoId}\0${remote}`);
+  }
+
   /** Returns true when the stored count moved (the sidebar should re-read). */
   setDiffers(repoId: string, remote: string, differs: number): boolean {
     const result = this.db
@@ -531,11 +546,15 @@ export class TagSourceStore {
   }
 
   /**
-   * The sidebar's line, from the database only. The publisher is the chosen
-   * remote, else origin; a repository without origin has no snapshot for it.
+   * The sidebar's line, from the database only. The publisher is chosen as
+   * `TagSources.resolve` chooses it, from the remotes configured now: the
+   * chosen remote, else origin, else none.
    */
-  attention(repoId: string): { remote: string; differs: number } | undefined {
-    const remote = this.chosenPrimary(repoId) ?? "origin";
+  attention(repoId: string, remotes: readonly string[]): { remote: string; differs: number } | undefined {
+    const chosen = this.chosenPrimary(repoId);
+    const remote =
+      chosen !== null && remotes.includes(chosen) ? chosen : remotes.includes("origin") ? "origin" : null;
+    if (remote === null) return undefined;
     const meta = this.snapshot(repoId, remote);
     if (meta === null || meta.checked_at_ms === null || meta.differs <= 0) return undefined;
     return { remote, differs: meta.differs };
@@ -636,33 +655,51 @@ export class TagSources {
     return ok(tags);
   }
 
-  /** List one remote's tags into the store (and re-count if it is the publisher). */
-  refresh(git: GitExec, repoId: string, cwd: string, remote: string): Promise<Result<void>> {
+  /**
+   * List one remote's tags into the store (and re-count if it is the
+   * publisher). A second asker shares a listing in flight, unless that listing
+   * was stopped: a background check yields to a tracked one by aborting, and
+   * the tracked caller must not inherit that abort.
+   */
+  async refresh(git: GitExec, repoId: string, cwd: string, remote: string): Promise<Result<void>> {
     const key = `${repoId}\0${remote}`;
     const running = this.inFlight.get(key);
-    if (running !== undefined) return running;
-    const run = (async (): Promise<Result<void>> => {
-      const config = await readRemoteConfig(git, cwd);
-      if (!config.ok) return config;
-      const target = config.value.find((candidate) => candidate.name === remote);
-      if (target === undefined) {
-        return err({ kind: "repo", code: "invalid_remote", message: `Not a configured remote: ${remote}` });
-      }
-      const listed = await listRemoteTags(git, cwd, remote);
-      if (!listed.ok) {
-        this.store.recordFailure(repoId, remote, listed.error.message.split("\n")[0] ?? "Listing failed", this.now());
-        return listed;
-      }
-      this.store.recordListing(repoId, remote, target.url, listed.value, this.now());
-      const source = this.resolve(repoId, config.value);
-      if (source.state.primary === remote) {
-        const recount = await this.recount(git, repoId, cwd, remote);
-        if (!recount.ok) return recount;
-      }
-      return ok(undefined);
-    })();
+    if (running !== undefined) {
+      const shared = await running;
+      if (shared.ok || !wasStopped(shared.error)) return shared;
+    }
+    const run = this.list(git, repoId, cwd, remote);
     this.inFlight.set(key, run);
-    return run.finally(() => this.inFlight.delete(key));
+    try {
+      return await run;
+    } finally {
+      if (this.inFlight.get(key) === run) this.inFlight.delete(key);
+    }
+  }
+
+  private async list(git: GitExec, repoId: string, cwd: string, remote: string): Promise<Result<void>> {
+    const config = await readRemoteConfig(git, cwd);
+    if (!config.ok) return config;
+    const target = config.value.find((candidate) => candidate.name === remote);
+    if (target === undefined) {
+      return err({ kind: "repo", code: "invalid_remote", message: `Not a configured remote: ${remote}` });
+    }
+    const listed = await listRemoteTags(git, cwd, remote);
+    if (!listed.ok) {
+      // A stopped listing says nothing about the remote. The caller that set
+      // a timeout records that itself (`recordFailure`).
+      if (!wasStopped(listed.error)) {
+        this.store.recordFailure(repoId, remote, listed.error.message.split("\n")[0] ?? "Listing failed", this.now());
+      }
+      return listed;
+    }
+    this.store.recordListing(repoId, remote, target.url, listed.value, this.now());
+    const source = this.resolve(repoId, config.value);
+    if (source.state.primary === remote) {
+      const recount = await this.recount(git, repoId, cwd, remote);
+      if (!recount.ok) return recount;
+    }
+    return ok(undefined);
   }
 
   /** Re-derive the stored "differs" count; true when it moved. */
@@ -830,19 +867,18 @@ export class TagSources {
       await dropStaging();
       return target;
     }
-    let at = this.now();
     let replacedRef: string | null = null;
     if (current.value !== null) {
-      const existing = await listReplacedTags(git, cwd, name);
-      if (existing.ok) {
-        const taken = new Set(existing.value.map((tag) => tag.ref));
-        while (taken.has(replacedRefFor(name, at))) at += 1;
+      const next = await this.nextReplacedRef(git, cwd, name);
+      if (!next.ok) {
+        await dropStaging();
+        return next;
       }
-      replacedRef = replacedRefFor(name, at);
+      replacedRef = next.value;
     }
     const id = arrived.value;
     const written = await updateRefs(git, cwd, [
-      ...(replacedRef === null || current.value === null ? [] : [`create ${replacedRef} ${current.value}`]),
+      ...(replacedRef === null ? [] : [`create ${replacedRef} ${current.value}`]),
       `update ${fullName} ${id} ${current.value ?? zeroLike(id)}`,
       `delete ${staging} ${id}`
     ]);
@@ -853,6 +889,16 @@ export class TagSources {
     this.store.clearKeep(repoId, name);
     await this.recountPublisher(git, repoId, cwd);
     return ok({ name, objectId: id, targetId: target.value.targetId, replacedRef });
+  }
+
+  /** A free refs/pwrgit/replaced-tags/<ms>/<name>: now, or the next unused millisecond. */
+  private async nextReplacedRef(git: GitExec, cwd: string, name: string): Promise<Result<string>> {
+    const existing = await listReplacedTags(git, cwd, name);
+    if (!existing.ok) return existing;
+    const taken = new Set(existing.value.map((tag) => tag.ref));
+    let at = this.now();
+    while (taken.has(replacedRefFor(name, at))) at += 1;
+    return ok(replacedRefFor(name, at));
   }
 
   /** Put a replaced value back, pinning the current one the same way first. */
@@ -881,15 +927,12 @@ export class TagSources {
     }
     let replacedRef: string | null = null;
     if (current.value !== null) {
-      const existing = await listReplacedTags(git, cwd, name);
-      if (!existing.ok) return existing;
-      const taken = new Set(existing.value.map((tag) => tag.ref));
-      let at = this.now();
-      while (taken.has(replacedRefFor(name, at))) at += 1;
-      replacedRef = replacedRefFor(name, at);
+      const next = await this.nextReplacedRef(git, cwd, name);
+      if (!next.ok) return next;
+      replacedRef = next.value;
     }
     const written = await updateRefs(git, cwd, [
-      ...(replacedRef === null || current.value === null ? [] : [`create ${replacedRef} ${current.value}`]),
+      ...(replacedRef === null ? [] : [`create ${replacedRef} ${current.value}`]),
       `update ${fullName} ${kept.value} ${current.value ?? zeroLike(kept.value)}`,
       // The tag ref now keeps the object alive; the pin has done its job.
       `delete ${input.ref} ${kept.value}`
@@ -902,18 +945,32 @@ export class TagSources {
     return ok({ name, objectId: kept.value, targetId: target.value.targetId, replacedRef });
   }
 
-  keepLocal(
+  /** Record (or drop) Keep local for exactly this pair of objects. */
+  async keepLocal(
+    git: GitExec,
     repoId: string,
+    cwd: string,
     input: { name: string; remote: string; localObjectId: string; remoteObjectId: string; keep: boolean }
-  ): void {
-    if (input.keep) {
-      this.store.setKeep(repoId, input.remote, input.name, {
-        localObjectId: input.localObjectId,
-        remoteObjectId: input.remoteObjectId
-      }, this.now());
-    } else {
-      this.store.clearKeep(repoId, input.name, input.remote);
+  ): Promise<Result<void>> {
+    const valid = await validTagName(git, cwd, input.name);
+    if (!valid.ok) return valid;
+    if (!input.keep) {
+      this.store.clearKeep(repoId, valid.value, input.remote);
+      return ok(undefined);
     }
+    if (!OBJECT_ID.test(input.localObjectId) || !OBJECT_ID.test(input.remoteObjectId)) {
+      return err({ kind: "repo", code: "invalid_tag_object", message: "Invalid tag object ID" });
+    }
+    const config = await readRemoteConfig(git, cwd);
+    if (!config.ok) return config;
+    if (!config.value.some((remote) => remote.name === input.remote)) {
+      return err({ kind: "repo", code: "invalid_remote", message: `Not a configured remote: ${input.remote}` });
+    }
+    this.store.setKeep(repoId, input.remote, valid.value, {
+      localObjectId: input.localObjectId,
+      remoteObjectId: input.remoteObjectId
+    }, this.now());
+    return ok(undefined);
   }
 
   async recountPublisher(git: GitExec, repoId: string, cwd: string): Promise<Result<boolean>> {
