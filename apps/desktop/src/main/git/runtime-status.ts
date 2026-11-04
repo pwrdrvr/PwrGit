@@ -6,6 +6,8 @@ import { posix, win32, type PlatformPath } from "node:path";
 import {
   err,
   ok,
+  type GitReflinkStatus,
+  type GitReflinkSupport,
   type GitRuntimeCandidate,
   type GitRuntimeProblem,
   type GitRuntimeSource,
@@ -18,10 +20,14 @@ import { logMain } from "../logs";
 import type { SettingsService } from "../settings/settings-service";
 import {
   activeGitPath,
+  activeGitReflinkProbe,
   bundledGitPath,
   bundledKeychainHelper,
   gitLaunch,
   installedGitSelection,
+  noteGitReflinkSupport,
+  reflinkCheckoutActive,
+  reflinkCheckoutEnabled,
   useInstalledGit,
   type GitLaunch
 } from "./dugite";
@@ -148,6 +154,20 @@ async function discoveredGits(deps: GitDiscoveryDeps): Promise<Array<{ path: str
   return found.filter((entry) => !seen.has(entry.path) && seen.add(entry.path));
 }
 
+/**
+ * Read copy-on-write support from `git worktree -h`. PwrGit's Git lists
+ * `[--[no-]reflink]` under `add` (checkout.reflink, runtime .1) and a
+ * `git worktree reflink` subcommand (re-share, runtime .2). A usage text is
+ * what Git promises to keep stable enough for people; a version string is
+ * not, and a local build of the same source carries none.
+ */
+export function parseReflinkSupport(usage: string): GitReflinkSupport {
+  return {
+    checkout: usage.includes("[--[no-]reflink]"),
+    reshare: /git worktree reflink\b/.test(usage)
+  };
+}
+
 /** Probe one Git the way it would run: its own environment, then LFS through it. */
 export async function probeGitRuntime(
   path: string,
@@ -155,16 +175,29 @@ export async function probeGitRuntime(
   deps: GitDiscoveryDeps = machine
 ): Promise<GitRuntimeCandidate> {
   const bundled = source === "bundled";
-  const candidate = (git: string | null, lfs: string | null, problem: GitRuntimeProblem | null): GitRuntimeCandidate =>
-    ({ path, source, git, lfs, problem });
+  const candidate = (
+    git: string | null,
+    lfs: string | null,
+    problem: GitRuntimeProblem | null,
+    reflink?: GitReflinkSupport
+  ): GitRuntimeCandidate =>
+    ({ path, source, git, lfs, problem, ...(reflink === undefined ? {} : { reflink }) });
   if (!(await deps.executable(path))) return candidate(null, null, "not_found");
   const launch = gitLaunch({}, bundled ? null : path);
   const version = await deps.probe(launch, ["--version"]);
   if (!version.ok || !/^git version \S/.test(version.stdout)) return candidate(null, null, "no_version");
-  const lfs = await deps.probe(launch, ["lfs", "version"]);
+  const [lfs, usage] = await Promise.all([
+    deps.probe(launch, ["lfs", "version"]),
+    // Exit status varies by Git (0 or 129); the usage text is the answer.
+    deps.probe(launch, ["worktree", "-h"])
+  ]);
+  // No usage text means the probe never answered (a timeout while main was
+  // blocked, say), which is unknown, not "can't": leave it out so the next
+  // ask probes again.
+  const reflink = /\busage:/.test(usage.stdout) ? parseReflinkSupport(usage.stdout) : undefined;
   return lfs.ok && lfs.stdout.startsWith("git-lfs/")
-    ? candidate(version.stdout, lfs.stdout, null)
-    : candidate(version.stdout, null, "lfs_missing");
+    ? candidate(version.stdout, lfs.stdout, null, reflink)
+    : candidate(version.stdout, null, "lfs_missing", reflink);
 }
 
 export async function readGitRuntimeStatus(deps: GitDiscoveryDeps = machine): Promise<GitRuntimeStatus> {
@@ -179,11 +212,67 @@ export async function readGitRuntimeStatus(deps: GitDiscoveryDeps = machine): Pr
     probeGitRuntime(bundledGitPath(), "bundled", deps),
     ...[...discovered, ...custom].map((entry) => probeGitRuntime(entry.path, entry.source, deps))
   ]);
+  noteActiveCandidate(candidates);
   return {
     active: selected === null ? "bundled" : "installed",
     path: activeGitPath(),
     keychainHelper: bundledKeychainHelper(),
     candidates
+  };
+}
+
+const NO_REFLINK: GitReflinkSupport = { checkout: false, reshare: false };
+
+/** Keep main's copy-on-write state in step with whatever a probe saw of the
+ *  Git in use. A probe that didn't answer records nothing: until one does,
+ *  copy-on-write stays off and the next ask probes again. */
+function noteActiveCandidate(candidates: GitRuntimeCandidate[]): void {
+  const path = activeGitPath();
+  const active = candidates.find((candidate) => candidate.path === path);
+  if (active?.reflink !== undefined) noteGitReflinkSupport(path, active.git, active.reflink);
+}
+
+/** In-flight probes by path: callers asking about the same Git share one,
+ *  and a runtime switch never waits on the previous Git's answer. */
+const activeProbes = new Map<string, Promise<void>>();
+
+/**
+ * Probe only the Git in use, so `checkout.reflink` follows it: at launch
+ * and after every runtime switch. Until it answers, copy-on-write checkout
+ * stays off — the ordinary writer, never a wrong one.
+ */
+export function refreshActiveGitReflink(deps: GitDiscoveryDeps = machine): Promise<void> {
+  const path = activeGitPath();
+  const pending = activeProbes.get(path);
+  if (pending !== undefined) return pending;
+  const probe = (async () => {
+    const probed = await probeGitRuntime(path, installedGitSelection() === null ? "bundled" : "custom", deps);
+    noteActiveCandidate([probed]);
+    const support = probed.reflink;
+    logMain(
+      support === undefined ? "warn" : "info",
+      "git",
+      support === undefined
+        ? `copy-on-write support of ${path}: no answer${probed.problem === null ? "" : ` (${probed.problem})`}, asking again later; flag off`
+        : `copy-on-write support of ${path}: checkout ${support.checkout ? "yes" : "no"}, re-share ${support.reshare ? "yes" : "no"}; flag ${reflinkCheckoutActive() ? "on" : "off"}`
+    );
+  })().finally(() => {
+    activeProbes.delete(path);
+  });
+  activeProbes.set(path, probe);
+  return probe;
+}
+
+/** What `git:reflinkSupport` answers. */
+export async function readGitReflinkStatus(deps: GitDiscoveryDeps = machine): Promise<GitReflinkStatus> {
+  if (activeGitReflinkProbe() === null) await refreshActiveGitReflink(deps);
+  const probe = activeGitReflinkProbe();
+  return {
+    path: activeGitPath(),
+    version: probe?.version ?? null,
+    support: probe?.support ?? NO_REFLINK,
+    enabled: reflinkCheckoutEnabled(),
+    active: reflinkCheckoutActive()
   };
 }
 
@@ -202,17 +291,21 @@ export async function selectGitRuntime(
 ): Promise<Result<null>> {
   const path = requested?.trim() ?? "";
   const chosen = path === "" || path === bundledGitPath() ? null : path;
+  let probed: GitRuntimeCandidate | null = null;
   if (chosen !== null) {
     if (!pathsFor(deps).isAbsolute(chosen)) {
       return err({ kind: "git", code: "git_runtime_relative", message: "Choose Git by its full path." });
     }
-    const probed = await probeGitRuntime(chosen, "custom", deps);
+    probed = await probeGitRuntime(chosen, "custom", deps);
     if (probed.problem !== null) {
       return err({ kind: "git", code: `git_runtime_${probed.problem}`, message: PROBLEM_MESSAGE[probed.problem](chosen) });
     }
   }
   settings.update({ gitPath: chosen ?? undefined });
   useInstalledGit(chosen);
+  // The chosen Git was just probed; only the bundle still needs asking.
+  if (probed === null) await refreshActiveGitReflink(deps);
+  else noteActiveCandidate([probed]);
   logMain("info", "git", chosen === null ? "repository commands use the bundled Git" : `repository commands use the installed Git at ${chosen}`);
   return ok(null);
 }
@@ -225,6 +318,7 @@ export function registerGitRuntimeHandlers(bus: CommandBus, settings: Pick<Setti
     return pending;
   };
   bus.register("git:runtimeStatus", async () => ok(await read()));
+  bus.register("git:reflinkSupport", async () => ok(await readGitReflinkStatus()));
   bus.register("git:selectRuntime", async (req) => {
     const selected = await selectGitRuntime(settings, req.path);
     if (!selected.ok) return selected;

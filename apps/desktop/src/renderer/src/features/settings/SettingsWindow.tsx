@@ -520,6 +520,9 @@ function SettingsSectionBody(props: {
           update({ general: { sidebarDensity } });
         }}
         onWorktreeSharingChange={update}
+        onReflinkCheckoutChange={(gitReflinkCheckout) => {
+          update({ general: { gitReflinkCheckout } });
+        }}
       />
     );
   }

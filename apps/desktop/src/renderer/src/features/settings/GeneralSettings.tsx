@@ -45,6 +45,7 @@ export function GeneralSettings(props: {
   onSidebarTextSizeChange: (size: SidebarTextSize) => void;
   onSidebarDensityChange: (density: SidebarDensity) => void;
   onWorktreeSharingChange: (patch: AppSettingsPatch) => void;
+  onReflinkCheckoutChange: (enabled: boolean) => void;
 }) {
   const searchAllProfiles = props.snapshot.general.searchAllProfiles;
   const theme = props.snapshot.general.theme;
@@ -125,7 +126,13 @@ export function GeneralSettings(props: {
         </div>
       </SettingsSection>
 
-      <GitRuntimeSettings />
+      <GitRuntimeSettings
+        reflinkCheckout={{
+          enabled: props.snapshot.general.gitReflinkCheckout,
+          saving: props.saving,
+          onChange: props.onReflinkCheckoutChange
+        }}
+      />
 
       <SettingsSection
         eyebrow="Worktrees"

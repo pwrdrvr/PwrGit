@@ -6781,6 +6781,15 @@ button.agent-menu__item:hover {
 .maintenance__help summary { cursor: pointer; color: var(--text-secondary); }
 .maintenance__help[open] summary { margin-bottom: 8px; }
 .maintenance__body > .bulk-sync__status { margin: 0; }
+/* A live card stays in view while its rows scroll beneath it. Shadows in
+   the dialog's own fill hide rows passing its rounded corners and the
+   body's 12px top padding above it. */
+.maintenance__body > .bulk-sync__status.is-live {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  box-shadow: 0 0 0 4px var(--bg-menu), 0 -12px 0 4px var(--bg-menu);
+}
 .maintenance__results { display: flex; flex-direction: column; gap: 8px; }
 .maintenance__branch { padding: 6px 0; overflow-wrap: anywhere; }
 .maintenance__branch > span { min-width: 0; }
@@ -17101,6 +17110,13 @@ body.is-col-resizing {
   color: var(--text-muted);
   font: 400 11px/1.3 var(--font-sans);
 }
+/* One version per box: the line wraps between parts, and only a part wider
+   than the whole row breaks inside itself. */
+.settings-ai-install__meta-part {
+  display: inline-block;
+  max-width: 100%;
+  overflow-wrap: anywhere;
+}
 
 .settings-ai-path {
   display: flex;
@@ -20956,6 +20972,44 @@ button.agent-auth-node:focus-visible,
 .maintenance__quiet strong { color: var(--text-secondary); font-family: var(--font-mono); }
 .maintenance__quiet button { margin-left: auto; border: 0; background: transparent; color: var(--accent); font: 600 10.5px var(--font-sans); cursor: pointer; }
 .maintenance .bulk-sync__repo-status:has(+ *) { white-space: nowrap; }
+/* Maintenance › Clones (design/Refresh Clones - UX Review.dc.html, turn 2). */
+.maintenance__clones-lead { margin: 0; color: var(--text-secondary); font-size: 11.5px; }
+.maintenance__clones-lead strong { color: var(--text-primary); font-weight: 600; }
+.maintenance__clones-block { padding: 12px; border: 1px solid var(--border-default); border-radius: 8px; background: var(--bg-panel); }
+.maintenance__clones-block strong { display: block; color: var(--text-primary); font: 650 12px/1.3 var(--font-sans); }
+.maintenance__clones-block p { margin: 5px 0 9px; color: var(--text-secondary); font-size: 11px; }
+.maintenance__clones-block code { font: 500 10.5px var(--font-mono); }
+.maintenance__clones-link { padding: 0; border: 0; background: none; color: var(--accent); font: 600 11px/1.3 var(--font-sans); cursor: pointer; }
+.maintenance__clones-link:hover { text-decoration: underline; }
+.maintenance__clones-link:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px; }
+.maintenance__clones-rows { margin: 0; padding: 0; list-style: none; border: 1px solid var(--border-subtle); border-radius: 8px; overflow: hidden; }
+.maintenance__clones-row { background: var(--bg-panel); }
+.maintenance__clones-row + .maintenance__clones-row { border-top: 1px solid var(--border-faint); }
+.maintenance__clones-row > details > summary,
+.maintenance__clones-row:not(:has(details)) { display: grid; grid-template-columns: 16px minmax(0, 1fr) auto; gap: 9px; align-items: start; padding: 8px 12px; }
+.maintenance__clones-row summary { list-style: none; cursor: pointer; }
+.maintenance__clones-row summary::-webkit-details-marker { display: none; }
+.maintenance__clones-row summary:hover { background: var(--bg-panel-hover); }
+.maintenance__clones-row summary:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: -2px; }
+.maintenance__clones-row .bulk-sync__spinner,
+.maintenance__clones-row .bulk-sync__mark { width: 16px; height: 16px; margin-top: 1px; }
+.maintenance__clones-queued { width: 16px; height: 16px; margin-top: 1px; border: 1px solid var(--border-default); border-radius: 50%; }
+.maintenance__clones-queued.is-skipped { border-style: dashed; border-color: var(--border-strong); }
+.maintenance__clones-name { min-width: 0; }
+.maintenance__clones-name strong { display: block; color: var(--text-primary); font: 650 11.5px/1.3 var(--font-sans); }
+.maintenance__clones-name code { display: block; margin-top: 1px; color: var(--text-muted); font: 500 10px/1.4 var(--font-mono); overflow-wrap: anywhere; }
+.maintenance__clones-name small { display: block; margin-top: 2px; color: var(--text-secondary); font-size: 10.5px; line-height: 1.4; overflow-wrap: anywhere; }
+.maintenance__clones-none { color: var(--text-muted); font-size: 11px; }
+.maintenance__clones-none summary { cursor: pointer; color: var(--text-secondary); }
+.maintenance__clones-none p { margin: 6px 0 0; overflow-wrap: anywhere; }
+.maintenance__clones-bytes { color: var(--text-primary); font: 600 10.5px/1.3 var(--font-mono); text-align: right; white-space: nowrap; }
+.maintenance__clones-worktrees { margin: 0; padding: 0 12px 8px 37px; list-style: none; }
+.maintenance__clones-worktrees li { display: flex; gap: 10px; align-items: flex-start; padding: 6px 0; border-top: 1px solid var(--border-faint); }
+.maintenance__clones-worktrees li > span:first-child { flex: 1; min-width: 0; }
+.maintenance__clones-worktrees strong { display: block; color: var(--text-primary); font: 600 11px/1.3 var(--font-sans); }
+.maintenance__clones-worktrees code { display: block; color: var(--text-muted); font: 500 10px/1.4 var(--font-mono); overflow-wrap: anywhere; }
+.maintenance__clones-worktrees small { display: block; color: var(--text-secondary); font-size: 10.5px; line-height: 1.4; }
+.maintenance__clones-worktrees small.is-failed { color: var(--danger-text); }
 .maintenance__done-status { display: flex; align-items: center; gap: 11px; margin: 12px 18px 0; padding: 11px 12px; border: 1px solid var(--border-subtle); border-radius: 8px; background: var(--bg-panel); }
 .maintenance__done-status > .bulk-sync__mark { width: 16px; height: 16px; }
 .maintenance__done-status strong, .maintenance__done-status small { display: block; }

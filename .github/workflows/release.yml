@@ -130,6 +130,8 @@ jobs:
             apps/desktop/scripts/verify-asar-contents.mjs \
             apps/desktop/scripts/packaged-html-rules.mjs \
             apps/desktop/scripts/verify-embedded-git-notices.mjs \
+            apps/desktop/scripts/stage-runtime.mjs \
+            apps/desktop/custom-git-runtime.json \
             apps/desktop/node_modules \
             node_modules
           sha256="$(shasum -a 256 "$tarball" | awk '{print $1}')"

@@ -1,12 +1,13 @@
 import { chmodSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, unlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { delimiter, dirname, join } from "node:path";
+import { delimiter, dirname, join, resolve } from "node:path";
 import dugite from "dugite";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
   bundledGitEnvironment,
   defaultBundledGitConfigDirectory,
-  installedKeychainHelper
+  installedKeychainHelper,
+  userSystemConfig
 } from "./git-runtime.js";
 
 const posix = process.platform !== "win32";
@@ -97,6 +98,22 @@ describe.skipIf(!posix)("installedKeychainHelper", () => {
 });
 
 describe("bundledGitEnvironment", () => {
+  // The dev shell's own system config would change every answer.
+  const ISOLATED = ["GIT_CONFIG_SYSTEM"];
+  const saved = new Map<string, string | undefined>();
+  beforeEach(() => {
+    for (const name of ISOLATED) {
+      saved.set(name, process.env[name]);
+      delete process.env[name];
+    }
+  });
+  afterEach(() => {
+    for (const [name, value] of saved) {
+      if (value === undefined) delete process.env[name];
+      else process.env[name] = value;
+    }
+  });
+
   it("keeps Dugite's own config when no directory is configured", () => {
     const env = bundledGitEnvironment(undefined, {}, { configDirectory: null });
     expect(env.GIT_CONFIG_SYSTEM).toBeUndefined();
@@ -133,6 +150,18 @@ describe("bundledGitEnvironment", () => {
     expect(path.indexOf("/fixture/bin")).toBeLessThan(path.indexOf(dirname(helper)));
   });
 
+  it("writes the copy-on-write switch after the bundle's include, so it outranks the bundle", () => {
+    const configDirectory = temporary("pwrgit-gitconfig-");
+    const on = readFileSync(bundledGitEnvironment(undefined, {}, { configDirectory, platform: "linux", checkoutReflink: true }).GIT_CONFIG_SYSTEM ?? "", "utf8");
+    const off = bundledGitEnvironment(undefined, {}, { configDirectory, platform: "linux", checkoutReflink: false });
+    const offText = readFileSync(off.GIT_CONFIG_SYSTEM ?? "", "utf8");
+    expect(on.endsWith("[checkout]\n\treflink = true\n")).toBe(true);
+    expect(offText.endsWith("[checkout]\n\treflink = false\n")).toBe(true);
+    expect(offText.indexOf("[checkout]")).toBeGreaterThan(offText.indexOf("[include]"));
+    const unset = readFileSync(bundledGitEnvironment(undefined, {}, { configDirectory, platform: "linux" }).GIT_CONFIG_SYSTEM ?? "", "utf8");
+    expect(unset).not.toContain("[checkout]");
+  });
+
   it("names the file by content, so differing app copies never rewrite each other's", () => {
     const configDirectory = temporary("pwrgit-gitconfig-");
     const one = bundledGitEnvironment(undefined, {}, { configDirectory, platform: "linux" });
@@ -149,6 +178,132 @@ describe("bundledGitEnvironment", () => {
     expect(env.GIT_CONFIG_SYSTEM).toBeUndefined();
   });
 
+  describe("an inherited GIT_CONFIG_SYSTEM", () => {
+    // Unquoted: Git's config syntax escapes every backslash, as on Windows.
+    const includeOf = (file: string) =>
+      readFileSync(file, "utf8").match(/\[include\]\n\tpath = "(.*)"/)?.[1]?.replaceAll("\\\\", "\\");
+    const bundleConfig = (runtime: string) => join(runtime, "etc", "gitconfig");
+
+    it("includes the user's own system config in place of the bundle's", () => {
+      const runtime = temporary("pwrgit-custom-runtime-");
+      const own = join(temporary("pwrgit-etc-"), "gitconfig");
+      writeFileSync(own, "[user]\n\tname = Machine\n");
+      const configDirectory = temporary("pwrgit-gitconfig-");
+      const env = bundledGitEnvironment(runtime, { GIT_CONFIG_SYSTEM: own }, { configDirectory, platform: "linux" });
+      expect(dirname(env.GIT_CONFIG_SYSTEM!)).toBe(configDirectory);
+      expect(includeOf(env.GIT_CONFIG_SYSTEM!)).toBe(own);
+      // From the process environment too, which is how Dugite and the app see it.
+      process.env.GIT_CONFIG_SYSTEM = own;
+      expect(includeOf(bundledGitEnvironment(runtime, {}, { configDirectory, platform: "linux" }).GIT_CONFIG_SYSTEM!)).toBe(own);
+    });
+
+    it("rebuilds a Pwr app's generated config, or the bundle's, instead of stacking it", () => {
+      const runtime = temporary("pwrgit-custom-runtime-");
+      const configDirectory = temporary("pwrgit-gitconfig-");
+      const elsewhere = temporary("pwrgit-other-profile-");
+      // PwrAgent's terminal hands its generated file to anything launched there.
+      const pwragent = join(elsewhere, "pwragent-gitconfig");
+      writeFileSync(pwragent, "# Written by PwrAgent: defaults for its bundled Git\n[filter \"lfs\"]\n");
+      const first = bundledGitEnvironment(runtime, {}, { configDirectory, platform: "linux" }).GIT_CONFIG_SYSTEM!;
+      const devProfile = join(elsewhere, "gitconfig-dev");
+      writeFileSync(devProfile, readFileSync(first, "utf8"));
+      for (const inherited of [first, devProfile, pwragent, bundleConfig(runtime)]) {
+        const env = bundledGitEnvironment(runtime, { GIT_CONFIG_SYSTEM: inherited }, { configDirectory, platform: "linux" });
+        expect(env.GIT_CONFIG_SYSTEM).toBe(first);
+        expect(includeOf(env.GIT_CONFIG_SYSTEM!)).toBe(bundleConfig(runtime));
+      }
+    });
+
+    it("keeps the user's config through every rebuild and through PwrAgent's wrapper", () => {
+      const runtime = temporary("pwrgit-custom-runtime-");
+      const configDirectory = temporary("pwrgit-gitconfig-");
+      const options = { configDirectory, platform: "linux" as const };
+      const etc = temporary("pwrgit-etc-");
+      const own = join(etc, "gitconfig");
+      writeFileSync(own, "[user]\n\tname = Machine\n");
+      // A PwrGit terminal passes its generated file on; building again from
+      // that environment must still reach the user's file.
+      let env: NodeJS.ProcessEnv = { GIT_CONFIG_SYSTEM: own };
+      for (let build = 0; build < 3; build += 1) {
+        env = bundledGitEnvironment(runtime, env, options);
+        expect(includeOf(env.GIT_CONFIG_SYSTEM!)).toBe(own);
+      }
+      // PwrAgent's generated file, written the same way, with escapes.
+      const pwragent = join(temporary("pwragent-gitconfig-"), "gitconfig-abc");
+      const quoted = own.replaceAll("\\", "\\\\").replaceAll("\"", "\\\"");
+      writeFileSync(pwragent, `# Written by PwrAgent: defaults\n[credential]\n\thelper = x\n[include]\n\tpath = "${quoted}"\n`);
+      expect(includeOf(bundledGitEnvironment(runtime, { GIT_CONFIG_SYSTEM: pwragent }, options).GIT_CONFIG_SYSTEM!)).toBe(own);
+      // A relative include resolves against the generated file's directory.
+      const relativeWrapper = join(etc, "wrapper");
+      writeFileSync(relativeWrapper, "# Written by PwrAgent: defaults\n[include]\n\tpath = gitconfig\n");
+      expect(userSystemConfig(runtime, configDirectory, relativeWrapper)).toBe(own);
+    });
+
+    it("still leads back to the user's file when the copy-on-write switch is written after the include", () => {
+      // PwrAgent's operatorSystemConfig and userSystemConfig both read the
+      // first `path =` after the last `[include]`; the switch's `[checkout]`
+      // section must never get in the way.
+      const runtime = temporary("pwrgit-custom-runtime-");
+      const configDirectory = temporary("pwrgit-gitconfig-");
+      const own = join(temporary("pwrgit-etc-"), "gitconfig");
+      writeFileSync(own, "[user]\n\tname = Machine\n");
+      for (const checkoutReflink of [true, false]) {
+        const generated = bundledGitEnvironment(runtime, { GIT_CONFIG_SYSTEM: own }, { configDirectory, platform: "linux", checkoutReflink }).GIT_CONFIG_SYSTEM!;
+        expect(readFileSync(generated, "utf8")).toMatch(/^# Written by PwrGit:/);
+        expect(userSystemConfig(runtime, configDirectory, generated)).toBe(own);
+        // Moved to another data directory (PwrAgent's terminal hands it on), it is still read by its marker.
+        const handedOn = join(temporary("pwrgit-elsewhere-"), "gitconfig-x");
+        writeFileSync(handedOn, readFileSync(generated, "utf8"));
+        expect(userSystemConfig(runtime, null, handedOn)).toBe(own);
+      }
+    });
+
+    it("treats a bundled Git's own config as no user config, wherever the bundle is", () => {
+      const runtime = temporary("pwrgit-custom-runtime-");
+      const configDirectory = temporary("pwrgit-gitconfig-");
+      // Another Pwr app's bundle, which PwrAgent's generated file includes.
+      const other = join(temporary("pwragent-app-"), "git");
+      mkdirSync(join(other, "libexec", "git-core"), { recursive: true });
+      mkdirSync(join(other, "etc"));
+      writeFileSync(join(other, "etc", "gitconfig"), "[pwrtest]\n\talpha = other-bundle\n");
+      const wrapper = join(temporary("pwragent-gitconfig-"), "gitconfig-abc");
+      writeFileSync(wrapper, `# Written by PwrAgent: defaults\n[include]\n\tpath = "${join(other, "etc", "gitconfig").replaceAll("\\", "\\\\")}"\n`);
+      // A generated file that includes itself ends at the depth limit.
+      const loop = join(temporary("pwrgit-loop-"), "gitconfig-loop");
+      writeFileSync(loop, `# Written by PwrGit: defaults\n[include]\n\tpath = "${loop.replaceAll("\\", "\\\\")}"\n`);
+      for (const inherited of [join(other, "etc", "gitconfig"), wrapper, loop]) {
+        expect(userSystemConfig(runtime, configDirectory, inherited)).toBeUndefined();
+        const env = bundledGitEnvironment(runtime, { GIT_CONFIG_SYSTEM: inherited }, { configDirectory, platform: "linux" });
+        expect(includeOf(env.GIT_CONFIG_SYSTEM!)).toBe(bundleConfig(runtime));
+      }
+    });
+
+    it("hands Dugite the user's config, or the bundle's, when no generated config can be written", () => {
+      const runtime = temporary("pwrgit-custom-runtime-");
+      const own = join(temporary("pwrgit-etc-"), "gitconfig");
+      writeFileSync(own, "");
+      const wrapped = join(temporary("pwragent-gitconfig-"), "gitconfig-abc");
+      writeFileSync(wrapped, `# Written by PwrAgent: defaults\n[include]\n\tpath = "${own.replaceAll("\\", "\\\\")}"\n`);
+      const stale = join(temporary("pwrgit-gitconfig-"), "gitconfig-old");
+      writeFileSync(stale, "# Written by PwrGit: defaults\n");
+      const options = { configDirectory: null, platform: "linux" as const };
+      // Dugite keeps a GIT_CONFIG_SYSTEM it is given, so ours must be final.
+      expect(bundledGitEnvironment(runtime, { GIT_CONFIG_SYSTEM: wrapped }, options).GIT_CONFIG_SYSTEM).toBe(own);
+      expect(bundledGitEnvironment(runtime, { GIT_CONFIG_SYSTEM: stale }, options).GIT_CONFIG_SYSTEM).toBe(bundleConfig(runtime));
+      expect(bundledGitEnvironment(runtime, { GIT_CONFIG_SYSTEM: "/etc/own" }, options).GIT_CONFIG_SYSTEM).toBe(resolve("/etc/own"));
+      expect(bundledGitEnvironment(runtime, {}, options)).not.toHaveProperty("GIT_CONFIG_SYSTEM");
+    });
+
+    it("treats a missing or empty value as no user config, and any other file as the user's", () => {
+      expect(userSystemConfig("/bundle", null, undefined)).toBeUndefined();
+      expect(userSystemConfig("/bundle", null, "")).toBeUndefined();
+      const absent = join(temporary("pwrgit-etc-"), "absent");
+      expect(userSystemConfig("/bundle", null, absent)).toBe(absent);
+      expect(userSystemConfig("/bundle", null, "/bundle/etc/gitconfig")).toBeUndefined();
+      expect(userSystemConfig("/bundle", "/data/git", "/data/git/gitconfig-1")).toBeUndefined();
+    });
+  });
+
   it("lives beside the MCP policy, in PwrGit's own data directory", () => {
     const directory = defaultBundledGitConfigDirectory({ PWRGIT_MCP_POLICY_FILE: "/elsewhere/policy.json" });
     expect(directory.endsWith(join("PwrGit", "git"))).toBe(true);
@@ -158,7 +313,7 @@ describe("bundledGitEnvironment", () => {
 /** The bundled Git itself, reading the generated config: global config
  *  isolated, prompts off, exactly as PwrGit runs it. */
 describe.skipIf(!posix)("bundled Git with the generated config", () => {
-  function run(args: string[], options: { global?: string; stdin?: string }) {
+  function run(args: string[], options: { global?: string; stdin?: string; checkoutReflink?: boolean }) {
     const { bin } = homebrewGit(temporary("pwrgit-brew-"), "9.1.0");
     const home = temporary("pwrgit-home-");
     const global = join(home, "gitconfig");
@@ -169,7 +324,12 @@ describe.skipIf(!posix)("bundled Git with the generated config", () => {
           GIT_CONFIG_GLOBAL: global,
           HOME: home,
           GIT_TERMINAL_PROMPT: "0"
-        }, { configDirectory: temporary("pwrgit-gitconfig-"), platform: "darwin", searchPath: bin })
+        }, {
+          configDirectory: temporary("pwrgit-gitconfig-"),
+          platform: "darwin",
+          searchPath: bin,
+          ...(options.checkoutReflink === undefined ? {} : { checkoutReflink: options.checkoutReflink })
+        })
       },
       ...(options.stdin === undefined ? {} : { stdin: options.stdin })
     });
@@ -200,5 +360,15 @@ describe.skipIf(!posix)("bundled Git with the generated config", () => {
       global: "[filter \"lfs\"]\n\tsmudge = git-lfs smudge --skip -- %f\n"
     });
     expect(skipSmudge.stdout.trim()).toBe("git-lfs smudge --skip -- %f");
+  });
+
+  it("sets copy-on-write checkout from the app's switch, and leaves global config able to override it", async () => {
+    const off = await run(["config", "--get", "checkout.reflink"], { checkoutReflink: false });
+    expect(off.stdout.trim()).toBe("false");
+    const overridden = await run(["config", "--get", "checkout.reflink"], {
+      checkoutReflink: false,
+      global: "[checkout]\n\treflink = true\n"
+    });
+    expect(overridden.stdout.trim()).toBe("true");
   });
 });

@@ -33,6 +33,7 @@ async function render(reflink: "off" | "on", seed: "off" | "on" = "off") {
     onSearchAllProfilesChange={() => undefined}
     onSidebarTextSizeChange={() => undefined}
     onSidebarDensityChange={() => undefined}
+    onReflinkCheckoutChange={() => undefined}
     onWorktreeSharingChange={update}
   />));
 }

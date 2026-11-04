@@ -83,8 +83,9 @@ normalize it. Do not depend on either behavior.
   worktrees share `refs/remotes`. Prefer this to `update-ref`, so the asserted
   precondition is a state that Git produced.
 - **Product code that pushes a branch to a URL refreshes the ref itself.**
-  `pushPlannedRefs` pushes to the remote's push URL and keeps its refetch. The
-  bundled Git predates 2.56, and Settings accepts any installed Git.
+  `pushPlannedRefs` pushes to the remote's push URL and keeps its refetch.
+  Packaged macOS/Linux builds run a 2.56 development build, Windows and the
+  tests run Dugite's older Git, and Settings accepts any installed Git.
   `remote.test.ts` pins this with two remotes on one URL, where 2.56 moves
   neither. The remote tag actions also push to the URL. They need no refresh,
   because the default fetch refspec maps no tags.
@@ -107,6 +108,15 @@ bundled Git unless Settings › General › Git runtime chose an installed Git
     filter, on macOS the installed Git's `git-credential-osxkeychain`, then an
     include of Dugite's config. At system scope, the user's global config still
     wins and `credential.helper =` still opts out.
+  - An inherited `GIT_CONFIG_SYSTEM` of the user's own is included in place of
+    Dugite's. `userSystemConfig` follows a Pwr app's generated file (in the
+    data directory, or with a `# Written by Pwr…:` first line) to its last
+    `[include]`, so the user's file survives rebuilds, PwrAgent's terminal and
+    a later installed-Git choice. A bundled Git's own `git/etc/gitconfig`
+    means the user set none. PwrAgent's `operatorSystemConfig` follows the same
+    rule, and parses our generated file: keep its `[include] path = "…"`, and
+    change both apps together. `git-runtime.oracle.test.ts` checks every case
+    against real Git.
   - Nothing is written until `configureBundledGitConfig` runs, so unit tests
     stay out of the real data directory. Tests that need it use a temp one.
 - **Borrow the keychain helper from the user's terminal Git.** A keychain item
@@ -117,7 +127,7 @@ bundled Git unless Settings › General › Git runtime chose an installed Git
 - **A chosen Git never falls back.** If it breaks, every command fails with a
   message that names it and points at Settings. A fallback would make Settings
   wrong about which Git runs. `installedGitEnvironment` removes every bundle
-  variable: `GIT_EXEC_PATH`, the generated `GIT_CONFIG_SYSTEM` and the
+  variable: `GIT_EXEC_PATH`, a Pwr app's `GIT_CONFIG_SYSTEM` and the
   bundle's PATH directories. Any one of them silently sends that Git to the
   bundle's helpers or config.
 
@@ -126,6 +136,49 @@ developer tools, that shim opens the installer dialog. Discovery lists the Git
 under `xcode-select -p` instead, only when that Git exists. A Git without
 working Git LFS is listed but cannot be chosen. `git:selectRuntime` probes a
 path before it saves it.
+
+## Copy-on-write clones: a `-c` flag and Maintenance › Clones
+
+PwrGit's own Git (huntharo/git runtime) clones files a worktree shares with
+its main checkout. Support is read from `git worktree -h`
+(`parseReflinkSupport`): `[--[no-]reflink]` means `checkout.reflink` (runtime
+.1), a `git worktree reflink` line means re-share (.2). Never from a version
+string: a local build of the same source has none.
+
+- **The switch reaches the bundle as system config, not `-c`.**
+  `bundledSystemConfig` writes `checkout.reflink = true|false` *after* the
+  bundle's include, while Settings' switch is on *and* the last probe of the
+  Git in use (`refreshActiveGitReflink`, at launch and after every runtime
+  switch) said it can. Off is written as `false`, so the runtime's own config
+  never decides: `.2`'s `etc/gitconfig` forced `true`; `.3`, which PwrGit
+  ships, sets nothing. System scope keeps the user's global and repository
+  config in charge, as for LFS and the keychain.
+  An installed Git reads its own system config, which PwrGit never writes, so
+  it gets `-c checkout.reflink=true` while on and nothing while off.
+  - Add no `[include]` or `path =` after the include: `userSystemConfig` and
+    PwrAgent's `operatorSystemConfig` read the first `path =` after the last
+    `[include]`. Keep the `# Written by PwrGit:` first line.
+  - `git-runtime.reflink-oracle.test.ts` asks real Git all 81 combinations of
+    repository, global, switch and runtime config; a sample missed a switch
+    written before the include. `dugite.property.test.ts` and
+    `runtime-status.property.test.ts` hold the switch to the Git in use
+    across runtime switches and out-of-order probes.
+- **Clones (`worktree-reshare.ts`) is non-destructive by Git's contract.**
+  Git compares bytes before it shares and skips changed, untracked and ignored
+  files. Keep the real-Git tests (`worktree-reshare.test.ts`, and the
+  generated-loose-work property in `worktree-reshare.property.test.ts`; run with
+  `PWRGIT_TEST_GIT=installed` and the runtime first on PATH; they skip on any
+  other Git, CI included) proving loose work survives byte for byte.
+- **A file the main checkout just wrote is racy and is no donor** (`no-donor`).
+  After a fast-forward, wait past the index's timestamp, then let `git status`
+  rewrite the index (it does whenever an entry is racy).
+- The main-checkout update is Try pull's own soft pull
+  (`softPullMainCheckout` over `bulkSyncRepositories`), only on the default
+  branch. A running `git worktree reflink` is never cancelled.
+- The receipt's figure is Git's `observed-private-reduction`: file data that
+  stopped being private. Word it "now shared", never "freed".
+
+Design: `design/Refresh Clones - UX Review.dc.html`.
 
 ## Main decides how many Git processes exist, not the renderer
 

@@ -7,9 +7,8 @@ copyright: "Copyright © 2026 PwrDrvr LLC."
 # Keep this in sync with apps/desktop/package.json devDependencies.electron.
 electronVersion: 44.9.3
 
-# dugite's embedded git is downloaded per-arch at install time; this hook
-# re-downloads the right slice for each macOS arch pass of the universal
-# build. See scripts/beforepack-dugite-arch.mjs.
+# Stage the pinned custom POSIX runtime; both macOS legs reuse the identical
+# signed universal payload. Windows retains its installed Dugite distribution.
 beforePack: "scripts/beforepack-dugite-arch.mjs"
 
 # Give the main executable a PwrGit-specific LC_UUID before code signing.
@@ -89,6 +88,9 @@ files:
   # process points dugite at it with LOCAL_GIT_DIRECTORY (see
   # src/main/index.ts); only dugite's JS stays in the asar.
   - "!**/node_modules/dugite/git/**"
+  # stage-runtime.mjs extracts beside git/ before an atomic rename; a run killed
+  # mid-extraction leaves this directory, which must never reach the asar.
+  - "!**/node_modules/dugite/.pwrgit-stage-*/**"
 
 extraResources:
   - from: LICENSE
@@ -117,22 +119,11 @@ extraResources:
     to: tray-icon@2x.png
   - from: build/tray-icon@3x.png
     to: tray-icon@3x.png
-  # The per-arch git distribution staged by scripts/beforepack-dugite-arch.mjs.
-  # Lands at Contents/Resources/git (macOS) / resources/git (Windows), where
-  # LOCAL_GIT_DIRECTORY points. @electron/universal lipo-merges the per-arch
-  # Mach-O binaries and keeps the (identical) symlinks from the x64 tree.
+  # beforePack verifies this complete runtime before copying. On macOS,
+  # already-universal Git executables retain their original signed bytes.
+  # LOCAL_GIT_DIRECTORY points to the resulting resources/git directory.
   - from: node_modules/dugite/git
     to: git
-  # Dugite's downloaded Git distribution omits these notice files. Ship them
-  # in the same resource directory as the binaries they govern.
-  - from: resources/embedded-git/COPYING
-    to: git/COPYING
-  - from: resources/embedded-git/LICENSE.git-lfs
-    to: git/LICENSE.git-lfs
-  - from: resources/embedded-git/LICENSE.git-credential-manager
-    to: git/LICENSE.git-credential-manager
-  - from: resources/embedded-git/NOTICE
-    to: git/NOTICE
 
 # Electron fuses — ASAR integrity is NOT on by default in electron-builder.
 # Enable it explicitly so the runtime aborts if the .asar is tampered with.
@@ -147,6 +138,9 @@ electronFuses:
   grantFileProtocolExtraPrivileges: true
 
 mac:
+  # Preserve the approved universal Git payload and its existing PwrDrvr signatures.
+  signIgnore:
+    - "/Contents/Resources/git(?:/|$)"
   category: public.app-category.developer-tools
   # Icon Composer package, NOT a hand-built .icns: electron-builder compiles
   # it with Xcode 26's actool (Assets.car + CFBundleIconName for macOS 26) and
@@ -203,6 +197,9 @@ dmg:
   writeUpdateInfo: false
 
 win:
+  extraResources:
+    - from: resources/embedded-git
+      to: git
   # Electron Builder derives the Windows .ico from the 1024px master PNG;
   # keep the source PNG rather than a hand-authored .ico in the repository.
   icon: build/icon.png

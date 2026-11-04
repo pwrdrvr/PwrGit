@@ -230,7 +230,14 @@ The gate reads all three surfaces of the notice:
    devDependency that `--prod` never reports; the generator merges it in and
    the gate follows. **Keep the two in step**, or the largest shipped
    component has an ungated license.
-3. `EMBEDDED_GIT_NOTICE_SOURCES`, the Dugite runtimes.
+3. `EMBEDDED_GIT_NOTICE_SOURCES`, the Git runtimes: Dugite's (Windows) and
+   PwrDrvr's custom macOS/Linux runtime, which on Linux also ships curl's
+   Mozilla CA bundle (MPL-2.0). Its license and notice live in
+   `apps/desktop/resources/custom-git/` (an entry's `directory`), never in
+   `resources/embedded-git/`, which Windows packaging copies into its Git
+   folder. Their version and source come from the pinned
+   `custom-git-runtime.json`; a test fails if the committed license's hash
+   differs from the pin's `license_sha256`.
 
 **Not** covered:
 

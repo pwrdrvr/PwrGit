@@ -112,6 +112,7 @@ import type {
   SearchHitStatus,
   SubmoduleSnapshot,
   SshRemoteRecovery,
+  GitReflinkStatus,
   GitRuntimeStatus,
   StashDetails,
   StashEntry,
@@ -725,6 +726,15 @@ export type GeneralSettings = {
    */
   gitIdentityReminder: boolean;
   /**
+   * Settings › General › Git runtime: Git runs with `checkout.reflink` on,
+   * so checkouts clone files the main checkout holds unchanged. Applies only
+   * while the Git in use supports it; with any other Git the switch is shown
+   * disabled. Set in PwrGit's generated system config for the bundle (where
+   * the user's own config still wins) and as `-c` for an installed Git;
+   * nothing is written to the user's Git config.
+   */
+  gitReflinkCheckout: boolean;
+  /**
    * Settings › Profiles › By folder: PwrGit keeps an `includeIf` per profile
    * root in the global Git config. Set only by `identity:setFolderSync`,
    * which writes the config, never by `settings:update`.
@@ -822,7 +832,8 @@ export const GENERAL_DEFAULTS: GeneralSettings = {
   worktreeCleanupKeepDays: 7,
   worktreeFinishedAfterDays: STALE_AGE_DAYS,
   gitIdentityReminder: true,
-  gitIdentityByFolder: false
+  gitIdentityByFolder: false,
+  gitReflinkCheckout: true
 };
 
 export const EXPERIMENTAL_DEFAULTS: ExperimentalSettings = {
@@ -2451,6 +2462,10 @@ export interface Commands {
    * LFS, so a typo is never written as the runtime.
    */
   "git:selectRuntime": { req: { path: string | null }; res: GitRuntimeStatus };
+  /** What the Git in use can do with copy-on-write clones. Answered from the
+   *  probe main keeps for the running Git (refreshed when Settings changes
+   *  it), so Maintenance can ask on open without spawning a Git. */
+  "git:reflinkSupport": { req: void; res: GitReflinkStatus };
 
   // App settings (Settings window)
   "settings:read": { req: void; res: AppSettingsSnapshot };

@@ -423,13 +423,18 @@ describe("embedded Git runtimes", () => {
     expect(checkEmbeddedRuntimeLicenses(EMBEDDED_GIT_NOTICE_SOURCES)).toEqual([]);
   });
 
-  test("the real Git entry is the only copyleft one, and it is disclosed", () => {
+  test("only the two platform-specific Git distributions are copyleft, and both are disclosed", () => {
     const copyleft = EMBEDDED_GIT_NOTICE_SOURCES.filter((entry) =>
       declaresCopyleft(entry.declaredLicense),
     );
-    expect(copyleft.map((entry) => entry.name)).toEqual(["Git embedded runtime"]);
-    expect(copyleft[0].declaredLicense).toBe("GPL-2.0-only");
-    expect(copyleft[0].copyleft.correspondingSource).toMatch(/^https:\/\//);
+    expect(copyleft.map((entry) => entry.name)).toEqual([
+      "Custom Git embedded runtime (macOS/Linux)",
+      "Git embedded runtime",
+    ]);
+    for (const entry of copyleft) {
+      expect(entry.declaredLicense).toBe("GPL-2.0-only");
+      expect(entry.copyleft.correspondingSource).toMatch(/^https:\/\//);
+    }
   });
 });
 

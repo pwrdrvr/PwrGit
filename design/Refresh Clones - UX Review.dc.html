@@ -1,0 +1,251 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <script src="./support.js"></script>
+  </head>
+  <body>
+    <x-dc>
+      <helmet data-dc-atomics>
+        <link href="https://fonts.googleapis.com/css2?family=Geist:wght@400..700&amp;family=Geist+Mono:wght@400..700&amp;display=swap" rel="stylesheet" />
+        <style>
+          :root {
+            --rv-bg: #050505; --rv-line: rgba(247, 243, 235, 0.1);
+            --rv-t1: #f7f3eb; --rv-t2: #b8b0a5; --rv-t3: #8c857a; --rv-tsub: rgba(247, 243, 235, 0.54);
+            --rv-acc: #ff8a1f; --rv-accb: #ffb35c; --rv-bad: #b94232; --rv-ok: #5fa969;
+            --font-sans: "Geist", "SF Pro Text", system-ui, sans-serif;
+            --font-mono: "Geist Mono", "SF Mono", "JetBrains Mono", Consolas, monospace;
+          }
+          *, *::before, *::after { box-sizing: border-box; }
+          html { background: var(--rv-bg); }
+          body { margin: 0; background: var(--rv-bg); font-family: var(--font-sans); }
+          a { color: var(--rv-accb); text-decoration: none; } a:hover { color: var(--rv-acc); }
+          .dv-turn { padding: 40px 44px 32px; background: var(--rv-bg); border-bottom: 1px solid var(--rv-line); }
+          .dv-thd { display: flex; align-items: baseline; gap: 10px; margin: 0 0 6px; }
+          .dv-tid { font: 600 10px var(--font-mono); padding: 3px 7px; background: var(--rv-t1); color: var(--rv-bg); border-radius: 4px; }
+          .dv-tname { font: 600 13px/1.2 var(--font-sans); color: var(--rv-t1); }
+          .dv-sub { margin: 0 0 22px; font: 400 11.5px/1.5 var(--font-sans); color: var(--rv-t3); max-width: 900px; text-wrap: pretty; }
+          .dv-sub b { color: var(--rv-t2); font-weight: 600; }
+          .dv-opts { display: flex; flex-wrap: wrap; gap: 28px; align-items: flex-start; }
+          .dv-opt { flex: 0 1 auto; min-width: 0; display: flex; flex-direction: column; gap: 9px; }
+          .dv-oid { font: 600 10.5px var(--font-mono); padding: 3px 7px; background: rgba(247, 243, 235, 0.08); color: var(--rv-t1); border-radius: 5px; }
+          .dv-olabel { display: flex; align-items: baseline; gap: 8px; font: 400 11px/1.3 var(--font-sans); color: var(--rv-tsub); max-width: 760px; }
+          .dv-olabel b { color: var(--rv-accb); font-weight: 600; }
+          .dv-next { margin: 26px 0 0; font: 400 11px/1.5 var(--font-sans); color: var(--rv-t3); }
+          .dv-next b { color: var(--rv-t2); }
+          .tbl { border-collapse: collapse; max-width: 980px; font: 400 10.5px/1.45 var(--font-sans); color: var(--rv-t2); }
+          .tbl th { text-align: left; padding: 7px 10px; color: var(--rv-t1); font-weight: 650; border-bottom: 1px solid var(--rv-line); }
+          .tbl td { padding: 7px 10px; vertical-align: top; border-bottom: 1px solid var(--rv-line); }
+          .tbl code { font: 500 10px var(--font-mono); color: var(--rv-accb); }
+
+          .th-light {
+            --bg-stage: #efe9df; --bg-panel: #fdfcfa; --bg-menu: #ffffff; --bg-input: #ffffff; --bg-panel-hover: #f4f0e8;
+            --border-faint: rgba(0, 0, 0, 0.05); --border-subtle: rgba(0, 0, 0, 0.08); --border-default: rgba(0, 0, 0, 0.12); --border-strong: rgba(0, 0, 0, 0.18);
+            --text-primary: #1a1612; --text-secondary: #524a40; --text-muted: #736c64; --text-subtle: rgba(26, 22, 18, 0.68);
+            --accent: #b74c00; --accent-on: #ffffff;
+            --accent-tint: color-mix(in srgb, var(--accent) 8%, transparent); --accent-border: color-mix(in srgb, var(--accent) 42%, transparent); --accent-soft: color-mix(in srgb, var(--accent) 12%, transparent);
+            --danger-base: #8a1f12; --danger-soft: rgba(138, 31, 18, 0.12); --danger-border: rgba(138, 31, 18, 0.28); --danger-text: #8a1f12;
+            --success-soft: rgba(46, 110, 64, 0.14); --success-text: #1a5c2e;
+            --shadow-overlay: 0 24px 60px rgba(40, 28, 12, 0.18);
+          }
+          .stage { padding: 22px; border-radius: 10px; background: var(--bg-stage); }
+          .bs { width: 720px; max-width: 100%; display: flex; flex-direction: column; overflow: hidden; background: var(--bg-menu); border: 1px solid var(--border-strong); border-radius: 14px; box-shadow: var(--shadow-overlay); }
+          .bs-head { padding: 14px 18px 12px; border-bottom: 1px solid var(--border-subtle); }
+          .bs-head h2 { margin: 0; color: var(--text-primary); font: 650 14px/1.2 var(--font-sans); }
+          .mt-tabs { display: flex; gap: 8px; padding: 12px 18px 0; }
+          .mt-tab { padding: 7px 10px; border: 1px solid var(--border-subtle); border-radius: 6px; background: var(--bg-panel); color: var(--text-secondary); font: 600 12px/1 var(--font-sans); }
+          .mt-tab.on { border-color: var(--accent-border); background: var(--accent-tint); color: var(--text-primary); }
+          .bs-body { display: flex; flex-direction: column; padding-bottom: 12px; }
+          .bs-actions { display: flex; justify-content: flex-end; gap: 8px; padding: 12px 18px; border-top: 1px solid var(--border-subtle); }
+          .bs-btn { height: 28px; padding: 0 12px; border: 1px solid var(--border-default); border-radius: 7px; background: var(--bg-panel); color: var(--text-primary); font: 600 12px/1 var(--font-sans); }
+
+          .done { display: flex; align-items: center; gap: 11px; margin: 12px 18px 0; padding: 11px 12px; border: 1px solid var(--border-subtle); border-radius: 8px; background: var(--bg-panel); }
+          .done strong { display: block; color: var(--text-primary); font: 650 11.5px/1.25 var(--font-sans); }
+          .done small { display: block; margin-top: 3px; color: var(--text-secondary); font: 400 10.5px/1.3 var(--font-sans); }
+          .done time { margin-left: auto; color: var(--text-secondary); font: 600 10.5px/1 var(--font-mono); }
+          .mark { flex: none; display: grid; place-items: center; width: 16px; height: 16px; border-radius: 50%; font: 800 9px/1 var(--font-sans); }
+          .mark.ok { background: var(--success-soft); color: var(--success-text); }
+          .mark.run { border: 2px solid var(--accent-border); border-top-color: var(--accent); background: transparent; }
+
+          .run { display: flex; align-items: center; gap: 11px; margin: 12px 18px 0; padding: 11px 12px; height: 62px; border: 1px solid var(--accent-border); border-radius: 8px; background: var(--bg-panel); }
+          .run strong { display: block; color: var(--text-primary); font: 650 11.5px/1.25 var(--font-sans); }
+          .run small { display: block; margin-top: 3px; color: var(--text-secondary); font: 400 10.5px/1.3 var(--font-sans); }
+
+
+
+          .set { width: 640px; max-width: 100%; padding: 16px 18px; border: 1px solid var(--border-subtle); border-radius: 12px; background: var(--bg-menu); }
+          .set-eyebrow { color: var(--text-muted); font: 600 10px/1 var(--font-mono); letter-spacing: .06em; text-transform: uppercase; }
+          .set-title { display: flex; align-items: center; gap: 8px; margin: 6px 0 4px; color: var(--text-primary); font: 650 14px/1.2 var(--font-sans); }
+          .chip { padding: 3px 7px; border-radius: 999px; border: 1px solid var(--border-default); color: var(--text-secondary); font: 600 10px/1 var(--font-sans); }
+          .chip.ok { border-color: transparent; background: var(--success-soft); color: var(--success-text); }
+          .set-desc { margin: 0 0 12px; color: var(--text-secondary); font: 400 11.5px/1.45 var(--font-sans); }
+          .fld { display: grid; grid-template-columns: 170px minmax(0, 1fr); gap: 14px; padding: 11px 0; border-top: 1px solid var(--border-faint); }
+          .fld-l { color: var(--text-primary); font: 600 12px/1.3 var(--font-sans); }
+          .fld-l small { display: block; margin-top: 3px; color: var(--text-muted); font: 400 10.5px/1.35 var(--font-sans); }
+          .fld-c { display: flex; flex-direction: column; gap: 5px; color: var(--text-primary); font: 500 12px/1.3 var(--font-mono); }
+          .fld-c .det { color: var(--text-muted); font: 500 10.5px/1.35 var(--font-mono); }
+          .fld-c .help { color: var(--text-muted); font: 400 10.5px/1.45 var(--font-sans); }
+          .fld-c .help a, .lnk2 { color: var(--accent); font-weight: 600; }
+          .sw { display: inline-flex; align-items: center; gap: 8px; font: 500 11.5px var(--font-sans); color: var(--text-secondary); }
+          .sw i { position: relative; width: 30px; height: 17px; border-radius: 999px; background: var(--border-strong); }
+          .sw i::after { content: ""; position: absolute; top: 2px; left: 2px; width: 13px; height: 13px; border-radius: 50%; background: #fff; box-shadow: 0 1px 2px rgba(0,0,0,.25); }
+          .sw.on i { background: var(--accent); } .sw.on i::after { left: 15px; }
+          .sw.off { opacity: .45; }
+          .inst { display: flex; align-items: center; gap: 10px; padding: 7px 9px; border: 1px solid var(--border-subtle); border-radius: 7px; }
+          .inst + .inst { margin-top: 5px; }
+          .inst.using { border-color: var(--accent-border); background: var(--accent-tint); }
+          .inst b { display: block; color: var(--text-primary); font: 500 11px/1.3 var(--font-mono); }
+          .inst > div > span { display: block; color: var(--text-muted); font: 500 10px/1.3 var(--font-sans); }
+          .inst .chip, .inst .use { margin-left: auto; }
+          .use { padding: 4px 9px; border: 1px solid var(--border-default); border-radius: 6px; color: var(--text-primary); font: 600 10.5px/1 var(--font-sans); }
+          .tag { padding: 2px 6px; border-radius: 4px; background: var(--accent-soft); color: var(--accent); font: 650 9.5px/1 var(--font-sans); }
+          .cl-body { padding: 12px 18px 0; display: flex; flex-direction: column; gap: 10px; }
+          .cl-lead { margin: 0; color: var(--text-secondary); font: 400 11.5px/1.5 var(--font-sans); }
+          .cl-lead b { color: var(--text-primary); font-weight: 600; }
+          .opt { display: flex; gap: 9px; align-items: flex-start; padding: 10px 12px; border: 1px solid var(--border-subtle); border-radius: 8px; background: var(--bg-panel); }
+          .opt .box { flex: none; width: 14px; height: 14px; margin-top: 1px; border-radius: 3px; border: 1px solid var(--border-strong); }
+          .opt .box.on { border-color: var(--accent); background: var(--accent); box-shadow: inset 0 0 0 2px #fff; }
+          .opt strong { display: block; color: var(--text-primary); font: 650 11.5px/1.3 var(--font-sans); }
+          .opt small { display: block; margin-top: 3px; color: var(--text-secondary); font: 400 10.5px/1.45 var(--font-sans); }
+          .help2 { margin: 0; color: var(--text-muted); font: 400 10.5px/1.45 var(--font-sans); }
+          .foot-lead { margin-right: auto; align-self: center; color: var(--text-muted); font: 500 10.5px var(--font-sans); }
+          .bs-btn.pri { border-color: var(--accent); background: var(--accent); color: var(--accent-on); }
+          .bar { height: 4px; margin: 8px 0 0; border-radius: 999px; background: var(--border-faint); overflow: hidden; }
+          .bar > i { display: block; height: 100%; width: 38%; background: var(--accent); }
+          .cnt { margin-left: auto; color: var(--text-secondary); font: 600 10.5px/1 var(--font-mono); }
+          .rows { margin: 0 18px; border: 1px solid var(--border-subtle); border-radius: 8px; overflow: hidden; }
+          .row { display: grid; grid-template-columns: 16px minmax(0, 1fr) auto; gap: 9px; align-items: start; padding: 8px 12px; background: var(--bg-panel); }
+          .row + .row { border-top: 1px solid var(--border-faint); }
+          .row strong { display: block; color: var(--text-primary); font: 650 11.5px/1.3 var(--font-sans); }
+          .row small { display: block; margin-top: 2px; color: var(--text-secondary); font: 400 10.5px/1.4 var(--font-sans); }
+          .row small em { font-style: normal; color: var(--text-muted); }
+          .row .v { color: var(--text-primary); font: 600 10.5px/1.3 var(--font-mono); text-align: right; }
+          .row .v small { color: var(--text-muted); font: 500 10px/1.3 var(--font-mono); }
+          .mark.skip { border: 1px dashed var(--border-strong); }
+          .mark.q { border: 1px solid var(--border-default); }
+          .block { margin: 12px 18px 0; padding: 12px; border: 1px solid var(--border-default); border-radius: 8px; background: var(--bg-panel); }
+          .block strong { display: block; color: var(--text-primary); font: 650 12px/1.3 var(--font-sans); }
+          .block p { margin: 5px 0 9px; color: var(--text-secondary); font: 400 11px/1.5 var(--font-sans); }
+        </style>
+      </helmet>
+
+      <section class="dv-turn" id="t1" data-screen-label="Turn 1 Settings switch">
+        <div class="dv-thd"><span class="dv-tid">1</span><span class="dv-tname">Settings › General › Git runtime: a copy-on-write checkout switch that is always shown</span></div>
+        <p class="dv-sub">PwrGit's own Git (the <b>huntharo/git</b> runtime, <code>2.56.0-dev-pwrgit.N</code>) can write a worktree's unchanged files as <b>copy-on-write clones</b> of the main checkout. PwrGit turns that on by passing <code>-c checkout.reflink=true</code> to every Git it runs, while this switch is on and the Git in use supports it. The switch sits in the Git runtime card at all times. With any other Git it is drawn off and disabled, and its help line names the Git to switch to, with a <b>Use</b> that does it. Nothing is written to anyone's Git config. All data is invented.</p>
+        <div class="dv-opts">
+          <div class="dv-opt" id="1a" data-screen-label="1a On">
+            <div class="dv-olabel"><a class="dv-oid" href="#1a">1a</a><b>PwrGit's Git in use</b>: the switch works, on by default</div>
+            <div class="stage th-light"><div class="set">
+              <div class="set-eyebrow">Git</div>
+              <div class="set-title">Git runtime <span class="chip">Bundled</span></div>
+              <p class="set-desc">PwrGit runs its own bundled Git and Git LFS, so repository operations don’t depend on what’s installed on this machine.</p>
+              <div class="fld"><div class="fld-l">Git</div><div class="fld-c">2.56.0-dev-pwrgit.2<span class="det">/Applications/PwrGit.app/Contents/Resources/git/bin/git</span></div></div>
+              <div class="fld"><div class="fld-l">Copy-on-write checkout<small>Worktrees share unchanged files with the main checkout</small></div><div class="fld-c"><span class="sw on"><i></i>On</span><span class="help">Checkout, switch, reset and new worktrees clone files the main checkout holds unchanged, so the copies take no extra space until one is edited. APFS, Btrfs and XFS; elsewhere files are written as usual.</span></div></div>
+              <div class="fld"><div class="fld-l">Installs</div><div class="fld-c"><div class="inst using"><div><b>/Applications/PwrGit.app/…/git/bin/git</b><span>Bundled · 2.56.0-dev-pwrgit.2 · LFS 3.7.1 · <span class="tag">Copy-on-write</span></span></div><span class="chip ok">Using</span></div><div class="inst"><div><b>/opt/homebrew/bin/git</b><span>Homebrew · 2.56.0 · LFS 3.7.1</span></div><span class="use">Use</span></div></div></div>
+            </div></div>
+          </div>
+          <div class="dv-opt" id="1b" data-screen-label="1b Other Git">
+            <div class="dv-olabel"><a class="dv-oid" href="#1b">1b</a><b>Homebrew Git chosen</b>: drawn off, disabled, and says how to get it</div>
+            <div class="stage th-light"><div class="set">
+              <div class="set-eyebrow">Git</div>
+              <div class="set-title">Git runtime <span class="chip">Installed</span></div>
+              <p class="set-desc">PwrGit runs its own bundled Git and Git LFS, so repository operations don’t depend on what’s installed on this machine.</p>
+              <div class="fld"><div class="fld-l">Git</div><div class="fld-c">2.56.0<span class="det">/opt/homebrew/bin/git</span></div></div>
+              <div class="fld"><div class="fld-l">Copy-on-write checkout<small>Worktrees share unchanged files with the main checkout</small></div><div class="fld-c"><span class="sw off"><i></i>Off</span><span class="help">Needs PwrGit’s Git. The Git in use (2.56.0, Homebrew) can’t clone files. <a>Use PwrGit’s Git</a></span></div></div>
+              <div class="fld"><div class="fld-l">Installs</div><div class="fld-c"><div class="inst"><div><b>/Applications/PwrGit.app/…/git/bin/git</b><span>Bundled · 2.56.0-dev-pwrgit.2 · LFS 3.7.1 · <span class="tag">Copy-on-write</span></span></div><span class="use">Use</span></div><div class="inst using"><div><b>/opt/homebrew/bin/git</b><span>Homebrew · 2.56.0 · LFS 3.7.1</span></div><span class="chip ok">Using</span></div></div></div>
+            </div></div>
+          </div>
+          <div class="dv-opt" id="1c" data-screen-label="1c Switched off">
+            <div class="dv-olabel"><a class="dv-oid" href="#1c">1c</a><b>Switched off by the reader</b>: the help says what still happens</div>
+            <div class="stage th-light"><div class="set">
+              <div class="fld" style="border-top:0"><div class="fld-l">Copy-on-write checkout<small>Worktrees share unchanged files with the main checkout</small></div><div class="fld-c"><span class="sw"><i></i>Off</span><span class="help">PwrGit writes every file as usual. A worktree created with <code>--reflink</code> elsewhere, or your own <code>checkout.reflink</code> config, still applies.</span></div></div>
+            </div></div>
+          </div>
+        </div>
+        <p class="dv-next" style="max-width:900px">Notes: the <span class="tag">Copy-on-write</span> tag on an install row is what decides 1a against 1b: PwrGit asks each Git <code>git worktree -h</code> and looks for <code>--reflink</code>. A Git that clones on checkout but cannot <b>re-share</b> (runtime <code>.1</code>) gets the switch, and Maintenance › Clones (turn 2) says it needs a newer one.</p>
+      </section>
+
+      <section class="dv-turn" id="t2" data-screen-label="Turn 2 Maintenance Clones">
+        <div class="dv-thd"><span class="dv-tid">2</span><span class="dv-tname">Maintenance › Clones: re-share every worktree’s unchanged files with its main checkout</span></div>
+        <p class="dv-sub">A worktree loses its sharing whenever an ordinary Git, an editor or an agent rewrites its files, and a later checkout that changes nothing never gets it back. <b>Refresh clones</b> runs <code>git worktree reflink</code> on <b>every</b> linked worktree of every repository in scope: no Focused filter, no age guard. First it brings each main checkout up to its default branch, with Try pull’s rule (fetch, then fast-forward only a clean, tracked default branch), so more files match. Changed, untracked and ignored files are never touched; Git compares the bytes before it shares anything. Repositories run in parallel, with the same status card and receipt as the other tasks. The figure is Git’s own count of file data that stopped being private, which is not a promise of free space. All data is invented.</p>
+        <div class="dv-opts">
+          <div class="dv-opt" id="2a" data-screen-label="2a Setup">
+            <div class="dv-olabel"><a class="dv-oid" href="#2a">2a</a><b>Setup</b>: a new tab after Worktrees</div>
+            <div class="stage th-light"><section class="bs">
+              <div class="bs-head"><h2>Repository maintenance</h2></div>
+              <div class="mt-tabs"><span class="mt-tab">Combined</span><span class="mt-tab">Worktrees</span><span class="mt-tab on">Clones</span><span class="mt-tab">Local branches</span><span class="mt-tab">Garbage collection</span></div>
+              <div class="cl-body">
+                <p class="cl-lead">Turn files that every worktree holds <b>unchanged</b> back into copy-on-write clones of the main checkout, so they share disk space again. Edited, untracked and ignored files stay exactly as they are.</p>
+                <div class="opt"><span class="box on"></span><div><strong>Update main checkouts first</strong><small>Fetch, then fast-forward a main checkout that is clean and on its default branch. Any other main checkout is left as it is.</small></div></div>
+                <div class="opt"><span class="box"></span><div><strong>Include all profiles</strong><small>Every known repository across all profiles.</small></div></div>
+                <p class="help2">Runs on all 214 worktrees in 38 repositories. A large worktree can take a few seconds; Cancel stops after the worktrees already running.</p>
+              </div>
+              <div class="bs-actions"><span class="foot-lead">38 repositories · 214 worktrees</span><span class="bs-btn">Close</span><span class="bs-btn pri">Refresh clones</span></div>
+            </section></div>
+          </div>
+          <div class="dv-opt" id="2b" data-screen-label="2b Running">
+            <div class="dv-olabel"><a class="dv-oid" href="#2b">2b</a><b>Running</b>: four repositories at once, worktree counts per row</div>
+            <div class="stage th-light"><section class="bs">
+              <div class="bs-head" style="display:flex"><h2>Repository maintenance</h2><span class="cnt">14 / 38</span></div>
+              <div class="mt-tabs"><span class="mt-tab">Combined</span><span class="mt-tab">Worktrees</span><span class="mt-tab on">Clones</span><span class="mt-tab">Local branches</span><span class="mt-tab">Garbage collection</span></div>
+              <div class="run"><span class="mark run"></span><div style="flex:1"><strong>Refreshing clones in 4 repositories</strong><small>lumen-api · lumen-web · atlas · pwrgit</small><div class="bar"><i></i></div></div><time style="color:var(--text-secondary);font:600 10.5px var(--font-mono)">0:42</time></div>
+              <div class="rows" style="margin-top:10px">
+                <div class="row"><span class="mark run"></span><div><strong>pwrgit</strong><small>Worktree 9 of 31 · feat/sync-toast</small></div><div class="v">1.1 GiB<small>shared so far</small></div></div>
+                <div class="row"><span class="mark run"></span><div><strong>lumen-api</strong><small>Updating the main checkout: fetching origin…</small></div><div class="v">—</div></div>
+                <div class="row"><span class="mark ok">✓</span><div><strong>tidepool</strong><small>main fast-forwarded · 6 worktrees refreshed</small></div><div class="v">212 MiB</div></div>
+                <div class="row"><span class="mark q"></span><div><strong>zephyr</strong><small><em>Queued</em></small></div><div class="v"></div></div>
+              </div>
+              <div class="bs-actions"><span class="bs-btn">Cancel</span></div>
+            </section></div>
+          </div>
+          <div class="dv-opt" id="2c" data-screen-label="2c Receipt">
+            <div class="dv-olabel"><a class="dv-oid" href="#2c">2c</a><b>Receipt</b>: Git’s count first, then each repository and why any main checkout was left</div>
+            <div class="stage th-light"><section class="bs">
+              <div class="bs-head" style="display:flex"><h2>Repository maintenance</h2><span class="cnt">38 / 38</span></div>
+              <div class="mt-tabs"><span class="mt-tab">Combined</span><span class="mt-tab">Worktrees</span><span class="mt-tab on">Clones</span><span class="mt-tab">Local branches</span><span class="mt-tab">Garbage collection</span></div>
+              <div class="done"><span class="mark ok">✓</span><div><strong>3.4 GiB of file data now shared with main checkouts</strong><small>214 worktrees · 61,204 files re-shared · 1,877 changed files left as they are</small></div><time>took 2m 14s</time></div>
+              <div class="rows" style="margin-top:10px">
+                <div class="row"><span class="mark ok">✓</span><div><strong>pwrgit</strong><small>main up to date · 31 worktrees · 18,330 files re-shared</small></div><div class="v">1.9 GiB</div></div>
+                <div class="row"><span class="mark ok">✓</span><div><strong>lumen-api</strong><small>main fast-forwarded 12 commits · 9 worktrees</small></div><div class="v">640 MiB</div></div>
+                <div class="row"><span class="mark skip"></span><div><strong>atlas</strong><small>Main checkout left: it is on <code>release/2.4</code>, not <code>main</code> · 4 worktrees</small></div><div class="v">88 MiB</div></div>
+                <div class="row"><span class="mark ok">✓</span><div><strong>tidepool</strong><small>Already shared · 6 worktrees</small></div><div class="v">0 B</div></div>
+                <div class="row"><span class="mark skip"></span><div><strong>notes</strong><small>No linked worktrees</small></div><div class="v"></div></div>
+              </div>
+              <p class="help2" style="margin:10px 18px 0">Git counts file data that stopped being private. Free space can differ: a Time Machine snapshot keeps old blocks until it expires.</p>
+              <div class="bs-actions"><span class="bs-btn">Close</span><span class="bs-btn">Run again</span></div>
+            </section></div>
+          </div>
+          <div class="dv-opt" id="2d" data-screen-label="2d Unavailable">
+            <div class="dv-olabel"><a class="dv-oid" href="#2d">2d</a><b>Git can’t re-share</b>: the tab stays, and names the fix</div>
+            <div class="stage th-light"><section class="bs">
+              <div class="bs-head"><h2>Repository maintenance</h2></div>
+              <div class="mt-tabs"><span class="mt-tab">Combined</span><span class="mt-tab">Worktrees</span><span class="mt-tab on">Clones</span><span class="mt-tab">Local branches</span><span class="mt-tab">Garbage collection</span></div>
+              <div class="block"><strong>Refreshing clones needs PwrGit’s Git</strong><p>The Git in use (2.56.0, Homebrew) has no <code>git worktree reflink</code>. Choose PwrGit’s bundled Git in Settings › General › Git runtime. Runtime 2.56.0-dev-pwrgit.1 clones on checkout but can’t re-share; it needs .2 or newer.</p><span class="lnk2">Open Git runtime settings</span></div>
+              <div class="bs-actions"><span class="bs-btn">Close</span><span class="bs-btn pri" style="opacity:.45">Refresh clones</span></div>
+            </section></div>
+          </div>
+        </div>
+        <p class="dv-next"><b>Next:</b> add Clones as a fourth Combined step after garbage collection · show the figure on the sidebar's worktree hover card · a dry run that reports what a refresh would share.</p>
+      </section>
+
+      <section class="dv-turn" id="t3" data-screen-label="Turn 3 Spec">
+        <div class="dv-thd"><span class="dv-tid">3</span><span class="dv-tname">Build notes</span></div>
+        <table class="tbl">
+          <tr><th>Rule</th><th>Detail</th></tr>
+          <tr><td>Flag</td><td><code>-c checkout.reflink=true</code> before <code>-C</code> on every spawn, only while the switch is on <i>and</i> the Git in use answered <code>--[no-]reflink</code> in <code>git worktree -h</code>. Off passes nothing, so the reader's own config stays in charge.</td></tr>
+          <tr><td>Scope</td><td>Every visible repository in the profile (or all profiles). Every linked worktree git lists; missing and locked ones are reported, never run.</td></tr>
+          <tr><td>Main checkout</td><td>Try pull's soft pull on the main checkout only, and only while it is on the default branch. Otherwise “left as it is” with the reason. A repository with no linked worktree fetches nothing.</td></tr>
+          <tr><td>Locks</td><td>Repository lock for the repository, then each worktree's lock around its <code>git worktree reflink --porcelain -z</code>. Two worktrees per repository at a time; four repositories.</td></tr>
+          <tr><td>Cancel</td><td>Cooperative. A running reflink is never killed; the queue stops.</td></tr>
+          <tr><td>Figure</td><td>Sum of the summary's <code>observed-private-reduction</code>. Words: “now shared”, never “freed”.</td></tr>
+        </table>
+      </section>
+    </x-dc>
+    <script type="text/x-dc" data-dc-script data-props='{}'>
+      class Component extends DCLogic {
+        renderVals() { return {}; }
+      }
+    </script>
+  </body>
+</html>
