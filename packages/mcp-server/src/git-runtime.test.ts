@@ -1,4 +1,3 @@
-import { execFileSync } from "node:child_process";
 import { chmodSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, unlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { delimiter, dirname, join } from "node:path";
@@ -99,8 +98,8 @@ describe.skipIf(!posix)("installedKeychainHelper", () => {
 });
 
 describe("bundledGitEnvironment", () => {
-  // The dev shell's own Git and certificate variables would change every answer.
-  const ISOLATED = ["GIT_CONFIG_SYSTEM", "GIT_SSL_CAINFO", "GIT_SSL_CAPATH", "SSL_CERT_FILE", "SSL_CERT_DIR", "CURL_CA_BUNDLE"];
+  // The dev shell's own system config would change every answer.
+  const ISOLATED = ["GIT_CONFIG_SYSTEM"];
   const saved = new Map<string, string | undefined>();
   beforeEach(() => {
     for (const name of ISOLATED) {
@@ -165,99 +164,6 @@ describe("bundledGitEnvironment", () => {
     writeFileSync(blocker, "");
     const env = bundledGitEnvironment(undefined, {}, { configDirectory: join(blocker, "git"), platform: "linux" });
     expect(env.GIT_CONFIG_SYSTEM).toBeUndefined();
-  });
-
-  describe("Linux CA fallback", () => {
-    const UBUNTU = "/etc/ssl/certs/ca-certificates.crt";
-    const RHEL = "/etc/pki/tls/certs/ca-bundle.crt";
-    const SUSE = "/etc/ssl/ca-bundle.pem";
-    const ALPINE = "/etc/ssl/cert.pem";
-    /** A host whose only files are `present`; the runtime ships no CA file. */
-    const host = (...present: string[]) => (file: string) => present.includes(file);
-    const linux = (exists: (file: string) => boolean, overrides: NodeJS.ProcessEnv = {}) => {
-      const env = bundledGitEnvironment(temporary("pwrgit-custom-runtime-"), overrides, {
-        configDirectory: temporary("pwrgit-gitconfig-"), platform: "linux", exists
-      });
-      return { env, text: readFileSync(env.GIT_CONFIG_SYSTEM!, "utf8") };
-    };
-
-    it("writes nothing where the runtime libcurl's own default exists", () => {
-      const { env, text } = linux(host(UBUNTU, RHEL));
-      expect(text).not.toContain("[http]");
-      expect(env).not.toHaveProperty("GIT_SSL_CAINFO");
-    });
-
-    it("otherwise defaults http.sslCAInfo to the distribution's bundle, below the system config", () => {
-      const { env, text } = linux(host(RHEL));
-      // Config, never the environment: GIT_SSL_CAINFO would outrank every
-      // http.sslCAInfo the machine, user or repository sets.
-      expect(env).not.toHaveProperty("GIT_SSL_CAINFO");
-      expect(text).toContain(`[http]\n\tsslCAInfo = "${RHEL}"\n`);
-      expect(text.indexOf("[http]")).toBeLessThan(text.indexOf("[include]"));
-      // In Go crypto/x509's order.
-      expect(linux(host(ALPINE, SUSE)).text).toContain(`sslCAInfo = "${SUSE}"`);
-      expect(linux(host()).text).not.toContain("[http]");
-    });
-
-    it.each(["GIT_SSL_CAINFO", "GIT_SSL_CAPATH", "SSL_CERT_FILE", "SSL_CERT_DIR", "CURL_CA_BUNDLE"])(
-      "leaves the trust store to a user who set %s",
-      (name) => {
-        const { env, text } = linux(host(RHEL), { [name]: "/chosen" });
-        expect(text).not.toContain("[http]");
-        expect(env.GIT_SSL_CAINFO).toBe(name === "GIT_SSL_CAINFO" ? "/chosen" : undefined);
-      }
-    );
-
-    it("keeps Dugite's own CA file for a bundle that ships one, as Dugite does", () => {
-      const runtime = temporary("pwrgit-dugite-runtime-");
-      const shipped = join(runtime, "ssl", "cacert.pem");
-      const options = { configDirectory: temporary("pwrgit-gitconfig-"), platform: "linux" as const, exists: host(shipped, RHEL) };
-      const env = bundledGitEnvironment(runtime, {}, options);
-      expect(env.GIT_SSL_CAINFO).toBe(shipped);
-      expect(readFileSync(env.GIT_CONFIG_SYSTEM!, "utf8")).not.toContain("[http]");
-      expect(bundledGitEnvironment(runtime, { GIT_SSL_CAINFO: "/chosen.pem" }, options).GIT_SSL_CAINFO).toBe("/chosen.pem");
-    });
-
-    it("never falls back to the environment, and leaves other platforms alone", () => {
-      const runtime = temporary("pwrgit-custom-runtime-");
-      const unwritten = bundledGitEnvironment(runtime, {}, { configDirectory: null, platform: "linux", exists: host(RHEL) });
-      expect(unwritten).not.toHaveProperty("GIT_SSL_CAINFO");
-      const mac = bundledGitEnvironment(runtime, {}, {
-        configDirectory: temporary("pwrgit-gitconfig-"), platform: "darwin", exists: host(RHEL), searchPath: ""
-      });
-      expect(mac).not.toHaveProperty("GIT_SSL_CAINFO");
-      expect(readFileSync(mac.GIT_CONFIG_SYSTEM!, "utf8")).not.toContain("[http]");
-    });
-
-    it.skipIf(!posix)("lets machine, global and repository http.sslCAInfo override the default, in that order", () => {
-      const runtime = temporary("pwrgit-custom-runtime-");
-      // The bundle's config includes a machine-wide file, as Dugite's does with /etc/gitconfig.
-      const machine = join(runtime, "machine-gitconfig");
-      mkdirSync(join(runtime, "etc"));
-      writeFileSync(join(runtime, "etc", "gitconfig"), `[include]\n\tpath = ${machine}\n`);
-      const home = temporary("pwrgit-home-");
-      const global = join(home, "gitconfig");
-      const repo = temporary("pwrgit-repo-");
-      const env = bundledGitEnvironment(runtime, { HOME: home, GIT_CONFIG_GLOBAL: global }, {
-        configDirectory: temporary("pwrgit-gitconfig-"), platform: "linux", exists: host(RHEL)
-      });
-      // Only the config files differ; the real bundled binary reads them.
-      const git = dugite.resolveGitBinary(dugite.resolveEmbeddedGitDir());
-      const read = (cwd: string) => execFileSync(git, ["config", "--get", "http.sslCAInfo"], {
-        cwd, encoding: "utf8", env: { HOME: home, GIT_CONFIG_GLOBAL: global, GIT_CONFIG_SYSTEM: env.GIT_CONFIG_SYSTEM }
-      }).trim();
-      execFileSync(git, ["init", "-q", repo], { env: { HOME: home, GIT_CONFIG_GLOBAL: "/dev/null", GIT_CONFIG_NOSYSTEM: "1" } });
-
-      writeFileSync(machine, "");
-      writeFileSync(global, "");
-      expect(read(repo)).toBe(RHEL);
-      writeFileSync(machine, "[http]\n\tsslCAInfo = /machine.pem\n");
-      expect(read(repo)).toBe("/machine.pem");
-      writeFileSync(global, "[http]\n\tsslCAInfo = /global.pem\n");
-      expect(read(repo)).toBe("/global.pem");
-      execFileSync(git, ["-C", repo, "config", "http.sslCAInfo", "/repo.pem"], { env: { HOME: home, GIT_CONFIG_GLOBAL: global } });
-      expect(read(repo)).toBe("/repo.pem");
-    });
   });
 
   describe("an inherited GIT_CONFIG_SYSTEM", () => {
