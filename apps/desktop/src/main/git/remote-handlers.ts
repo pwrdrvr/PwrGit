@@ -3,6 +3,8 @@ import {
   ok,
   type PullProgressPhase,
   type PwrGitError,
+  TAG_SOURCE_SYNC_TTL_MS,
+  TAG_SOURCE_VIEW_TTL_MS,
   type RemoteActivityPhase,
   type CloneRepository,
   type ForkStatus,
@@ -76,6 +78,7 @@ import { WorktreeOperationQueue } from "./worktree-operation-queue";
 import { mapLimit } from "../util/map-limit";
 import { inspectForkTracking, repairForkTracking } from "./fork-tracking";
 import { inspectRetrack, listTrackingOptions, retrackBranch } from "./branch-tracking";
+import { tagSourcesFor } from "./tag-sources";
 
 /** Forge reads at once while confirming extra forks for tracking repair. */
 const FORK_CANDIDATE_READS = 3;
@@ -516,6 +519,132 @@ export function registerRemoteHandlers(
       }
     }
   });
+  // ---- Published tags (tag-sources.ts) -----------------------------------
+  //
+  // Listing a remote's tags is a full `ls-remote --tags`: protocol v2 has no
+  // "changed since". So it never rides on every Fetch or Pull. It runs:
+  //  - explicitly (Refresh / Check once / Details), as a tracked activity;
+  //  - automatically when the Tags tab opens on a snapshot older than
+  //    TAG_SOURCE_VIEW_TTL_MS, or after a successful toolbar Fetch/Pull on one
+  //    older than TAG_SOURCE_SYNC_TTL_MS. Automatic checks are background
+  //    checks like the tip checker: untracked, their own timeout, no
+  //    repository lock (ls-remote writes no ref; the snapshot is SQLite), and
+  //    aborted by any tracked operation on the repository. A remote with
+  //    `tagOpt=--no-tags` is never listed automatically.
+  const tagSources = tagSourcesFor(db);
+  const tagChecksFailedAt = new Map<string, number>();
+  const announceTags = (repoId: string): void => {
+    const repo = repoOf(repoId);
+    if (repo !== null) emitEvent("repo:changed", { profileId: repo.profileId, repoIds: [repoId] });
+  };
+  const autoRefreshTags = async (
+    repoId: string,
+    ttlMs: number,
+    reason: string
+  ): Promise<boolean> => {
+    const repo = repoOf(repoId);
+    if (repo === null || Date.now() < networkPausedUntil) return false;
+    const source = await tagSources.source(execGit, repoId, repo.path, ttlMs);
+    if (!source.ok) return false;
+    const { state } = source.value;
+    if (state.primary === null || state.tagOpt === "no-tags" || !state.stale) return false;
+    // A failing remote is retried at most every two minutes, not on every
+    // open of the tab.
+    if ((tagChecksFailedAt.get(repoId) ?? 0) > Date.now() - 2 * 60_000) return false;
+    const controller = new AbortController();
+    const aborts = autoCheckAborts.get(repoId) ?? new Set();
+    aborts.add(controller);
+    autoCheckAborts.set(repoId, aborts);
+    const signal = AbortSignal.any([controller.signal, AbortSignal.timeout(20_000)]);
+    const startedAt = Date.now();
+    try {
+      const refreshed = await tagSources.refresh(controlledGit(execGit, { signal }), repoId, repo.path, state.primary);
+      if (!refreshed.ok) {
+        if (!controller.signal.aborted) tagChecksFailedAt.set(repoId, Date.now());
+        logMain("debug", "tag", `automatic tag check (${reason}) of ${state.primary} unavailable for ${repo.path}: ${sanitizeGitLogDetail(refreshed.error.message)}`);
+        return false;
+      }
+      tagChecksFailedAt.delete(repoId);
+      logMain("info", "tag", `listed ${state.primary}'s tags for ${repo.path} (${reason}, ${seconds(startedAt)})`);
+      announceTags(repoId);
+      return true;
+    } finally {
+      aborts.delete(controller);
+      if (aborts.size === 0) autoCheckAborts.delete(repoId);
+    }
+  };
+  /** After a successful toolbar Fetch or Pull: hourly at most, never awaited. */
+  const tagCheckAfterSync = (repoId: string): void => {
+    void autoRefreshTags(repoId, TAG_SOURCE_SYNC_TTL_MS, "after sync").catch((cause) =>
+      logMain("warn", "tag", `automatic tag check failed: ${sanitizeGitLogDetail(cause)}`)
+    );
+  };
+
+  bus.register("tag:refreshRemote", async (req) => {
+    const repo = repoOf(req.repoId);
+    if (repo === null) return err({ ...notFound, message: "repo not found" });
+    if (req.mode === "auto") {
+      const checked = await autoRefreshTags(req.repoId, TAG_SOURCE_VIEW_TTL_MS, "view");
+      const source = await tagSources.source(execGit, req.repoId, repo.path);
+      return source.ok ? ok({ checked, source: source.value.state }) : source;
+    }
+    const before = await tagSources.source(execGit, req.repoId, repo.path);
+    if (!before.ok) return before;
+    const remote = req.remote ?? before.value.state.primary;
+    if (remote === null) {
+      return err({ kind: "repo", code: "no_tag_source", message: "Choose which remote publishes this repository's tags first." });
+    }
+    const startedAt = Date.now();
+    const result = await tracked(
+      {
+        kind: "fetch",
+        profileId: repo.profileId,
+        repoId: req.repoId,
+        repoName: repo.name,
+        branch: `${remote} tags`
+      },
+      "fetch",
+      (git) => tagSources.refresh(git, req.repoId, repo.path, remote)
+    );
+    if (!result.ok) return err(classifyAuthFailure(result.error));
+    logMain("info", "tag", `listed ${remote}'s tags for ${repo.path} (${seconds(startedAt)})`);
+    tagChecksFailedAt.delete(req.repoId);
+    announceTags(req.repoId);
+    const source = await tagSources.source(execGit, req.repoId, repo.path);
+    return source.ok ? ok({ checked: true, source: source.value.state }) : source;
+  });
+
+  bus.register("tag:adoptRemote", async (req) => {
+    const repo = repoOf(req.repoId);
+    if (repo === null) return err({ ...notFound, message: "repo not found" });
+    const result = await tracked(
+      {
+        kind: "fetch",
+        profileId: repo.profileId,
+        repoId: req.repoId,
+        repoName: repo.name,
+        branch: req.name
+      },
+      "fetch",
+      (git) =>
+        tagSources.adopt(git, req.repoId, repo.path, {
+          name: req.name,
+          remote: req.remote,
+          expectedRemoteObjectId: req.expectedRemoteObjectId,
+          expectedLocalObjectId: req.expectedLocalObjectId
+        })
+    );
+    if (!result.ok) return err(classifyAuthFailure(result.error));
+    logMain(
+      "info",
+      "tag",
+      `adopted ${req.remote}'s ${req.name} ${result.value.objectId}${result.value.replacedRef === null ? "" : `; previous value kept as ${result.value.replacedRef}`}`
+    );
+    announceTags(req.repoId);
+    emitEvent("graph:changed", { repoId: req.repoId });
+    return result;
+  });
+
   bus.register("remote:checkSelected", (req) =>
     tipChecker.request(req.worktreeId, req.intent ?? "selected").result
   );
@@ -580,6 +709,7 @@ export function registerRemoteHandlers(
     );
     refreshIdentity?.(worktree.repoId);
     refresher.refreshWorktree(req.worktreeId);
+    tagCheckAfterSync(worktree.repoId);
     return ok({ remotes: asked });
   });
 
@@ -615,6 +745,7 @@ export function registerRemoteHandlers(
     );
     refreshIdentity?.(req.repoId);
     refresher.refreshRepoWorktrees(req.repoId);
+    tagCheckAfterSync(req.repoId);
     return ok(null);
   });
 
@@ -1076,6 +1207,7 @@ export function registerRemoteHandlers(
         "remote",
         `pull finished ${path}: ${outcome}${recoveryStash === undefined ? "" : ", recovery stash kept in Stashes"} (${seconds(startedAt)})`
       );
+      tagCheckAfterSync(worktree.repoId);
       return result;
     } finally {
       activity.finish();

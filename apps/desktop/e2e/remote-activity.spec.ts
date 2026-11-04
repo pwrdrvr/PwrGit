@@ -204,7 +204,7 @@ test("a pull that gets no answer says so, shows Git's command, and cancels", asy
     /Fetching updates/,
     { timeout: 20_000 }
   );
-  await expect(card).toContainText("git fetch --prune --tags --force --progress");
+  await expect(card).toContainText("git fetch --prune --progress");
   await expect(await gitOutput(card)).toContainText(
     "Git has produced no output yet."
   );
@@ -280,7 +280,7 @@ test("a wedged fetch opens its card from the click that started it", async () =>
   const card = window.locator(".remote-activity-popover");
   await expect(card).toBeVisible({ timeout: 10_000 });
   await expect(card).toContainText("Fetch · svc · main");
-  await expect(card).toContainText("git fetch --prune --tags --force --progress");
+  await expect(card).toContainText("git fetch --prune --progress");
   await expect(await gitOutput(card)).toContainText(
     "Git has produced no output yet."
   );

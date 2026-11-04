@@ -105,6 +105,11 @@ import type {
   ResetTargets,
   ResolvedCommit,
   TagPage,
+  TagAdoptResult,
+  TagDetails,
+  TagSourceState,
+  TagStatusFilter,
+  TagStatusPage,
   TagSummary,
   RepoSearchHit,
   RepoWorktreeRefresh,
@@ -385,6 +390,11 @@ export const TAG_PREVIEW = 6;
 /** Default and maximum page sizes for repo:tags. */
 export const TAG_PAGE_SIZE = 50;
 export const TAG_PAGE_MAX = 200;
+
+/** Opening the Tags tab re-lists the published remote's tags past this age. */
+export const TAG_SOURCE_VIEW_TTL_MS = 10 * 60_000;
+/** A successful toolbar Fetch or Pull re-lists them past this age. */
+export const TAG_SOURCE_SYNC_TTL_MS = 60 * 60_000;
 
 /** Latest is smoke-checked; Prerelease is newer and may not install. */
 export const UPDATE_CHANNELS = ["latest", "prerelease"] as const;
@@ -1730,6 +1740,81 @@ export interface Commands {
   "tag:applyRemote": {
     req: { repoId: string; plan: RemoteTagPlan };
     res: RemoteTagResult;
+  };
+  /**
+   * The Tags tab: local tags compared with the published remote's stored
+   * snapshot, filtered and paged in main. Runs no network command.
+   */
+  "repo:tagStatus": {
+    req: {
+      repoId: string;
+      filter?: TagStatusFilter;
+      /** Case-insensitive substring over name, annotation, and tagger. */
+      query?: string;
+      offset?: number;
+      limit?: number;
+    };
+    res: TagStatusPage;
+  };
+  /** Choose which remote's tags count as published for this repository. */
+  "tag:setPrimaryRemote": {
+    req: { repoId: string; remote: string };
+    res: TagSourceState;
+  };
+  /**
+   * List one remote's tags (`ls-remote --tags`) into PwrGit's snapshot.
+   * `auto` checks only when the snapshot is stale and the remote has not
+   * opted out with `tagOpt=--no-tags`, and runs as a background check;
+   * `explicit` always checks, as a tracked remote activity. `remote`
+   * defaults to the published remote.
+   */
+  "tag:refreshRemote": {
+    req: { repoId: string; remote?: string; mode: "auto" | "explicit" };
+    res: { checked: boolean; source: TagSourceState };
+  };
+  /**
+   * Make one local tag equal the published remote's reviewed value: a
+   * `--no-tags` fetch of that one ref into a staging ref, a check that it is
+   * the reviewed object, then a compare-and-swap of refs/tags/<name>. The
+   * previous value is kept under refs/pwrgit/replaced-tags/ first.
+   */
+  "tag:adoptRemote": {
+    req: {
+      repoId: string;
+      name: string;
+      remote: string;
+      expectedRemoteObjectId: string;
+      /** Null when the tag must not exist locally (a download). */
+      expectedLocalObjectId: string | null;
+    };
+    res: TagAdoptResult;
+  };
+  /** Record (or clear) "keep the local value" for one exact pair of objects. */
+  "tag:keepLocal": {
+    req: {
+      repoId: string;
+      name: string;
+      remote: string;
+      localObjectId: string;
+      remoteObjectId: string;
+      keep: boolean;
+    };
+    res: null;
+  };
+  /** Every remote's stored value and every replaced value for one tag. */
+  "tag:details": {
+    req: { repoId: string; name: string };
+    res: TagDetails;
+  };
+  /** Put a replaced value back. The current value is kept the same way first. */
+  "tag:restoreReplaced": {
+    req: {
+      repoId: string;
+      name: string;
+      ref: string;
+      expectedLocalObjectId: string | null;
+    };
+    res: TagAdoptResult;
   };
 
   // Remotes (U9 / U13)

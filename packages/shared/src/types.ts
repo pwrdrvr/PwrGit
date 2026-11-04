@@ -599,6 +599,128 @@ export type TagPage = {
   total: number;
 };
 
+/**
+ * One remote's value for a tag name, from PwrGit's stored snapshot of that
+ * remote's `ls-remote --tags`. It is a record of what the remote published,
+ * not a ref: the objects may be absent here, and nothing in `refs/tags` moves
+ * until the user adopts it.
+ */
+export type RemoteTagValue = {
+  remote: string;
+  /** Object the remote's refs/tags/<name> names (a tag object if annotated). */
+  objectId: string;
+  /** Fully peeled target. Equal to objectId for a lightweight tag. */
+  targetId: string;
+  kind: "lightweight" | "annotated";
+  /** Whether the peeled target exists in this repository. Present only where
+   *  the reader asked (a page's attention rows, a details view). */
+  available?: boolean;
+};
+
+/**
+ * A tag name compared against the repository's published remote.
+ *
+ * - `same`: the local ref names the same object the published remote does.
+ * - `differs`: both have the name, with different objects (moved, re-cut,
+ *   lightweight <-> annotated).
+ * - `kept_local`: differs, and the user chose to keep the local value for
+ *   exactly this pair of objects. Either side moving makes it `differs` again.
+ * - `local_only` / `remote_only`: one side lacks the name.
+ * - `unchecked`: no snapshot of the published remote exists yet.
+ */
+export type TagSyncStatus =
+  | "same"
+  | "differs"
+  | "kept_local"
+  | "local_only"
+  | "remote_only"
+  | "unchecked";
+
+export type TagStatusFilter = "all" | "differs" | "remoteOnly" | "localOnly";
+
+export type TagStatusRow = {
+  name: string;
+  status: TagSyncStatus;
+  /** Null only for `remote_only`. */
+  local: TagSummary | null;
+  /** The published remote's value; null when it lacks the name or was never checked. */
+  published: RemoteTagValue | null;
+};
+
+export type TagStatusCounts = {
+  /** Local tags plus published-only tags. */
+  all: number;
+  differs: number;
+  keptLocal: number;
+  remoteOnly: number;
+  localOnly: number;
+};
+
+/** The repository's published tag source and how fresh PwrGit's view of it is. */
+export type TagSourceState = {
+  /** Configured remotes, for the chooser. */
+  remotes: string[];
+  /** The remote whose tags count as published, or null when none is chosen
+   *  (no origin and no explicit choice). */
+  primary: string | null;
+  /** True when the user picked it; false when it defaulted to origin. */
+  chosen: boolean;
+  /** The primary's `remote.<name>.tagOpt`: `--no-tags` means PwrGit never
+   *  lists its tags on its own. */
+  tagOpt: "no-tags" | "all" | null;
+  /** Last successful listing of the primary, ISO. Null when never checked. */
+  checkedAt: string | null;
+  /** Tags the primary published at that listing. */
+  publishedCount: number;
+  /** The last attempt's failure, when it failed after `checkedAt`. */
+  error: string | null;
+  /** Old enough (or the URL changed) that opening the tab should re-check. */
+  stale: boolean;
+};
+
+/** One page of the Tags tab: local and published tags, compared. */
+export type TagStatusPage = {
+  rows: TagStatusRow[];
+  /** Matches for this filter and query across the repository. */
+  total: number;
+  counts: TagStatusCounts;
+  source: TagSourceState;
+};
+
+/** A previous local value kept under refs/pwrgit/replaced-tags/ before it was overwritten. */
+export type ReplacedTag = {
+  /** The full ref that keeps the object alive for gc. */
+  ref: string;
+  objectId: string;
+  targetId: string;
+  kind: "lightweight" | "annotated";
+  replacedAt: string;
+};
+
+/** Every source's own value for one tag name: the expert view. */
+export type TagDetails = {
+  name: string;
+  local: TagSummary | null;
+  remotes: {
+    remote: string;
+    published: boolean;
+    /** Null when this remote was never listed. */
+    checkedAt: string | null;
+    /** Null when the remote lacked the name at that listing, or was never listed. */
+    value: RemoteTagValue | null;
+  }[];
+  replaced: ReplacedTag[];
+};
+
+/** What adopting one published tag changed. */
+export type TagAdoptResult = {
+  name: string;
+  objectId: string;
+  targetId: string;
+  /** The ref now keeping the previous local value, when there was one. */
+  replacedRef: string | null;
+};
+
 /** Reviewed migration from a GitHub HTTPS fetch URL to its SSH equivalent. */
 export type SshRemoteRecovery = {
   remote: string;
@@ -656,6 +778,10 @@ export type RepoRefs = {
   /** Small newest-first slice for the sidebar; browse the rest via repo:tags. */
   previewTags: TagSummary[];
   tagCount: number;
+  /** Tags that differ from the published remote as of PwrGit's last comparison,
+   *  read from the database (no Git, no network). Absent when there are none or
+   *  nothing was checked. */
+  tagAttention?: { remote: string; differs: number };
   remotes: RemoteSummary[];
 };
 

@@ -1078,18 +1078,18 @@ describe("remote ops (bare-remote fixture)", () => {
     {
       name: "the configured remote",
       fetch: (git: GitExec) => fetchRemote(git, "/repos/project"),
-      args: ["fetch", "--prune", "--tags", "--force"]
+      args: ["fetch", "--prune"]
     },
     {
       name: "a named remote",
       fetch: (git: GitExec) =>
         fetchNamedRemote(git, "/repos/project", "origin"),
-      args: ["fetch", "--prune", "--tags", "--force", "origin"]
+      args: ["fetch", "--prune", "origin"]
     },
     {
       name: "all remotes",
       fetch: (git: GitExec) => fetchAllRemotes(git, "/repos/project"),
-      args: ["fetch", "--all", "--prune", "--tags", "--force"]
+      args: ["fetch", "--all", "--prune"]
     }
   ])(
     "retries $name when another process updates a ref first",

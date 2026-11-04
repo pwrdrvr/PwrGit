@@ -1470,11 +1470,11 @@ export async function fetchRefspec(
   return fetchWithRefRaceRetry(git, cwd, ["fetch", "--no-tags", remote, refspec]);
 }
 
-// Auto-following only discovers missing tag names; it never refreshes a
-// reissued tag. Do this in the existing fetch: Git already advertises tags,
-// negotiates missing objects and batches ref writes. Do not prune tags, which
-// would also delete unpublished local tags.
-const FETCH_TAG_UPDATES = ["--tags", "--force"];
+// Fetch never adds tag flags. Git's own rules decide which tags arrive:
+// auto-follow of missing names, `remote.<name>.tagOpt`, shallow and partial
+// limits and custom refspecs. `--tags --force` would override all of them and
+// let the last remote fetched rewrite a shared tag name. A tag that moved on
+// the published remote is adopted one at a time instead (tag-sources.ts).
 
 /** Fetch the checked-out branch's configured remote (or origin) and prune. */
 export async function fetchRemote(
@@ -1482,7 +1482,7 @@ export async function fetchRemote(
   cwd: string,
   forceProgress = false
 ): Promise<Result<void>> {
-  const args = ["fetch", "--prune", ...FETCH_TAG_UPDATES, ...(forceProgress ? ["--progress"] : [])];
+  const args = ["fetch", "--prune", ...(forceProgress ? ["--progress"] : [])];
   return fetchWithRefRaceRetry(git, cwd, args);
 }
 
@@ -1496,7 +1496,6 @@ export async function fetchNamedRemote(
   return fetchWithRefRaceRetry(git, cwd, [
     "fetch",
     "--prune",
-    ...FETCH_TAG_UPDATES,
     ...(forceProgress ? ["--progress"] : []),
     remote
   ]);
@@ -1532,7 +1531,6 @@ export async function fetchNamedRemotes(
   return fetchWithRefRaceRetry(git, cwd, [
     "fetch",
     "--prune",
-    ...FETCH_TAG_UPDATES,
     ...(forceProgress ? ["--progress"] : []),
     "--multiple",
     ...remotes
@@ -1549,7 +1547,6 @@ export async function fetchAllRemotes(
     "fetch",
     "--all",
     "--prune",
-    ...FETCH_TAG_UPDATES,
     ...(forceProgress ? ["--progress"] : [])
   ]);
 }
@@ -3795,6 +3792,54 @@ export function parseTagRows(stdout: string): TagSummary[] {
   return tags;
 }
 
+/**
+ * Rich rows for the named local tags, in the order asked. A `for-each-ref`
+ * pattern also matches refs below it (`refs/tags/v1` matches `refs/tags/v1/x`),
+ * so the answer is filtered to exact names. Batched to stay under Windows'
+ * command-line limit.
+ */
+export async function readTagSummaries(
+  git: GitExec,
+  cwd: string,
+  names: string[]
+): Promise<Result<Map<string, TagSummary>>> {
+  const found = new Map<string, TagSummary>();
+  const wanted = new Set(names);
+  for (let index = 0; index < names.length; index += 100) {
+    const batch = names.slice(index, index + 100).map((name) => `refs/tags/${name}`);
+    const args = ["for-each-ref", `--format=${TAG_FORMAT}`, ...batch];
+    const raw = await git(args, cwd);
+    if (!raw.ok) return raw;
+    const checked = requireExit0(raw.value, ["for-each-ref"]);
+    if (!checked.ok) return checked;
+    for (const tag of parseTagRows(checked.value.stdout)) {
+      // `%(refname:short)` becomes `tags/<name>` when a branch shares the
+      // name, so key by the full ref.
+      const name = tag.fullName.slice("refs/tags/".length);
+      if (wanted.has(name)) found.set(name, { ...tag, name });
+    }
+  }
+  return ok(found);
+}
+
+/** Every local tag's rich row from one `for-each-ref`: the cost a metadata search already pays. */
+export async function readAllTagSummaries(
+  git: GitExec,
+  cwd: string
+): Promise<Result<Map<string, TagSummary>>> {
+  const args = ["for-each-ref", `--format=${TAG_FORMAT}`, "refs/tags"];
+  const raw = await git(args, cwd);
+  if (!raw.ok) return raw;
+  const checked = requireExit0(raw.value, ["for-each-ref"]);
+  if (!checked.ok) return checked;
+  const found = new Map<string, TagSummary>();
+  for (const tag of parseTagRows(checked.value.stdout)) {
+    const name = tag.fullName.slice("refs/tags/".length);
+    found.set(name, { ...tag, name });
+  }
+  return ok(found);
+}
+
 export type TagPageOptions = {
   query?: string;
   offset?: number;
@@ -3860,7 +3905,7 @@ export async function listTagPage(
   return ok({ rows: matches.slice(start, start + size), total: matches.length });
 }
 
-async function validTagName(
+export async function validTagName(
   git: GitExec,
   cwd: string,
   name: string
