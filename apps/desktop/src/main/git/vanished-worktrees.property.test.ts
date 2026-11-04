@@ -137,8 +137,11 @@ class Add implements Cmd {
   async run(m: Model, r: Real) {
     const n = r.next++;
     // Agents nest worktrees inside the checkout (`.claude/worktrees/<name>`).
-    const path = this.nested ? join(r.primary, ".claude", "worktrees", `w${n}`) : join(r.root, `w${n}`);
-    git(r.primary, ["worktree", "add", "-q", "-b", `w${n}`, path]);
+    const target = this.nested ? join(r.primary, ".claude", "worktrees", `w${n}`) : join(r.root, `w${n}`);
+    git(r.primary, ["worktree", "add", "-q", "-b", `w${n}`, target]);
+    // Keep git's spelling of the path: rows store it, and node:path's would
+    // differ on Windows (backslashes), so a lookup would never match.
+    const path = gitWorktrees(r).find((w) => w.branch === `w${n}`)!.path;
     m.linked.push({ path, branch: `w${n}` });
   }
   toString = () => `worktree add${this.nested ? " (nested)" : ""}`;

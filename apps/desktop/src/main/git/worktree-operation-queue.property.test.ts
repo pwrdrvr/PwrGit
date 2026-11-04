@@ -30,8 +30,9 @@ import { WorktreeStateService } from "./worktree-state";
  * - every request settles, without tripping the queue's lock-order guard;
  * - no two Git commands touch the same repository or worktree at once.
  *
- * Before #486 and #542 this deadlocked on every seed, shrunk to
- * `pull, removeRepository, pull`.
+ * Against #542's parent it deadlocks within a few runs (shrunk, for example,
+ * to `pull, repairForkTracking, fetchRepo`); #486's parent removal trips the
+ * lock-order guard on the first run.
  */
 
 type Scope = string;
@@ -122,7 +123,6 @@ let fixtureWorktrees: WorktreeInfo[] = [];
 let root = "";
 let db: DB;
 let repoId = "";
-let repoPath = "";
 const worktreeIds: Record<"primary" | "linked", string> = { primary: "", linked: "" };
 const pathToWorktreeId = new Map<string, string>();
 
@@ -132,7 +132,7 @@ function git(dir: string, args: string[]): void {
 
 beforeAll(async () => {
   root = realpathSync.native(mkdtempSync(join(tmpdir(), "pwrgit-queue-model-")));
-  repoPath = join(root, "harbor").replaceAll("\\", "/");
+  const repoPath = join(root, "harbor");
   execFileSync("git", ["init", "-q", "-b", "main", repoPath]);
   git(repoPath, ["config", "user.email", "t@t.com"]);
   git(repoPath, ["config", "user.name", "Tester"]);
@@ -151,12 +151,11 @@ beforeAll(async () => {
   const rows = db
     .prepare("SELECT id, path, is_primary FROM worktrees WHERE repo_id = ?")
     .all(repoId) as { id: string; path: string; is_primary: number }[];
+  // Paths exactly as the indexer stored them (git's spelling), never rebuilt.
   for (const row of rows) {
     worktreeIds[row.is_primary === 1 ? "primary" : "linked"] = row.id;
     pathToWorktreeId.set(row.path, row.id);
   }
-  // Paths exactly as the indexer stored them (git's spelling), never rebuilt.
-  repoPath = (db.prepare("SELECT path FROM repos WHERE id = ?").get(repoId) as { path: string }).path;
   fixtureWorktrees = rows
     .sort((a, b) => b.is_primary - a.is_primary)
     .map((row) => ({
@@ -234,9 +233,16 @@ it("settles every request and never lets two Git commands share a scope", async 
           const owner = requestOf.getStore() ?? -1;
           for (const scope of scopes) {
             const holder = running.get(scope);
-            if (holder === undefined) running.set(scope, { owner, label, count: 1 });
-            else if (holder.owner === owner) holder.count += 1;
-            else overlaps.push(`${label} ran during ${holder.label} on ${scope}`);
+            if (holder !== undefined && holder.owner !== owner) {
+              overlaps.push(`${label} ran during ${holder.label} on ${scope}`);
+            }
+          }
+          // Count every command per scope and owner, overlapping or not, so a
+          // later overlap with this one is still seen.
+          for (const scope of scopes) {
+            const holder = running.get(scope);
+            if (holder?.owner === owner) holder.count += 1;
+            else running.set(scope, { owner, label, count: 1 });
           }
           return s.schedule(Promise.resolve(value), label).then((result) => {
             for (const scope of scopes) {
@@ -280,7 +286,7 @@ it("settles every request and never lets two Git commands share a scope", async 
           // checkout holds `.git`, so the whole repository with it.
           trash: (path) => harness.current!.git(
             "trash",
-            path === repoPath
+            pathToWorktreeId.get(path) === worktreeIds.primary
               ? harness.current!.scopesOfPath(path)
               : harness.current!.scopesOfPath(path).filter((x) => x.startsWith("worktree:")),
             undefined
@@ -330,13 +336,15 @@ it("settles every request and never lets two Git commands share a scope", async 
 
         // Drain: release scheduled work until nothing is left. Removal's
         // review measures folders with real fs calls, outside the scheduler,
-        // so an empty schedule is only "stuck" once that I/O has had time.
-        for (let idle = 0; idle < 20 && settled.includes(false);) {
+        // so an empty schedule is only "stuck" once that I/O has had time:
+        // about two seconds, which a slow Windows disk still fits in. Only a
+        // deadlocked run waits that long.
+        for (let idle = 0; idle < 40 && settled.includes(false);) {
           await s.waitIdle();
           await nextTurn();
           if (s.count() > 0) { idle = 0; continue; }
           idle += 1;
-          await pause(2);
+          await pause(idle < 10 ? 2 : 50);
         }
 
         const stuck = requests.filter((_, i) => !settled[i]).map((r) => r.kind);
