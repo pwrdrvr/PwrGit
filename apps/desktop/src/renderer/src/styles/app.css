@@ -17101,6 +17101,13 @@ body.is-col-resizing {
   color: var(--text-muted);
   font: 400 11px/1.3 var(--font-sans);
 }
+/* One version per box: the line wraps between parts, and only a part wider
+   than the whole row breaks inside itself. */
+.settings-ai-install__meta-part {
+  display: inline-block;
+  max-width: 100%;
+  overflow-wrap: anywhere;
+}
 
 .settings-ai-path {
   display: flex;

@@ -83,8 +83,9 @@ normalize it. Do not depend on either behavior.
   worktrees share `refs/remotes`. Prefer this to `update-ref`, so the asserted
   precondition is a state that Git produced.
 - **Product code that pushes a branch to a URL refreshes the ref itself.**
-  `pushPlannedRefs` pushes to the remote's push URL and keeps its refetch. The
-  bundled Git predates 2.56, and Settings accepts any installed Git.
+  `pushPlannedRefs` pushes to the remote's push URL and keeps its refetch.
+  Packaged macOS/Linux builds run a 2.56 development build, Windows and the
+  tests run Dugite's older Git, and Settings accepts any installed Git.
   `remote.test.ts` pins this with two remotes on one URL, where 2.56 moves
   neither. The remote tag actions also push to the URL. They need no refresh,
   because the default fetch refspec maps no tags.
@@ -107,6 +108,15 @@ bundled Git unless Settings › General › Git runtime chose an installed Git
     filter, on macOS the installed Git's `git-credential-osxkeychain`, then an
     include of Dugite's config. At system scope, the user's global config still
     wins and `credential.helper =` still opts out.
+  - An inherited `GIT_CONFIG_SYSTEM` of the user's own is included in place of
+    Dugite's. `userSystemConfig` follows a Pwr app's generated file (in the
+    data directory, or with a `# Written by Pwr…:` first line) to its last
+    `[include]`, so the user's file survives rebuilds, PwrAgent's terminal and
+    a later installed-Git choice. A bundled Git's own `git/etc/gitconfig`
+    means the user set none. PwrAgent's `operatorSystemConfig` follows the same
+    rule, and parses our generated file: keep its `[include] path = "…"`, and
+    change both apps together. `git-runtime.oracle.test.ts` checks every case
+    against real Git.
   - Nothing is written until `configureBundledGitConfig` runs, so unit tests
     stay out of the real data directory. Tests that need it use a temp one.
 - **Borrow the keychain helper from the user's terminal Git.** A keychain item
@@ -117,7 +127,7 @@ bundled Git unless Settings › General › Git runtime chose an installed Git
 - **A chosen Git never falls back.** If it breaks, every command fails with a
   message that names it and points at Settings. A fallback would make Settings
   wrong about which Git runs. `installedGitEnvironment` removes every bundle
-  variable: `GIT_EXEC_PATH`, the generated `GIT_CONFIG_SYSTEM` and the
+  variable: `GIT_EXEC_PATH`, a Pwr app's `GIT_CONFIG_SYSTEM` and the
   bundle's PATH directories. Any one of them silently sends that Git to the
   bundle's helpers or config.
 

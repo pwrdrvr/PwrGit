@@ -105,10 +105,22 @@ export function declaresCopyleft(declaredLicense) {
   return COPYLEFT_PATTERN.test(declaredLicense);
 }
 
-// Dugite downloads and ships this runtime outside npm's package inventory.
-// Keep the versions and source URLs in sync with its embedded-git.json when
-// updating the dugite dependency.
+// Git runtimes shipped outside npm's package inventory. The first entry is the
+// pinned custom macOS/Linux runtime and follows apps/desktop/custom-git-runtime.json.
+// The rest are Dugite's Windows distribution: keep their versions and source
+// URLs in sync with Dugite's embedded-git.json when updating the dependency.
+const customGit = JSON.parse(readFileSync(join(repoRoot, "apps/desktop/custom-git-runtime.json"), "utf8"));
 export const EMBEDDED_GIT_NOTICE_SOURCES = [
+  {
+    name: "Custom Git embedded runtime (macOS/Linux)",
+    version: customGit.version,
+    declaredLicense: "GPL-2.0-only",
+    file: "COPYING",
+    source: `https://github.com/huntharo/git/releases/tag/v${customGit.version}`,
+    copyleft: {
+      correspondingSource: `https://github.com/huntharo/git/tree/${customGit.source_revision}`,
+    },
+  },
   {
     name: "Git embedded runtime",
     version: "2.53.0",
@@ -592,7 +604,7 @@ function main() {
     "The renderer build emits Geist Sans and Geist Mono webfont assets from @fontsource/geist-sans and @fontsource/geist-mono. Those packages are listed below under OFL-1.1, and their SIL Open Font License text is included in the License Texts section.",
   );
   lines.push(
-    "PwrGit also bundles Git, Git LFS, and Git Credential Manager through Dugite outside the npm dependency tree. Their COPYING, LICENSE, and NOTICE files are installed beside the runtime under Resources/git and are included below.",
+    "PwrGit bundles the pinned custom Git runtime with Git LFS on macOS/Linux and retains Dugite's Git/Git Credential Manager distribution on Windows. Git runs as a separate executable. Exact custom sources, build provenance, Linux library notices and dependency source inputs are identified by Resources/git/SOURCES and linux-libraries.json. The COPYING, LICENSE and NOTICE texts below cover these platform-specific distributions.",
   );
 
   // GPL-2.0 section 3 asks that a binary distribution be accompanied by the
@@ -607,7 +619,7 @@ function main() {
     lines.push("-------------------");
     lines.push("");
     lines.push(
-      "PwrGit invokes the components below as separate executables over a process boundary and links no code from them. PwrGit redistributes them as built and published upstream and applies no changes of its own. Their corresponding source, and the build scripts and patches used to produce the shipped binaries, are published at:",
+      "PwrGit invokes the components below as separate executables over a process boundary and links no code from them. PwrGit redistributes the pinned artifacts identified below without modifying their code. Their corresponding source, and the build scripts and patches used to produce the shipped binaries, are published at:",
     );
     for (const notice of copyleftNotices) {
       lines.push(

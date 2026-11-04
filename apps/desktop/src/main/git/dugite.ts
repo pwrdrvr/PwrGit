@@ -1,7 +1,7 @@
 // dugite is CommonJS; default-import it so the strict-ESM main bundle loads
 // it (a named `import { exec }` throws at runtime).
 import { execFile, spawn, type ChildProcessWithoutNullStreams, type ExecFileOptions } from "node:child_process";
-import { bundledGitEnvironment, installedKeychainHelper } from "@pwrgit/mcp-server";
+import { bundledGitEnvironment, installedKeychainHelper, userSystemConfig } from "@pwrgit/mcp-server";
 import { tmpdir } from "node:os";
 import { delimiter, dirname, isAbsolute, relative, resolve } from "node:path";
 import dugite from "dugite";
@@ -193,15 +193,15 @@ export function installedGitEnvironment(
       delete env[key];
     } else if (
       ["LOCAL_GIT_DIRECTORY", "GIT_EXEC_PATH", "GIT_TEMPLATE_DIR"].includes(upper) ||
-      (["GIT_CONFIG_SYSTEM", "PREFIX", "GIT_SSL_CAINFO"].includes(upper) &&
-        value !== undefined &&
-        inBundle(value)) ||
-      (upper === "GIT_CONFIG_SYSTEM" &&
-        value !== undefined &&
-        generatedConfigDirectory !== null &&
-        within(resolve(generatedConfigDirectory), value))
+      (["PREFIX", "GIT_SSL_CAINFO"].includes(upper) && value !== undefined && inBundle(value))
     ) {
       delete env[key];
+    } else if (upper === "GIT_CONFIG_SYSTEM") {
+      // The user's own system config, unwrapped from any a Pwr app generated;
+      // with none, the installed Git reads its own.
+      const user = userSystemConfig(bundle, generatedConfigDirectory, value);
+      if (user === undefined) delete env[key];
+      else env[key] = user;
     }
   }
   const searchPath = process.platform === "win32" ? inheritedPath : [inheritedPath, cliSearchPath()].join(delimiter);

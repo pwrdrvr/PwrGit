@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, readlinkSync, realpathSync, renameSync, writeFileSync } from "node:fs";
-import { delimiter, dirname, isAbsolute, join } from "node:path";
+import { basename, delimiter, dirname, isAbsolute, join, relative, resolve } from "node:path";
 import dugite from "dugite";
 import { defaultMcpPolicyFile } from "./access-policy.js";
 
@@ -52,24 +52,106 @@ export function bundledGitEnvironment(
   // which Git looks for in its own exec path and then on PATH.
   if (keychainHelper !== undefined) pathEntries.push(dirname(keychainHelper));
   const configDirectory = options.configDirectory === undefined ? defaultConfigDirectory : options.configDirectory;
-  // What Dugite would point POSIX Git at. On Windows MinGit reads the config
-  // Dugite's build wrote inside the bundle.
-  const bundleConfig = platform === "win32"
+  const inherited = { ...process.env, ...overrides };
+  // The user's own system config, followed through any config a Pwr app
+  // generated around it. It is included in place of the bundle's.
+  const inheritedSystem = inherited.GIT_CONFIG_SYSTEM || undefined;
+  const userSystem = userSystemConfig(directory, configDirectory, inheritedSystem);
+  const bundleSystem = platform === "win32"
+    // MinGit reads the config Dugite's build wrote inside the bundle.
     ? mingitSystemConfig(directory, execPath)
+    // What Dugite points POSIX Git at.
     : join(directory, "etc", "gitconfig");
-  const systemConfig = configDirectory === null || bundleConfig === undefined
+  const includedSystem = userSystem ?? bundleSystem;
+  const systemConfig = configDirectory === null || includedSystem === undefined
     ? undefined
-    : bundledSystemConfig(configDirectory, bundleConfig, keychainHelper);
+    : bundledSystemConfig(configDirectory, includedSystem, keychainHelper);
+  // With no generated config, Dugite keeps an inherited GIT_CONFIG_SYSTEM, so
+  // it is replaced by the user's own, or by the bundle's when that was an
+  // app's. (On Windows the variable cannot be unset from here; that needs an
+  // unwritable data folder.)
+  const systemEnv = systemConfig
+    ?? userSystem
+    ?? (inheritedSystem !== undefined && platform !== "win32" ? bundleSystem : undefined);
   return {
     ...overrides,
     LOCAL_GIT_DIRECTORY: directory,
     GIT_EXEC_PATH: execPath,
     PATH: [...new Set(pathEntries.filter(Boolean))].join(delimiter),
-    ...(systemConfig === undefined ? {} : { GIT_CONFIG_SYSTEM: systemConfig }),
+    ...(systemEnv === undefined ? {} : { GIT_CONFIG_SYSTEM: systemEnv }),
     // Dugite normally supplies this only when LOCAL_GIT_DIRECTORY is unset.
     ...(process.platform === "linux" && !process.env.GIT_SSL_CAINFO && !overrides.GIT_SSL_CAINFO
       ? { GIT_SSL_CAINFO: join(directory, "ssl", "cacert.pem") } : {})
   };
+}
+
+/** First line of every system config PwrGit generates. */
+const GENERATED_CONFIG_MARKER = "# Written by PwrGit:";
+/** The same line from any Pwr app: PwrAgent writes `# Written by PwrAgent:`. */
+const PWR_GENERATED_CONFIG = /^# Written by Pwr[A-Za-z]+:/;
+
+/**
+ * The user's own system config that a GIT_CONFIG_SYSTEM value stands for, or
+ * undefined when it names none.
+ *
+ * Apps set the variable too. Dugite points it at a bundled Git's own
+ * etc/gitconfig, and PwrGit and PwrAgent point it at a config they generated
+ * (in `configDirectory`, or marked by its first line), which includes the
+ * system config underneath. PwrAgent's terminal passes its file on, and an
+ * environment built from one PwrGit already built carries PwrGit's. A
+ * generated config is followed to the file it includes, so the user's config
+ * survives however many times it was wrapped. A bundled Git's own config means
+ * the user set none. Neither is returned as is, so app defaults and another
+ * bundle's config are never stacked beneath ours. PwrAgent's
+ * `operatorSystemConfig` follows the same rules.
+ */
+export function userSystemConfig(
+  bundleRoot: string,
+  configDirectory: string | null,
+  value: string | undefined
+): string | undefined {
+  let file = value ? resolve(value) : undefined;
+  for (let depth = 0; file !== undefined && depth < 8; depth += 1) {
+    if (isBundledGitSystemConfig(bundleRoot, file)) return undefined;
+    const included = generatedConfigInclude(configDirectory, file);
+    if (included === null) return file;
+    file = included;
+  }
+  return undefined;
+}
+
+/** Our bundle's files, or another Dugite layout's `git/etc/gitconfig`. */
+function isBundledGitSystemConfig(bundleRoot: string, file: string): boolean {
+  if (isInside(resolve(bundleRoot), file)) return true;
+  const gitDirectory = dirname(dirname(file));
+  return basename(file) === "gitconfig"
+    && basename(dirname(file)) === "etc"
+    && basename(gitDirectory) === "git"
+    && existsSync(join(gitDirectory, "libexec", "git-core"));
+}
+
+/**
+ * For a config a Pwr app generated, the system config it includes, or
+ * undefined when it includes none. Null for any other file.
+ */
+function generatedConfigInclude(configDirectory: string | null, file: string): string | undefined | null {
+  const ours = configDirectory !== null && isInside(resolve(configDirectory), file);
+  let content: string;
+  try {
+    content = readFileSync(file, "utf8");
+  } catch {
+    return ours ? undefined : null;
+  }
+  if (!ours && !PWR_GENERATED_CONFIG.test(content)) return null;
+  const include = content.lastIndexOf("[include]");
+  if (include < 0) return undefined;
+  const value = /^\s*path\s*=\s*(.*?)\s*$/m.exec(content.slice(include))?.[1];
+  return value ? resolve(dirname(file), unquoteConfigValue(value)) : undefined;
+}
+
+function isInside(directory: string, value: string): boolean {
+  const path = relative(directory, value);
+  return path === "" || (!path.startsWith("..") && !isAbsolute(path));
 }
 
 /** Dugite's build writes to etc/gitconfig when MinGit has one there, and to
@@ -166,8 +248,10 @@ const writtenSystemConfigs = new Set<string>();
  *
  * System scope, like the installed Git's, so global and repository config
  * still override every default: `lfs install --skip-smudge` keeps pointers,
- * and resetting `credential.helper` opts out. The bundle's config is
- * included after the defaults so its own settings win too.
+ * and resetting `credential.helper` opts out. The system config Git would
+ * otherwise read (the bundle's, which includes /etc/gitconfig, or the user's
+ * own GIT_CONFIG_SYSTEM) is included after the defaults so its settings win
+ * too.
  *
  * Named by content: app copies that disagree write different files instead
  * of rewriting one another's. Returns undefined when the file cannot be
@@ -175,13 +259,14 @@ const writtenSystemConfigs = new Set<string>();
  */
 function bundledSystemConfig(
   directory: string,
-  bundleConfig: string,
+  systemConfig: string,
   keychainHelper: string | undefined
 ): string | undefined {
   const content = [
-    "# Written by PwrGit: defaults for its bundled Git, then the bundle's own",
-    "# system config. PwrGit rewrites this file, so edit your global config",
-    "# (git config --global) instead; it overrides everything here.",
+    `${GENERATED_CONFIG_MARKER} defaults for its bundled Git, then the`,
+    "# system config Git would otherwise read. PwrGit rewrites this file, so",
+    "# edit your global config (git config --global) instead; it overrides",
+    "# everything here.",
     "[filter \"lfs\"]",
     "\tclean = git-lfs clean -- %f",
     "\tsmudge = git-lfs smudge -- %f",
@@ -196,7 +281,7 @@ function bundledSystemConfig(
         `\thelper = ${quoteConfigValue(`!'${keychainHelper.replaceAll("'", "'\\''")}'`)}`
       ]),
     "[include]",
-    `\tpath = ${quoteConfigValue(bundleConfig)}`,
+    `\tpath = ${quoteConfigValue(systemConfig)}`,
     ""
   ].join("\n");
   const hash = createHash("sha256").update(content).digest("hex").slice(0, 16);
@@ -215,6 +300,11 @@ function bundledSystemConfig(
   }
   writtenSystemConfigs.add(file);
   return file;
+}
+
+function unquoteConfigValue(value: string): string {
+  if (value.length < 2 || !value.startsWith("\"") || !value.endsWith("\"")) return value;
+  return value.slice(1, -1).replace(/\\(["\\])/g, "$1");
 }
 
 function quoteConfigValue(value: string): string {

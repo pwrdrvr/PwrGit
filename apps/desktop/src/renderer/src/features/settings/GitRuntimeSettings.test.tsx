@@ -168,6 +168,20 @@ describe("GitRuntimeSettings", () => {
     expect(container.querySelector("[role='alert']")).toBeNull();
   });
 
+  it("keeps each version in its own wrap unit, so a narrow window never splits one", async () => {
+    await render();
+
+    const parts = Array.from(
+      container.querySelectorAll(".settings-ai-install")[0]!.querySelectorAll(
+        ".settings-ai-install__meta-part"
+      ),
+      (part) => part.textContent
+    );
+    // A dev build such as `2.56.0-dev-pwrgit.2` would otherwise break at its
+    // hyphens; the separator travels with the part before it.
+    expect(parts).toEqual(["Bundled ·", "2.50.9 ·", "LFS 3.6.9"]);
+  });
+
   it("says which keychain helper bundled Git signs in to HTTPS remotes with", async () => {
     await render();
 
