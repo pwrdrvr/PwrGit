@@ -10,7 +10,6 @@ import { readdir } from "node:fs/promises";
 import { basename, join } from "node:path";
 import {
   changeRequestLocalBranch,
-  changeRequestNumberQuery,
   claimWorktreeOwnership,
   err,
   ok,
@@ -36,8 +35,10 @@ import { requireExit0, type GitExec } from "./dugite";
 import { buildFtsQuery } from "./fts-query";
 import {
   changeRequestAnswersQuery,
-  pathLeafLikePatterns,
-  rankSearchHits
+  rankSearchHits,
+  registerSearchSqlFunctions,
+  SEARCH_EXACT_TIER_SQL,
+  searchExactTierParams
 } from "./search-rank";
 import {
   listBranches,
@@ -295,6 +296,7 @@ export class RepoIndexer {
     private readonly git: GitExec,
     options: RepoIndexerOptions = {}
   ) {
+    registerSearchSqlFunctions(db);
     this.yieldToEventLoop =
       options.yieldToEventLoop ?? defaultYieldToEventLoop;
     this.branchWriteChunkSize = Math.max(
@@ -908,21 +910,15 @@ export class RepoIndexer {
     const only = scope.allProfiles ? null : scope.profileId;
     const mine = scope.profileId;
 
-    // Exact repo names lead even exact branch/folder matches, so naming a
-    // project cannot lose its row to a busy checkout collection.
-    // Exact literal names come first so the intended row survives the result
-    // cap — a name the user typed in full, or the final segment of a repo's or
-    // a checkout's path, which is that directory's name and is not something
-    // FTS5 can pick out of a tokenized path. Within exact/fuzzy groups, bm25
-    // weights per column (entity_id, kind, name, path, repo_name, pr): a hit in
-    // the repo/branch name outranks one buried in a path; PR number/title hits
+    // Exact names come first so the intended row survives the result cap,
+    // and an exact repository name leads even exact branch and folder
+    // matches, so naming a project cannot lose its row to a busy checkout
+    // collection (SEARCH_EXACT_TIER_SQL). Within each tier, bm25 weights per
+    // column (entity_id, kind, name, path, repo_name, pr): a hit in the
+    // repo/branch name outranks one buried in a path; PR number/title hits
     // rank just under names.
-    const [leafPosix, leafWindows] = pathLeafLikePatterns(query);
-    // A bare number names a change request exactly; its `pr` text begins with
-    // that number and a space. Without this the index's prefix match lets
-    // #1060 and every branch spelled `issue-10604` crowd #106 past the cap.
-    const prNumber = changeRequestNumberQuery(query);
-    const prLike = prNumber === null ? null : `${prNumber} %`;
+    const exactTier = searchExactTierParams(query);
+    const prLike = exactTier[3];
     // Rows of a hidden repository are dropped before the cap, not after it
     // (src/main/AGENTS.md). Most profiles hide nothing indexed, and then the
     // clause and its per-row lookup are left out entirely.
@@ -939,22 +935,14 @@ export class RepoIndexer {
          WHERE search_fts_index MATCH ? AND kind <> 'change_request'
            AND (? IS NULL OR profile_id = ?)
            ${hidden}
-         ORDER BY CASE WHEN kind = 'repo' AND name = ? COLLATE NOCASE
-                       THEN -1
-                       WHEN name = ? COLLATE NOCASE
-                         OR (kind IN ('repo', 'worktree')
-                             AND (path LIKE ? ESCAPE '\\'
-                                  OR path LIKE ? ESCAPE '\\'))
-                         OR pr LIKE ?
-                       THEN 0 ELSE 1 END,
+         ORDER BY ${SEARCH_EXACT_TIER_SQL},
                   repo_name = (SELECT name FROM repos WHERE id = ?) COLLATE NOCASE DESC,
                   profile_id = ? DESC,
                   bm25(search_fts_index, 0.0, 0.0, 10.0, 2.0, 4.0, 8.0, 0.0)
          LIMIT 60`
       )
       .all(
-        fts, only, only, query.trim(), query.trim(),
-        leafPosix, leafWindows, prLike, scope.focusedRepoId ?? null, mine
+        fts, only, only, ...exactTier, scope.focusedRepoId ?? null, mine
       ) as {
       entity_id: string;
       kind: RepoSearchHit["kind"];

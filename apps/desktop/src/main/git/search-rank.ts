@@ -1,8 +1,11 @@
 import {
   changeRequestNumberQuery,
+  searchNameKey,
+  searchPathLeaf,
   type OpenChangeRequest,
   type RepoSearchHit
 } from "@pwrgit/shared";
+import type { DB } from "../persistence/db";
 
 /**
  * Final ordering for ⌘F results, applied over the bm25 order the index
@@ -17,18 +20,6 @@ import {
  * same word, including branches that exist nowhere on disk.
  */
 
-/** Case- and diacritic-insensitive, for literal name comparison. */
-const normalizeSearchName = (value: string): string =>
-  value
-    .trim()
-    .normalize("NFKD")
-    .replace(/\p{M}/gu, "")
-    .toLowerCase();
-
-/** Final segment of a path, with either platform's separators. */
-const pathLeaf = (path: string): string =>
-  path.replace(/\\/g, "/").split("/").filter(Boolean).pop() ?? "";
-
 /**
  * The names a hit answers to.
  *
@@ -42,7 +33,7 @@ const pathLeaf = (path: string): string =>
  */
 const answersTo = (hit: RepoSearchHit): string[] =>
   hit.kind === "repo" || hit.kind === "worktree"
-    ? [hit.name, pathLeaf(hit.path)]
+    ? [hit.name, searchPathLeaf(hit.path)]
     : [hit.name];
 
 /** -1 = an exact repo name; 0 = the query names this hit (or its change
@@ -54,16 +45,16 @@ export function searchMatchTier(
   hit: RepoSearchHit,
   query: string
 ): SearchMatchTier {
-  const wanted = normalizeSearchName(query);
+  const wanted = searchNameKey(query);
   if (wanted === "") return 2;
-  if (hit.kind === "repo" && normalizeSearchName(hit.name) === wanted) return -1;
+  if (hit.kind === "repo" && searchNameKey(hit.name) === wanted) return -1;
   // `106` names change request #106 as surely as a branch's name names the
   // branch — and the index only knows it as a prefix, so #1060 matched too.
   const number = changeRequestNumberQuery(query);
   if (number !== null && hit.pr?.number === number) return 0;
   let tier: SearchMatchTier = 2;
   for (const name of answersTo(hit)) {
-    const candidate = normalizeSearchName(name);
+    const candidate = searchNameKey(name);
     if (candidate === wanted) return 0;
     if (candidate.startsWith(wanted)) tier = 1;
   }
@@ -84,7 +75,7 @@ const searchKindRank = (hit: RepoSearchHit): 0 | 1 =>
 
 /** unicode61's view of a string: letter/digit runs, folded. */
 const searchTokens = (value: string): string[] =>
-  normalizeSearchName(value)
+  searchNameKey(value)
     .split(/[^\p{L}\p{N}]+/u)
     .filter((token) => token.length > 0);
 
@@ -140,19 +131,50 @@ export function rankSearchHits(
   });
 }
 
-// `\` escapes itself and the two wildcards; the SQL below pairs these with
-// ESCAPE '\'. Without it a branch named `wip_1` would match `wip1` — `_` is
-// LIKE's single-character wildcard and is entirely ordinary in a branch name.
-const likeLiteral = (value: string): string =>
-  value.replace(/[\\%_]/g, (char) => `\\${char}`);
-
 /**
- * LIKE patterns for "a path whose final segment is exactly this query", in
- * POSIX and Windows form. The index cannot express it — FTS5 tokenizes a path
- * into words, so it cannot tell the leaf from any other segment — and this is
- * what keeps a folder the user named verbatim inside the query's row cap.
+ * The search SQL's own copy of `searchMatchTier`'s exact tiers, decided
+ * before the result cap: -1 for a repository the query names, 0 for anything
+ * else it names (by name, by a checkout's folder, or by change-request
+ * number), 1 for the rest, which bm25 orders.
+ *
+ * It has to agree with `searchMatchTier`, or a row main would lead with is
+ * cut before main sees it. So it calls the same `searchNameKey` through
+ * `registerSearchSqlFunctions` rather than SQLite's `COLLATE NOCASE`, which
+ * folds only ASCII: a repository named `Übersicht` was no exact match for
+ * `übersicht` there, and 60 checkouts on a branch of that name took every
+ * slot. A checkout's folder is its path's last segment, which FTS5 cannot
+ * pick out of a tokenized path.
+ *
+ * Reads `kind`, `name`, `path` and `pr` of a `search_fts` row; bind
+ * `searchExactTierParams(query)` in order. `AND` short-circuits, so the
+ * functions run only on rows of the kinds that need them.
  */
-export function pathLeafLikePatterns(query: string): [string, string] {
-  const leaf = likeLiteral(query.trim());
-  return [`%/${leaf}`, `%\\\\${leaf}`];
+export const SEARCH_EXACT_TIER_SQL = `CASE
+  WHEN kind = 'repo' AND pwrgit_search_key(name) = ? THEN -1
+  WHEN pwrgit_search_key(name) = ?
+    OR (kind IN ('repo', 'worktree') AND pwrgit_search_leaf_key(path) = ?)
+    OR pr LIKE ?
+  THEN 0 ELSE 1 END`;
+
+export function searchExactTierParams(
+  query: string
+): [string, string, string, string | null] {
+  const key = searchNameKey(query);
+  // A bare number names a change request exactly; its `pr` text begins with
+  // that number and a space. Without this the index's prefix match lets
+  // #1060 and every branch spelled `issue-10604` crowd #106 past the cap.
+  const prNumber = changeRequestNumberQuery(query);
+  return [key, key, key, prNumber === null ? null : `${prNumber} %`];
+}
+
+/** Make `SEARCH_EXACT_TIER_SQL`'s functions callable on this connection. */
+export function registerSearchSqlFunctions(db: DB): void {
+  const text = (value: unknown): string =>
+    typeof value === "string" ? value : "";
+  db.function("pwrgit_search_key", { deterministic: true }, (value) =>
+    searchNameKey(text(value))
+  );
+  db.function("pwrgit_search_leaf_key", { deterministic: true }, (path) =>
+    searchNameKey(searchPathLeaf(text(path)))
+  );
 }

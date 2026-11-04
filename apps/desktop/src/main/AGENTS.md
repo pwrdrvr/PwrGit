@@ -31,11 +31,17 @@ a query is capped, scope it in SQL.
 `RepoIndexer.searchAll` (⌘K) takes a `SearchScope` — which profile's window
 asked, and whether it wants the others too (General → Search all profiles, or
 the palette's This profile / All profiles control, which writes it; off by
-default). Two things about it are easy to get wrong:
+default). Three things about it are easy to get wrong:
 
 - **The filter is a WHERE clause, not a pass over the answer.** `search_fts`
   carries a `profile_id` column for exactly this (0033), because both of its
   queries are capped.
+- **"The query is this name" has one test: `searchNameKey`** (`@pwrgit/shared`).
+  The SQL's exact tier (`SEARCH_EXACT_TIER_SQL`) calls it as a registered
+  function, main's `searchMatchTier` and the palette's leading group call it
+  directly. Never `COLLATE NOCASE` or `LIKE` for it: both fold ASCII only, and
+  a row SQL misjudges is cut by the cap before main can rank it. The
+  differential test is `RepoSwitcherOverlay.ranking.property.test.ts`.
 - **Widened is not unordered.** With the setting on, other profiles' rows are
   reachable but never ahead of this profile's — `profile_id = ? DESC` sits
   between the exact-name tier and bm25. Those rows are how two of the three

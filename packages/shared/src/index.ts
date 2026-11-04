@@ -4,6 +4,7 @@ export * from "./types";
 export * from "./forge-host-name";
 export * from "./forge-product";
 export * from "./change-request-query";
+export * from "./search-name";
 export * from "./forge-remote";
 export * from "./fork-route";
 export * from "./fork-tracking";

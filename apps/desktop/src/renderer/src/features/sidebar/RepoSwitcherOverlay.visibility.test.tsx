@@ -124,3 +124,34 @@ it("memoizes a verified unused branch when it scrolls back into view", async () 
   expect(branchCalls()).toHaveLength(1);
   expect(container.querySelectorAll('[data-hit-key^="local_branch:"]')).toHaveLength(2);
 });
+
+it("keeps the highlight on a branch row that resolves to its checkout", async () => {
+  // The highlight sat on the second row; that row resolved, and the old key
+  // matched nothing, so the highlight fell back to the first row and Enter
+  // opened a branch the reader never pointed at.
+  const secondWorktree: RepoSearchHit = {
+    ...second, kind: "worktree", worktreeId: "second", path: "/second"
+  };
+  dispatch.mockImplementation(async (command: string, req: { branch?: string }) => {
+    if (command === "repo:search") return ok([first, second]);
+    if (command === "search:branchWorktree") {
+      return ok(req.branch === second.name ? secondWorktree : null);
+    }
+    return ok({ lastActivityAt: null, dirty: null, ahead: null, behind: null });
+  });
+  const press = async (key: string) => {
+    await act(async () => container.querySelector("input")!.dispatchEvent(
+      new KeyboardEvent("keydown", { key, bubbles: true, cancelable: true })
+    ));
+  };
+  await press("ArrowDown");
+  const target = container.querySelector(`[data-hit-key="local_branch:repo:${second.name}"]`)!;
+  await act(async () => callback([
+    { target, isIntersecting: true } as IntersectionObserverEntry
+  ], {} as IntersectionObserver));
+  await advance(200);
+  expect(container.querySelector(".overlay-result.is-selected")?.getAttribute("data-hit-key"))
+    .toBe("worktree:repo:second");
+  await press("Enter");
+  expect(onPick).toHaveBeenCalledExactlyOnceWith(secondWorktree);
+});
