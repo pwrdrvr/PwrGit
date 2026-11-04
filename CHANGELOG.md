@@ -1,5 +1,11 @@
 # Changelog
 
+## v0.52.0 - 2026-11-03
+
+- Performance - Improved status refreshes, commit graph loads, and bulk Pull by overlapping independent Git work. Bulk Pull can process up to four checkouts per repository at once while retaining repository and checkout locks, final safety checks, cancellation, and live progress. Shared process limits keep overlapping requests bounded.
+- Repository workflows - Improved repository discovery, branch safety checks, AI input collection, and pull-request views by running independent reads concurrently. Results retain their input order, and worker failures are reported after accepted work finishes rather than being silently ignored.
+- Security - Updated networking, request parsing, URI handling, and packaging dependencies to patched releases, including Undici, body-parser, Hono, qs, fast-uri, and newer glob/minimatch versions. One alert affecting legacy minimatch dependencies remains open; these updates are not a claim that every dependency alert is resolved.
+
 ## v0.51.0 - 2026-11-03
 
 - Pull safety - Fixed Pull restoring another linked worktree's stash when entries are added concurrently. Pull now restores only its own verified saved changes and keeps a recovery copy in Stashes after restoration or rollback. Missing or ambiguous recovery entries stop the operation with guidance instead of applying another entry; inspect and remove retained copies from Stashes when no longer needed.
