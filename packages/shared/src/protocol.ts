@@ -13,7 +13,7 @@
 import type { ForgeHostMap } from "./forge-remote";
 import type { ContributionIdentity, ContributionSnapshot } from "./contributions";
 import type { HookRun, IgnoreDestination, IgnoreOptions, IgnorePatternChoice, IgnoredSummary, RepositorySetup, SetupIgnoreTest } from "./git-discovery";
-import type { MaintenanceScope, MaintenanceAction, MaintenanceSummary, MaintenanceProgress, BranchCleanupKeepDays } from "./maintenance";
+import type { MaintenanceScope, MaintenanceAction, MaintenanceSummary, MaintenanceProgress, MaintenanceCurrent, BranchCleanupKeepDays } from "./maintenance";
 import { DEFAULT_BRANCH_CLEANUP_OPTIONS } from "./maintenance";
 import { STALE_AGE_DAYS, type WorktreeFinishedAfterDays } from "./prunable";
 import type {
@@ -1819,6 +1819,21 @@ export interface Commands {
   "maintenance:cancel": {
     req: { operationId: string };
     res: { cancelled: boolean };
+  };
+  /**
+   * The run this profile's Maintenance dialog should show: the live one, or
+   * the last finished one. A window reload keeps main's run going but loses
+   * the dialog; this is how the reloaded window gets it back.
+   */
+  "maintenance:current": {
+    req: { profileId: string };
+    res: MaintenanceCurrent;
+  };
+  /** A dialog drew this run's receipt (or its own `maintenance:run`
+   *  answered), so it is not shown again on the next open. */
+  "maintenance:seen": {
+    req: { profileId: string; operationId: string };
+    res: null;
   };
   /**
    * Recreate a branch the finished-branch clean-up deleted, at the tip it had.
