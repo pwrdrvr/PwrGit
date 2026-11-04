@@ -30,3 +30,5 @@ All command results are JSON on stdout, including without `--json`; errors are J
 Users may install sccache or Kache separately for compiler reuse. This tool never configures or spawns them, sets a wrapper, or edits global Cargo config. Smaller debug information and faster linkers are separate user choices.
 
 Run `cargo test --locked`, `cargo fmt --check`, and `cargo clippy --locked --all-targets -- -D warnings`. Tests create disposable repositories and temporary Cargo homes. The repeatable benchmark is `python3 scripts/benchmark.py target/release/pwrgit-share`; it uses vendored registry data and a local `file://` Git dependency, with no registry downloads. [BENCHMARK.md](BENCHMARK.md) records this machine's run and its limits.
+
+[TESTING.md](TESTING.md) describes the generated property/model tests, their independent Git oracle, replay commands, and validation against the pre-fix implementation.
