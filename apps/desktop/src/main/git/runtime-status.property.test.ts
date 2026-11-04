@@ -9,7 +9,7 @@ import {
   useReflinkCheckout,
   type GitLaunch
 } from "./dugite";
-import { refreshActiveGitReflink, selectGitRuntime, type GitDiscoveryDeps } from "./runtime-status";
+import { readGitReflinkStatus, refreshActiveGitReflink, selectGitRuntime, type GitDiscoveryDeps } from "./runtime-status";
 
 const CAPABLE_USAGE = "usage: git worktree add [-f] [--[no-]reflink] <path>\n   or: git worktree reflink [--porcelain]";
 const PLAIN_USAGE = "usage: git worktree add [-f] <path>";
@@ -20,7 +20,10 @@ const PLAIN_USAGE = "usage: git worktree add [-f] <path>";
  * Rules:
  * - once everything has answered, the flag is on exactly when the switch is
  *   on and the Git in use can clone;
- * - at no point is the flag on for a Git that can't.
+ * - at no point is the flag on for a Git that can't;
+ * - a probe that got no answer (a timeout: macOS's keychain prompt holds the
+ *   main thread at launch) is not "can't": the next ask, as Settings and
+ *   Clones make, settles it.
  */
 describe("copy-on-write follows the Git in use, for any switches and probe order", () => {
   afterEach(() => {
@@ -44,7 +47,11 @@ describe("copy-on-write follows the Git in use, for any switches and probe order
           ),
           { minLength: 1, maxLength: 6 }
         ),
-        async (s, capable, initiallyOn, actions) => {
+        // Which probe runs get no answer, in order; the rest answer.
+        fc.array(fc.boolean(), { maxLength: 24 }),
+        async (s, capable, initiallyOn, actions, silences) => {
+          let call = 0;
+          let answering = false;
           useInstalledGit(null);
           noteGitReflinkSupport("/nowhere", null, { checkout: false, reshare: false });
           let wanted = initiallyOn;
@@ -63,13 +70,15 @@ describe("copy-on-write follows the Git in use, for any switches and probe order
             realpath: async (path) => path,
             developerDirectory: async () => null,
             probe: async (launch: GitLaunch, args: string[]) => {
-              const stdout =
-                args[0] === "--version"
+              const silent = !answering && (silences[call++ % Math.max(1, silences.length)] ?? false);
+              const stdout = silent
+                ? ""
+                : args[0] === "--version"
                   ? "git version 2.56.0"
                   : args[0] === "lfs"
                     ? "git-lfs/3.7.1"
                     : canClone(launch.binary) ? CAPABLE_USAGE : PLAIN_USAGE;
-              const answer = await s.schedule(Promise.resolve({ ok: true, stdout }), `${launch.binary} ${args[0]}`);
+              const answer = await s.schedule(Promise.resolve({ ok: !silent, stdout }), `${launch.binary} ${args[0]}`);
               check();
               return answer;
             }
@@ -91,6 +100,10 @@ describe("copy-on-write follows the Git in use, for any switches and probe order
           await s.waitFor(Promise.all([launch, ...running]));
           await s.waitIdle();
           expect(ranAhead).toEqual([]);
+          // Settings or Clones asks once Git answers again.
+          answering = true;
+          await s.waitFor(readGitReflinkStatus(deps));
+          await s.waitIdle();
           expect(reflinkCheckoutActive()).toBe(wanted && canClone(activeGitPath()));
         }
       ),

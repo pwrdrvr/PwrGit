@@ -191,7 +191,10 @@ export async function probeGitRuntime(
     // Exit status varies by Git (0 or 129); the usage text is the answer.
     deps.probe(launch, ["worktree", "-h"])
   ]);
-  const reflink = parseReflinkSupport(usage.stdout);
+  // No usage text means the probe never answered (a timeout while main was
+  // blocked, say), which is unknown, not "can't": leave it out so the next
+  // ask probes again.
+  const reflink = /\busage:/.test(usage.stdout) ? parseReflinkSupport(usage.stdout) : undefined;
   return lfs.ok && lfs.stdout.startsWith("git-lfs/")
     ? candidate(version.stdout, lfs.stdout, null, reflink)
     : candidate(version.stdout, null, "lfs_missing", reflink);
@@ -221,11 +224,12 @@ export async function readGitRuntimeStatus(deps: GitDiscoveryDeps = machine): Pr
 const NO_REFLINK: GitReflinkSupport = { checkout: false, reshare: false };
 
 /** Keep main's copy-on-write state in step with whatever a probe saw of the
- *  Git in use. */
+ *  Git in use. A probe that didn't answer records nothing: until one does,
+ *  copy-on-write stays off and the next ask probes again. */
 function noteActiveCandidate(candidates: GitRuntimeCandidate[]): void {
   const path = activeGitPath();
   const active = candidates.find((candidate) => candidate.path === path);
-  if (active !== undefined) noteGitReflinkSupport(path, active.git, active.reflink ?? NO_REFLINK);
+  if (active?.reflink !== undefined) noteGitReflinkSupport(path, active.git, active.reflink);
 }
 
 /** In-flight probes by path: callers asking about the same Git share one,
@@ -244,11 +248,13 @@ export function refreshActiveGitReflink(deps: GitDiscoveryDeps = machine): Promi
   const probe = (async () => {
     const probed = await probeGitRuntime(path, installedGitSelection() === null ? "bundled" : "custom", deps);
     noteActiveCandidate([probed]);
-    const support = probed.reflink ?? NO_REFLINK;
+    const support = probed.reflink;
     logMain(
-      "info",
+      support === undefined ? "warn" : "info",
       "git",
-      `copy-on-write support of ${path}: checkout ${support.checkout ? "yes" : "no"}, re-share ${support.reshare ? "yes" : "no"}; flag ${reflinkCheckoutActive() ? "on" : "off"}`
+      support === undefined
+        ? `copy-on-write support of ${path}: no answer${probed.problem === null ? "" : ` (${probed.problem})`}, asking again later; flag off`
+        : `copy-on-write support of ${path}: checkout ${support.checkout ? "yes" : "no"}, re-share ${support.reshare ? "yes" : "no"}; flag ${reflinkCheckoutActive() ? "on" : "off"}`
     );
   })().finally(() => {
     activeProbes.delete(path);

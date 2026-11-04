@@ -52,7 +52,7 @@ import {
 } from "./diagnostics-copy";
 import { registerDialogHandlers } from "./dialog-handlers";
 import { refreshActiveGitReflink, registerGitRuntimeHandlers } from "./git/runtime-status";
-import { configureBundledGit, configureBundledGitConfig, execGit, useInstalledGit, useReflinkCheckout } from "./git/dugite";
+import { activeGitReflinkProbe, configureBundledGit, configureBundledGitConfig, execGit, useInstalledGit, useReflinkCheckout } from "./git/dugite";
 import { openExternalUrlFromMenu } from "./external-links";
 import { registerBranchHandlers } from "./git/branch-handlers";
 import { registerBulkSyncHandlers } from "./git/bulk-sync-handlers";
@@ -263,9 +263,12 @@ const applyReflinkCheckout = (): void =>
   useReflinkCheckout(settings.get().general?.gitReflinkCheckout ?? GENERAL_DEFAULTS.gitReflinkCheckout);
 applyReflinkCheckout();
 settings.onWrite(applyReflinkCheckout);
-void refreshActiveGitReflink().catch((cause: unknown) =>
-  logMain("warn", "git", `copy-on-write probe failed: ${cause instanceof Error ? cause.message : String(cause)}`)
-);
+const probeReflink = (): void => {
+  void refreshActiveGitReflink().catch((cause: unknown) =>
+    logMain("warn", "git", `copy-on-write probe failed: ${cause instanceof Error ? cause.message : String(cause)}`)
+  );
+};
+probeReflink();
 const storedTheme = settings.get().general?.theme;
 // Assigned once the window registries exist (below). A window with a palette
 // of its own — a profile window, or an auxiliary window that borrowed a
@@ -473,6 +476,10 @@ if (!gotSingleInstanceLock) {
       app.quit();
       return;
     }
+    // macOS's keychain prompt holds the main thread until it is answered, and
+    // the launch probe's Git runs time out behind it. Ask again once it's
+    // done, if that probe got no answer.
+    if (activeGitReflinkProbe() === null) probeReflink();
 
     const db = openDatabase(join(app.getPath("userData"), "pwrgit.db"));
     const diagnosticsOutputRoot = join(app.getPath("userData"), "diagnostics");

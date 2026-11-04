@@ -13,10 +13,13 @@ import {
   execGitRecords,
   installedGitEnvironment,
   installedGitSelection,
+  noteGitReflinkSupport,
+  reflinkCheckoutActive,
   useInstalledGit,
+  useReflinkCheckout,
   type GitLaunch
 } from "./dugite";
-import { parseReflinkSupport, probeGitRuntime, readGitRuntimeStatus, selectGitRuntime, type GitDiscoveryDeps } from "./runtime-status";
+import { parseReflinkSupport, probeGitRuntime, readGitReflinkStatus, readGitRuntimeStatus, refreshActiveGitReflink, selectGitRuntime, type GitDiscoveryDeps } from "./runtime-status";
 
 const posix = process.platform !== "win32";
 const scratch: string[] = [];
@@ -289,6 +292,34 @@ describe("Git discovery", () => {
   it("calls a Git that does not answer --version unusable", async () => {
     const machine = fakeMachine({ "/opt/hub": { git: "hub version 2.14.2" } });
     expect((await probeGitRuntime("/opt/hub", "custom", machine)).problem).toBe("no_version");
+  });
+});
+
+describe("copy-on-write probe that gets no answer", () => {
+  afterEach(() => {
+    useReflinkCheckout(false);
+    noteGitReflinkSupport("/nowhere", null, { checkout: false, reshare: false });
+  });
+
+  // Found validating a packaged .3 build: macOS's keychain prompt held the
+  // main thread for 13s, the launch probe's Git runs timed out behind it, and
+  // "no answer" was recorded as "can't" for the rest of the session.
+  it("is unknown, not unsupported: the next ask probes again and turns it on", async () => {
+    let answering = false;
+    const machine = fakeMachine({}, {
+      executable: async () => true,
+      probe: async (_launch, args) =>
+        !answering
+          ? { ok: false, stdout: "" }
+          : { ok: true, stdout: args[0] === "--version" ? "git version 2.56.0-dev-pwrgit.3" : args[0] === "lfs" ? "git-lfs/3.7.1" : "usage: git worktree add [--[no-]reflink]\n   or: git worktree reflink" }
+    });
+    useReflinkCheckout(true);
+    await refreshActiveGitReflink(machine);
+    expect(reflinkCheckoutActive()).toBe(false);
+    answering = true;
+    const status = await readGitReflinkStatus(machine);
+    expect(status.support).toEqual({ checkout: true, reshare: true });
+    expect(reflinkCheckoutActive()).toBe(true);
   });
 });
 
