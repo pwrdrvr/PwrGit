@@ -273,11 +273,25 @@ export function layoutLanes(commits: LaneCommit[], refs?: LaneRefs): LaneLayout 
       laneReservedFor[1] = head;
     }
   }
-  // Lowest lane this owner may use: free, and not reserved for someone else.
-  const firstFreeFor = (ls: (string | null)[], o: string | null): number => {
+  // A reserved line starts at its owner's first drawn commit (the spine's tip,
+  // the head's tip). Until that row, only an edge INTO that commit may take
+  // the lane. Otherwise a newer merge's side line into older trunk history
+  // would claim lane 0 first and push the trunk's own tip to the right.
+  const pendingStart: (string | undefined)[] = laneReservedFor.map(
+    (o) => commits.find((c) => owners.get(c.hash) === o)?.hash
+  );
+  // Lowest lane a line owned by `o`, flowing toward `target`, may use: free,
+  // not reserved for someone else, and not held for a line yet to start.
+  const firstFreeFor = (
+    ls: (string | null)[],
+    o: string | null,
+    target: string
+  ): number => {
     for (let i = 0; ; i += 1) {
       const r = laneReservedFor[i];
       if (r !== undefined && r !== o) continue;
+      const start = pendingStart[i];
+      if (start !== undefined && start !== target) continue;
       if (i >= ls.length || ls[i] === null) return i;
     }
   };
@@ -312,7 +326,10 @@ export function layoutLanes(commits: LaneCommit[], refs?: LaneRefs): LaneLayout 
     const myLane =
       continuable.length > 0
         ? Math.min(...continuable)
-        : (inheritedLane ?? firstFreeFor(before, co));
+        : (inheritedLane ?? firstFreeFor(before, co, c.hash));
+    pendingStart.forEach((start, i) => {
+      if (start === c.hash) pendingStart[i] = undefined;
+    });
 
     // Top half: every lane entering this row from above.
     const top: LaneSeg[] = [];
@@ -361,7 +378,7 @@ export function layoutLanes(commits: LaneCommit[], refs?: LaneRefs): LaneLayout 
       fromDot.add(myLane);
       for (const p of c.parents.slice(1)) {
         const po = owners.get(p) ?? null;
-        const lane = firstFreeFor(work, po);
+        const lane = firstFreeFor(work, po, p);
         while (work.length <= lane) {
           work.push(null);
           workOwner.push(null);
