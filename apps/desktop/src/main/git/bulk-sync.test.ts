@@ -161,7 +161,7 @@ describe("bulk repository synchronization", () => {
     expect(progress.filter((event) => event.worktreeResult)).toHaveLength(2);
     expect(progress.map((event) => event.detail)).toContain("main: Fast-forwarding…");
     expect(fetches).toBe(1);
-    expect(fetchArgs).toEqual(["fetch", "--atomic", "--prune", "origin"]);
+    expect(fetchArgs).toEqual(["fetch", "--atomic", "--prune", "--tags", "--force", "origin"]);
     expect(summary.counts.worktrees.updated).toBe(2);
     expect(summary.results[0]?.outcome).toBe("success");
     expect(git(repo.input.path, "rev-parse", "HEAD")).toBe(mainHead);

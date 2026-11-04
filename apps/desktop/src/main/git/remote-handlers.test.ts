@@ -677,6 +677,33 @@ describe("remote handlers", () => {
     }
   );
 
+  it.each(["worktree", "repo", "all"])("repaints tag-only changes after a successful %s fetch", async (scope) => {
+    const db = {
+      prepare: vi.fn(() => ({ get: vi.fn(() => ({
+        path: "/repos/project", repoId: "repo-1", profileId: "profile-1"
+      })) }))
+    } as unknown as DB;
+    const refresher = {
+      refreshWorktree: vi.fn(async () => undefined),
+      refreshRepoWorktrees: vi.fn()
+    } satisfies WorktreeRefresher;
+    const bus = new CommandBus();
+    registerRemoteHandlers(bus, db, refresher, new WorktreeOperationQueue());
+    const fetch = () => scope === "worktree"
+      ? bus.dispatch("remote:fetch", { worktreeId: "wt-1" })
+      : bus.dispatch("remote:fetchRepo", { repoId: "repo-1", ...(scope === "repo" ? { remote: "origin" } : {}) });
+
+    expect((await fetch()).ok).toBe(true);
+    expect(emitEvent).toHaveBeenCalledWith("graph:changed", { repoId: "repo-1" });
+    vi.mocked(emitEvent).mockClear();
+    const offline = err({ kind: "git" as const, code: "failed", message: "offline" });
+    vi.mocked(fetchRemote).mockResolvedValue(offline);
+    vi.mocked(fetchNamedRemote).mockResolvedValue(offline);
+    vi.mocked(fetchAllRemotes).mockResolvedValue(offline);
+    expect((await fetch()).ok).toBe(false);
+    expect(emitEvent).not.toHaveBeenCalledWith("graph:changed", expect.anything());
+  });
+
   it("refuses to fetch a worktree whose directory is gone, without running git", async () => {
     const db = {
       prepare: vi.fn(() => ({
@@ -1968,7 +1995,8 @@ describe("remote handlers", () => {
         vi.mocked(emitEvent).mockClear();
         await bus.dispatch("remote:fetch", { worktreeId: "wt-1" });
         expect(fetchRemote).toHaveBeenCalled();
-        expect(emitEvent).not.toHaveBeenCalledWith("graph:changed", expect.anything());
+        // A normal fetch can move only tags, which also changes no counters.
+        expect(emitEvent).toHaveBeenCalledWith("graph:changed", { repoId: "repo-1" });
       });
 
       it("runs one fork read per checkout, and one more for whoever asked meanwhile", async () => {
