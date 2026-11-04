@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, readlinkSync, realpathSync, renameSync, writeFileSync } from "node:fs";
-import { delimiter, dirname, isAbsolute, join, relative, resolve } from "node:path";
+import { basename, delimiter, dirname, isAbsolute, join, relative, resolve } from "node:path";
 import dugite from "dugite";
 import { defaultMcpPolicyFile } from "./access-policy.js";
 
@@ -53,24 +53,26 @@ export function bundledGitEnvironment(
   if (keychainHelper !== undefined) pathEntries.push(dirname(keychainHelper));
   const configDirectory = options.configDirectory === undefined ? defaultConfigDirectory : options.configDirectory;
   const inherited = { ...process.env, ...overrides };
-  // A GIT_CONFIG_SYSTEM that a Pwr app set is rebuilt, never included, so its
-  // defaults are not stacked twice. Anything else is the user's own system
-  // config, and it is included in place of the bundle's.
+  // The user's own system config, followed through any config a Pwr app
+  // generated around it. It is included in place of the bundle's.
   const inheritedSystem = inherited.GIT_CONFIG_SYSTEM || undefined;
-  const ownSystem = isOwnSystemConfig(directory, configDirectory, inheritedSystem);
+  const userSystem = userSystemConfig(directory, configDirectory, inheritedSystem);
   const bundleSystem = platform === "win32"
     // MinGit reads the config Dugite's build wrote inside the bundle.
     ? mingitSystemConfig(directory, execPath)
     // What Dugite points POSIX Git at.
     : join(directory, "etc", "gitconfig");
-  const includedSystem = ownSystem ? bundleSystem : inheritedSystem ?? bundleSystem;
+  const includedSystem = userSystem ?? bundleSystem;
   const systemConfig = configDirectory === null || includedSystem === undefined
     ? undefined
     : bundledSystemConfig(configDirectory, includedSystem, keychainHelper);
   // With no generated config, Dugite keeps an inherited GIT_CONFIG_SYSTEM, so
-  // a stale generated one is pointed back at the bundle's. (On Windows the
-  // variable cannot be unset from here; that needs an unwritable data folder.)
-  const systemEnv = systemConfig ?? (ownSystem && platform !== "win32" ? bundleSystem : undefined);
+  // it is replaced by the user's own, or by the bundle's when that was an
+  // app's. (On Windows the variable cannot be unset from here; that needs an
+  // unwritable data folder.)
+  const systemEnv = systemConfig
+    ?? userSystem
+    ?? (inheritedSystem !== undefined && platform !== "win32" ? bundleSystem : undefined);
   return {
     ...overrides,
     LOCAL_GIT_DIRECTORY: directory,
@@ -89,26 +91,62 @@ const GENERATED_CONFIG_MARKER = "# Written by PwrGit:";
 const PWR_GENERATED_CONFIG = /^# Written by Pwr[A-Za-z]+:/;
 
 /**
- * Whether a GIT_CONFIG_SYSTEM value is one a Pwr app set rather than the
- * user's: the bundle's own file, a config generated in `configDirectory`, or
- * a file whose first line is a Pwr app's generated-config marker. The marker
- * catches a generated file from another data directory, such as a dev profile,
- * or PwrAgent's when PwrGit is launched from a PwrAgent terminal.
+ * The user's own system config that a GIT_CONFIG_SYSTEM value stands for, or
+ * undefined when it names none.
+ *
+ * Apps set the variable too. Dugite points it at a bundled Git's own
+ * etc/gitconfig, and PwrGit and PwrAgent point it at a config they generated
+ * (in `configDirectory`, or marked by its first line), which includes the
+ * system config underneath. PwrAgent's terminal passes its file on, and an
+ * environment built from one PwrGit already built carries PwrGit's. A
+ * generated config is followed to the file it includes, so the user's config
+ * survives however many times it was wrapped. A bundled Git's own config means
+ * the user set none. Neither is returned as is, so app defaults and another
+ * bundle's config are never stacked beneath ours. PwrAgent's
+ * `operatorSystemConfig` follows the same rules.
  */
-export function isOwnSystemConfig(
+export function userSystemConfig(
   bundleRoot: string,
   configDirectory: string | null,
   value: string | undefined
-): boolean {
-  if (!value) return false;
-  const file = resolve(value);
-  if (isInside(resolve(bundleRoot), file)) return true;
-  if (configDirectory !== null && isInside(resolve(configDirectory), file)) return true;
-  try {
-    return PWR_GENERATED_CONFIG.test(readFileSync(file, "utf8"));
-  } catch {
-    return false;
+): string | undefined {
+  let file = value ? resolve(value) : undefined;
+  for (let depth = 0; file !== undefined && depth < 8; depth += 1) {
+    if (isBundledGitSystemConfig(bundleRoot, file)) return undefined;
+    const included = generatedConfigInclude(configDirectory, file);
+    if (included === null) return file;
+    file = included;
   }
+  return undefined;
+}
+
+/** Our bundle's files, or another Dugite layout's `git/etc/gitconfig`. */
+function isBundledGitSystemConfig(bundleRoot: string, file: string): boolean {
+  if (isInside(resolve(bundleRoot), file)) return true;
+  const gitDirectory = dirname(dirname(file));
+  return basename(file) === "gitconfig"
+    && basename(dirname(file)) === "etc"
+    && basename(gitDirectory) === "git"
+    && existsSync(join(gitDirectory, "libexec", "git-core"));
+}
+
+/**
+ * For a config a Pwr app generated, the system config it includes, or
+ * undefined when it includes none. Null for any other file.
+ */
+function generatedConfigInclude(configDirectory: string | null, file: string): string | undefined | null {
+  const ours = configDirectory !== null && isInside(resolve(configDirectory), file);
+  let content: string;
+  try {
+    content = readFileSync(file, "utf8");
+  } catch {
+    return ours ? undefined : null;
+  }
+  if (!ours && !PWR_GENERATED_CONFIG.test(content)) return null;
+  const include = content.lastIndexOf("[include]");
+  if (include < 0) return undefined;
+  const value = /^\s*path\s*=\s*(.*?)\s*$/m.exec(content.slice(include))?.[1];
+  return value ? resolve(dirname(file), unquoteConfigValue(value)) : undefined;
 }
 
 function isInside(directory: string, value: string): boolean {
@@ -262,6 +300,11 @@ function bundledSystemConfig(
   }
   writtenSystemConfigs.add(file);
   return file;
+}
+
+function unquoteConfigValue(value: string): string {
+  if (value.length < 2 || !value.startsWith("\"") || !value.endsWith("\"")) return value;
+  return value.slice(1, -1).replace(/\\(["\\])/g, "$1");
 }
 
 function quoteConfigValue(value: string): string {

@@ -1,13 +1,13 @@
 import { chmodSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, unlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { delimiter, dirname, join } from "node:path";
+import { delimiter, dirname, join, resolve } from "node:path";
 import dugite from "dugite";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
   bundledGitEnvironment,
   defaultBundledGitConfigDirectory,
   installedKeychainHelper,
-  isOwnSystemConfig
+  userSystemConfig
 } from "./git-runtime.js";
 
 const posix = process.platform !== "win32";
@@ -202,22 +202,74 @@ describe("bundledGitEnvironment", () => {
       }
     });
 
-    it("points a stale generated config back at the bundle's when none can be written, and keeps the user's", () => {
+    it("keeps the user's config through every rebuild and through PwrAgent's wrapper", () => {
       const runtime = temporary("pwrgit-custom-runtime-");
+      const configDirectory = temporary("pwrgit-gitconfig-");
+      const options = { configDirectory, platform: "linux" as const };
+      const etc = temporary("pwrgit-etc-");
+      const own = join(etc, "gitconfig");
+      writeFileSync(own, "[user]\n\tname = Machine\n");
+      // A PwrGit terminal passes its generated file on; building again from
+      // that environment must still reach the user's file.
+      let env: NodeJS.ProcessEnv = { GIT_CONFIG_SYSTEM: own };
+      for (let build = 0; build < 3; build += 1) {
+        env = bundledGitEnvironment(runtime, env, options);
+        expect(includeOf(env.GIT_CONFIG_SYSTEM!)).toBe(own);
+      }
+      // PwrAgent's generated file, written the same way, with escapes.
+      const pwragent = join(temporary("pwragent-gitconfig-"), "gitconfig-abc");
+      const quoted = own.replaceAll("\\", "\\\\").replaceAll("\"", "\\\"");
+      writeFileSync(pwragent, `# Written by PwrAgent: defaults\n[credential]\n\thelper = x\n[include]\n\tpath = "${quoted}"\n`);
+      expect(includeOf(bundledGitEnvironment(runtime, { GIT_CONFIG_SYSTEM: pwragent }, options).GIT_CONFIG_SYSTEM!)).toBe(own);
+      // A relative include resolves against the generated file's directory.
+      const relativeWrapper = join(etc, "wrapper");
+      writeFileSync(relativeWrapper, "# Written by PwrAgent: defaults\n[include]\n\tpath = gitconfig\n");
+      expect(userSystemConfig(runtime, configDirectory, relativeWrapper)).toBe(own);
+    });
+
+    it("treats a bundled Git's own config as no user config, wherever the bundle is", () => {
+      const runtime = temporary("pwrgit-custom-runtime-");
+      const configDirectory = temporary("pwrgit-gitconfig-");
+      // Another Pwr app's bundle, which PwrAgent's generated file includes.
+      const other = join(temporary("pwragent-app-"), "git");
+      mkdirSync(join(other, "libexec", "git-core"), { recursive: true });
+      mkdirSync(join(other, "etc"));
+      writeFileSync(join(other, "etc", "gitconfig"), "[pwrtest]\n\talpha = other-bundle\n");
+      const wrapper = join(temporary("pwragent-gitconfig-"), "gitconfig-abc");
+      writeFileSync(wrapper, `# Written by PwrAgent: defaults\n[include]\n\tpath = "${join(other, "etc", "gitconfig").replaceAll("\\", "\\\\")}"\n`);
+      // A generated file that includes itself ends at the depth limit.
+      const loop = join(temporary("pwrgit-loop-"), "gitconfig-loop");
+      writeFileSync(loop, `# Written by PwrGit: defaults\n[include]\n\tpath = "${loop.replaceAll("\\", "\\\\")}"\n`);
+      for (const inherited of [join(other, "etc", "gitconfig"), wrapper, loop]) {
+        expect(userSystemConfig(runtime, configDirectory, inherited)).toBeUndefined();
+        const env = bundledGitEnvironment(runtime, { GIT_CONFIG_SYSTEM: inherited }, { configDirectory, platform: "linux" });
+        expect(includeOf(env.GIT_CONFIG_SYSTEM!)).toBe(bundleConfig(runtime));
+      }
+    });
+
+    it("hands Dugite the user's config, or the bundle's, when no generated config can be written", () => {
+      const runtime = temporary("pwrgit-custom-runtime-");
+      const own = join(temporary("pwrgit-etc-"), "gitconfig");
+      writeFileSync(own, "");
+      const wrapped = join(temporary("pwragent-gitconfig-"), "gitconfig-abc");
+      writeFileSync(wrapped, `# Written by PwrAgent: defaults\n[include]\n\tpath = "${own.replaceAll("\\", "\\\\")}"\n`);
       const stale = join(temporary("pwrgit-gitconfig-"), "gitconfig-old");
       writeFileSync(stale, "# Written by PwrGit: defaults\n");
       const options = { configDirectory: null, platform: "linux" as const };
+      // Dugite keeps a GIT_CONFIG_SYSTEM it is given, so ours must be final.
+      expect(bundledGitEnvironment(runtime, { GIT_CONFIG_SYSTEM: wrapped }, options).GIT_CONFIG_SYSTEM).toBe(own);
       expect(bundledGitEnvironment(runtime, { GIT_CONFIG_SYSTEM: stale }, options).GIT_CONFIG_SYSTEM).toBe(bundleConfig(runtime));
-      // Returned untouched: Dugite keeps a GIT_CONFIG_SYSTEM it is given.
-      expect(bundledGitEnvironment(runtime, { GIT_CONFIG_SYSTEM: "/etc/own" }, options).GIT_CONFIG_SYSTEM).toBe("/etc/own");
+      expect(bundledGitEnvironment(runtime, { GIT_CONFIG_SYSTEM: "/etc/own" }, options).GIT_CONFIG_SYSTEM).toBe(resolve("/etc/own"));
+      expect(bundledGitEnvironment(runtime, {}, options)).not.toHaveProperty("GIT_CONFIG_SYSTEM");
     });
 
-    it("treats a missing or empty value as the user's absence, not as PwrGit's", () => {
-      expect(isOwnSystemConfig("/bundle", null, undefined)).toBe(false);
-      expect(isOwnSystemConfig("/bundle", null, "")).toBe(false);
-      expect(isOwnSystemConfig("/bundle", null, join(temporary("pwrgit-etc-"), "absent"))).toBe(false);
-      expect(isOwnSystemConfig("/bundle", null, "/bundle/etc/gitconfig")).toBe(true);
-      expect(isOwnSystemConfig("/bundle", "/data/git", "/data/git/gitconfig-1")).toBe(true);
+    it("treats a missing or empty value as no user config, and any other file as the user's", () => {
+      expect(userSystemConfig("/bundle", null, undefined)).toBeUndefined();
+      expect(userSystemConfig("/bundle", null, "")).toBeUndefined();
+      const absent = join(temporary("pwrgit-etc-"), "absent");
+      expect(userSystemConfig("/bundle", null, absent)).toBe(absent);
+      expect(userSystemConfig("/bundle", null, "/bundle/etc/gitconfig")).toBeUndefined();
+      expect(userSystemConfig("/bundle", "/data/git", "/data/git/gitconfig-1")).toBeUndefined();
     });
   });
 

@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { chmod, mkdtemp, readFile, realpath, rm, unlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { delimiter, dirname, join } from "node:path";
+import { delimiter, dirname, join, resolve } from "node:path";
 import dugite from "dugite";
 import {
   configureBundledGit,
@@ -168,17 +168,31 @@ describe.skipIf(!posix)("an installed Git chosen in Settings", () => {
     expect(stream.ok ? "" : stream.error.message).toContain("Settings");
   });
 
-  it("keeps a GIT_CONFIG_SYSTEM of the user's own, and drops the bundle's and any Pwr app's generated one", async () => {
+  it("hands an installed Git the user's own GIT_CONFIG_SYSTEM, unwrapped from any a Pwr app generated, or none", async () => {
     const generated = await temporary("pwrgit-gitconfig-");
     configureBundledGitConfig(generated);
     const bundle = dugite.resolveEmbeddedGitDir();
-    const own = installedGitEnvironment({ GIT_CONFIG_SYSTEM: "/etc/custom-gitconfig", PATH: "" }, "/opt/fixture/bin/git");
-    expect(own.GIT_CONFIG_SYSTEM).toBe("/etc/custom-gitconfig");
+    const installed = (config: string) =>
+      installedGitEnvironment({ GIT_CONFIG_SYSTEM: config, PATH: "" }, "/opt/fixture/bin/git").GIT_CONFIG_SYSTEM;
+    expect(installed("/etc/custom-gitconfig")).toBe(resolve("/etc/custom-gitconfig"));
+    // Built by the bundled path once or twice (a PwrGit terminal, then PwrGit
+    // again), then a Git chosen in Settings: the user's file comes back.
+    const own = join(await temporary("pwrgit-etc-"), "gitconfig");
+    await writeFile(own, "[user]\n\tname = Machine\n");
+    let env: NodeJS.ProcessEnv = { GIT_CONFIG_SYSTEM: own };
+    for (let build = 0; build < 2; build += 1) {
+      env = gitExecutionEnvironment(env);
+      expect(installedGitEnvironment({ ...env, PATH: "" }, "/opt/fixture/bin/git").GIT_CONFIG_SYSTEM).toBe(own);
+    }
     // PwrAgent's terminal hands its generated file to anything launched there.
     const pwragent = join(await temporary("pwragent-gitconfig-"), "gitconfig-abc");
-    await writeFile(pwragent, "# Written by PwrAgent: defaults for its bundled Git\n");
-    for (const config of [join(bundle, "etc", "gitconfig"), join(generated, "gitconfig-abc"), pwragent]) {
-      expect(installedGitEnvironment({ GIT_CONFIG_SYSTEM: config, PATH: "" }, "/opt/fixture/bin/git").GIT_CONFIG_SYSTEM).toBeUndefined();
+    await writeFile(pwragent, `# Written by PwrAgent: defaults for its bundled Git\n[include]\n\tpath = "${own.replaceAll("\\", "\\\\")}"\n`);
+    expect(installed(pwragent)).toBe(own);
+    // With no user config underneath, the installed Git reads its own.
+    const bare = join(await temporary("pwragent-gitconfig-"), "gitconfig-def");
+    await writeFile(bare, "# Written by PwrAgent: defaults for its bundled Git\n");
+    for (const config of [join(bundle, "etc", "gitconfig"), join(generated, "gitconfig-abc"), bare, gitExecutionEnvironment({}).GIT_CONFIG_SYSTEM!]) {
+      expect(installed(config)).toBeUndefined();
     }
   });
 });

@@ -109,10 +109,14 @@ bundled Git unless Settings › General › Git runtime chose an installed Git
     include of Dugite's config. At system scope, the user's global config still
     wins and `credential.helper =` still opts out.
   - An inherited `GIT_CONFIG_SYSTEM` of the user's own is included in place of
-    Dugite's. `isOwnSystemConfig` recognises a Pwr app's own (the bundle's, the
-    data directory's, or a `# Written by Pwr…:` first line, as PwrAgent's
-    terminal passes on), and that one is rebuilt instead. PwrAgent's
-    `bundled-git.ts` follows the same rule; change both together.
+    Dugite's. `userSystemConfig` follows a Pwr app's generated file (in the
+    data directory, or with a `# Written by Pwr…:` first line) to its last
+    `[include]`, so the user's file survives rebuilds, PwrAgent's terminal and
+    a later installed-Git choice. A bundled Git's own `git/etc/gitconfig`
+    means the user set none. PwrAgent's `operatorSystemConfig` follows the same
+    rule, and parses our generated file: keep its `[include] path = "…"`, and
+    change both apps together. `git-runtime.oracle.test.ts` checks every case
+    against real Git.
   - Nothing is written until `configureBundledGitConfig` runs, so unit tests
     stay out of the real data directory. Tests that need it use a temp one.
 - **Borrow the keychain helper from the user's terminal Git.** A keychain item

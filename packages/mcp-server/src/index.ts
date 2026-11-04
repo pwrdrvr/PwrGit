@@ -32,5 +32,5 @@ export type { AppBackend, AppCatalog, AppRepository, AppWorktree } from "./app-t
 export {
   bundledGitEnvironment,
   installedKeychainHelper,
-  isOwnSystemConfig
+  userSystemConfig
 } from "./git-runtime.js";
