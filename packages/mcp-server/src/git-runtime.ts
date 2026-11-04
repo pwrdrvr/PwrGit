@@ -17,8 +17,8 @@ export type BundledGitOptions = {
   /**
    * PwrGit's copy-on-write checkout switch, as `checkout.reflink`. Written
    * after the system config's include, so it outranks the bundle's own config
-   * (the PwrGit runtime `.2` payload forces `true` there) while global and
-   * repository config still win. Undefined writes nothing.
+   * (runtime `.2`'s forced `true`; `.3`, the one PwrGit ships, sets nothing)
+   * while global and repository config still win. Undefined writes nothing.
    */
   checkoutReflink?: boolean;
 };

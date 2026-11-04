@@ -1,6 +1,11 @@
+import { createHash } from "node:crypto";
+import { readFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { describe, expect, test } from "vitest";
 
 import {
+  EMBEDDED_GIT_NOTICE_SOURCES,
   NOTICE_PNPM_FILTERS,
   SHIPPED_PACKAGE_NAMES,
   describeNoticeDrift,
@@ -129,5 +134,44 @@ describe("notice drift description", () => {
   test("reports no difference for identical notices", () => {
     const text = notice("- a@1.0.0 | https://example.test/a");
     expect(describeNoticeDrift(text, text)).toBe("no difference found");
+  });
+});
+
+describe("the custom Git runtime's CA bundle notice", () => {
+  // The pinned manifest is the oracle: it carries the license hash the
+  // runtime build sealed. A repin that moves the bundle without refreshing
+  // the committed copies fails here, not in a license review.
+  const repoRoot = join(dirname(fileURLToPath(import.meta.url)), "..");
+  const manifest = JSON.parse(readFileSync(join(repoRoot, "apps/desktop/custom-git-runtime.json"), "utf8"));
+  const dir = join(repoRoot, "apps/desktop/resources/custom-git");
+
+  test("every Linux asset pins the same bundle, and macOS none", () => {
+    const linux = Object.entries(manifest.assets).filter(([key]) => key.startsWith("linux-"));
+    expect(linux.length).toBeGreaterThan(0);
+    for (const [, asset] of linux) expect(asset.ca_bundle).toEqual(manifest.assets["linux-x64"].ca_bundle);
+    expect(manifest.assets["darwin-universal"].ca_bundle).toBeUndefined();
+  });
+
+  test("the committed license is the one the runtime ships", () => {
+    const bundle = manifest.assets["linux-x64"].ca_bundle;
+    const bytes = readFileSync(join(dir, "LICENSE.ca-bundle"));
+    expect(createHash("sha256").update(bytes).digest("hex")).toBe(bundle.license_sha256);
+  });
+
+  test("the committed notice names the pinned bundle", () => {
+    const bundle = manifest.assets["linux-x64"].ca_bundle;
+    const notice = readFileSync(join(dir, "NOTICE.ca-bundle"), "utf8");
+    expect(notice).toContain(bundle.url);
+    expect(notice).toContain(`Bundle date: ${bundle.date}`);
+    expect(notice).toContain(`SHA256: ${bundle.sha256}`);
+  });
+
+  test("both are in the generated notice sources, outside Windows' Git folder", () => {
+    const entries = EMBEDDED_GIT_NOTICE_SOURCES.filter((entry) => entry.file.endsWith(".ca-bundle"));
+    expect(entries.map((entry) => entry.file).sort()).toEqual(["LICENSE.ca-bundle", "NOTICE.ca-bundle"]);
+    for (const entry of entries) {
+      expect(entry.declaredLicense).toBe("MPL-2.0");
+      expect(entry.directory).toBe(dir);
+    }
   });
 });

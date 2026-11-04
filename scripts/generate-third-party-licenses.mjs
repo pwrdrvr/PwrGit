@@ -57,6 +57,9 @@ const embeddedGitNoticeDir = join(
   "resources",
   "embedded-git",
 );
+// Notices for files only the custom macOS/Linux runtime ships. Kept apart from
+// `embedded-git`, which Windows packaging copies into its Git folder.
+const customGitNoticeDir = join(repoRoot, "apps", "desktop", "resources", "custom-git");
 
 /**
  * The two `pnpm licenses list` invocations the notice is built from.
@@ -110,6 +113,9 @@ export function declaresCopyleft(declaredLicense) {
 // The rest are Dugite's Windows distribution: keep their versions and source
 // URLs in sync with Dugite's embedded-git.json when updating the dependency.
 const customGit = JSON.parse(readFileSync(join(repoRoot, "apps/desktop/custom-git-runtime.json"), "utf8"));
+// Linux runtimes carry curl's Mozilla CA bundle at ssl/cacert.pem (macOS has
+// none); every Linux asset pins the same one.
+const customGitCaBundle = customGit.assets["linux-x64"].ca_bundle;
 export const EMBEDDED_GIT_NOTICE_SOURCES = [
   {
     name: "Custom Git embedded runtime (macOS/Linux)",
@@ -120,6 +126,22 @@ export const EMBEDDED_GIT_NOTICE_SOURCES = [
     copyleft: {
       correspondingSource: `https://github.com/huntharo/git/tree/${customGit.source_revision}`,
     },
+  },
+  {
+    name: "Mozilla CA certificate bundle (Linux custom Git runtime)",
+    version: customGitCaBundle.date,
+    declaredLicense: customGitCaBundle.license,
+    file: "LICENSE.ca-bundle",
+    directory: customGitNoticeDir,
+    source: customGitCaBundle.url,
+  },
+  {
+    name: "Mozilla CA certificate bundle notice (Linux custom Git runtime)",
+    version: customGitCaBundle.date,
+    declaredLicense: customGitCaBundle.license,
+    file: "NOTICE.ca-bundle",
+    directory: customGitNoticeDir,
+    source: customGitCaBundle.url,
   },
   {
     name: "Git embedded runtime",
@@ -411,15 +433,19 @@ export function validateEmbeddedNoticeSource(notice) {
 function readEmbeddedGitNoticeRecords() {
   return EMBEDDED_GIT_NOTICE_SOURCES.map((notice) => {
     validateEmbeddedNoticeSource(notice);
-    const path = join(embeddedGitNoticeDir, notice.file);
+    const path = join(notice.directory ?? embeddedGitNoticeDir, notice.file);
     if (!existsSync(path)) {
       throw new Error(
         `Embedded Git runtime notice is missing at ${relative(repoRoot, path)}.`,
       );
     }
     const licenseText = normalizeLicenseText(readFileSync(path, "utf8"));
+    // `directory` is this machine's absolute path; `licenseFile` below is the
+    // committed, repo-relative one.
+    const descriptor = { ...notice };
+    delete descriptor.directory;
     return {
-      ...notice,
+      ...descriptor,
       // `THIRD_PARTY_LICENSES` is committed, so its source paths must not
       // depend on whether it was generated on Windows or POSIX.
       licenseFile: normalizePathForNotice(relative(repoRoot, path)),

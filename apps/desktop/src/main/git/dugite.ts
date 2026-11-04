@@ -197,8 +197,9 @@ export function gitExecutionEnvironment(
   return {
     ...bundledGitEnvironment(bundledDirectory, overrides, {
       configDirectory: generatedConfigDirectory,
-      // Always written, off included: the runtime .2 payload's own config
-      // forces it on. Global and repository config still override it.
+      // Always written, off included, so the runtime's own config never
+      // decides (runtime .2's forced it on). Global and repository config
+      // still override it.
       checkoutReflink: installedGit === null && reflinkCheckoutActive(),
       searchPath: keychainSearchPath()
     }),
