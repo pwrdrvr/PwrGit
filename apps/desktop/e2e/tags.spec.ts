@@ -1,4 +1,6 @@
 import { expect, test } from "@playwright/test";
+import { mkdirSync } from "node:fs";
+import { join } from "node:path";
 import { launchApp, type AppHandle } from "./fixtures/electron-app";
 import { createGitSandbox, type GitSandbox } from "./fixtures/git-sandbox";
 import { addRootAndExpand, branchRow, expandRepoGroup, primaryShortcut } from "./fixtures/steps";
@@ -14,6 +16,59 @@ test.afterEach(async () => {
   sandbox?.cleanup();
   sandbox = null;
 });
+
+for (const operation of ["Fetch", "Pull"]) {
+  test(`${operation} refreshes a reissued tag in the sidebar and lineage`, async () => {
+    sandbox = createGitSandbox();
+    const box = sandbox;
+    const repo = box.makeRepoWithRemote("release-demo");
+    box.commit(repo.path, "release.txt", "Prepare release 1.2.3");
+    const oldHead = box.git(repo.path, "rev-parse", "HEAD");
+    box.git(repo.path, "tag", "-a", "-m", "Release 1.2.3", "v1.2.3");
+    box.git(repo.path, "push", "origin", "main", "--tags");
+    box.commit(repo.path, "notes.txt", "Refresh release 1.2.3 notes");
+    const newHead = box.git(repo.path, "rev-parse", "HEAD");
+    box.git(repo.path, "push", "origin", "main");
+    const publisher = join(box.worktreeRoot, "publisher");
+    box.git(repo.path, "clone", repo.remotePath, publisher);
+    box.git(publisher, "push", "origin", ":refs/tags/v1.2.3");
+    box.git(publisher, "tag", "-d", "v1.2.3");
+    box.git(publisher, "tag", "-a", "-m", "Reissued release 1.2.3", "v1.2.3");
+    box.git(publisher, "push", "origin", "refs/tags/v1.2.3");
+
+    handle = await launchApp({ worktreeRoot: box.worktreeRoot, theme: "light" });
+    const { window } = handle;
+    const nativeWindow = await handle.app.browserWindow(window);
+    await nativeWindow.evaluate((win) => win.setIgnoreMouseEvents(true));
+    await addRootAndExpand(window, handle, box, "release-demo");
+    await branchRow(window, "main").click();
+    const toggle = window.getByRole("button", { name: /^Tags 1/ });
+    await toggle.click();
+    await expect(toggle).toHaveAttribute("aria-expanded", "true");
+    const tag = window.locator(".ref-tag-row", { hasText: "v1.2.3" });
+    await expect(tag).toContainText(oldHead.slice(0, 7));
+    const oldRow = window.locator(`.graph-row[data-hash="${oldHead}"]`);
+    const newRow = window.locator(`.graph-row[data-hash="${newHead}"]`);
+    await expect(oldRow.locator(".commit-tag--tag .commit-tag__name")).toHaveText("v1.2.3");
+    const shots = process.env.PWRGIT_TAG_SHOTS;
+    if (shots !== undefined && operation === "Fetch") {
+      mkdirSync(shots, { recursive: true });
+      await window.mouse.move(1700, 900);
+      await window.screenshot({ path: join(shots, "before.png"), animations: "disabled" });
+    }
+    await window.getByRole("button", { name: operation, exact: true }).click();
+    await expect(tag).toContainText(newHead.slice(0, 7));
+    await expect(newRow.locator(".commit-tag--tag .commit-tag__name")).toHaveText("v1.2.3");
+    await expect(oldRow.locator(".commit-tag--tag")).toHaveCount(0);
+    expect(box.git(repo.path, "rev-parse", "HEAD")).toBe(newHead);
+    if (shots !== undefined && operation === "Fetch") {
+      await window.getByRole("button", { name: "Dismiss status" }).click();
+      await window.mouse.move(1700, 900);
+      await expect(window.locator(".remote-activity")).toHaveCount(0);
+      await window.screenshot({ path: join(shots, "after.png"), animations: "disabled" });
+    }
+  });
+}
 
 test("browses, creates, deletes, and explicitly reviews remote tag actions", async () => {
   test.setTimeout(90_000);

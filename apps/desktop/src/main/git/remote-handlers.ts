@@ -563,12 +563,9 @@ export function registerRemoteHandlers(
           // transfer as a stalled one.
           activity.setPhase("refresh");
           await refreshRemoteBranches(worktree.repoId, "fetch");
-          // The worktree refresh below repaints the graph only when the
-          // branch's own sync state moved. A second remote's tips never move
-          // it — the fork source's new commits are exactly the ones it misses.
-          if (remotes !== undefined) {
-            emitEvent("graph:changed", { repoId: worktree.repoId });
-          }
+          // Tag updates (and other remotes' tips) move no worktree counters.
+          // Force a graph rebuild without adding all tags to every cache check.
+          emitEvent("graph:changed", { repoId: worktree.repoId });
         }
         return fetched;
       }
@@ -605,6 +602,7 @@ export function registerRemoteHandlers(
         if (fetched.ok) {
           activity.setPhase("refresh");
           await refreshRemoteBranches(req.repoId, "fetch");
+          emitEvent("graph:changed", { repoId: req.repoId });
         }
         return fetched;
       }

@@ -1470,13 +1470,19 @@ export async function fetchRefspec(
   return fetchWithRefRaceRetry(git, cwd, ["fetch", "--no-tags", remote, refspec]);
 }
 
+// Auto-following only discovers missing tag names; it never refreshes a
+// reissued tag. Do this in the existing fetch: Git already advertises tags,
+// negotiates missing objects and batches ref writes. Do not prune tags, which
+// would also delete unpublished local tags.
+const FETCH_TAG_UPDATES = ["--tags", "--force"];
+
 /** Fetch the checked-out branch's configured remote (or origin) and prune. */
 export async function fetchRemote(
   git: GitExec,
   cwd: string,
   forceProgress = false
 ): Promise<Result<void>> {
-  const args = ["fetch", "--prune", ...(forceProgress ? ["--progress"] : [])];
+  const args = ["fetch", "--prune", ...FETCH_TAG_UPDATES, ...(forceProgress ? ["--progress"] : [])];
   return fetchWithRefRaceRetry(git, cwd, args);
 }
 
@@ -1490,6 +1496,7 @@ export async function fetchNamedRemote(
   return fetchWithRefRaceRetry(git, cwd, [
     "fetch",
     "--prune",
+    ...FETCH_TAG_UPDATES,
     ...(forceProgress ? ["--progress"] : []),
     remote
   ]);
@@ -1525,6 +1532,7 @@ export async function fetchNamedRemotes(
   return fetchWithRefRaceRetry(git, cwd, [
     "fetch",
     "--prune",
+    ...FETCH_TAG_UPDATES,
     ...(forceProgress ? ["--progress"] : []),
     "--multiple",
     ...remotes
@@ -1541,6 +1549,7 @@ export async function fetchAllRemotes(
     "fetch",
     "--all",
     "--prune",
+    ...FETCH_TAG_UPDATES,
     ...(forceProgress ? ["--progress"] : [])
   ]);
 }

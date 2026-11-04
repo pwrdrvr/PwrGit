@@ -176,7 +176,7 @@ async function fetchConfiguredRemotes(
     }
     report({ detail: `Fetching ${remote.name}…` });
     const raw = await git(
-      ["fetch", "--atomic", "--prune", remote.name],
+      ["fetch", "--atomic", "--prune", "--tags", "--force", remote.name],
       repo.path,
       signal === undefined ? undefined : { signal }
     );
