@@ -369,3 +369,51 @@ test("Fetch ▾, the run's dialog and its toast, on contrived repositories", asy
     silent.close();
   }
 });
+
+/**
+ * The gh default-repository warning: a fork checkout whose `upstream` would
+ * receive a bare `gh pr create`. Invented owners and repository; nothing is
+ * fetched, so the remotes need not exist. Captures the header chip, then the
+ * Repository setup sheet's GitHub CLI page it opens.
+ */
+test("the gh default-repository warning, on a contrived fork checkout", async () => {
+  mkdirSync(OUT, { recursive: true });
+  sandbox = createGitSandbox();
+  const box = sandbox;
+  const repo = box.makeRepo("northwind-labs");
+  box.commit(repo.path, "capture-window.ts", "base");
+  box.git(repo.path, "remote", "add", "origin", "git@github.com:mara-quill/northwind-labs.git");
+  box.git(repo.path, "remote", "add", "upstream", "git@github.com:northwind-oss/northwind-labs.git");
+  if (process.env["PWRGIT_GH_DEFAULT_SET"] === "1") {
+    box.git(repo.path, "config", "remote.origin.gh-resolved", "base");
+  }
+
+  // A signed-out gh: the warning is read from Git config alone, and a token
+  // would send PwrGit's change-request reader to api.github.com.
+  const signedOut = join(dirname(box.reposDir), "gh-signed-out");
+  mkdirSync(signedOut, { recursive: true });
+  writeFileSync(join(signedOut, "gh"), "#!/bin/sh\n[ \"$1\" = \"--version\" ] && echo \"gh version 2.99.0 (contrived)\" && exit 0\nexit 1\n", { mode: 0o755 });
+  process.env["PATH"] = `${signedOut}${delimiter}${process.env["PATH"] ?? ""}`;
+  handle = await launchApp({ theme: "dark" });
+  const { app, window } = handle;
+  await app.evaluate(async ({ BrowserWindow }, size) => {
+    BrowserWindow.getAllWindows()[0]?.setBounds({ x: 0, y: 0, ...size });
+  }, WINDOW);
+
+  await addRootAndExpand(window, handle, box, "northwind-labs");
+  await branchRow(window, "main").first().click();
+  const header = window.locator(".wt-header");
+  await header.waitFor();
+  await window.waitForTimeout(800);
+  await window.mouse.move(6, 6);
+  await header.screenshot({ path: join(OUT, "gh-default-header.png") });
+
+  const chip = window.locator(".discovery-gh-chip");
+  if ((await chip.count()) === 0) return;
+  await chip.click();
+  const sheet = window.locator(".repository-setup");
+  await sheet.waitFor();
+  await window.mouse.move(6, 6);
+  await window.waitForTimeout(400);
+  await sheet.screenshot({ path: join(OUT, "gh-default-sheet.png") });
+});

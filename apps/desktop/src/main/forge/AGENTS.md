@@ -419,6 +419,15 @@ never reach a real forge.
   in `repo_identity`, which `RepoIndexer` joins onto `repo:list`, so marks
   paint on the first frame. Refreshes send a `repo:identityChanged` delta the
   renderer patches in place; a full reload would collapse expanded repos.
+- **gh's default repository follows gh's rule, not ours.** Without
+  `gh repo set-default` (`remote.<name>.gh-resolved`), a non-interactive `gh`
+  picks by remote NAME (`upstream` > `github` > `origin` > others). In a fork
+  checkout that sends `gh pr create` to the original repository.
+  `@pwrgit/mcp-server/gh-default` is the one copy of that rule. The MCP tool
+  `pwrgit_repository_info` and `repo:setup` (header chip, Repository setup ›
+  GitHub CLI) both call it. When gh changes, re-check it against real gh with
+  `PWRGIT_GH_ORACLE=1` (`gh-default.oracle.test.ts`). Show the fix; never
+  write the key for the user, because it is shared `.git/config`.
 - **Other remotes are read at the same time, only for naming.** `readRemotes`
   runs one `git remote -v` and stores every forge hostname in
   `RepoIdentity.remoteHostnames` (`repo_identity.remote_hosts`, JSON array). A

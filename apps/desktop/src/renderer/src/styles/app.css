@@ -9513,7 +9513,7 @@ button.agent-menu__item:hover {
   cursor: progress;
   opacity: 0.65;
 }
-.lfs-chip--shadowed, .discovery-hooks-chip {
+.lfs-chip--shadowed, .discovery-hooks-chip, .discovery-gh-chip {
   display: inline-flex;
   align-items: center;
   height: 18px;
@@ -9526,8 +9526,8 @@ button.agent-menu__item:hover {
   cursor: pointer;
   white-space: nowrap;
 }
-.lfs-chip--shadowed { background: var(--warn-soft); color: var(--status-warning); border-color: var(--status-warning); }
-.discovery-hooks-chip:hover, .discovery-hooks-chip:focus-visible, .lfs-chip--shadowed:hover, .lfs-chip--shadowed:focus-visible { border-color: var(--accent); outline-color: var(--focus-ring); }
+.lfs-chip--shadowed, .discovery-gh-chip { background: var(--warn-soft); color: var(--status-warning); border-color: var(--status-warning); }
+.discovery-hooks-chip:hover, .discovery-hooks-chip:focus-visible, .lfs-chip--shadowed:hover, .lfs-chip--shadowed:focus-visible, .discovery-gh-chip:hover, .discovery-gh-chip:focus-visible { border-color: var(--accent); outline-color: var(--focus-ring); }
 .titlebar__repo {
   /* --accent, not --accent-bright: this is the leading breadcrumb crumb, and
      PwrAgnt paints the same role (`.thread-header__eyebrow`) with the base
@@ -21232,6 +21232,13 @@ button.agent-auth-node:focus-visible,
 .repository-setup__warning { padding: 10px 12px; border: 1px solid var(--status-warning); border-radius: 8px; background: var(--warn-soft); color: var(--text-secondary); font: 400 11px/1.5 var(--font-sans); }
 .repository-setup__warning strong { color: var(--status-warning); }
 .repository-setup__warning p { margin: 4px 0 0; }
+.repository-setup__fix { display: flex; align-items: center; gap: 8px; margin-top: 8px; }
+.repository-setup__fix code { flex: 1 1 auto; min-width: 0; padding: 6px 8px; border: 1px solid var(--border-default); border-radius: 6px; background: var(--bg-input); color: var(--text-primary); font: 500 11px/1.4 var(--font-mono); overflow-wrap: anywhere; user-select: text; }
+.repository-setup__candidates { display: grid; gap: 4px; }
+.repository-setup__candidate { display: flex; align-items: center; gap: 8px; padding: 6px 10px; border: 1px solid var(--border-default); border-radius: 8px; font: 500 11px/1.4 var(--font-mono); }
+.repository-setup__candidate.is-chosen { border-color: var(--accent); }
+.repository-setup__candidate span { color: var(--text-muted); }
+.repository-setup__candidate strong { margin-left: auto; color: var(--accent); font: 600 10px/1 var(--font-sans); }
 .repository-setup__hooks { display: flex; flex-direction: column; }
 .repository-setup__hooks > p { color: var(--text-muted); font: 11px/1.5 var(--font-sans); }
 .repository-setup__hook { display: grid; grid-template-columns: 102px minmax(0, 1fr) auto; align-items: center; gap: 10px; padding: 9px 0; border-top: 1px solid var(--border-subtle); color: var(--text-secondary); font: 10.5px/1.45 var(--font-sans); }

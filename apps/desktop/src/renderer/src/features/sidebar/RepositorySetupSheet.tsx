@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
-import type { IgnoreDestination, RepositorySetup, SetupIgnoreTest } from "@pwrgit/shared";
+import type { GhDefaultRepository, IgnoreDestination, RepositorySetup, SetupIgnoreTest } from "@pwrgit/shared";
+import { copyText } from "../../lib/copyText";
 import { dispatch } from "../../lib/pwrgit";
 import { useModal } from "../../lib/useModal";
 import { showErrorToast } from "../../lib/toast";
@@ -19,9 +20,43 @@ const hookLanes = [
   { name: "Rebase", action: "git rebase", hooks: ["pre-rebase", "post-rewrite"] }
 ] as const;
 
+export type RepositorySetupPage = "hooks" | "ignore" | "gh";
+
+function ghReason(gh: GhDefaultRepository): string {
+  if (gh.status === "set") return `gh repo set-default chose it (remote.${gh.remote}.gh-resolved)`;
+  if (gh.status === "implicit") return "every GitHub remote points at it";
+  return `no default is set, and remote ${gh.remote} ranks first`;
+}
+
+/** What `gh` acts on in this clone without `--repo`. Shown so a fork
+ *  checkout's `upstream` cannot silently receive a `gh pr create`. */
+function GhDefaultPage({ gh, scope }: { gh: GhDefaultRepository | null; scope: string }) {
+  const [copied, setCopied] = useState(false);
+  const risky = gh !== null && gh.warning !== null;
+  return <>
+    <div className="repository-setup__heading"><h3>GitHub CLI</h3><span className="discovery-scope discovery-scope--exclude">{scope}</span></div>
+    <p className="repository-setup__intro"><code>gh pr create</code> and other <code>gh</code> commands act on one repository when you do not pass <code>--repo</code>. gh keeps that choice in this clone’s Git config, so every worktree shares it.</p>
+    {gh === null && <p>PwrGit could not read this clone’s remotes.</p>}
+    {gh !== null && gh.status === "none" && <p>No remote points at a GitHub repository, so gh has nothing to choose from.</p>}
+    {gh !== null && gh.repository !== null && <div className="repository-setup__resolved"><span>gh uses</span><code>{gh.repository}</code><span>because</span><code>{ghReason(gh)}</code></div>}
+    {risky && <div className="repository-setup__warning" role="status">
+      <strong>{gh.status === "invalid" ? "gh cannot read this clone’s default repository" : "No default repository is set"}</strong>
+      <p>{gh.status === "invalid" ? gh.warning : <>gh picks by remote name (<code>upstream</code>, then <code>github</code>, then <code>origin</code>), not by where you push. A <code>gh pr create</code> run by an agent or a script would open its pull request on <code>{gh.repository}</code>.</>} Run this in a terminal to choose. PwrGit does not change your Git config.</p>
+      {gh.fix !== null && <div className="repository-setup__fix"><code>{gh.fix}</code><button type="button" className="modal__cancel" onClick={() => { void copyText(gh.fix ?? "").then(() => setCopied(true)).catch(() => setCopied(false)); }}>{copied ? "Copied" : "Copy"}</button></div>}
+    </div>}
+    {gh !== null && gh.candidates.length > 1 && <>
+      <p className="repository-setup__intro">GitHub repositories this clone has remotes for. To choose another, run <code>gh repo set-default OWNER/REPO</code>.</p>
+      <div className="repository-setup__candidates">{gh.candidates.map((candidate) => {
+        const chosen = candidate.repository === gh.repository && candidate.host === gh.host;
+        return <div key={`${candidate.host}/${candidate.repository}`} className={`repository-setup__candidate${chosen ? " is-chosen" : ""}`}><code>{candidate.repository}</code><span>{candidate.remotes.join(", ")}</span>{chosen && <strong>gh uses</strong>}</div>;
+      })}</div>
+    </>}
+  </>;
+}
+
 export function RepositorySetupSheet({ repo, initialPage = "hooks", onClose, platform = currentPlatform() }: {
   repo: { id: string; name: string; path: string };
-  initialPage?: "hooks" | "ignore";
+  initialPage?: RepositorySetupPage;
   onClose: () => void;
   /** Explicit only in deterministic platform component tests. */
   platform?: string;
@@ -101,6 +136,7 @@ export function RepositorySetupSheet({ repo, initialPage = "hooks", onClose, pla
           <nav className="repository-setup__nav" aria-label="Repository setup pages">
             <button type="button" className={page === "hooks" ? "is-selected" : ""} onClick={() => setPage("hooks")}>Hooks <span>{activeHooks.length}</span></button>
             <button type="button" className={page === "ignore" ? "is-selected" : ""} onClick={() => setPage("ignore")}>Ignore rules <span>{setup?.ignore.reduce((count, layer) => count + layer.lines.length, 0) ?? 0}</span></button>
+            <button type="button" className={page === "gh" ? "is-selected" : ""} onClick={() => setPage("gh")}>GitHub CLI <span>{(setup?.ghDefault?.warning ?? null) !== null ? "!" : ""}</span></button>
           </nav>
           <main className="repository-setup__body">
             {error !== null && <div className="modal__error" role="alert">{error}</div>}
@@ -119,6 +155,7 @@ export function RepositorySetupSheet({ repo, initialPage = "hooks", onClose, pla
               <div className="repository-setup__actions"><button type="button" className="modal__cancel" onClick={() => void openPath(setup.hooks.directory)}>Open hooks directory</button><button type="button" className="modal__cancel" onClick={() => void dispatch("shell:revealPath", { path: setup.hooks.directory })}>Reveal directory</button><button type="button" className="modal__cancel" onClick={() => setMapOpen(!mapOpen)} aria-expanded={mapOpen}>{mapOpen ? "Hide hook map" : "Hook map…"}</button>{setup.hooks.manager !== null && <span>Managed by {setup.hooks.manager}</span>}</div>
               {mapOpen && <div className="repository-setup__map"><p className="repository-setup__intro">The hooks Git can run at each operation. Lit hooks are active in this clone; warning hooks are shadowed.</p>{hookLanes.map((lane) => <div className="repository-setup__lane" key={lane.name}><strong>{lane.name}<small>{lane.action}</small></strong><div>{lane.hooks.map((name) => { const active = activeHooks.some((hook) => hook.name === name); const shadowed = shadowedHooks.some((hook) => hook.name === name); return <button type="button" key={name} className={`${active ? "is-active" : shadowed ? "is-shadowed" : ""}${selectedMapHook === name ? " is-selected" : ""}`} onClick={() => setSelectedMapHook(name)}>{name}</button>; })}</div></div>)}{selectedMapHook !== null && <div className="repository-setup__map-detail"><strong><code>{selectedMapHook}</code></strong>{mappedHook === undefined ? <span>No executable <code>{selectedMapHook}</code> hook in this clone.</span> : <span><code>{mappedHook.displayPath}</code> → <code>{mappedHook.calls}</code>{shadowedHooks.includes(mappedHook) ? " · shadowed, not run" : mappedHook.lastRun ? ` · last ran ${(mappedHook.lastRun.elapsedMs / 1000).toFixed(1)}s, exit ${mappedHook.lastRun.exitCode}` : " · active"}</span>}</div>}</div>}
             </>}
+            {setup !== null && page === "gh" && <GhDefaultPage gh={setup.ghDefault} scope={scope} />}
             {setup !== null && page === "ignore" && <>
               <div className="repository-setup__heading"><h3>Ignore rules</h3></div>
               <p className="repository-setup__intro">Git checks these three places in precedence order. Within a file, later matches can override earlier ones. Rules hide untracked files only.</p>

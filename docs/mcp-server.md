@@ -261,6 +261,14 @@ it uses the configured, workspace, and conventional candidates above.
 - credential-free remote identities and their roles;
 - an explicit fork relationship only when a distinct `upstream` remote proves
   it, otherwise `isFork: null`;
+- `ghDefaultRepository`: the repository `gh` acts on when no `--repo` is given
+  (what `gh pr create` opens a PR against), from `gh repo set-default`'s
+  `remote.<name>.gh-resolved` key or, when that is unset, gh's own remote
+  ranking (`upstream` > `github` > `origin` > others). `status: "ambiguous"`
+  means nothing is set and the GitHub remotes name different repositories, so
+  gh picks by remote name: in a fork checkout, the original repository.
+  `warning` says so and `fix` is the `gh repo set-default` command. PwrGit
+  never runs it; agents should pass `--repo` or ask the user;
 - resolved default and current branches;
 - `worktrees`: the ten most relevant worktrees by default, ordered primary,
   conflicted, mid-operation, prunable, dirty, diverged, locked, quiet. Raise

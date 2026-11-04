@@ -41,6 +41,7 @@ import { useForkStatus } from "../../state/useForkStatus";
 import { WorktreeMenu } from "../shell/WorktreeMenu";
 import { forkMenuLabel } from "../shell/worktree-menu-items";
 import { GitLfsChip } from "./GitLfsChip";
+import type { RepositorySetupPage } from "../sidebar/RepositorySetupSheet";
 import { PullDivergenceDialog } from "./PullDivergenceDialog";
 import { PullMenu, type PullMenuRow } from "./PullMenu";
 import {
@@ -676,7 +677,7 @@ export function WorktreeHeader({
   repo: Pick<Repo, "id" | "name" | "path" | "profileId" | "identity">;
   worktree: Worktree;
   state: WorktreeState | null;
-  onOpenSetup?: () => void;
+  onOpenSetup?: (page?: RepositorySetupPage) => void;
   /** Set while the right-hand panel is collapsed: its reopen button is the
    *  last control in this row, where it takes its own width, rather than a
    *  floating button laid over Push and the kebab (Fork Sync 3c). */
@@ -1780,9 +1781,23 @@ export function WorktreeHeader({
           repoPath={repo.path}
           worktreeId={worktree.id}
           hooksShadowed={repositorySetup?.hooks.lfsShadowed ?? false}
-          {...(onOpenSetup === undefined ? {} : { onOpenSetup })}
+          {...(onOpenSetup === undefined ? {} : { onOpenSetup: () => onOpenSetup() })}
         />
-        {(repositorySetup?.hooks.active.length ?? 0) > 0 && <button type="button" className="discovery-hooks-chip" title={`${repositorySetup?.hooks.displayDirectory} · ${repositorySetup?.hooks.worktreeCount} worktrees`} onClick={onOpenSetup}>hooks {repositorySetup?.hooks.active.length}</button>}
+        {(repositorySetup?.hooks.active.length ?? 0) > 0 && <button type="button" className="discovery-hooks-chip" title={`${repositorySetup?.hooks.displayDirectory} · ${repositorySetup?.hooks.worktreeCount} worktrees`} onClick={() => onOpenSetup?.()}>hooks {repositorySetup?.hooks.active.length}</button>}
+        {/* A bare `gh pr create` here would pick a repository by remote NAME
+            (`upstream` first), not by where this checkout pushes. A repo
+            fact like the hooks chip, so it sits beside it. */}
+        {(repositorySetup?.ghDefault?.warning ?? null) !== null && (
+          <button
+            type="button"
+            className="discovery-gh-chip"
+            aria-label={`GitHub CLI default repository: ${repositorySetup?.ghDefault?.warning ?? ""}`}
+            {...hoverTooltip(tip, `${repositorySetup?.ghDefault?.warning ?? ""} Click for details.`)}
+            onClick={() => onOpenSetup?.("gh")}
+          >
+            gh default
+          </button>
+        )}
         {/* The one repo-level fact the action buttons cannot act on: this
             account may not push here. A button, unlike the sidebar's mark,
             because this is where the push it is about lives. Hidden while an

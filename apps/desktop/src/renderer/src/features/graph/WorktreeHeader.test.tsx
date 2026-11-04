@@ -3393,3 +3393,47 @@ describe("WorktreeHeader publishes a branch Push has nowhere to send", () => {
     expect(dialog()).toBeNull();
   });
 });
+
+describe("gh default chip", () => {
+  const ghSetup = (warning: string | null) => ({
+    hooks: { directory: "/r/.git/hooks", displayDirectory: ".git/hooks", configuredPath: null, origin: null, manager: null, active: [], shadowed: [], sampleCount: 0, lfsShadowed: false, worktreeCount: 1 },
+    ignore: [],
+    ghDefault: {
+      status: warning === null ? "set" : "ambiguous",
+      host: "github.com",
+      repository: warning === null ? "pwrdrvr/PwrDisk" : "tobi/disktree",
+      remote: warning === null ? "origin" : "upstream",
+      candidates: [],
+      fix: warning === null ? null : "gh repo set-default pwrdrvr/PwrDisk",
+      warning
+    }
+  });
+
+  async function renderWith(warning: string | null, onOpenSetup = vi.fn()) {
+    bridge.dispatch.mockImplementation((name: string) =>
+      name === "repo:setup"
+        ? Promise.resolve(ok(ghSetup(warning)))
+        : name === "remote:activities"
+          ? Promise.resolve(ok([]))
+          : new Promise(() => undefined)
+    );
+    await act(async () => {
+      root.render(<WorktreeHeader repo={{ ...repo, id: `gh-${String(warning)}` }} worktree={worktree} state={null} onOpenSetup={onOpenSetup} />);
+    });
+    return onOpenSetup;
+  }
+
+  it("warns when gh would guess, and opens the setup sheet on its page", async () => {
+    const onOpenSetup = await renderWith("No gh default repository is set.");
+    const chip = container.querySelector<HTMLButtonElement>(".discovery-gh-chip");
+    expect(chip?.textContent).toBe("gh default");
+    expect(chip?.getAttribute("aria-label")).toContain("No gh default repository is set.");
+    await act(async () => chip?.click());
+    expect(onOpenSetup).toHaveBeenCalledWith("gh");
+  });
+
+  it("says nothing once a default is set", async () => {
+    await renderWith(null);
+    expect(container.querySelector(".discovery-gh-chip")).toBeNull();
+  });
+});

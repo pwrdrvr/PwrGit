@@ -1,8 +1,10 @@
 import { existsSync, readFileSync, readdirSync, statSync, writeFileSync, mkdirSync, realpathSync } from "node:fs";
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
-import { err, ok, type HookRun, type RepositorySetup, type Result, type SetupHook, type SetupIgnoreTest } from "@pwrgit/shared";
+import { describeGhDefaultRisk, parseGhResolvedConfig, resolveGhDefaultRepository } from "@pwrgit/mcp-server/gh-default";
+import { FORGE_PRODUCTS, err, isForgeKind, ok, parseForgeRemote, type ForgeHostMap, type GhDefaultRepository, type HookRun, type RepositorySetup, type Result, type SetupHook, type SetupIgnoreTest } from "@pwrgit/shared";
 import { NO_OPTIONAL_LOCKS, requireExit0, type GitExec } from "./dugite";
 import { ignoreDestinations, validIgnorePath } from "./ignore-discovery";
+import { parseRemoteRows } from "./remote-list";
 
 const receipts = new Map<string, Map<string, HookRun & { at: number }>>();
 const hookNames = new Set([
@@ -95,7 +97,38 @@ function managerFor(cwd: string): string | null {
   return null;
 }
 
-export async function readRepositorySetup(git: GitExec, cwd: string): Promise<Result<RepositorySetup>> {
+/**
+ * Which repository `gh` would act on here, and whether that is a guess. Two
+ * Git reads, no gh process and no network: gh's own choice is a function of
+ * the remote names and `remote.*.gh-resolved` (see `gh-default.ts`).
+ * Best-effort: a failed read is null, never a failed setup sheet.
+ */
+export async function readGhDefault(git: GitExec, cwd: string, hosts: ForgeHostMap = {}): Promise<GhDefaultRepository | null> {
+  const [remotes, resolvedConfig] = await Promise.all([
+    git(["remote", "-v"], cwd, NO_OPTIONAL_LOCKS),
+    git(["config", "--get-regexp", "^remote\\..*\\.gh-resolved$"], cwd, NO_OPTIONAL_LOCKS)
+  ]);
+  if (!remotes.ok || remotes.value.exitCode !== 0) return null;
+  if (!resolvedConfig.ok || resolvedConfig.value.exitCode > 1) return null;
+  const resolved = parseGhResolvedConfig(resolvedConfig.value.exitCode === 0 ? resolvedConfig.value.stdout : "");
+  const state = resolveGhDefaultRepository(
+    // gh reads a remote's repository from its fetch URL.
+    parseRemoteRows(remotes.value.stdout).filter((row) => row.direction === "fetch").map((row) => {
+      const parsed = parseForgeRemote(row.url, hosts);
+      return {
+        name: row.name,
+        host: parsed?.hostname ?? null,
+        repository: parsed?.nameWithOwner ?? null,
+        // Only hosts the gh CLI serves; a GitLab remote is not gh's concern.
+        github: parsed !== null && isForgeKind(parsed.host) && FORGE_PRODUCTS[parsed.host].cli === "gh",
+        resolved: resolved.get(row.name) ?? null
+      };
+    })
+  );
+  return { ...state, warning: describeGhDefaultRisk(state) };
+}
+
+export async function readRepositorySetup(git: GitExec, cwd: string, hosts: ForgeHostMap = {}): Promise<Result<RepositorySetup>> {
   const locations = await ignoreDestinations(git, cwd);
   if (!locations.ok) return locations;
   const common = await commonDirectory(git, cwd);
@@ -123,6 +156,7 @@ export async function readRepositorySetup(git: GitExec, cwd: string): Promise<Re
   const active = listHooks(activeDir, cwd, common.value, lastRuns);
   const shadowed = activeDir === defaultDir ? { hooks: [], sampleCount: 0 } : listHooks(defaultDir, cwd, common.value, undefined);
   const ignore = locations.value.destinations.map((destination) => ({ ...destination, ...readLines(destination.path) }));
+  const ghDefault = await readGhDefault(git, cwd, hosts);
   return ok({
     hooks: {
       directory: activeDir,
@@ -136,7 +170,8 @@ export async function readRepositorySetup(git: GitExec, cwd: string): Promise<Re
       lfsShadowed: shadowed.hooks.some((hook) => callsGitLfs(hook.path)),
       worktreeCount: locations.value.worktreeCount
     },
-    ignore
+    ignore,
+    ghDefault
   });
 }
 

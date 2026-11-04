@@ -1,4 +1,4 @@
-import { err } from "@pwrgit/shared";
+import { err, type ForgeHostMap } from "@pwrgit/shared";
 import type { CommandBus } from "../command-bus";
 import type { DB } from "../persistence/db";
 import { emitEvent } from "../ipc";
@@ -7,7 +7,7 @@ import { ignoreDestinations } from "./ignore-discovery";
 import { readRepositorySetup, saveSetupExclude, testSetupIgnorePath } from "./repository-setup";
 import type { WorktreeOperationQueue } from "./worktree-operation-queue";
 
-export function registerRepositorySetupHandlers(bus: CommandBus, db: DB, operations: WorktreeOperationQueue): void {
+export function registerRepositorySetupHandlers(bus: CommandBus, db: DB, operations: WorktreeOperationQueue, hosts: () => ForgeHostMap = () => ({})): void {
   const pathOf = (repoId: string): string | null => {
     const row = db.prepare("SELECT path FROM worktrees WHERE repo_id = ? AND missing = 0 ORDER BY is_primary DESC LIMIT 1").get(repoId) as { path: string } | undefined;
     return row?.path ?? null;
@@ -18,7 +18,7 @@ export function registerRepositorySetupHandlers(bus: CommandBus, db: DB, operati
   // header re-reads setup on every change event.
   bus.register("repo:setup", async ({ repoId }) => {
     const path = pathOf(repoId);
-    return path === null ? missing() : readRepositorySetup(execGit, path);
+    return path === null ? missing() : readRepositorySetup(execGit, path, hosts());
   });
   bus.register("repo:testIgnorePath", async ({ repoId, path: testPath }) => {
     const path = pathOf(repoId);
