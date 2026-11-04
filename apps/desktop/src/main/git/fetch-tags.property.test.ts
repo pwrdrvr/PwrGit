@@ -75,8 +75,25 @@ beforeAll(() => {
   setup(join(template, "local"));
 });
 
+/*
+ * Budget (docs/property-model-oracle-testing.md): about 0.1s per run on Linux
+ * and macOS, 25 runs in ~2.4s. Real Git on the Windows runner is 6-13x slower
+ * (tag-source-handlers.test.ts: 1.1s on Linux, 9-13s on Windows), so 25 runs
+ * there passed the 20s test timeout. Windows runs 4: a platform smoke of the
+ * same rule, which Linux and macOS search properly.
+ */
+
+/** Windows may still hold a directory a moment after Git exits; afterAll retries. */
+function removeRun(root: string): void {
+  try {
+    rmSync(root, { recursive: true, force: true });
+  } catch {
+    // Left in `runs` for afterAll.
+  }
+}
+
 afterAll(() => {
-  for (const root of [template, ...runs]) rmSync(root, { recursive: true, force: true });
+  for (const root of [template, ...runs]) rmSync(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
 });
 
 type Op =
@@ -163,10 +180,9 @@ describe("ordinary sync and tags (git as the oracle)", () => {
           }
           for (const orphan of orphans) expect(has(local, orphan), `${step.how} downloaded tag-only history`).toBe(false);
         }
-        rmSync(root, { recursive: true, force: true });
+        removeRun(root);
       }),
-      // Real Git: about a quarter second per run, so the file stays under 10s.
-      { numRuns: 25 }
+      { numRuns: process.platform === "win32" ? 4 : 25 }
     );
   });
 });
