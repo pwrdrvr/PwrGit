@@ -140,12 +140,16 @@ describe("ClonesPanel", () => {
     const { operationId } = (run?.[1] ?? {}) as { operationId: string };
 
     await act(async () => {
-      progress?.({ operationId, profileId: "one", phase: "starting", repos: [repo("a"), repo("b")] });
+      progress?.({ operationId, profileId: "one", phase: "starting", repos: [repo("a"), repo("b")], noWorktrees: [repo("z")] });
       progress?.({ operationId, profileId: "one", phase: "repo_started", repo: repo("a") });
       progress?.({ operationId, profileId: "one", phase: "repo_progress", repo: repo("a"), detail: "Worktree 1 of 1 · feature" });
     });
     expect(container.textContent).toContain("Refreshing clones in 1 repository");
     expect(container.textContent).toContain("Worktree 1 of 1 · feature");
+    // Repositories without worktrees are their own line, not skips.
+    expect(container.textContent).toContain("1 repository has no linked worktrees, so nothing to share");
+    // No per-repository ETA: one repository can hold hundreds of worktrees.
+    expect(container.textContent).not.toMatch(/left$|· about/);
     expect(button("Cancel")).toBeDefined();
 
     const results = [reshared("a", 1024 * 1024, 3), reshared("b", 4 * 1024 * 1024, 9)];

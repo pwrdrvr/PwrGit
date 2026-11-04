@@ -184,12 +184,17 @@ export type MaintenanceSummary = {
   finishedAt: string;
   cancelled: boolean;
   results: MaintenanceRepoResult[];
+  /** Clones only: repositories in scope with no linked worktree, so nothing
+   *  to share. Listed apart from the run rather than counted as skipped. */
+  noWorktrees?: MaintenanceRepo[];
 };
 export type MaintenanceProgress = {
   operationId: string;
   profileId: string;
   phase: "starting" | "repo_started" | "repo_progress" | "repo_completed";
   repos?: MaintenanceRepo[];
+  /** With `starting`, Clones only: see `MaintenanceSummary.noWorktrees`. */
+  noWorktrees?: MaintenanceRepo[];
   repo?: MaintenanceRepo;
   detail?: string;
   result?: MaintenanceRepoResult;

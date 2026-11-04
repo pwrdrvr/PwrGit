@@ -77,17 +77,31 @@ test("copy-on-write switch and Maintenance › Clones lay out without overflow",
     await dialog.getByRole("button", { name: "Refresh clones" }).click();
     await call(page, "progress");
     await expect(dialog).toContainText("Refreshing clones in 2 repositories");
+    await expect(dialog).toContainText("3 of 14 repositories");
     await expect(dialog).toContainText("Worktree 2 of 3 · fix/retry-jitter");
+    await expect(dialog).toContainText("3 repositories have no linked worktrees, so nothing to share");
     await shoot("clones-running", ".modal");
+    // The live card stays in view while the rows scroll under it.
+    const body = dialog.locator(".maintenance__body");
+    expect(await body.evaluate((node) => {
+      node.scrollTo({ top: node.scrollHeight });
+      return node.scrollTop;
+    })).toBeGreaterThan(100);
+    await shoot("clones-running-scrolled", ".modal");
+    const card = await dialog.locator(".bulk-sync__status.is-live").boundingBox();
+    const view = await body.boundingBox();
+    expect(card !== null && view !== null && card.y >= view.y - 1 && card.y + card.height <= view.y + view.height).toBe(true);
+    await body.evaluate((node) => node.scrollTo({ top: 0 }));
     await call(page, "finish");
     const status = dialog.locator(".maintenance__done-status");
-    await expect(status).toContainText("978.0 MiB of file data now shared with main checkouts");
+    await expect(status).toContainText("987.0 MiB of file data now shared with main checkouts");
     // Largest share first, then expand it to its worktrees.
     await expect(dialog.locator(".maintenance__clones-name strong").first()).toHaveText("lumen-api");
     await dialog.locator(".maintenance__clones-row summary").first().click();
     await expect(dialog).toContainText("3,810 files re-shared · 2 left as they are (2 changed).");
     // Two clones named atlas: each row names its path.
     await expect(dialog.locator(".maintenance__clones-name code")).toHaveText(["/Users/demo/src/atlas", "/Users/demo/forks/atlas"]);
+    await expect(dialog.locator(".maintenance__clones-row strong", { hasText: "notes" })).toHaveCount(0);
     // Every row keeps its text inside its box.
     const overflow = await dialog.locator(".maintenance__clones-rows").evaluate((list) =>
       Array.from(list.querySelectorAll<HTMLElement>("summary, li, small, code")).filter(

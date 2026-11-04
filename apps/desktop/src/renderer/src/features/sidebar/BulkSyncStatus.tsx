@@ -37,7 +37,8 @@ export function BulkSyncStatus({
   queued,
   startedAt,
   durationMs,
-  compactWhenFinished = false
+  compactWhenFinished = false,
+  estimateRemaining = true
 }: {
   phase: BulkSyncStatusPhase;
   /** Whether the ended run failed anywhere; picks the mark that replaces the spinner. */
@@ -54,6 +55,9 @@ export function BulkSyncStatus({
   durationMs: number | null;
   /** Maintenance reviews use the same neutral card without the completed progress bar. */
   compactWhenFinished?: boolean;
+  /** Off where repositories differ too much in size for a per-repository
+   *  average to mean anything (Clones: one can hold 400 worktrees). */
+  estimateRemaining?: boolean;
 }): ReactElement {
   const live = phase === "running" || phase === "cancelling";
   const finished = finishedCount(counts);
@@ -99,7 +103,7 @@ export function BulkSyncStatus({
             startedAt={startedAt}
             finished={finished}
             total={total}
-            estimate={phase === "running"}
+            estimate={phase === "running" && estimateRemaining}
           />
         ) : (
           durationMs !== null && (

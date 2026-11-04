@@ -88,6 +88,7 @@ export function ClonesPanel({
   const [running, setRunning] = useState(false);
   const [cancelling, setCancelling] = useState(false);
   const [repos, setRepos] = useState<MaintenanceRepo[]>([]);
+  const [noWorktrees, setNoWorktrees] = useState<MaintenanceRepo[]>([]);
   const [current, setCurrent] = useState<Set<string>>(new Set());
   const [details, setDetails] = useState<Map<string, string>>(new Map());
   const [results, setResults] = useState<Map<string, MaintenanceRepoResult>>(new Map());
@@ -126,6 +127,7 @@ export function ClonesPanel({
     setSummary(null);
     setError(null);
     setRepos([]);
+    setNoWorktrees([]);
     setCurrent(new Set());
     setDetails(new Map());
     setResults(new Map());
@@ -133,6 +135,7 @@ export function ClonesPanel({
     const off = subscribe("maintenance:progress", (event) => {
       if (!live.current || event.operationId !== operationId || event.profileId !== profileId) return;
       if (event.repos !== undefined) setRepos(event.repos);
+      if (event.noWorktrees !== undefined) setNoWorktrees(event.noWorktrees);
       const repo = event.repo;
       if (event.phase === "repo_started" && repo !== undefined) setCurrent((old) => new Set(old).add(repo.id));
       if (repo !== undefined && event.detail !== undefined) {
@@ -160,6 +163,7 @@ export function ClonesPanel({
       if (response.ok) {
         setSummary(response.value);
         setRepos(response.value.results.map((result) => result.repo));
+        setNoWorktrees(response.value.noWorktrees ?? []);
         setResults(new Map(response.value.results.map((result) => [result.repo.id, result])));
       } else {
         setError(response.error.message);
@@ -233,6 +237,7 @@ export function ClonesPanel({
             queued={Math.max(0, repos.length - results.size - current.size)}
             startedAt={startedAt}
             durationMs={null}
+            estimateRemaining={false}
           />
         )}
         {!started && (
@@ -312,6 +317,15 @@ export function ClonesPanel({
               />
             ))}
           </ul>
+        )}
+        {started && noWorktrees.length > 0 && (
+          <details className="maintenance__clones-none">
+            <summary>
+              {noWorktrees.length.toLocaleString("en-US")} {noWorktrees.length === 1 ? "repository has" : "repositories have"} no
+              linked worktrees, so nothing to share
+            </summary>
+            <p>{noWorktrees.map((repo) => repo.name).join(" · ")}</p>
+          </details>
         )}
         {summary !== null && (
           <p className="maintenance__help">

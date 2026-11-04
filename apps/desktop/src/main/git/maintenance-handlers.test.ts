@@ -788,13 +788,14 @@ describe("maintenance › clones", () => {
     const summary = value(
       await bus.dispatch("maintenance:run", { profileId: "one", operationId: "yes", action: reshare })
     );
-    const [a, b] = summary.results;
+    const [a, ...rest] = summary.results;
     expect(a).toMatchObject({ outcome: "success", reshare: { main: { outcome: "not_requested" } } });
     expect(a?.reshare?.worktrees).toEqual([
       expect.objectContaining({ worktreeId: "a-wt", outcome: "reshared", reshared: 1, sharedBytes: 4096 })
     ]);
-    // `b` has no worktree rows, so nothing to share and nothing fetched.
-    expect(b).toMatchObject({ outcome: "skipped", message: "No linked worktrees." });
+    // `b` has no linked worktree: listed apart, never run or counted as skipped.
+    expect(rest).toEqual([]);
+    expect(summary.noWorktrees?.map((repo) => repo.id)).toEqual(["b"]);
     const reflinkCwds = git.mock.calls.filter(([args]) => args[1] === "reflink").map(([, cwd]) => cwd);
     expect(reflinkCwds).toEqual([join(root, "a-wt")]);
   });

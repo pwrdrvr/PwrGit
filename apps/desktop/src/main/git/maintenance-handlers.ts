@@ -35,6 +35,14 @@ import { activeGitReflinkProbe } from "./dugite";
 import { refreshActiveGitReflink } from "./runtime-status";
 import { refreshRepositoryClones, softPullMainCheckout, type ReshareWorktreeRow } from "./worktree-reshare";
 
+/** Linked (non-primary) worktrees per repository, for Clones' scope. */
+function linkedWorktreeCounts(db: DB, repos: readonly MaintenanceRepo[]): Map<string, number> {
+  const counts = new Map<string, number>();
+  const statement = db.prepare("SELECT COUNT(*) AS n FROM worktrees WHERE repo_id = ? AND is_primary = 0");
+  for (const repo of repos) counts.set(repo.id, (statement.get(repo.id) as { n: number }).n);
+  return counts;
+}
+
 export function maintenanceRepos(
   db: DB,
   scope: MaintenanceScope
@@ -228,12 +236,20 @@ export function registerMaintenanceHandlers(
           "A selected branch is outside the reviewed repository scope. Review branches again."
       });
     }
+    // Clones runs only where there is something to share. A repository with
+    // no linked worktree is reported apart, not counted as a skip.
+    const linkedCounts =
+      action.kind === "reshare" ? linkedWorktreeCounts(db, knownRepos) : null;
+    const noWorktrees =
+      linkedCounts === null ? [] : knownRepos.filter((repo) => (linkedCounts.get(repo.id) ?? 0) === 0);
     const repos =
       action.kind === "delete-branches"
         ? knownRepos.filter((repo) =>
             selected.some((branch) => branch.repoId === repo.id)
           )
-        : knownRepos;
+        : linkedCounts !== null
+          ? knownRepos.filter((repo) => (linkedCounts.get(repo.id) ?? 0) > 0)
+          : knownRepos;
     const controller = new AbortController();
     const abort = (): void => controller.abort();
     if (ctx.signal?.aborted === true) abort();
@@ -268,7 +284,7 @@ export function registerMaintenanceHandlers(
       });
 
     try {
-      progress({ phase: "starting", repos });
+      progress({ phase: "starting", repos, ...(linkedCounts === null ? {} : { noWorktrees }) });
       // GC and review claim each common directory before work; deletion
       // takes turns per directory instead (`inStoreTurn`).
       const concurrency = Math.max(
@@ -283,12 +299,16 @@ export function registerMaintenanceHandlers(
         );
       // The longest deletion starts first, so it is not the one left running
       // alone at the end. The rows keep their reviewed order on screen.
+      // Clones does the same with worktree counts: a 400-worktree repository
+      // started last would run alone for minutes.
       const order =
         action.kind === "delete-branches"
           ? [...repos].sort(
               (a, b) => (selectedCount.get(b.id) ?? 0) - (selectedCount.get(a.id) ?? 0)
             )
-          : repos;
+          : linkedCounts !== null
+            ? [...repos].sort((a, b) => (linkedCounts.get(b.id) ?? 0) - (linkedCounts.get(a.id) ?? 0))
+            : repos;
       await mapLimit(order, concurrency, async (repo) => {
         const report = (detail: string): void =>
           progress({ phase: "repo_progress", repo, detail });
@@ -600,7 +620,8 @@ export function registerMaintenanceHandlers(
         startedAt,
         finishedAt: new Date().toISOString(),
         cancelled: controller.signal.aborted,
-        results: repos.map((repo) => results.get(repo.id)!)
+        results: repos.map((repo) => results.get(repo.id)!),
+        ...(linkedCounts === null ? {} : { noWorktrees })
       };
       return ok(summary);
     } finally {

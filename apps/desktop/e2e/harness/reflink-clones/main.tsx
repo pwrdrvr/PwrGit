@@ -52,7 +52,6 @@ const results: MaintenanceRepoResult[] = [
   { repo: repos[2]!, outcome: "success", message: "main up to date · 1 worktree · 4,120 files re-shared.",
     reshare: { main: { outcome: "up_to_date", branch: "main", defaultBranch: "main", message: "main up to date." },
       worktrees: [worktree("lumen-web", "feat/onboarding", 4120, 9, 212 * MiB)] } },
-  { repo: repos[3]!, outcome: "skipped", message: "No linked worktrees.", reshare: { main: { outcome: "not_requested", message: "Main checkout not updated." }, worktrees: [] } },
   { repo: repos[4]!, outcome: "success", message: "main up to date · 2 worktrees · nothing new to share.",
     reshare: { main: { outcome: "up_to_date", branch: "main", defaultBranch: "main", message: "main up to date." },
       worktrees: [worktree("tidepool", "feat/alerts", 0, 0, 0), worktree("tidepool", "chore/deps", 0, 0, 0)] } },
@@ -60,8 +59,15 @@ const results: MaintenanceRepoResult[] = [
     reshare: { main: { outcome: "left", branch: "main", defaultBranch: "main", message: "Main checkout left: it has uncommitted changes." },
       worktrees: [worktree("zephyr", "feat/importer", 940, 3, 38 * MiB),
         { worktreeId: "zephyr:wip", path: "/Users/demo/.worktrees/zephyr/wip", branch: "wip", outcome: "failed", message: "fatal: Unable to create '/Users/demo/src/zephyr/.git/worktrees/wip/index.lock': File exists.", reshared: 0, alreadyShared: 0, skipped: 0, failed: 0, sharedBytes: null }] } },
-  { repo: repos[6]!, outcome: "skipped", message: "No linked worktrees.", reshare: { main: { outcome: "not_requested", message: "Main checkout not updated." }, worktrees: [] } }
+  { repo: repos[6]!, outcome: "success", message: "main up to date · 1 worktree · 412 files re-shared.",
+    reshare: { main: { outcome: "up_to_date", branch: "main", defaultBranch: "main", message: "main up to date." },
+      worktrees: [worktree("atlas-fork", "spike/tiles", 412, 0, 9 * MiB)] } }
 ];
+// Repositories with no linked worktree are listed apart, never run.
+const noWorktrees = ["notes", "scratch", "dotfiles"].map(repo);
+// Enough still queued mid-run that the rows scroll under the live card.
+const queuedOnly = ["ingest", "ledger", "mapper", "notifier", "orbit", "pager", "quarry", "relay"].map(repo);
+const runRepos = [...repos.filter((r) => r.id !== "notes"), ...queuedOnly];
 
 let reflink = capable;
 let finish: ((summary: MaintenanceSummary) => void) | null = null;
@@ -122,10 +128,11 @@ const harness = {
   },
   /** Mid-run: three repositories done, two running, one queued. */
   progress(): void {
-    emit({ phase: "starting", repos });
-    for (const index of [0, 2, 3]) {
+    emit({ phase: "starting", repos: runRepos, noWorktrees });
+    for (const index of [0, 2, 6]) {
+      const result = results.find((r) => r.repo.id === repos[index]!.id)!;
       emit({ phase: "repo_started", repo: repos[index]! });
-      emit({ phase: "repo_completed", repo: repos[index]!, result: results[index]! });
+      emit({ phase: "repo_completed", repo: repos[index]!, result });
     }
     emit({ phase: "repo_started", repo: repos[1]! });
     emit({ phase: "repo_progress", repo: repos[1]!, detail: "Worktree 2 of 3 · fix/retry-jitter" });
@@ -133,7 +140,7 @@ const harness = {
     emit({ phase: "repo_progress", repo: repos[5]!, detail: "Updating the main checkout: origin: fetching…" });
   },
   finish(): void {
-    finish?.({ operationId, startedAt: "2026-11-04T12:00:00Z", finishedAt: "2026-11-04T12:02:14Z", cancelled: false, results });
+    finish?.({ operationId, startedAt: "2026-11-04T12:00:00Z", finishedAt: "2026-11-04T12:02:14Z", cancelled: false, results, noWorktrees });
   }
 };
 (window as unknown as { __harness: typeof harness }).__harness = harness;
