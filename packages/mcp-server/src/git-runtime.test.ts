@@ -239,6 +239,25 @@ describe("bundledGitEnvironment", () => {
       expect(userSystemConfig(runtime, configDirectory, relativeWrapper)).toBe(own);
     });
 
+    it("still leads back to the user's file when the copy-on-write switch is written after the include", () => {
+      // PwrAgent's operatorSystemConfig and userSystemConfig both read the
+      // first `path =` after the last `[include]`; the switch's `[checkout]`
+      // section must never get in the way.
+      const runtime = temporary("pwrgit-custom-runtime-");
+      const configDirectory = temporary("pwrgit-gitconfig-");
+      const own = join(temporary("pwrgit-etc-"), "gitconfig");
+      writeFileSync(own, "[user]\n\tname = Machine\n");
+      for (const checkoutReflink of [true, false]) {
+        const generated = bundledGitEnvironment(runtime, { GIT_CONFIG_SYSTEM: own }, { configDirectory, platform: "linux", checkoutReflink }).GIT_CONFIG_SYSTEM!;
+        expect(readFileSync(generated, "utf8")).toMatch(/^# Written by PwrGit:/);
+        expect(userSystemConfig(runtime, configDirectory, generated)).toBe(own);
+        // Moved to another data directory (PwrAgent's terminal hands it on), it is still read by its marker.
+        const handedOn = join(temporary("pwrgit-elsewhere-"), "gitconfig-x");
+        writeFileSync(handedOn, readFileSync(generated, "utf8"));
+        expect(userSystemConfig(runtime, null, handedOn)).toBe(own);
+      }
+    });
+
     it("treats a bundled Git's own config as no user config, wherever the bundle is", () => {
       const runtime = temporary("pwrgit-custom-runtime-");
       const configDirectory = temporary("pwrgit-gitconfig-");

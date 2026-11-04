@@ -72,6 +72,7 @@
     "electron": "^44.9.3",
     "electron-builder": "26.17.0",
     "electron-vite": "^5.0.0",
+    "fast-check": "^4.10.2",
     "sharp": "^0.35.5",
     "vite": "^7.3.7"
   }

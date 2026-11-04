@@ -36,6 +36,23 @@ import { refreshActiveGitReflink } from "./runtime-status";
 import { refreshRepositoryClones, softPullMainCheckout, type ReshareWorktreeRow } from "./worktree-reshare";
 
 /** Linked (non-primary) worktrees per repository, for Clones' scope. */
+/** Heaviest first, ties in the order given: the longest job starts first,
+ *  so it is not the one left running alone at the end. */
+export function largestFirst<T extends { id: string }>(items: readonly T[], weight: ReadonlyMap<string, number>): T[] {
+  return [...items].sort((a, b) => (weight.get(b.id) ?? 0) - (weight.get(a.id) ?? 0));
+}
+
+/** Clones runs only where there is something to share. A repository with
+ *  no linked worktree is reported apart, not counted as a skip. Both keep
+ *  the order given. */
+export function splitByLinkedWorktrees<T extends { id: string }>(
+  repos: readonly T[],
+  linked: ReadonlyMap<string, number>
+): { withWorktrees: T[]; noWorktrees: T[] } {
+  const has = (repo: T): boolean => (linked.get(repo.id) ?? 0) > 0;
+  return { withWorktrees: repos.filter(has), noWorktrees: repos.filter((repo) => !has(repo)) };
+}
+
 function linkedWorktreeCounts(db: DB, repos: readonly MaintenanceRepo[]): Map<string, number> {
   const counts = new Map<string, number>();
   const statement = db.prepare("SELECT COUNT(*) AS n FROM worktrees WHERE repo_id = ? AND is_primary = 0");
@@ -236,20 +253,16 @@ export function registerMaintenanceHandlers(
           "A selected branch is outside the reviewed repository scope. Review branches again."
       });
     }
-    // Clones runs only where there is something to share. A repository with
-    // no linked worktree is reported apart, not counted as a skip.
     const linkedCounts =
       action.kind === "reshare" ? linkedWorktreeCounts(db, knownRepos) : null;
-    const noWorktrees =
-      linkedCounts === null ? [] : knownRepos.filter((repo) => (linkedCounts.get(repo.id) ?? 0) === 0);
+    const clones = linkedCounts === null ? null : splitByLinkedWorktrees(knownRepos, linkedCounts);
+    const noWorktrees = clones?.noWorktrees ?? [];
     const repos =
       action.kind === "delete-branches"
         ? knownRepos.filter((repo) =>
             selected.some((branch) => branch.repoId === repo.id)
           )
-        : linkedCounts !== null
-          ? knownRepos.filter((repo) => (linkedCounts.get(repo.id) ?? 0) > 0)
-          : knownRepos;
+        : clones?.withWorktrees ?? knownRepos;
     const controller = new AbortController();
     const abort = (): void => controller.abort();
     if (ctx.signal?.aborted === true) abort();
@@ -303,11 +316,9 @@ export function registerMaintenanceHandlers(
       // started last would run alone for minutes.
       const order =
         action.kind === "delete-branches"
-          ? [...repos].sort(
-              (a, b) => (selectedCount.get(b.id) ?? 0) - (selectedCount.get(a.id) ?? 0)
-            )
+          ? largestFirst(repos, selectedCount)
           : linkedCounts !== null
-            ? [...repos].sort((a, b) => (linkedCounts.get(b.id) ?? 0) - (linkedCounts.get(a.id) ?? 0))
+            ? largestFirst(repos, linkedCounts)
             : repos;
       await mapLimit(order, concurrency, async (repo) => {
         const report = (detail: string): void =>

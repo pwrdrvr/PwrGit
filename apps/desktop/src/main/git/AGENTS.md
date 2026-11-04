@@ -154,10 +154,19 @@ string: a local build of the same source has none.
   user's global and repository config in charge, as for LFS and the keychain.
   An installed Git reads its own system config, which PwrGit never writes, so
   it gets `-c checkout.reflink=true` while on and nothing while off.
+  - Add no `[include]` or `path =` after the include: `userSystemConfig` and
+    PwrAgent's `operatorSystemConfig` read the first `path =` after the last
+    `[include]`. Keep the `# Written by PwrGit:` first line.
+  - `git-runtime.reflink-oracle.test.ts` asks real Git all 81 combinations of
+    repository, global, switch and runtime config; a sample missed a switch
+    written before the include. `dugite.property.test.ts` and
+    `runtime-status.property.test.ts` hold the switch to the Git in use
+    across runtime switches and out-of-order probes.
 - **Clones (`worktree-reshare.ts`) is non-destructive by Git's contract.**
   Git compares bytes before it shares and skips changed, untracked and ignored
-  files. Keep the real-Git test (`worktree-reshare.test.ts`, run with
-  `PWRGIT_TEST_GIT=installed` and the runtime first on PATH; it skips on any
+  files. Keep the real-Git tests (`worktree-reshare.test.ts`, and the
+  generated-loose-work property in `worktree-reshare.property.test.ts`; run with
+  `PWRGIT_TEST_GIT=installed` and the runtime first on PATH; they skip on any
   other Git, CI included) proving loose work survives byte for byte.
 - **A file the main checkout just wrote is racy and is no donor** (`no-donor`).
   After a fast-forward, wait past the index's timestamp, then let `git status`
