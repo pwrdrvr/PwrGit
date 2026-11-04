@@ -67,9 +67,21 @@ export function bundledGitEnvironment(
     PATH: [...new Set(pathEntries.filter(Boolean))].join(delimiter),
     ...(systemConfig === undefined ? {} : { GIT_CONFIG_SYSTEM: systemConfig }),
     // Dugite normally supplies this only when LOCAL_GIT_DIRECTORY is unset.
-    ...(process.platform === "linux" && !process.env.GIT_SSL_CAINFO && !overrides.GIT_SSL_CAINFO
-      ? { GIT_SSL_CAINFO: join(directory, "ssl", "cacert.pem") } : {})
+    // Only a bundle that ships the file gets it: PwrGit's own Linux runtime
+    // links the system libcurl, and a CA path that does not exist fails every
+    // HTTPS operation instead of falling back to the system store.
+    ...(linuxCaBundle(platform, directory, overrides) ?? {})
   };
+}
+
+function linuxCaBundle(
+  platform: NodeJS.Platform,
+  directory: string,
+  overrides: NodeJS.ProcessEnv
+): { GIT_SSL_CAINFO: string } | undefined {
+  if (platform !== "linux" || process.env.GIT_SSL_CAINFO || overrides.GIT_SSL_CAINFO) return undefined;
+  const bundle = join(directory, "ssl", "cacert.pem");
+  return existsSync(bundle) ? { GIT_SSL_CAINFO: bundle } : undefined;
 }
 
 /** Dugite's build writes to etc/gitconfig when MinGit has one there, and to

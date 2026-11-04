@@ -149,6 +149,26 @@ describe("bundledGitEnvironment", () => {
     expect(env.GIT_CONFIG_SYSTEM).toBeUndefined();
   });
 
+  it("points Linux Git at the bundle's CA file only when the bundle ships one", () => {
+    const withBundle = temporary("pwrgit-dugite-ca-");
+    mkdirSync(join(withBundle, "ssl"));
+    writeFileSync(join(withBundle, "ssl", "cacert.pem"), "");
+    // PwrGit's own Linux runtime links the system libcurl and has no ssl/.
+    const withoutBundle = temporary("pwrgit-custom-ca-");
+    const options = { configDirectory: null, platform: "linux" as const };
+    const inherited = process.env.GIT_SSL_CAINFO;
+    delete process.env.GIT_SSL_CAINFO;
+    try {
+      expect(bundledGitEnvironment(withBundle, {}, options).GIT_SSL_CAINFO)
+        .toBe(join(withBundle, "ssl", "cacert.pem"));
+      expect(bundledGitEnvironment(withoutBundle, {}, options)).not.toHaveProperty("GIT_SSL_CAINFO");
+      expect(bundledGitEnvironment(withBundle, {}, { ...options, platform: "darwin" }))
+        .not.toHaveProperty("GIT_SSL_CAINFO");
+    } finally {
+      if (inherited !== undefined) process.env.GIT_SSL_CAINFO = inherited;
+    }
+  });
+
   it("lives beside the MCP policy, in PwrGit's own data directory", () => {
     const directory = defaultBundledGitConfigDirectory({ PWRGIT_MCP_POLICY_FILE: "/elsewhere/policy.json" });
     expect(directory.endsWith(join("PwrGit", "git"))).toBe(true);

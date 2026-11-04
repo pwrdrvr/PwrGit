@@ -105,9 +105,10 @@ export function declaresCopyleft(declaredLicense) {
   return COPYLEFT_PATTERN.test(declaredLicense);
 }
 
-// Dugite downloads and ships this runtime outside npm's package inventory.
-// Keep the versions and source URLs in sync with its embedded-git.json when
-// updating the dugite dependency.
+// Git runtimes shipped outside npm's package inventory. The first entry is the
+// pinned custom macOS/Linux runtime and follows apps/desktop/custom-git-runtime.json.
+// The rest are Dugite's Windows distribution: keep their versions and source
+// URLs in sync with Dugite's embedded-git.json when updating the dependency.
 const customGit = JSON.parse(readFileSync(join(repoRoot, "apps/desktop/custom-git-runtime.json"), "utf8"));
 export const EMBEDDED_GIT_NOTICE_SOURCES = [
   {

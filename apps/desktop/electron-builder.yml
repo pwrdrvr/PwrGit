@@ -88,6 +88,9 @@ files:
   # process points dugite at it with LOCAL_GIT_DIRECTORY (see
   # src/main/index.ts); only dugite's JS stays in the asar.
   - "!**/node_modules/dugite/git/**"
+  # stage-runtime.mjs extracts beside git/ before an atomic rename; a run killed
+  # mid-extraction leaves this directory, which must never reach the asar.
+  - "!**/node_modules/dugite/.pwrgit-stage-*/**"
 
 extraResources:
   - from: LICENSE

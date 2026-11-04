@@ -83,8 +83,9 @@ normalize it. Do not depend on either behavior.
   worktrees share `refs/remotes`. Prefer this to `update-ref`, so the asserted
   precondition is a state that Git produced.
 - **Product code that pushes a branch to a URL refreshes the ref itself.**
-  `pushPlannedRefs` pushes to the remote's push URL and keeps its refetch. The
-  bundled Git predates 2.56, and Settings accepts any installed Git.
+  `pushPlannedRefs` pushes to the remote's push URL and keeps its refetch.
+  Packaged macOS/Linux builds run a 2.56 development build, Windows and the
+  tests run Dugite's older Git, and Settings accepts any installed Git.
   `remote.test.ts` pins this with two remotes on one URL, where 2.56 moves
   neither. The remote tag actions also push to the URL. They need no refresh,
   because the default fetch refspec maps no tags.
