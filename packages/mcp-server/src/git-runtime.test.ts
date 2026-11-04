@@ -7,7 +7,8 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
   bundledGitEnvironment,
   defaultBundledGitConfigDirectory,
-  installedKeychainHelper
+  installedKeychainHelper,
+  isOwnSystemConfig
 } from "./git-runtime.js";
 
 const posix = process.platform !== "win32";
@@ -98,6 +99,22 @@ describe.skipIf(!posix)("installedKeychainHelper", () => {
 });
 
 describe("bundledGitEnvironment", () => {
+  // The dev shell's own Git and certificate variables would change every answer.
+  const ISOLATED = ["GIT_CONFIG_SYSTEM", "GIT_SSL_CAINFO", "GIT_SSL_CAPATH", "SSL_CERT_FILE", "SSL_CERT_DIR", "CURL_CA_BUNDLE"];
+  const saved = new Map<string, string | undefined>();
+  beforeEach(() => {
+    for (const name of ISOLATED) {
+      saved.set(name, process.env[name]);
+      delete process.env[name];
+    }
+  });
+  afterEach(() => {
+    for (const [name, value] of saved) {
+      if (value === undefined) delete process.env[name];
+      else process.env[name] = value;
+    }
+  });
+
   it("keeps Dugite's own config when no directory is configured", () => {
     const env = bundledGitEnvironment(undefined, {}, { configDirectory: null });
     expect(env.GIT_CONFIG_SYSTEM).toBeUndefined();
@@ -150,68 +167,70 @@ describe("bundledGitEnvironment", () => {
     expect(env.GIT_CONFIG_SYSTEM).toBeUndefined();
   });
 
-  describe("Linux trust store", () => {
-    let inherited: string | undefined;
-    beforeEach(() => {
-      inherited = process.env.GIT_SSL_CAINFO;
-      delete process.env.GIT_SSL_CAINFO;
-    });
-    afterEach(() => {
-      if (inherited !== undefined) process.env.GIT_SSL_CAINFO = inherited;
-    });
-
-    /** A distribution's trust store, and a runtime that ships no CA file. */
-    function store(): { runtime: string; trust: string; missing: string } {
-      const root = temporary("pwrgit-trust-");
-      writeFileSync(join(root, "ca-bundle.crt"), "");
-      return { runtime: temporary("pwrgit-custom-runtime-"), trust: join(root, "ca-bundle.crt"), missing: join(root, "absent.crt") };
-    }
-
-    it("defaults http.sslCAInfo to the first trust store that exists, below the bundle's config", () => {
-      const { runtime, trust, missing } = store();
-      const env = bundledGitEnvironment(runtime, {}, {
-        configDirectory: temporary("pwrgit-gitconfig-"), platform: "linux", caBundles: [missing, trust]
+  describe("Linux CA fallback", () => {
+    const UBUNTU = "/etc/ssl/certs/ca-certificates.crt";
+    const RHEL = "/etc/pki/tls/certs/ca-bundle.crt";
+    const SUSE = "/etc/ssl/ca-bundle.pem";
+    const ALPINE = "/etc/ssl/cert.pem";
+    /** A host whose only files are `present`; the runtime ships no CA file. */
+    const host = (...present: string[]) => (file: string) => present.includes(file);
+    const linux = (exists: (file: string) => boolean, overrides: NodeJS.ProcessEnv = {}) => {
+      const env = bundledGitEnvironment(temporary("pwrgit-custom-runtime-"), overrides, {
+        configDirectory: temporary("pwrgit-gitconfig-"), platform: "linux", exists
       });
+      return { env, text: readFileSync(env.GIT_CONFIG_SYSTEM!, "utf8") };
+    };
+
+    it("writes nothing where the runtime libcurl's own default exists", () => {
+      const { env, text } = linux(host(UBUNTU, RHEL));
+      expect(text).not.toContain("[http]");
+      expect(env).not.toHaveProperty("GIT_SSL_CAINFO");
+    });
+
+    it("otherwise defaults http.sslCAInfo to the distribution's bundle, below the system config", () => {
+      const { env, text } = linux(host(RHEL));
       // Config, never the environment: GIT_SSL_CAINFO would outrank every
       // http.sslCAInfo the machine, user or repository sets.
       expect(env).not.toHaveProperty("GIT_SSL_CAINFO");
-      const text = readFileSync(env.GIT_CONFIG_SYSTEM!, "utf8");
-      expect(text).toContain(`[http]\n\tsslCAInfo = "${trust}"\n`);
+      expect(text).toContain(`[http]\n\tsslCAInfo = "${RHEL}"\n`);
       expect(text.indexOf("[http]")).toBeLessThan(text.indexOf("[include]"));
+      // In Go crypto/x509's order.
+      expect(linux(host(ALPINE, SUSE)).text).toContain(`sslCAInfo = "${SUSE}"`);
+      expect(linux(host()).text).not.toContain("[http]");
     });
+
+    it.each(["GIT_SSL_CAINFO", "GIT_SSL_CAPATH", "SSL_CERT_FILE", "SSL_CERT_DIR", "CURL_CA_BUNDLE"])(
+      "leaves the trust store to a user who set %s",
+      (name) => {
+        const { env, text } = linux(host(RHEL), { [name]: "/chosen" });
+        expect(text).not.toContain("[http]");
+        expect(env.GIT_SSL_CAINFO).toBe(name === "GIT_SSL_CAINFO" ? "/chosen" : undefined);
+      }
+    );
 
     it("keeps Dugite's own CA file for a bundle that ships one, as Dugite does", () => {
-      const { runtime, trust } = store();
-      mkdirSync(join(runtime, "ssl"));
-      writeFileSync(join(runtime, "ssl", "cacert.pem"), "");
-      const env = bundledGitEnvironment(runtime, {}, {
-        configDirectory: temporary("pwrgit-gitconfig-"), platform: "linux", caBundles: [trust]
-      });
-      expect(env.GIT_SSL_CAINFO).toBe(join(runtime, "ssl", "cacert.pem"));
+      const runtime = temporary("pwrgit-dugite-runtime-");
+      const shipped = join(runtime, "ssl", "cacert.pem");
+      const options = { configDirectory: temporary("pwrgit-gitconfig-"), platform: "linux" as const, exists: host(shipped, RHEL) };
+      const env = bundledGitEnvironment(runtime, {}, options);
+      expect(env.GIT_SSL_CAINFO).toBe(shipped);
       expect(readFileSync(env.GIT_CONFIG_SYSTEM!, "utf8")).not.toContain("[http]");
+      expect(bundledGitEnvironment(runtime, { GIT_SSL_CAINFO: "/chosen.pem" }, options).GIT_SSL_CAINFO).toBe("/chosen.pem");
     });
 
-    it("falls back to the environment only when no generated config can carry it", () => {
-      const { runtime, trust } = store();
-      const env = bundledGitEnvironment(runtime, {}, { configDirectory: null, platform: "linux", caBundles: [trust] });
-      expect(env.GIT_SSL_CAINFO).toBe(trust);
-    });
-
-    it("never replaces a CA file the caller chose, and leaves other platforms alone", () => {
-      const { runtime, trust } = store();
-      const chosen = bundledGitEnvironment(runtime, { GIT_SSL_CAINFO: "/chosen.pem" }, {
-        configDirectory: null, platform: "linux", caBundles: [trust]
-      });
-      expect(chosen.GIT_SSL_CAINFO).toBe("/chosen.pem");
+    it("never falls back to the environment, and leaves other platforms alone", () => {
+      const runtime = temporary("pwrgit-custom-runtime-");
+      const unwritten = bundledGitEnvironment(runtime, {}, { configDirectory: null, platform: "linux", exists: host(RHEL) });
+      expect(unwritten).not.toHaveProperty("GIT_SSL_CAINFO");
       const mac = bundledGitEnvironment(runtime, {}, {
-        configDirectory: temporary("pwrgit-gitconfig-"), platform: "darwin", caBundles: [trust], searchPath: ""
+        configDirectory: temporary("pwrgit-gitconfig-"), platform: "darwin", exists: host(RHEL), searchPath: ""
       });
       expect(mac).not.toHaveProperty("GIT_SSL_CAINFO");
       expect(readFileSync(mac.GIT_CONFIG_SYSTEM!, "utf8")).not.toContain("[http]");
     });
 
     it.skipIf(!posix)("lets machine, global and repository http.sslCAInfo override the default, in that order", () => {
-      const { runtime, trust } = store();
+      const runtime = temporary("pwrgit-custom-runtime-");
       // The bundle's config includes a machine-wide file, as Dugite's does with /etc/gitconfig.
       const machine = join(runtime, "machine-gitconfig");
       mkdirSync(join(runtime, "etc"));
@@ -220,7 +239,7 @@ describe("bundledGitEnvironment", () => {
       const global = join(home, "gitconfig");
       const repo = temporary("pwrgit-repo-");
       const env = bundledGitEnvironment(runtime, { HOME: home, GIT_CONFIG_GLOBAL: global }, {
-        configDirectory: temporary("pwrgit-gitconfig-"), platform: "linux", caBundles: [trust]
+        configDirectory: temporary("pwrgit-gitconfig-"), platform: "linux", exists: host(RHEL)
       });
       // Only the config files differ; the real bundled binary reads them.
       const git = dugite.resolveGitBinary(dugite.resolveEmbeddedGitDir());
@@ -231,13 +250,66 @@ describe("bundledGitEnvironment", () => {
 
       writeFileSync(machine, "");
       writeFileSync(global, "");
-      expect(read(repo)).toBe(trust);
+      expect(read(repo)).toBe(RHEL);
       writeFileSync(machine, "[http]\n\tsslCAInfo = /machine.pem\n");
       expect(read(repo)).toBe("/machine.pem");
       writeFileSync(global, "[http]\n\tsslCAInfo = /global.pem\n");
       expect(read(repo)).toBe("/global.pem");
       execFileSync(git, ["-C", repo, "config", "http.sslCAInfo", "/repo.pem"], { env: { HOME: home, GIT_CONFIG_GLOBAL: global } });
       expect(read(repo)).toBe("/repo.pem");
+    });
+  });
+
+  describe("an inherited GIT_CONFIG_SYSTEM", () => {
+    const includeOf = (file: string) => readFileSync(file, "utf8").match(/\[include\]\n\tpath = "(.*)"/)?.[1];
+    const bundleConfig = (runtime: string) => join(runtime, "etc", "gitconfig");
+
+    it("includes the user's own system config in place of the bundle's", () => {
+      const runtime = temporary("pwrgit-custom-runtime-");
+      const own = join(temporary("pwrgit-etc-"), "gitconfig");
+      writeFileSync(own, "[user]\n\tname = Machine\n");
+      const configDirectory = temporary("pwrgit-gitconfig-");
+      const env = bundledGitEnvironment(runtime, { GIT_CONFIG_SYSTEM: own }, { configDirectory, platform: "linux" });
+      expect(dirname(env.GIT_CONFIG_SYSTEM!)).toBe(configDirectory);
+      expect(includeOf(env.GIT_CONFIG_SYSTEM!)).toBe(own);
+      // From the process environment too, which is how Dugite and the app see it.
+      process.env.GIT_CONFIG_SYSTEM = own;
+      expect(includeOf(bundledGitEnvironment(runtime, {}, { configDirectory, platform: "linux" }).GIT_CONFIG_SYSTEM!)).toBe(own);
+    });
+
+    it("rebuilds a Pwr app's generated config, or the bundle's, instead of stacking it", () => {
+      const runtime = temporary("pwrgit-custom-runtime-");
+      const configDirectory = temporary("pwrgit-gitconfig-");
+      const elsewhere = temporary("pwrgit-other-profile-");
+      // PwrAgent's terminal hands its generated file to anything launched there.
+      const pwragent = join(elsewhere, "pwragent-gitconfig");
+      writeFileSync(pwragent, "# Written by PwrAgent: defaults for its bundled Git\n[filter \"lfs\"]\n");
+      const first = bundledGitEnvironment(runtime, {}, { configDirectory, platform: "linux" }).GIT_CONFIG_SYSTEM!;
+      const devProfile = join(elsewhere, "gitconfig-dev");
+      writeFileSync(devProfile, readFileSync(first, "utf8"));
+      for (const inherited of [first, devProfile, pwragent, bundleConfig(runtime)]) {
+        const env = bundledGitEnvironment(runtime, { GIT_CONFIG_SYSTEM: inherited }, { configDirectory, platform: "linux" });
+        expect(env.GIT_CONFIG_SYSTEM).toBe(first);
+        expect(includeOf(env.GIT_CONFIG_SYSTEM!)).toBe(bundleConfig(runtime));
+      }
+    });
+
+    it("points a stale generated config back at the bundle's when none can be written, and keeps the user's", () => {
+      const runtime = temporary("pwrgit-custom-runtime-");
+      const stale = join(temporary("pwrgit-gitconfig-"), "gitconfig-old");
+      writeFileSync(stale, "# Written by PwrGit: defaults\n");
+      const options = { configDirectory: null, platform: "linux" as const };
+      expect(bundledGitEnvironment(runtime, { GIT_CONFIG_SYSTEM: stale }, options).GIT_CONFIG_SYSTEM).toBe(bundleConfig(runtime));
+      // Returned untouched: Dugite keeps a GIT_CONFIG_SYSTEM it is given.
+      expect(bundledGitEnvironment(runtime, { GIT_CONFIG_SYSTEM: "/etc/own" }, options).GIT_CONFIG_SYSTEM).toBe("/etc/own");
+    });
+
+    it("treats a missing or empty value as the user's absence, not as PwrGit's", () => {
+      expect(isOwnSystemConfig("/bundle", null, undefined)).toBe(false);
+      expect(isOwnSystemConfig("/bundle", null, "")).toBe(false);
+      expect(isOwnSystemConfig("/bundle", null, join(temporary("pwrgit-etc-"), "absent"))).toBe(false);
+      expect(isOwnSystemConfig("/bundle", null, "/bundle/etc/gitconfig")).toBe(true);
+      expect(isOwnSystemConfig("/bundle", "/data/git", "/data/git/gitconfig-1")).toBe(true);
     });
   });
 

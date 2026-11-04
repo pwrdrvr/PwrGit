@@ -1,7 +1,7 @@
 // dugite is CommonJS; default-import it so the strict-ESM main bundle loads
 // it (a named `import { exec }` throws at runtime).
 import { execFile, spawn, type ChildProcessWithoutNullStreams, type ExecFileOptions } from "node:child_process";
-import { bundledGitEnvironment, installedKeychainHelper } from "@pwrgit/mcp-server";
+import { bundledGitEnvironment, installedKeychainHelper, isOwnSystemConfig } from "@pwrgit/mcp-server";
 import { tmpdir } from "node:os";
 import { delimiter, dirname, isAbsolute, relative, resolve } from "node:path";
 import dugite from "dugite";
@@ -193,13 +193,10 @@ export function installedGitEnvironment(
       delete env[key];
     } else if (
       ["LOCAL_GIT_DIRECTORY", "GIT_EXEC_PATH", "GIT_TEMPLATE_DIR"].includes(upper) ||
-      (["GIT_CONFIG_SYSTEM", "PREFIX", "GIT_SSL_CAINFO"].includes(upper) &&
-        value !== undefined &&
-        inBundle(value)) ||
-      (upper === "GIT_CONFIG_SYSTEM" &&
-        value !== undefined &&
-        generatedConfigDirectory !== null &&
-        within(resolve(generatedConfigDirectory), value))
+      (["PREFIX", "GIT_SSL_CAINFO"].includes(upper) && value !== undefined && inBundle(value)) ||
+      // The bundle's, PwrGit's or another Pwr app's generated system config;
+      // the user's own stays.
+      (upper === "GIT_CONFIG_SYSTEM" && isOwnSystemConfig(bundle, generatedConfigDirectory, value))
     ) {
       delete env[key];
     }

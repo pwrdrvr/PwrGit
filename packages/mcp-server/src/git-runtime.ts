@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, readlinkSync, realpathSync, renameSync, writeFileSync } from "node:fs";
-import { delimiter, dirname, isAbsolute, join } from "node:path";
+import { delimiter, dirname, isAbsolute, join, relative, resolve } from "node:path";
 import dugite from "dugite";
 import { defaultMcpPolicyFile } from "./access-policy.js";
 
@@ -14,8 +14,8 @@ export type BundledGitOptions = {
    *  Defaults to the PATH the command inherits. */
   searchPath?: string;
   platform?: NodeJS.Platform;
-  /** Linux trust-store files tried in order. Defaults to `LINUX_CA_BUNDLES`. */
-  caBundles?: readonly string[];
+  /** Whether a file exists. Tests stand in for the host's trust store. */
+  exists?: (file: string) => boolean;
 };
 
 let defaultConfigDirectory: string | null = null;
@@ -54,54 +54,113 @@ export function bundledGitEnvironment(
   // which Git looks for in its own exec path and then on PATH.
   if (keychainHelper !== undefined) pathEntries.push(dirname(keychainHelper));
   const configDirectory = options.configDirectory === undefined ? defaultConfigDirectory : options.configDirectory;
-  // What Dugite would point POSIX Git at. On Windows MinGit reads the config
-  // Dugite's build wrote inside the bundle.
-  const bundleConfig = platform === "win32"
+  const exists = options.exists ?? existsSync;
+  const inherited = { ...process.env, ...overrides };
+  // A GIT_CONFIG_SYSTEM that a Pwr app set is rebuilt, never included, so its
+  // defaults are not stacked twice. Anything else is the user's own system
+  // config, and it is included in place of the bundle's.
+  const inheritedSystem = inherited.GIT_CONFIG_SYSTEM || undefined;
+  const ownSystem = isOwnSystemConfig(directory, configDirectory, inheritedSystem);
+  const bundleSystem = platform === "win32"
+    // MinGit reads the config Dugite's build wrote inside the bundle.
     ? mingitSystemConfig(directory, execPath)
+    // What Dugite points POSIX Git at.
     : join(directory, "etc", "gitconfig");
-  const trust = platform === "linux" ? linuxTrust(directory, options.caBundles ?? LINUX_CA_BUNDLES) : {};
-  const systemConfig = configDirectory === null || bundleConfig === undefined
+  const includedSystem = ownSystem ? bundleSystem : inheritedSystem ?? bundleSystem;
+  // Dugite's Linux build ships a CA file, and Dugite points Git at it only
+  // when LOCAL_GIT_DIRECTORY is unset, which it never is here.
+  const shippedCa = platform === "linux" && exists(join(directory, "ssl", "cacert.pem"))
+    ? join(directory, "ssl", "cacert.pem")
+    : undefined;
+  const systemConfig = configDirectory === null || includedSystem === undefined
     ? undefined
-    : bundledSystemConfig(configDirectory, bundleConfig, keychainHelper, trust.systemStore);
-  // An environment variable outranks every config file, so it is a last
-  // resort: Dugite's own bundle (which ships a CA file and has always been
-  // pointed at it), or a system store that the generated config could not carry.
-  const caEnv = trust.shipped ?? (systemConfig === undefined ? trust.systemStore : undefined);
-  const caAlreadySet = Boolean(process.env.GIT_SSL_CAINFO || overrides.GIT_SSL_CAINFO);
+    : bundledSystemConfig(configDirectory, includedSystem, {
+      keychainHelper,
+      caBundle: platform === "linux" && shippedCa === undefined ? linuxCaBundleFallback(inherited, exists) : undefined
+    });
+  // With no generated config, Dugite keeps an inherited GIT_CONFIG_SYSTEM, so
+  // a stale generated one is pointed back at the bundle's. (On Windows the
+  // variable cannot be unset from here; that needs an unwritable data folder.)
+  const systemEnv = systemConfig ?? (ownSystem && platform !== "win32" ? bundleSystem : undefined);
   return {
     ...overrides,
     LOCAL_GIT_DIRECTORY: directory,
     GIT_EXEC_PATH: execPath,
     PATH: [...new Set(pathEntries.filter(Boolean))].join(delimiter),
-    ...(systemConfig === undefined ? {} : { GIT_CONFIG_SYSTEM: systemConfig }),
-    ...(caEnv === undefined || caAlreadySet ? {} : { GIT_SSL_CAINFO: caEnv })
+    ...(systemEnv === undefined ? {} : { GIT_CONFIG_SYSTEM: systemEnv }),
+    ...(shippedCa === undefined || inherited.GIT_SSL_CAINFO ? {} : { GIT_SSL_CAINFO: shippedCa })
   };
 }
 
+/** First line of every system config PwrGit generates. */
+const GENERATED_CONFIG_MARKER = "# Written by PwrGit:";
+/** The same line from any Pwr app: PwrAgent writes `# Written by PwrAgent:`. */
+const PWR_GENERATED_CONFIG = /^# Written by Pwr[A-Za-z]+:/;
+
 /**
- * Where Linux distributions keep the system trust store as one PEM file, most
- * common first (the list Go's crypto/x509 searches). PwrGit's own runtime links
- * Ubuntu's libcurl, whose compiled-in default is only the first entry, so
- * RHEL-family and openSUSE need to be told where theirs is.
+ * Whether a GIT_CONFIG_SYSTEM value is one a Pwr app set rather than the
+ * user's: the bundle's own file, a config generated in `configDirectory`, or
+ * a file whose first line is a Pwr app's generated-config marker. The marker
+ * catches a generated file from another data directory, such as a dev profile,
+ * or PwrAgent's when PwrGit is launched from a PwrAgent terminal.
  */
-export const LINUX_CA_BUNDLES: readonly string[] = [
+export function isOwnSystemConfig(
+  bundleRoot: string,
+  configDirectory: string | null,
+  value: string | undefined
+): boolean {
+  if (!value) return false;
+  const file = resolve(value);
+  if (isInside(resolve(bundleRoot), file)) return true;
+  if (configDirectory !== null && isInside(resolve(configDirectory), file)) return true;
+  try {
+    return PWR_GENERATED_CONFIG.test(readFileSync(file, "utf8"));
+  } catch {
+    return false;
+  }
+}
+
+function isInside(directory: string, value: string): boolean {
+  const path = relative(directory, value);
+  return path === "" || (!path.startsWith("..") && !isAbsolute(path));
+}
+
+/**
+ * Where Linux distributions keep the system trust store as one PEM file, in
+ * the order Go's crypto/x509 searches them. The first is the default compiled
+ * into the PwrGit runtime's libcurl (Ubuntu's).
+ */
+const LINUX_CA_BUNDLES = [
   "/etc/ssl/certs/ca-certificates.crt", // Debian, Ubuntu, Arch, Gentoo, current Fedora
-  "/etc/pki/tls/certs/ca-bundle.crt", // Fedora, RHEL 6+, Rocky, Alma
-  "/etc/ssl/ca-bundle.pem", // openSUSE
+  "/etc/pki/tls/certs/ca-bundle.crt", // Fedora, RHEL, Rocky, Alma
+  "/etc/ssl/ca-bundle.pem", // openSUSE, SLES
   "/etc/pki/tls/cacert.pem", // OpenELEC
   "/etc/pki/ca-trust/extracted/pem/tls-ca-bundle.pem", // CentOS, RHEL 7+
   "/etc/ssl/cert.pem" // Alpine
-];
+] as const;
 
-function linuxTrust(
-  directory: string,
-  candidates: readonly string[]
-): { shipped?: string; systemStore?: string } {
-  // Dugite's Linux build ships its own CA file, and Dugite points Git at it.
-  const shipped = join(directory, "ssl", "cacert.pem");
-  if (existsSync(shipped)) return { shipped };
-  const systemStore = candidates.find((candidate) => existsSync(candidate));
-  return systemStore === undefined ? {} : { systemStore };
+/** Certificate variables a user sets on purpose. Any one of them means the
+ * trust store is decided outside Git config. */
+const CA_ENVIRONMENT = ["GIT_SSL_CAINFO", "GIT_SSL_CAPATH", "SSL_CERT_FILE", "SSL_CERT_DIR", "CURL_CA_BUNDLE"];
+
+/**
+ * The distribution's CA bundle, when the runtime libcurl's compiled default
+ * is missing, as on openSUSE and the RHEL family.
+ *
+ * Returned for system-scope `http.sslCAInfo`, never GIT_SSL_CAINFO: the
+ * variable would beat global and repository config. At system scope the
+ * system config included after it, global and repository config, and any
+ * `http.<url>.sslCAInfo` all still win. A user who set a certificate
+ * variable gets no fallback.
+ */
+export function linuxCaBundleFallback(
+  env: NodeJS.ProcessEnv,
+  exists: (file: string) => boolean = existsSync
+): string | undefined {
+  if (CA_ENVIRONMENT.some((name) => env[name]?.trim())) return undefined;
+  const [compiledDefault, ...others] = LINUX_CA_BUNDLES;
+  if (exists(compiledDefault)) return undefined;
+  return others.find((file) => exists(file));
 }
 
 /** Dugite's build writes to etc/gitconfig when MinGit has one there, and to
@@ -195,15 +254,15 @@ const writtenSystemConfigs = new Set<string>();
  *   `git lfs install` against their global config. The filter also has
  *   git-lfs install its pre-push hook on first use, so pushes upload objects.
  * - On macOS, the installed keychain credential helper.
- * - On Linux, when the bundle ships no CA file, the system trust store as
- *   `http.sslCAInfo` (see `LINUX_CA_BUNDLES`).
+ * - On Linux without the runtime libcurl's default CA file, the
+ *   distribution's CA bundle as `http.sslCAInfo` (see `linuxCaBundleFallback`).
  *
  * System scope, like the installed Git's, so global and repository config
  * still override every default: `lfs install --skip-smudge` keeps pointers,
- * resetting `credential.helper` opts out, and any `http.sslCAInfo` the
- * machine, user or repository sets replaces the trust store. The bundle's
- * config (Dugite's, which includes /etc/gitconfig) is included after the
- * defaults so machine-wide settings win too.
+ * resetting `credential.helper` opts out, and any `http.sslCAInfo` replaces
+ * the CA bundle. The system config Git would otherwise read (the bundle's,
+ * which includes /etc/gitconfig, or the user's own GIT_CONFIG_SYSTEM) is
+ * included after the defaults so its settings win too.
  *
  * Named by content: app copies that disagree write different files instead
  * of rewriting one another's. Returns undefined when the file cannot be
@@ -211,14 +270,15 @@ const writtenSystemConfigs = new Set<string>();
  */
 function bundledSystemConfig(
   directory: string,
-  bundleConfig: string,
-  keychainHelper: string | undefined,
-  systemTrustStore: string | undefined
+  systemConfig: string,
+  defaults: { keychainHelper?: string | undefined; caBundle?: string | undefined }
 ): string | undefined {
+  const { keychainHelper, caBundle } = defaults;
   const content = [
-    "# Written by PwrGit: defaults for its bundled Git, then the bundle's own",
-    "# system config. PwrGit rewrites this file, so edit your global config",
-    "# (git config --global) instead; it overrides everything here.",
+    `${GENERATED_CONFIG_MARKER} defaults for its bundled Git, then the`,
+    "# system config Git would otherwise read. PwrGit rewrites this file, so",
+    "# edit your global config (git config --global) instead; it overrides",
+    "# everything here.",
     "[filter \"lfs\"]",
     "\tclean = git-lfs clean -- %f",
     "\tsmudge = git-lfs smudge -- %f",
@@ -232,11 +292,9 @@ function bundledSystemConfig(
         // (Xcode-beta.app, a renamed volume) still runs as one word.
         `\thelper = ${quoteConfigValue(`!'${keychainHelper.replaceAll("'", "'\\''")}'`)}`
       ]),
-    ...(systemTrustStore === undefined
-      ? []
-      : ["[http]", `\tsslCAInfo = ${quoteConfigValue(systemTrustStore)}`]),
+    ...(caBundle === undefined ? [] : ["[http]", `\tsslCAInfo = ${quoteConfigValue(caBundle)}`]),
     "[include]",
-    `\tpath = ${quoteConfigValue(bundleConfig)}`,
+    `\tpath = ${quoteConfigValue(systemConfig)}`,
     ""
   ].join("\n");
   const hash = createHash("sha256").update(content).digest("hex").slice(0, 16);

@@ -168,13 +168,16 @@ describe.skipIf(!posix)("an installed Git chosen in Settings", () => {
     expect(stream.ok ? "" : stream.error.message).toContain("Settings");
   });
 
-  it("keeps a GIT_CONFIG_SYSTEM of the user's own, and drops the bundle's and the generated one", async () => {
+  it("keeps a GIT_CONFIG_SYSTEM of the user's own, and drops the bundle's and any Pwr app's generated one", async () => {
     const generated = await temporary("pwrgit-gitconfig-");
     configureBundledGitConfig(generated);
     const bundle = dugite.resolveEmbeddedGitDir();
     const own = installedGitEnvironment({ GIT_CONFIG_SYSTEM: "/etc/custom-gitconfig", PATH: "" }, "/opt/fixture/bin/git");
     expect(own.GIT_CONFIG_SYSTEM).toBe("/etc/custom-gitconfig");
-    for (const config of [join(bundle, "etc", "gitconfig"), join(generated, "gitconfig-abc")]) {
+    // PwrAgent's terminal hands its generated file to anything launched there.
+    const pwragent = join(await temporary("pwragent-gitconfig-"), "gitconfig-abc");
+    await writeFile(pwragent, "# Written by PwrAgent: defaults for its bundled Git\n");
+    for (const config of [join(bundle, "etc", "gitconfig"), join(generated, "gitconfig-abc"), pwragent]) {
       expect(installedGitEnvironment({ GIT_CONFIG_SYSTEM: config, PATH: "" }, "/opt/fixture/bin/git").GIT_CONFIG_SYSTEM).toBeUndefined();
     }
   });

@@ -108,6 +108,15 @@ bundled Git unless Settings › General › Git runtime chose an installed Git
     filter, on macOS the installed Git's `git-credential-osxkeychain`, then an
     include of Dugite's config. At system scope, the user's global config still
     wins and `credential.helper =` still opts out.
+  - On Linux, the PwrGit runtime's libcurl knows only Ubuntu's CA path. If that
+    file is missing (RHEL, openSUSE), the file gets the distribution's bundle
+    as `http.sslCAInfo`, never `GIT_SSL_CAINFO`, which would outrank every
+    config. A user's certificate variable turns the fallback off.
+  - An inherited `GIT_CONFIG_SYSTEM` of the user's own is included in place of
+    Dugite's. `isOwnSystemConfig` recognises a Pwr app's own (the bundle's, the
+    data directory's, or a `# Written by Pwr…:` first line, as PwrAgent's
+    terminal passes on), and that one is rebuilt instead. PwrAgent's
+    `bundled-git.ts` follows the same rules; change both together.
   - Nothing is written until `configureBundledGitConfig` runs, so unit tests
     stay out of the real data directory. Tests that need it use a temp one.
 - **Borrow the keychain helper from the user's terminal Git.** A keychain item
@@ -118,7 +127,7 @@ bundled Git unless Settings › General › Git runtime chose an installed Git
 - **A chosen Git never falls back.** If it breaks, every command fails with a
   message that names it and points at Settings. A fallback would make Settings
   wrong about which Git runs. `installedGitEnvironment` removes every bundle
-  variable: `GIT_EXEC_PATH`, the generated `GIT_CONFIG_SYSTEM` and the
+  variable: `GIT_EXEC_PATH`, a Pwr app's `GIT_CONFIG_SYSTEM` and the
   bundle's PATH directories. Any one of them silently sends that Git to the
   bundle's helpers or config.
 
