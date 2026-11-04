@@ -86,6 +86,8 @@ test("copy-on-write switch and Maintenance › Clones lay out without overflow",
     await expect(dialog.locator(".maintenance__clones-name strong").first()).toHaveText("lumen-api");
     await dialog.locator(".maintenance__clones-row summary").first().click();
     await expect(dialog).toContainText("3,810 files re-shared · 2 left as they are (2 changed).");
+    // Two clones named atlas: each row names its path.
+    await expect(dialog.locator(".maintenance__clones-name code")).toHaveText(["/Users/demo/src/atlas", "/Users/demo/forks/atlas"]);
     // Every row keeps its text inside its box.
     const overflow = await dialog.locator(".maintenance__clones-rows").evaluate((list) =>
       Array.from(list.querySelectorAll<HTMLElement>("summary, li, small, code")).filter(

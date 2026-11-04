@@ -195,6 +195,8 @@ export function ClonesPanel({
     ? repos
     : [...repos].sort((a, b) => (repoTotals(results.get(b.id)!).bytes ?? 0) - (repoTotals(results.get(a.id)!).bytes ?? 0));
   const headline = summary === null ? null : clonesHeadline(summary.results);
+  // Separate clones of one project share a name; their path tells them apart.
+  const repeatedNames = repeatedRepoNames(ordered);
   const version = support?.version?.replace(/^git version /, "") ?? null;
 
   return (
@@ -306,6 +308,7 @@ export function ClonesPanel({
                 detail={details.get(repo.id)}
                 result={results.get(repo.id)}
                 platform={platform}
+                showPath={repeatedNames.has(repo.name)}
               />
             ))}
           </ul>
@@ -341,18 +344,28 @@ export function ClonesPanel({
   );
 }
 
+/** Names held by more than one repository in the list. */
+export function repeatedRepoNames(repos: readonly MaintenanceRepo[]): Set<string> {
+  const seen = new Set<string>();
+  const repeated = new Set<string>();
+  for (const repo of repos) (seen.has(repo.name) ? repeated : seen).add(repo.name);
+  return repeated;
+}
+
 function CloneRepoRow({
   repo,
   running,
   detail,
   result,
-  platform
+  platform,
+  showPath
 }: {
   repo: MaintenanceRepo;
   running: boolean;
   detail: string | undefined;
   result: MaintenanceRepoResult | undefined;
   platform: string;
+  showPath: boolean;
 }) {
   const totals = result === undefined ? null : repoTotals(result);
   const mark = result === undefined ? null : markFor(result.outcome);
@@ -369,6 +382,7 @@ function CloneRepoRow({
       )}
       <span className="maintenance__clones-name">
         <strong>{repo.name}</strong>
+        {showPath ? <code className="selectable">{displayPath(repo.path, platform)}</code> : null}
         <small>{result?.message ?? (running ? detail ?? "Starting…" : "Queued")}</small>
       </span>
       <span className="maintenance__clones-bytes">

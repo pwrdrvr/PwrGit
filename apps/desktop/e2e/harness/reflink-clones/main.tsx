@@ -29,6 +29,8 @@ const homebrew: GitReflinkStatus = { path: HOMEBREW, version: "git version 2.56.
 
 const repo = (name: string): MaintenanceRepo => ({ id: name, name, path: `/Users/demo/src/${name}`, profileId: "demo", profileName: "Demo" });
 const repos = ["atlas", "lumen-api", "lumen-web", "notes", "tidepool", "zephyr"].map(repo);
+// A second clone of atlas elsewhere: same name, told apart by path.
+repos.push({ ...repo("atlas"), id: "atlas-fork", path: "/Users/demo/forks/atlas" });
 const MiB = 1024 * 1024;
 const worktree = (name: string, branch: string, files: number, skipped: number, bytes: number, why = "changed") => ({
   worktreeId: `${name}:${branch}`,
@@ -57,7 +59,8 @@ const results: MaintenanceRepoResult[] = [
   { repo: repos[5]!, outcome: "partial", message: "Main checkout left: it has uncommitted changes · 2 worktrees · 940 files re-shared · 1 failed.",
     reshare: { main: { outcome: "left", branch: "main", defaultBranch: "main", message: "Main checkout left: it has uncommitted changes." },
       worktrees: [worktree("zephyr", "feat/importer", 940, 3, 38 * MiB),
-        { worktreeId: "zephyr:wip", path: "/Users/demo/.worktrees/zephyr/wip", branch: "wip", outcome: "failed", message: "fatal: Unable to create '/Users/demo/src/zephyr/.git/worktrees/wip/index.lock': File exists.", reshared: 0, alreadyShared: 0, skipped: 0, failed: 0, sharedBytes: null }] } }
+        { worktreeId: "zephyr:wip", path: "/Users/demo/.worktrees/zephyr/wip", branch: "wip", outcome: "failed", message: "fatal: Unable to create '/Users/demo/src/zephyr/.git/worktrees/wip/index.lock': File exists.", reshared: 0, alreadyShared: 0, skipped: 0, failed: 0, sharedBytes: null }] } },
+  { repo: repos[6]!, outcome: "skipped", message: "No linked worktrees.", reshare: { main: { outcome: "not_requested", message: "Main checkout not updated." }, worktrees: [] } }
 ];
 
 let reflink = capable;

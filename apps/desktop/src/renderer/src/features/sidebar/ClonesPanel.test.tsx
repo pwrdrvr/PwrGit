@@ -11,7 +11,7 @@ import type {
 } from "@pwrgit/shared";
 const { dispatch, subscribe } = vi.hoisted(() => ({ dispatch: vi.fn(), subscribe: vi.fn() }));
 vi.mock("../../lib/pwrgit", () => ({ dispatch, subscribe }));
-import { ClonesPanel, clonesBytes, clonesHeadline } from "./ClonesPanel";
+import { ClonesPanel, clonesBytes, clonesHeadline, repeatedRepoNames } from "./ClonesPanel";
 
 const repo = (id: string): MaintenanceRepo => ({
   id,
@@ -100,6 +100,13 @@ describe("clones receipt wording", () => {
     });
     expect(clonesHeadline([reshared("a", 0, 0)]).title).toBe("Nothing new to share");
     expect(clonesBytes(512)).toBe("512 B");
+  });
+});
+
+describe("repositories that share a name", () => {
+  it("are told apart by path, and only they are", () => {
+    const other = { ...repo("gpui-kit"), id: "gpui-kit-2", path: "/elsewhere/gpui-kit" };
+    expect([...repeatedRepoNames([repo("gpui-kit"), other, repo("solo")])]).toEqual(["gpui-kit"]);
   });
 });
 
