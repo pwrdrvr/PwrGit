@@ -185,6 +185,8 @@ export async function launchApp(
       ...(opts.agentAccess ? { PWRGIT_E2E_AGENT_ACCESS_PORT: "0" } : {}),
       PWRGIT_USER_DATA_DIR: userData,
       PWRGIT_GITCONFIG: gitconfig,
+      // Settings › Git checks GitHub for newer builds; here it is offline.
+      PWRGIT_E2E_MANAGED_GIT_OFFLINE: "1",
       ...(seedOnboarding ? { PWRGIT_E2E_ONBOARDING_DONE: "1" } : {}),
       // The app's Git commands must be as deterministic as fixture setup:
       // neither side may inherit the runner/developer's aliases, identity,
