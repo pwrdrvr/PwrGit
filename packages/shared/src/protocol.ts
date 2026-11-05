@@ -15,7 +15,7 @@ import type { ContributionIdentity, ContributionSnapshot } from "./contributions
 import type { GhDefaultRepository, HookRun, IgnoreDestination, IgnoreOptions, IgnorePatternChoice, IgnoredSummary, RepositorySetup, SetupIgnoreTest } from "./git-discovery";
 import type { MaintenanceScope, MaintenanceAction, MaintenanceSummary, MaintenanceProgress, MaintenanceCurrent, BranchCleanupKeepDays } from "./maintenance";
 import { DEFAULT_BRANCH_CLEANUP_OPTIONS } from "./maintenance";
-import type { ManagedGitProgress, ManagedGitStatus } from "./managed-git";
+import type { ManagedGitProgress, ManagedGitStatus, ManagedGitTrack } from "./managed-git";
 import { STALE_AGE_DAYS, type WorktreeFinishedAfterDays } from "./prunable";
 import type {
   AgentChoice,
@@ -2492,6 +2492,9 @@ export interface Commands {
   "gitManaged:install": { req: { version: string }; res: ManagedGitStatus };
   /** Stop the running install, if any. Nothing partial is kept. */
   "gitManaged:cancel": { req: void; res: null };
+  /** Follow the Latest or Prerelease track. Answers from the last check (no
+   *  network), and never changes which Git runs. */
+  "gitManaged:setTrack": { req: { track: ManagedGitTrack }; res: ManagedGitStatus };
   /** What the Git in use can do with copy-on-write clones. Answered from the
    *  probe main keeps for the running Git (refreshed when Settings changes
    *  it), so Maintenance can ask on open without spawning a Git. */

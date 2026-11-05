@@ -5,6 +5,7 @@ import { homedir, tmpdir } from "node:os";
 import { join, posix, win32, type PlatformPath } from "node:path";
 import {
   err,
+  isManagedGitTrack,
   ok,
   type GitReflinkStatus,
   type GitReflinkSupport,
@@ -451,7 +452,7 @@ export function registerGitRuntimeHandlers(
     await pending?.catch(() => undefined);
     return ok(await read());
   });
-  if (managed !== null) registerManagedGitHandlers(bus, managed);
+  if (managed !== null) registerManagedGitHandlers(bus, managed, settings);
 }
 
 function failure(cause: unknown, code: string): Result<never> {
@@ -460,7 +461,11 @@ function failure(cause: unknown, code: string): Result<never> {
 
 /** Settings › Git › PwrGit's Git. Main decides when the network is used:
  *  `status` never, `check` only past the cooldown unless forced. */
-export function registerManagedGitHandlers(bus: CommandBus, managed: ManagedGitService): void {
+export function registerManagedGitHandlers(
+  bus: CommandBus,
+  managed: ManagedGitService,
+  settings: Pick<SettingsService, "update">
+): void {
   bus.register("gitManaged:status", async () => ok(await managed.status()));
   bus.register("gitManaged:check", async (req) => ok(await managed.check({ force: req.force === true })));
   bus.register("gitManaged:install", async (req) => {
@@ -473,5 +478,14 @@ export function registerManagedGitHandlers(bus: CommandBus, managed: ManagedGitS
   bus.register("gitManaged:cancel", async () => {
     managed.cancel();
     return ok(null);
+  });
+  // Changes what is offered, never which Git runs: a build in use stays in
+  // use on either track.
+  bus.register("gitManaged:setTrack", async (req) => {
+    if (!isManagedGitTrack(req.track)) {
+      return err({ kind: "git", code: "git_managed_track_invalid", message: "Choose the Latest or Prerelease track." });
+    }
+    settings.update({ managedGitTrack: req.track });
+    return ok(await managed.status());
   });
 }

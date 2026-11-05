@@ -9,7 +9,8 @@ import {
   type GitRuntimeStatus,
   type ManagedGitBuild,
   type ManagedGitInstallPhase,
-  type ManagedGitStatus
+  type ManagedGitStatus,
+  type ManagedGitTrack
 } from "@pwrgit/shared";
 import { CheckGlyph } from "../../lib/CheckGlyph";
 import { CloseGlyph } from "../../lib/CloseGlyph";
@@ -29,17 +30,21 @@ import {
   managedCardState,
   managedInUse,
   megabytes,
+  offeredRelease,
   phaseSentence,
+  TRACK_LABEL,
+  TRACK_SUB,
+  trackOptions,
   type ManagedCardState
 } from "./git-settings-view";
 import { MetaParts } from "./GitMetaParts";
-import { SettingsField, SettingsSection, settingsChipClass } from "./SettingsLayout";
+import { SettingsField, SettingsSection, SettingsSegmented, settingsChipClass } from "./SettingsLayout";
 
 const DESCRIPTION =
   "Newer builds of PwrGit’s Git are published between app releases. PwrGit checks each one’s checksum and signature before it can be used, and keeps the one you were on.";
 
 function publishedLine(managed: ManagedGitStatus): string[] {
-  const latest = managed.latest;
+  const latest = offeredRelease(managed);
   if (latest === null) return [];
   const parts: string[] = [];
   if (latest.publishedAt !== null) {
@@ -254,6 +259,10 @@ export function ManagedGitSection(props: { git: GitSettingsState; onOpenUpdates?
           refs={{ cancelRef, useBuildRef, retryRef }}
           onInstall={install}
           onUse={use}
+          onTrack={(track) => {
+            setError(null);
+            void git.setTrack(track).then(setError);
+          }}
           onCopy={(text) => {
             void copyText(text).then(() => setCopied(true));
           }}
@@ -279,12 +288,13 @@ function ManagedFields(props: {
   onInstall: (version: string) => void;
   /** A build, or null for the bundled one. */
   onUse: (build: ManagedGitBuild | null) => void;
+  onTrack: (track: ManagedGitTrack) => void;
   onCopy: (text: string) => void;
   onOpenUpdates?: (() => void) | undefined;
 }) {
   const { git, managed, state } = props;
   const runtime = git.runtime;
-  const latest = managed.latest;
+  const latest = offeredRelease(managed);
   const running = managedInUse(managed);
   const busy = git.selecting || state.kind === "installing";
   const installedChosen = runtime?.active === "installed" ? inUseCandidate(runtime) : undefined;
@@ -338,14 +348,29 @@ function ManagedFields(props: {
         }
       />
       <SettingsField
-        label="Latest"
+        label="Build track"
+        sub={TRACK_SUB}
+        control={
+          <SettingsSegmented
+            aria-label="Build track"
+            disabled={git.savingTrack || state.kind === "installing"}
+            options={trackOptions(managed)}
+            value={managed.track}
+            onChange={(track) => {
+              if (track !== managed.track) props.onTrack(track);
+            }}
+          />
+        }
+      />
+      <SettingsField
+        label="Newest build"
         sub={checkedAgo(managed.checkedAt, props.now)}
         control={
           <>
             <span className="settings-git-version">
               {latest === null ? (
                 <span className="settings-field__value settings-field__value--absent">
-                  {managed.checkedAt === null ? "Not checked yet" : `Nothing newer than ${managed.bundledVersion}`}
+                  {managed.checkedAt === null ? "Not checked yet" : `Nothing newer than ${running?.version ?? managed.bundledVersion}`}
                 </span>
               ) : (
                 <span className="settings-field__value">{latest.version}</span>
@@ -425,6 +450,11 @@ function ManagedFields(props: {
             ) : state.kind === "ready" ? (
               <span className="settings-field__help">
                 Operations already running finish on the Git they started with. Nothing is restarted.
+              </span>
+            ) : null}
+            {latest === null && managed.track === "latest" && managed.tracks.prerelease !== null ? (
+              <span className="settings-field__help">
+                {TRACK_LABEL.prerelease} offers {managed.tracks.prerelease}, not yet promoted.
               </span>
             ) : null}
             {managed.checkError !== null ? (

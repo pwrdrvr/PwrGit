@@ -55,6 +55,8 @@ const RUNTIME: GitRuntimeStatus = {
 const UPDATE: ManagedGitStatus = {
   supported: true,
   bundledVersion: "2.56.0-dev-pwrgit.4",
+  track: "latest",
+  tracks: { latest: V5, prerelease: V5 },
   latest: { version: V5, tag: `v${V5}`, publishedAt: "2026-11-07T12:00:00Z", size: 38_900_000 },
   needsAppUpdate: null,
   checkedAt: Date.now() - 120_000,
@@ -247,6 +249,45 @@ describe("PwrGit’s Git", () => {
     await push({ phase: "idle" });
     await act(async () => answer(err({ kind: "git", code: "managed_install_failed", message: refusal })));
     expect(card().textContent).toContain(refusal);
+  });
+
+  it("names each track's build, and switching tracks never downloads or switches Git", async () => {
+    managed = { ...UPDATE, tracks: { latest: V5, prerelease: V6 } };
+    mocks.dispatch.mockImplementation(async (channel: string, req: { track?: string }) => {
+      if (channel === "git:runtimeStatus") return ok(runtime);
+      if (channel === "gitManaged:setTrack") {
+        managed = { ...managed, track: req.track as ManagedGitStatus["track"], latest: { ...UPDATE.latest!, version: V6, tag: `v${V6}` } };
+      }
+      return ok(managed);
+    });
+    await render();
+    const track = card().querySelector<HTMLElement>("[role='radiogroup'][aria-label='Build track']")!;
+    const options = Array.from(track.querySelectorAll("[role='radio']"), (radio) => [radio.textContent, radio.getAttribute("aria-checked")]);
+    expect(options).toEqual([[`Latest${V5}`, "true"], [`Prerelease${V6}`, "false"]]);
+
+    await act(async () => Array.from(track.querySelectorAll<HTMLButtonElement>("[role='radio']"))[1]!.click());
+    expect(calls("gitManaged:setTrack")).toEqual([["gitManaged:setTrack", { track: "prerelease" }]]);
+    expect(card().textContent).toContain(V6);
+    expect(calls("gitManaged:install")).toEqual([]);
+    expect(calls("git:selectRuntime")).toEqual([]);
+  });
+
+  it("on Latest with nothing promoted, says the Prerelease track has a build", async () => {
+    managed = { ...UPDATE, latest: null, tracks: { latest: null, prerelease: V5 } };
+    await render();
+    expect(chip()).toBe("Up to date");
+    expect(card().textContent).toContain(`Prerelease offers ${V5}, not yet promoted.`);
+    expect(() => button("Download and verify")).toThrow();
+  });
+
+  // Rule: a track offers only builds newer than the one running.
+  it("never offers an older promoted build over a newer prerelease build in use", async () => {
+    runtime = { ...RUNTIME, active: "managed", path: build(V6).path };
+    managed = { ...UPDATE, tracks: { latest: V5, prerelease: V6 }, builds: [build(V6)], selected: build(V6).id, inUse: true };
+    await render();
+    expect(chip()).toBe("Up to date");
+    expect(() => button("Download and verify")).toThrow();
+    expect(card().textContent).toContain(`Nothing newer than ${V6}`);
   });
 
   it("keeps a Git chosen by path, and says so", async () => {

@@ -117,6 +117,9 @@ render one answer from `git-settings-view.ts`.
   nav label in any state.
 - The Git stack folds labels above controls below 560px (a container query on
   `.settings-stack--git` only).
+- **Build track (Latest | Prerelease) changes what is offered, never what
+  runs.** `offeredRelease` offers only a build newer than the one in use, so
+  Latest never offers an older promoted build over a prerelease build in use.
 
 ## AI Providers and AI Features are per profile, in a window that is not
 

@@ -6,7 +6,7 @@ import { _electron as electron, expect, test, type ElectronApplication, type Pag
 import { cleanEnv } from "./fixtures/electron-app";
 import { buildHarness } from "./harness/build";
 
-const VIEWS = ["update", "downloading", "ready", "rollback", "failed", "offline", "chosen-by-path", "needs-app"] as const;
+const VIEWS = ["update", "downloading", "ready", "rollback", "failed", "offline", "chosen-by-path", "needs-app", "unpromoted", "prerelease"] as const;
 type View = "general" | (typeof VIEWS)[number];
 
 const mount = (page: Page, view: View): Promise<void> =>
@@ -92,7 +92,9 @@ test("Settings › Git lays out every PwrGit’s Git state, down to the 760px wi
       failed: "Failed",
       offline: "Couldn’t check",
       "chosen-by-path": "Ready to use",
-      "needs-app": "Up to date"
+      "needs-app": "Up to date",
+      unpromoted: "Up to date",
+      prerelease: "Update available"
     };
     for (const view of VIEWS) {
       await resize(app, 980, 720);
@@ -117,9 +119,15 @@ test("Settings › Git lays out every PwrGit’s Git state, down to the 760px wi
     await expect(child.locator(".settings-nav__subdot--accent")).toHaveCount(1);
     await expect(child.locator(".settings-nav__subchip")).toHaveText("new");
 
+    // The Build track names each track's build, and says which is followed.
+    await mount(page, "prerelease");
+    const track = managed.getByRole("radiogroup", { name: "Build track" });
+    await expect(track.getByRole("radio", { name: /Prerelease/ })).toHaveAttribute("aria-checked", "true");
+    await expect(track.getByRole("radio", { name: /Latest/ })).toContainText("2.56.0-dev-pwrgit.5");
+
     // The window minimum: the Git page folds each label above its control;
     // other panes keep their side-by-side rows.
-    for (const view of ["downloading", "chosen-by-path", "rollback"] as const) {
+    for (const view of ["downloading", "chosen-by-path", "rollback", "prerelease"] as const) {
       await resize(app, 760, 720);
       await mount(page, view);
       await expect(chip).toHaveText(expected[view]);

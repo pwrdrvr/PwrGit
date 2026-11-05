@@ -18,7 +18,7 @@ import {
   useState,
   type ReactNode
 } from "react";
-import type { GitRuntimeStatus, ManagedGitStatus } from "@pwrgit/shared";
+import type { GitRuntimeStatus, ManagedGitStatus, ManagedGitTrack } from "@pwrgit/shared";
 import { dispatch, subscribe } from "../../lib/pwrgit";
 
 /** What Settings can ask `git:selectRuntime` for. */
@@ -42,6 +42,10 @@ export type GitSettingsState = {
   /** Resolves to the failure, or null. */
   select: (choice: GitChoice) => Promise<string | null>;
   selecting: boolean;
+  /** Follow the Latest or Prerelease track. Never changes which Git runs.
+   *  Resolves to the failure, or null. */
+  setTrack: (track: ManagedGitTrack) => Promise<string | null>;
+  savingTrack: boolean;
 };
 
 const GitSettingsContext = createContext<GitSettingsState | null>(null);
@@ -192,6 +196,21 @@ function useGitSettingsState(): GitSettingsState {
     [readManaged]
   );
 
+  const [savingTrack, setSavingTrack] = useState(false);
+  const setTrack = useCallback(async (track: ManagedGitTrack): Promise<string | null> => {
+    setSavingTrack(true);
+    try {
+      const result = await dispatch("gitManaged:setTrack", { track });
+      if (!result.ok) return result.error.message;
+      if (alive.current) setManaged(result.value);
+      return null;
+    } catch (cause) {
+      return message(cause);
+    } finally {
+      if (alive.current) setSavingTrack(false);
+    }
+  }, []);
+
   return useMemo(
     () => ({
       runtime,
@@ -205,8 +224,25 @@ function useGitSettingsState(): GitSettingsState {
       install,
       cancel,
       select,
-      selecting
+      selecting,
+      setTrack,
+      savingTrack
     }),
-    [runtime, runtimeError, runtimeChecking, requestRuntime, managed, managedError, checking, check, install, cancel, select, selecting]
+    [
+      runtime,
+      runtimeError,
+      runtimeChecking,
+      requestRuntime,
+      managed,
+      managedError,
+      checking,
+      check,
+      install,
+      cancel,
+      select,
+      selecting,
+      setTrack,
+      savingTrack
+    ]
   );
 }

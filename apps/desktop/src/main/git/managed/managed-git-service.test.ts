@@ -2,7 +2,7 @@ import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpath
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, test } from "vitest";
-import type { ManagedGitProgress } from "@pwrgit/shared";
+import type { ManagedGitProgress, ManagedGitTrack } from "@pwrgit/shared";
 import { MANAGED_GIT_RELEASES_URL, type PlatformKey } from "./catalog";
 import { ManagedGitService, type ManagedGitSelection } from "./managed-git-service";
 import { archive, fixtureRelease, rawTarGz, sha256, writePayload, type FixtureRelease } from "./test-fixture";
@@ -20,7 +20,11 @@ afterEach(() => {
 });
 
 let counter = 0;
-function build(version: string, key: PlatformKey = "linux-x64", options: { tamper?: boolean; consumer?: string; revision?: string } = {}): FixtureRelease {
+function build(
+  version: string,
+  key: PlatformKey = "linux-x64",
+  options: { tamper?: boolean; consumer?: string; revision?: string; prerelease?: boolean } = {}
+): FixtureRelease {
   const root = join(scratch, `payload-${counter++}`);
   const pin = writePayload(root, { version, key, ...(options.revision ? { revision: options.revision } : {}) });
   if (options.tamper) writeFileSync(join(root, "bin", "git-lfs"), "#!/bin/sh\necho planted\n");
@@ -31,7 +35,8 @@ function build(version: string, key: PlatformKey = "linux-x64", options: { tampe
     archive: bytes,
     inventorySha256: pin.asset.inventory_sha256,
     consumerSha256: options.consumer ?? CONSUMER,
-    ...(options.revision ? { revision: options.revision } : {})
+    ...(options.revision ? { revision: options.revision } : {}),
+    ...(options.prerelease !== undefined ? { prerelease: options.prerelease } : {})
   });
 }
 
@@ -71,7 +76,14 @@ function serve(releases: FixtureRelease[], listOverride?: unknown[]): Server {
 
 function service(
   server: Server,
-  options: { key?: "x64" | "arm64"; selection?: ManagedGitSelection; installed?: boolean; pid?: number; alive?: (pid: number) => boolean } = {}
+  options: {
+    key?: "x64" | "arm64";
+    selection?: ManagedGitSelection;
+    installed?: boolean;
+    pid?: number;
+    alive?: (pid: number) => boolean;
+    track?: { current: ManagedGitTrack };
+  } = {}
 ) {
   const progress: ManagedGitProgress[] = [];
   const probes: string[] = [];
@@ -82,6 +94,7 @@ function service(
     arch: options.key ?? "x64",
     bundled: { version: BUNDLED, consumerSha256: CONSUMER },
     selection: () => selection,
+    ...(options.track === undefined ? {} : { track: () => options.track!.current }),
     installedOverride: () => options.installed === true,
     fetch: server.fetch,
     verify: (directory, pin, verifyOptions) => verifyManagedRuntime(directory, pin, { ...verifyOptions, probe: false }),
@@ -421,5 +434,75 @@ describe("ManagedGitService", () => {
     expect(status.latest).toBeNull();
     expect(status.checkError ?? "").toMatch(/larger than a release catalog can be/);
     expect(pulled).toBeLessThan(4 * 1024 * 1024);
+  });
+
+  // Rule: Latest offers only promoted releases; Prerelease the newest,
+  // promoted or not. One check answers both, so switching asks GitHub nothing
+  // and never changes the selection.
+  test("each track offers its own newest build, and switching asks GitHub nothing", async () => {
+    const six = build("2.56.0-dev-pwrgit.6", "linux-x64", { prerelease: true, revision: "6".repeat(40) });
+    const five = build("2.56.0-dev-pwrgit.5");
+    const server = serve([six, five]);
+    const track = { current: "latest" as ManagedGitTrack };
+    const { svc, selection } = service(server, { track });
+    const checked = await svc.check({ force: true });
+    expect(checked.track).toBe("latest");
+    expect(checked.tracks).toEqual({ latest: "2.56.0-dev-pwrgit.5", prerelease: "2.56.0-dev-pwrgit.6" });
+    expect(checked.latest?.version).toBe("2.56.0-dev-pwrgit.5");
+    const hits = server.hits.length;
+    track.current = "prerelease";
+    const switched = await svc.status();
+    expect(switched.latest?.version).toBe("2.56.0-dev-pwrgit.6");
+    expect(server.hits).toHaveLength(hits);
+    expect((await svc.install("2.56.0-dev-pwrgit.6")).builds.map((b) => b.version)).toEqual(["2.56.0-dev-pwrgit.6"]);
+    expect(selection).toEqual({});
+  });
+
+  test("with nothing promoted, Latest offers nothing and says nothing went wrong", async () => {
+    const five = build("2.56.0-dev-pwrgit.5", "linux-x64", { prerelease: true });
+    const status = await service(serve([five])).svc.check({ force: true });
+    expect(status.track).toBe("latest");
+    expect(status.latest).toBeNull();
+    expect(status.tracks).toEqual({ latest: null, prerelease: "2.56.0-dev-pwrgit.5" });
+    expect(status.checkError).toBeNull();
+    expect(status.needsAppUpdate).toBeNull();
+  });
+
+  test("a prerelease that needs a newer PwrGit is news only on the Prerelease track", async () => {
+    const six = build("2.56.0-dev-pwrgit.6", "linux-x64", { prerelease: true, consumer: "f".repeat(64), revision: "6".repeat(40) });
+    const five = build("2.56.0-dev-pwrgit.5");
+    const track = { current: "latest" as ManagedGitTrack };
+    const { svc } = service(serve([six, five]), { track });
+    expect((await svc.check({ force: true })).needsAppUpdate).toBeNull();
+    track.current = "prerelease";
+    const prerelease = await svc.status();
+    expect(prerelease.needsAppUpdate).toBe("2.56.0-dev-pwrgit.6");
+    expect(prerelease.latest?.version).toBe("2.56.0-dev-pwrgit.5");
+  });
+
+  test("prereleases older than the newest are never fetched while looking for a promoted build", async () => {
+    const seven = build("2.56.0-dev-pwrgit.7", "linux-x64", { prerelease: true, revision: "7".repeat(40) });
+    const six = build("2.56.0-dev-pwrgit.6", "linux-x64", { prerelease: true, revision: "6".repeat(40) });
+    const five = build("2.56.0-dev-pwrgit.5");
+    const server = serve([seven, six, five]);
+    const status = await service(server).svc.check({ force: true });
+    expect(status.tracks).toEqual({ latest: "2.56.0-dev-pwrgit.5", prerelease: "2.56.0-dev-pwrgit.7" });
+    expect(server.hits.some((url) => url.includes(six.tag))).toBe(false);
+  });
+
+  test("a check saved before tracks existed answers for neither track", async () => {
+    mkdirSync(root(), { recursive: true });
+    writeFileSync(
+      join(root(), "builds.json"),
+      JSON.stringify({
+        version: 1,
+        builds: [],
+        lastCheck: { checkedAt: 1, latest: { version: "2.56.0-dev-pwrgit.5", tag: "v2.56.0-dev-pwrgit.5", publishedAt: null, size: null }, needsAppUpdate: null }
+      })
+    );
+    const status = await service(serve([])).svc.status();
+    expect(status.checkedAt).toBeNull();
+    expect(status.latest).toBeNull();
+    expect(status.tracks).toEqual({ latest: null, prerelease: null });
   });
 });

@@ -2,8 +2,10 @@
 // can send. The oracle is the rule written plainly, not the code's branches:
 //
 // - The card offers news (accent) exactly when a newer build than the one in
-//   use is published, nothing is installing, nothing failed, and the chosen
-//   build passed its launch check.
+//   use is published on the followed track, nothing is installing, nothing
+//   failed, and the chosen build passed its launch check. A build in use that
+//   is newer than the track's newest (a prerelease, with Latest followed) is
+//   never offered an older one.
 // - "Up to date" is never said while a newer build exists and is not in use.
 // - Every nav dot that is not green carries a word and a spoken sentence
 //   (settings/AGENTS.md: colour is never the only channel).
@@ -19,6 +21,7 @@ import {
 } from "@pwrgit/shared";
 import { gitNavChildren, managedCardState, phaseSentence } from "./git-settings-view";
 
+/** Oldest first: the oracle orders versions by their place here. */
 const VERSIONS = ["2.56.0-dev-pwrgit.5", "2.56.0-dev-pwrgit.6", "2.57.0-dev-pwrgit.1"];
 
 const build = (version: string): ManagedGitBuild => ({
@@ -61,6 +64,8 @@ const status: fc.Arbitrary<ManagedGitStatus> = fc
     return {
       supported: input.supported,
       bundledVersion: "2.56.0-dev-pwrgit.4",
+      track: "latest" as const,
+      tracks: { latest: input.latest, prerelease: input.latest },
       latest:
         input.latest === null ? null : { version: input.latest, tag: `v${input.latest}`, publishedAt: null, size: null },
       needsAppUpdate: null,
@@ -79,7 +84,7 @@ const status: fc.Arbitrary<ManagedGitStatus> = fc
 function newerNotInUse(managed: ManagedGitStatus): boolean {
   if (managed.latest === null) return false;
   const running = managed.inUse ? managed.builds.find((b) => b.id === managed.selected) : undefined;
-  return running?.version !== managed.latest.version;
+  return running === undefined || VERSIONS.indexOf(managed.latest.version) > VERSIONS.indexOf(running.version);
 }
 
 const busy = (managed: ManagedGitStatus): boolean =>

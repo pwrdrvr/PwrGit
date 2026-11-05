@@ -4,14 +4,19 @@
 // with its card (settings/AGENTS.md).
 
 import {
+  compareManagedGitVersions,
   MANAGED_GIT_INSTALL_PHASES,
+  MANAGED_GIT_TRACKS,
+  parseManagedGitVersion,
   type GitRuntimeCandidate,
   type GitRuntimeProblem,
   type GitRuntimeSource,
   type GitRuntimeStatus,
   type ManagedGitBuild,
   type ManagedGitInstallPhase,
-  type ManagedGitStatus
+  type ManagedGitRelease,
+  type ManagedGitStatus,
+  type ManagedGitTrack
 } from "@pwrgit/shared";
 import type { SettingsChipTone } from "./SettingsLayout";
 import type { SettingsNavChild, SettingsNavDot } from "./settings-nav";
@@ -69,6 +74,38 @@ export function choiceFor(candidate: GitRuntimeCandidate): { path: string | null
   if (candidate.source === "bundled") return { path: null };
   if (candidate.source === "managed" && candidate.managedId !== undefined) return { managed: candidate.managedId };
   return { path: candidate.path };
+}
+
+/** The Build track's names, as PwrAgent's managed Codex and grok-build
+ *  tracks read. */
+export const TRACK_LABEL: Record<ManagedGitTrack, string> = {
+  latest: "Latest",
+  prerelease: "Prerelease"
+};
+
+export const TRACK_SUB =
+  "Latest offers promoted builds only. Prerelease offers the newest build, promoted or not. Switching never changes which Git runs.";
+
+/**
+ * Both tracks, each with the version it offers as of the last check. A track
+ * with nothing newer than the bundle offers the bundle, so says its version.
+ */
+export function trackOptions(
+  managed: ManagedGitStatus
+): Array<{ value: ManagedGitTrack; label: string; meta: string }> {
+  return MANAGED_GIT_TRACKS.map((track) => ({
+    value: track,
+    label: TRACK_LABEL[track],
+    meta: managed.tracks[track] ?? (managed.checkedAt === null ? "Not checked" : managed.bundledVersion)
+  }));
+}
+
+/** True when `version` is newer than `than`; false when either isn't a
+ *  version this app knows. */
+function isNewer(version: string, than: string): boolean {
+  const left = parseManagedGitVersion(version);
+  const right = parseManagedGitVersion(than);
+  return left !== null && right !== null && compareManagedGitVersions(left, right) > 0;
 }
 
 /** The step names an install shows, in the order it runs them. */
@@ -173,21 +210,34 @@ export function managedCardState(managed: ManagedGitStatus): ManagedCardState {
   if (managed.selectedError !== null) {
     return { kind: "launch-failed", chip: { label: "Failed check", tone: "err" }, dot: "bad", word: "failed" };
   }
-  const latest = managed.latest;
+  const running = managedInUse(managed);
+  const latest = offeredRelease(managed);
   if (latest !== null) {
     const build = downloadedBuild(managed, latest.version);
     if (build === undefined) {
       return { kind: "update", chip: { label: "Update available", tone: "accent" }, dot: "accent", word: "new" };
     }
-    if (managedInUse(managed)?.id !== build.id) {
+    if (running?.id !== build.id) {
       return { kind: "ready", chip: { label: "Ready to use", tone: "accent" }, dot: "accent", word: "new" };
     }
   }
   if (managed.checkError !== null) {
     return { kind: "offline", chip: { label: "Couldn’t check", tone: "warn" }, dot: "warn", word: "retry" };
   }
-  if (managed.checkedAt === null && latest === null) return { kind: "unchecked" };
+  if (managed.checkedAt === null && managed.latest === null) return { kind: "unchecked" };
   return { kind: "current", chip: { label: "Up to date", tone: "ok" }, dot: "ok" };
+}
+
+/**
+ * The release the card offers: the track's newest, unless the build running
+ * is already as new. On Latest, a prerelease build in use is never offered an
+ * older promoted one as an update.
+ */
+export function offeredRelease(managed: ManagedGitStatus): ManagedGitRelease | null {
+  const running = managedInUse(managed);
+  const latest = managed.latest;
+  if (latest === null || running === undefined) return latest;
+  return isNewer(latest.version, running.version) || latest.version === running.version ? latest : null;
 }
 
 /** The live region's sentence: changes only when the phase does. */

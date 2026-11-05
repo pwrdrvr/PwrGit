@@ -178,7 +178,9 @@ export function fixtureRelease(input: {
     release: {
       tag_name: tag,
       draft: input.draft ?? false,
-      prerelease: input.prerelease ?? true,
+      // Promoted unless a test says otherwise: the Latest track (the default)
+      // offers only promoted releases. huntharo/git publishes as prerelease.
+      prerelease: input.prerelease ?? false,
       published_at: "2026-11-07T12:00:00Z",
       assets: [asset(archiveName, input.archive), asset("runtime-manifest.json", catalog), asset("SHA256SUMS", sums)]
     }

@@ -63,6 +63,8 @@ let managedGit: Res<"gitManaged:status">;
 const NO_NEWER_GIT: Res<"gitManaged:status"> = {
   supported: true,
   bundledVersion: "2.56.0-dev-pwrgit.4",
+  track: "latest",
+  tracks: { latest: null, prerelease: null },
   latest: null,
   needsAppUpdate: null,
   checkedAt: null,
