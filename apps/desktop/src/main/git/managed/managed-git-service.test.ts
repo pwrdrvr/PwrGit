@@ -505,4 +505,13 @@ describe("ManagedGitService", () => {
     expect(status.latest).toBeNull();
     expect(status.tracks).toEqual({ latest: null, prerelease: null });
   });
+
+  test("a saved track answer without a version answers for neither track", async () => {
+    mkdirSync(root(), { recursive: true });
+    const broken = { release: {}, needsAppUpdate: null };
+    writeFileSync(join(root(), "builds.json"), JSON.stringify({ version: 1, builds: [], lastCheck: { checkedAt: 1, tracks: { latest: broken, prerelease: broken } } }));
+    const status = await service(serve([])).svc.status();
+    expect(status.checkedAt).toBeNull();
+    expect(status.latest).toBeNull();
+  });
 });

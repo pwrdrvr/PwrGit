@@ -30,6 +30,7 @@ import {
   managedCardState,
   managedInUse,
   megabytes,
+  newerThanRunning,
   offeredRelease,
   phaseSentence,
   TRACK_LABEL,
@@ -353,7 +354,8 @@ function ManagedFields(props: {
         control={
           <SettingsSegmented
             aria-label="Build track"
-            disabled={git.savingTrack || state.kind === "installing"}
+            // Not while a check runs: its answer is for the track it began on.
+            disabled={git.savingTrack || git.checking || state.kind === "installing"}
             options={trackOptions(managed)}
             value={managed.track}
             onChange={(track) => {
@@ -452,7 +454,10 @@ function ManagedFields(props: {
                 Operations already running finish on the Git they started with. Nothing is restarted.
               </span>
             ) : null}
-            {latest === null && managed.track === "latest" && managed.tracks.prerelease !== null ? (
+            {latest === null &&
+            managed.track === "latest" &&
+            managed.tracks.prerelease !== null &&
+            newerThanRunning(managed, managed.tracks.prerelease) ? (
               <span className="settings-field__help">
                 {TRACK_LABEL.prerelease} offers {managed.tracks.prerelease}, not yet promoted.
               </span>

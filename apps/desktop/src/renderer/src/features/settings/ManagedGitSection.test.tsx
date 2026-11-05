@@ -280,6 +280,29 @@ describe("PwrGit’s Git", () => {
     expect(() => button("Download and verify")).toThrow();
   });
 
+  it("doesn't point at a Prerelease build already in use", async () => {
+    runtime = { ...RUNTIME, active: "managed", path: build(V5).path };
+    managed = { ...UPDATE, latest: null, tracks: { latest: null, prerelease: V5 }, builds: [build(V5)], selected: build(V5).id, inUse: true };
+    await render();
+    expect(card().textContent).not.toContain("not yet promoted");
+  });
+
+  it("holds the track still while a check runs, and says a failed track is unknown", async () => {
+    let answer: (value: unknown) => void = () => undefined;
+    managed = { ...UPDATE, latest: null, tracks: { latest: null, prerelease: V6 }, checkError: "v2.56.0-dev-pwrgit.5: digest mismatch" };
+    mocks.dispatch.mockImplementation(async (channel: string) => {
+      if (channel === "git:runtimeStatus") return ok(runtime);
+      if (channel === "gitManaged:check") return new Promise((resolve) => (answer = resolve));
+      return ok(managed);
+    });
+    await render();
+    const radios = () => Array.from(card().querySelectorAll<HTMLButtonElement>("[role='radiogroup'][aria-label='Build track'] [role='radio']"));
+    expect(radios()[0]!.textContent).toBe("LatestUnavailable");
+    expect(radios().every((radio) => radio.disabled)).toBe(true);
+    await act(async () => answer(ok(managed)));
+    expect(radios().every((radio) => !radio.disabled)).toBe(true);
+  });
+
   // Rule: a track offers only builds newer than the one running.
   it("never offers an older promoted build over a newer prerelease build in use", async () => {
     runtime = { ...RUNTIME, active: "managed", path: build(V6).path };

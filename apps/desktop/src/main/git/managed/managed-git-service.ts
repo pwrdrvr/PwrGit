@@ -89,7 +89,9 @@ type LastCheck = {
 function isTrackAnswer(value: unknown): value is TrackAnswer {
   if (typeof value !== "object" || value === null) return false;
   const answer = value as Record<string, unknown>;
-  return (answer["release"] === null || typeof answer["release"] === "object") &&
+  const release = answer["release"] as Record<string, unknown> | null | undefined;
+  return (release === null ||
+      (typeof release === "object" && typeof release["version"] === "string" && typeof release["tag"] === "string")) &&
     (answer["needsAppUpdate"] === null || typeof answer["needsAppUpdate"] === "string");
 }
 

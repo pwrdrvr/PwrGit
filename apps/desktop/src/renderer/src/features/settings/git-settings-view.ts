@@ -96,15 +96,22 @@ export function trackOptions(
   return MANAGED_GIT_TRACKS.map((track) => ({
     value: track,
     label: TRACK_LABEL[track],
-    meta: managed.tracks[track] ?? (managed.checkedAt === null ? "Not checked" : managed.bundledVersion)
+    meta:
+      managed.tracks[track] ??
+      (managed.checkedAt === null
+        ? "Not checked"
+        : // No answer because the check failed is not "nothing newer".
+          track === managed.track && managed.checkError !== null
+          ? "Unavailable"
+          : managed.bundledVersion)
   }));
 }
 
-/** True when `version` is newer than `than`; false when either isn't a
- *  version this app knows. */
-function isNewer(version: string, than: string): boolean {
+/** True when `version` is newer than the Git running: the build in use, or
+ *  the bundle. False when either isn't a version this app knows. */
+export function newerThanRunning(managed: ManagedGitStatus, version: string): boolean {
   const left = parseManagedGitVersion(version);
-  const right = parseManagedGitVersion(than);
+  const right = parseManagedGitVersion(managedInUse(managed)?.version ?? managed.bundledVersion);
   return left !== null && right !== null && compareManagedGitVersions(left, right) > 0;
 }
 
@@ -236,8 +243,9 @@ export function managedCardState(managed: ManagedGitStatus): ManagedCardState {
 export function offeredRelease(managed: ManagedGitStatus): ManagedGitRelease | null {
   const running = managedInUse(managed);
   const latest = managed.latest;
-  if (latest === null || running === undefined) return latest;
-  return isNewer(latest.version, running.version) || latest.version === running.version ? latest : null;
+  // The build in use is still offered as itself, so the card can say so.
+  if (latest === null || running === undefined || latest.version === running.version) return latest;
+  return newerThanRunning(managed, latest.version) ? latest : null;
 }
 
 /** The live region's sentence: changes only when the phase does. */
