@@ -75,3 +75,28 @@ describe("RepositorySetupSheet GitHub CLI page", () => {
     expect(container.querySelector(".repository-setup__resolved")?.textContent).toContain("pwrdrvr/PwrDisk");
   });
 });
+
+describe("RepositorySetupSheet GitHub CLI actions", () => {
+  const setToOriginal: RepositorySetup = { ...ambiguous, ghDefault: { ...ambiguous.ghDefault!, status: "set", fix: null, warning: null } };
+  const setToFork = { ...ambiguous.ghDefault!, status: "set" as const, repository: "pwrdrvr/PwrDisk", remote: "origin", fix: null, warning: null };
+  afterEach(() => window.localStorage.clear());
+
+  it("points gh at a repository only when its button is clicked", async () => {
+    mocks.dispatch.mockImplementation(async (name: string) => name === "repo:setup" ? ok(ambiguous) : name === "repo:setGhDefault" ? ok(setToFork) : ok(null));
+    await act(async () => root.render(<RepositorySetupSheet repo={{ id: "r1", name: "disktree", path: "/repo" }} initialPage="gh" onClose={vi.fn()} />));
+    expect(mocks.dispatch).not.toHaveBeenCalledWith("repo:setGhDefault", expect.anything());
+    const use = [...container.querySelectorAll<HTMLButtonElement>(".repository-setup__candidate button")].find((b) => b.textContent === "Use for gh");
+    await act(async () => use?.click());
+    expect(mocks.dispatch).toHaveBeenCalledWith("repo:setGhDefault", { repoId: "r1", remote: "origin" });
+    expect(container.querySelector(".repository-setup__warning")).toBeNull();
+    expect(container.querySelector(".repository-setup__candidate.is-chosen code")?.textContent).toBe("pwrdrvr/PwrDisk");
+  });
+
+  it("says when gh's default is the original this fork moved on from", async () => {
+    window.localStorage.setItem("pwrgit.forkMovedOn.r1", "tracked");
+    mocks.dispatch.mockImplementation(async (name: string) => name === "repo:setup" ? ok(setToOriginal) : ok(null));
+    await act(async () => root.render(<RepositorySetupSheet repo={{ id: "r1", name: "disktree", path: "/repo" }} initialPage="gh" onClose={vi.fn()} />));
+    expect(container.querySelector(".repository-setup__warning strong")?.textContent).toBe("gh still targets the repository this fork moved on from");
+    expect(container.querySelector(".repository-setup__fix code")?.textContent).toBe("gh repo set-default pwrdrvr/PwrDisk");
+  });
+});

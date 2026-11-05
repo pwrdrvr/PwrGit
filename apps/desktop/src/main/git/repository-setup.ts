@@ -1,6 +1,6 @@
 import { existsSync, readFileSync, readdirSync, statSync, writeFileSync, mkdirSync, realpathSync } from "node:fs";
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
-import { describeGhDefaultRisk, parseGhResolvedConfig, resolveGhDefaultRepository } from "@pwrgit/mcp-server/gh-default";
+import { describeGhDefaultRisk, parseGhResolvedConfig, planGhSetDefault, resolveGhDefaultRepository, type GhRemoteInput } from "@pwrgit/mcp-server/gh-default";
 import { FORGE_PRODUCTS, err, isForgeKind, ok, parseForgeRemote, type ForgeHostMap, type GhDefaultRepository, type HookRun, type RepositorySetup, type Result, type SetupHook, type SetupIgnoreTest } from "@pwrgit/shared";
 import { NO_OPTIONAL_LOCKS, requireExit0, type GitExec } from "./dugite";
 import { ignoreDestinations, validIgnorePath } from "./ignore-discovery";
@@ -103,7 +103,7 @@ function managerFor(cwd: string): string | null {
  * the remote names and `remote.*.gh-resolved` (see `gh-default.ts`).
  * Best-effort: a failed read is null, never a failed setup sheet.
  */
-export async function readGhDefault(git: GitExec, cwd: string, hosts: ForgeHostMap = {}): Promise<GhDefaultRepository | null> {
+async function readGhRemotes(git: GitExec, cwd: string, hosts: ForgeHostMap): Promise<GhRemoteInput[] | null> {
   const [remotes, resolvedConfig] = await Promise.all([
     git(["remote", "-v"], cwd, NO_OPTIONAL_LOCKS),
     git(["config", "--get-regexp", "^remote\\..*\\.gh-resolved$"], cwd, NO_OPTIONAL_LOCKS)
@@ -111,21 +111,67 @@ export async function readGhDefault(git: GitExec, cwd: string, hosts: ForgeHostM
   if (!remotes.ok || remotes.value.exitCode !== 0) return null;
   if (!resolvedConfig.ok || resolvedConfig.value.exitCode > 1) return null;
   const resolved = parseGhResolvedConfig(resolvedConfig.value.exitCode === 0 ? resolvedConfig.value.stdout : "");
-  const state = resolveGhDefaultRepository(
-    // gh reads a remote's repository from its fetch URL.
-    parseRemoteRows(remotes.value.stdout).filter((row) => row.direction === "fetch").map((row) => {
-      const parsed = parseForgeRemote(row.url, hosts);
-      return {
-        name: row.name,
-        host: parsed?.hostname ?? null,
-        repository: parsed?.nameWithOwner ?? null,
-        // Only hosts the gh CLI serves; a GitLab remote is not gh's concern.
-        github: parsed !== null && isForgeKind(parsed.host) && FORGE_PRODUCTS[parsed.host].cli === "gh",
-        resolved: resolved.get(row.name) ?? null
-      };
-    })
-  );
+  // gh reads a remote's repository from its fetch URL.
+  return parseRemoteRows(remotes.value.stdout).filter((row) => row.direction === "fetch").map((row) => {
+    const parsed = parseForgeRemote(row.url, hosts);
+    return {
+      name: row.name,
+      host: parsed?.hostname ?? null,
+      repository: parsed?.nameWithOwner ?? null,
+      // Only hosts the gh CLI serves; a GitLab remote is not gh's concern.
+      github: parsed !== null && isForgeKind(parsed.host) && FORGE_PRODUCTS[parsed.host].cli === "gh",
+      resolved: resolved.get(row.name) ?? null
+    };
+  });
+}
+
+function ghDefaultOf(remotes: GhRemoteInput[]): GhDefaultRepository {
+  const state = resolveGhDefaultRepository(remotes);
   return { ...state, warning: describeGhDefaultRisk(state) };
+}
+
+/**
+ * Which repository `gh` would act on here, and whether that is a guess. Two
+ * Git reads, no gh process and no network: gh's own choice is a function of
+ * the remote names and `remote.*.gh-resolved` (see `gh-default.ts`).
+ * Best-effort: a failed read is null, never a failed setup sheet.
+ */
+export async function readGhDefault(git: GitExec, cwd: string, hosts: ForgeHostMap = {}): Promise<GhDefaultRepository | null> {
+  const remotes = await readGhRemotes(git, cwd, hosts);
+  return remotes === null ? null : ghDefaultOf(remotes);
+}
+
+/**
+ * Make `remote`'s repository gh's default: the key `gh repo set-default`
+ * writes, without spawning gh (which would need a sign-in and the network to
+ * write one line of config). Only ever on an explicit user action — it changes
+ * shared .git/config, so every worktree and every terminal sees it.
+ */
+export async function setGhDefault(git: GitExec, cwd: string, remote: string, hosts: ForgeHostMap = {}): Promise<Result<GhDefaultRepository>> {
+  const remotes = await readGhRemotes(git, cwd, hosts);
+  if (remotes === null) return err({ kind: "repo", code: "remotes_unreadable", message: "PwrGit could not read this repository’s remotes." });
+  const named = remotes.find((candidate) => candidate.name === remote);
+  if (named === undefined || !named.github || named.host === null || named.repository === null) {
+    return err({ kind: "validation", code: "not_a_github_remote", message: `${remote} is not a GitHub remote gh can use.` });
+  }
+  const plan = planGhSetDefault(remotes, { host: named.host, repository: named.repository });
+  if (plan === null) return err({ kind: "validation", code: "not_a_github_remote", message: `${remote} is not a GitHub remote gh can use.` });
+  for (const name of plan.unset) {
+    const unset = await git(["config", "--unset-all", `remote.${name}.gh-resolved`], cwd);
+    // 5: the key was already gone (another writer got there first).
+    if (!unset.ok) return unset;
+    if (unset.value.exitCode !== 0 && unset.value.exitCode !== 5) {
+      const failed = requireExit0(unset.value, ["config", "--unset-all", `remote.${name}.gh-resolved`]);
+      if (!failed.ok) return failed;
+    }
+  }
+  const set = await git(["config", `remote.${plan.set}.gh-resolved`, "base"], cwd);
+  if (!set.ok) return set;
+  const checked = requireExit0(set.value, ["config", `remote.${plan.set}.gh-resolved`, "base"]);
+  if (!checked.ok) return checked;
+  const after = await readGhDefault(git, cwd, hosts);
+  if (after === null) return err({ kind: "repo", code: "remotes_unreadable", message: "PwrGit could not read this repository’s remotes." });
+  return ok(after);
 }
 
 export async function readRepositorySetup(git: GitExec, cwd: string, hosts: ForgeHostMap = {}): Promise<Result<RepositorySetup>> {

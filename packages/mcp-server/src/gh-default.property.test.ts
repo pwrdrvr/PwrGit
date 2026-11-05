@@ -1,6 +1,6 @@
 import fc from "fast-check";
 import { expect, it } from "vitest";
-import { resolveGhDefaultRepository, type GhRemoteInput } from "./gh-default.js";
+import { planGhSetDefault, resolveGhDefaultRepository, type GhRemoteInput } from "./gh-default.js";
 
 // The model is gh's rule read straight off its source, written the slow way:
 // walk the rank buckets from `upstream` down, each bucket in `git remote -v`
@@ -75,5 +75,27 @@ it("never becomes ambiguous by adding a remote that duplicates an existing URL",
       expect(after.candidates.length).toBe(before.candidates.length);
       if (before.status === "implicit") expect(after.status).toBe("implicit");
     })
+  );
+});
+
+it("PwrGit's set-default plan always makes gh resolve to the chosen repository, with one key left", () => {
+  fc.assert(
+    fc.property(remotesArb, fc.nat(), (remotes, pick) => {
+      const usable = remotes.filter((remote) => remote.github && remote.repository !== null);
+      fc.pre(usable.length > 0);
+      const target = usable[pick % usable.length]!;
+      const plan = planGhSetDefault(remotes, { host: target.host!, repository: target.repository! });
+      expect(plan).not.toBeNull();
+      const after = remotes.map((remote) => ({
+        ...remote,
+        resolved: remote.name === plan!.set ? "base" : plan!.unset.includes(remote.name) ? null : remote.resolved
+      }));
+      expect(after.filter((remote) => remote.resolved !== null).map((remote) => remote.name)).toEqual([plan!.set]);
+      const state = resolveGhDefaultRepository(after);
+      expect(state.status).toBe("set");
+      expect(state.repository?.toLowerCase()).toBe(target.repository!.toLowerCase());
+      expect(state.host).toBe(target.host);
+    }),
+    { numRuns: 300 }
   );
 });

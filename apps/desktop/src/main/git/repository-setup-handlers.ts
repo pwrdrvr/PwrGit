@@ -4,7 +4,7 @@ import type { DB } from "../persistence/db";
 import { emitEvent } from "../ipc";
 import { execGit } from "./dugite";
 import { ignoreDestinations } from "./ignore-discovery";
-import { readRepositorySetup, saveSetupExclude, testSetupIgnorePath } from "./repository-setup";
+import { readRepositorySetup, saveSetupExclude, setGhDefault, testSetupIgnorePath } from "./repository-setup";
 import type { WorktreeOperationQueue } from "./worktree-operation-queue";
 
 export function registerRepositorySetupHandlers(bus: CommandBus, db: DB, operations: WorktreeOperationQueue, hosts: () => ForgeHostMap = () => ({})): void {
@@ -19,6 +19,20 @@ export function registerRepositorySetupHandlers(bus: CommandBus, db: DB, operati
   bus.register("repo:setup", async ({ repoId }) => {
     const path = pathOf(repoId);
     return path === null ? missing() : readRepositorySetup(execGit, path, hosts());
+  });
+  // A config write, so it queues behind fetch and friends like any other
+  // repository write; every worktree re-reads setup afterwards.
+  bus.register("repo:setGhDefault", async ({ repoId, remote }) => {
+    const path = pathOf(repoId);
+    if (path === null) return missing();
+    return operations.runRepository(repoId, async () => {
+      const result = await setGhDefault(execGit, path, remote, hosts());
+      if (result.ok) {
+        const worktrees = db.prepare("SELECT id FROM worktrees WHERE repo_id = ? AND missing = 0").all(repoId) as { id: string }[];
+        for (const worktree of worktrees) emitEvent("changes:changed", { worktreeId: worktree.id });
+      }
+      return result;
+    });
   });
   bus.register("repo:testIgnorePath", async ({ repoId, path: testPath }) => {
     const path = pathOf(repoId);

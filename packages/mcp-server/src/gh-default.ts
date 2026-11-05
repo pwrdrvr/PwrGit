@@ -223,3 +223,37 @@ export function describeGhDefaultRisk(state: GhDefaultRepository): string | null
   }
   return null;
 }
+
+/**
+ * The config writes that make `repository` gh's default, the way
+ * `gh repo set-default` makes them (cli/cli `setdefault.go`): `base` on the
+ * first remote, in gh's rank order, whose repository it is.
+ *
+ * One deliberate difference: gh unsets only the CURRENT default's key, so a
+ * second, lower-ranked key survives (and `git config --add` can leave a
+ * duplicate). That never changes gh's answer today, but it becomes the answer
+ * if the higher remote is removed. This plan clears every key instead, so the
+ * one it writes is the only one left. Null when no remote points there.
+ */
+export function planGhSetDefault(
+  remotes: ReadonlyArray<GhRemoteInput>,
+  target: { host: string; repository: string }
+): { unset: string[]; set: string } | null {
+  const wanted = key(target.host, target.repository);
+  const ranked = remotes
+    .filter(
+      (remote): remote is GhRemoteInput & { host: string; repository: string } =>
+        remote.github && remote.host !== null && remote.repository !== null
+    )
+    .sort(
+      (left, right) =>
+        ghRemoteRank(right.name) - ghRemoteRank(left.name) ||
+        byteCompare(left.name, right.name)
+    );
+  const chosen = ranked.find((remote) => key(remote.host, remote.repository) === wanted);
+  if (chosen === undefined) return null;
+  return {
+    unset: remotes.filter((remote) => (remote.resolved ?? "") !== "").map((remote) => remote.name),
+    set: chosen.name
+  };
+}

@@ -7,6 +7,8 @@ import {
 } from "react";
 import {
   ASSUMED_FORGE_KIND,
+  ghDefaultMismatch,
+  ghDefaultNotice,
   changeRequestNoun,
   changeRequestSigil,
   landedChangeRequest,
@@ -1611,6 +1613,11 @@ export function WorktreeHeader({
   /** Moved on and never answered: Pull reads the fork until the user says
    *  otherwise, so the stored (or built-in) choice is not what Pull does. */
   const movedOnUndecided = movedOn && movedOnAnswer === null;
+  /** The remote PwrGit pulls from after "Pull from origin only". The answer
+   *  is per repository, while the fork read is per branch (and absent on a
+   *  branch the original lacks), so fall back to `origin`, the fork. */
+  const movedOnRemote = movedOnAnswer === "tracked" ? (forkStatus?.tracked?.remote ?? "origin") : null;
+  const ghNotice = ghDefaultNotice(repositorySetup?.ghDefault ?? null, movedOnRemote);
   const runs: PullChoice =
     (movedOn && movedOnAnswer !== "sync") ||
     (choice === "sync" &&
@@ -1661,18 +1668,32 @@ export function WorktreeHeader({
         ? repo.identity.nameWithOwner
         : fork.tracked.remote
   });
-  const answerMovedOn = (answer: MovedOnAnswer): void => {
+  /** Point gh at a remote's repository: the user's own click, never implied. */
+  const pointGhAt = async (remote: string): Promise<void> => {
+    const result = await dispatch("repo:setGhDefault", { repoId: repo.id, remote });
+    if (!result.ok) {
+      showErrorToast({ title: "Could not set gh’s default repository", message: result.error.message, subject: { repoId: repo.id } });
+      return;
+    }
+    setRepositorySetup((current) => current === null ? current : { ...current, ghDefault: result.value });
+    showInfoToast({ title: "gh default repository set", message: `gh now opens pull requests on ${result.value.repository ?? remote}.`, subject: { repoId: repo.id } });
+  };
+  /** The prompt's "also point gh at the fork" box; read when it is answered. */
+  const pointGhBox = useRef<HTMLInputElement | null>(null);
+  const answerMovedOn = (answer: MovedOnAnswer, fork?: ForkChoice): void => {
     writeMovedOnAnswer(repo.id, answer);
     setMovedOnAnswer(answer);
     if (answer === "tracked") {
       setPullChoice("tracked");
       writePullChoice(repo.id, "tracked");
+      if (fork !== undefined && pointGhBox.current?.checked === true) void pointGhAt(fork.tracked.remote);
     }
     status.dismiss();
   };
   /** The question, asked once, in the card of the Pull that showed it. */
   const movedOnPrompt = (fork: ForkChoice): ReactNode => {
     const names = repoNames(fork);
+    const ghMismatch = ghDefaultMismatch(repositorySetup?.ghDefault ?? null, fork.tracked.remote);
     const ahead = fork.source.pushBack?.overwrites ?? 0;
     return (
       <div className="pull-moved-on" role="group" aria-label="Your fork has moved on">
@@ -1686,7 +1707,7 @@ export function WorktreeHeader({
           <button
             type="button"
             className="remote-activity__button remote-activity__button--primary"
-            onClick={() => answerMovedOn("tracked")}
+            onClick={() => answerMovedOn("tracked", fork)}
           >
             Pull from {fork.tracked.remote} only
           </button>
@@ -1698,6 +1719,19 @@ export function WorktreeHeader({
             Keep syncing
           </button>
         </div>
+        {/* gh does not hear this answer: unless its default is set, it still
+            ranks `upstream` first and opens pull requests on the original. */}
+        {ghMismatch !== null && (
+          <label className="pull-moved-on__gh">
+            <input type="checkbox" ref={pointGhBox} defaultChecked />
+            <span>
+              Also make <code>gh</code> open pull requests on{" "}
+              <b>{ghMismatch.intended.repository}</b>. It targets{" "}
+              <b>{ghMismatch.current ?? "a repository it cannot read"}</b> now.
+              Writes <code>gh repo set-default</code>’s setting to this clone’s Git config.
+            </span>
+          </label>
+        )}
         <p className="pull-moved-on__cap">
           Remembered for {repo.name}. Change it in the Pull menu.
         </p>
@@ -1785,14 +1819,14 @@ export function WorktreeHeader({
         />
         {(repositorySetup?.hooks.active.length ?? 0) > 0 && <button type="button" className="discovery-hooks-chip" title={`${repositorySetup?.hooks.displayDirectory} · ${repositorySetup?.hooks.worktreeCount} worktrees`} onClick={() => onOpenSetup?.()}>hooks {repositorySetup?.hooks.active.length}</button>}
         {/* A bare `gh pr create` here would pick a repository by remote NAME
-            (`upstream` first), not by where this checkout pushes. A repo
-            fact like the hooks chip, so it sits beside it. */}
-        {(repositorySetup?.ghDefault?.warning ?? null) !== null && (
+            (`upstream` first), or the user told PwrGit the fork moved on and
+            gh still targets the original. A repo fact like the hooks chip. */}
+        {ghNotice !== null && (
           <button
             type="button"
             className="discovery-gh-chip"
-            aria-label={`GitHub CLI default repository: ${repositorySetup?.ghDefault?.warning ?? ""}`}
-            {...hoverTooltip(tip, `${repositorySetup?.ghDefault?.warning ?? ""} Click for details.`)}
+            aria-label={`GitHub CLI default repository: ${ghNotice.text}`}
+            {...hoverTooltip(tip, `${ghNotice.text} Click for details.`)}
             onClick={() => onOpenSetup?.("gh")}
           >
             gh default

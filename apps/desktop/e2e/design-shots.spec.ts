@@ -1,4 +1,5 @@
-import { mkdirSync, writeFileSync } from "node:fs";
+import { createHash } from "node:crypto";
+import { mkdirSync, realpathSync, writeFileSync } from "node:fs";
 import { createServer, type Socket } from "node:net";
 import { delimiter, dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -384,9 +385,12 @@ test("the gh default-repository warning, on a contrived fork checkout", async ()
   box.commit(repo.path, "capture-window.ts", "base");
   box.git(repo.path, "remote", "add", "origin", "git@github.com:mara-quill/northwind-labs.git");
   box.git(repo.path, "remote", "add", "upstream", "git@github.com:northwind-oss/northwind-labs.git");
-  if (process.env["PWRGIT_GH_DEFAULT_SET"] === "1") {
-    box.git(repo.path, "config", "remote.origin.gh-resolved", "base");
-  }
+  // PWRGIT_GH_SHOT: unset (default), "set" (on the fork: no warning), or
+  // "moved-on" (set to the original, then Pull's "this fork has moved on"
+  // answered "Pull from origin only").
+  const shot = process.env["PWRGIT_GH_SHOT"] ?? "unset";
+  if (shot === "set") box.git(repo.path, "config", "remote.origin.gh-resolved", "base");
+  if (shot === "moved-on") box.git(repo.path, "config", "remote.upstream.gh-resolved", "base");
 
   // A signed-out gh: the warning is read from Git config alone, and a token
   // would send PwrGit's change-request reader to api.github.com.
@@ -400,13 +404,24 @@ test("the gh default-repository warning, on a contrived fork checkout", async ()
     BrowserWindow.getAllWindows()[0]?.setBounds({ x: 0, y: 0, ...size });
   }, WINDOW);
 
+  if (shot === "moved-on") {
+    // The answer lives where the Pull card writes it, keyed by the repo id
+    // (sha1 of its path, `hashId` in repo-indexer.ts). Seeded before the
+    // folder is added, as if answered in an earlier session.
+    const ids = [...new Set([repo.path, realpathSync(repo.path)])].map((path) =>
+      createHash("sha1").update(path).digest("hex").slice(0, 12)
+    );
+    await window.evaluate((keys) => {
+      for (const id of keys) window.localStorage.setItem(`pwrgit.forkMovedOn.${id}`, "tracked");
+    }, ids);
+  }
   await addRootAndExpand(window, handle, box, "northwind-labs");
   await branchRow(window, "main").first().click();
   const header = window.locator(".wt-header");
   await header.waitFor();
   await window.waitForTimeout(800);
   await window.mouse.move(6, 6);
-  await header.screenshot({ path: join(OUT, "gh-default-header.png") });
+  await header.screenshot({ path: join(OUT, `gh-default-header-${shot}.png`) });
 
   const chip = window.locator(".discovery-gh-chip");
   if ((await chip.count()) === 0) return;
@@ -415,5 +430,5 @@ test("the gh default-repository warning, on a contrived fork checkout", async ()
   await sheet.waitFor();
   await window.mouse.move(6, 6);
   await window.waitForTimeout(400);
-  await sheet.screenshot({ path: join(OUT, "gh-default-sheet.png") });
+  await sheet.screenshot({ path: join(OUT, `gh-default-sheet-${shot}.png`) });
 });

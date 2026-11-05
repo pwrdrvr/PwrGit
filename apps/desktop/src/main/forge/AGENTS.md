@@ -426,8 +426,18 @@ never reach a real forge.
   `@pwrgit/mcp-server/gh-default` is the one copy of that rule. The MCP tool
   `pwrgit_repository_info` and `repo:setup` (header chip, Repository setup ›
   GitHub CLI) both call it. When gh changes, re-check it against real gh with
-  `PWRGIT_GH_ORACLE=1` (`gh-default.oracle.test.ts`). Show the fix; never
-  write the key for the user, because it is shared `.git/config`.
+  `PWRGIT_GH_ORACLE=1` (`gh-default.oracle.test.ts`).
+  - **Write the key only on a click** (`repo:setGhDefault`: the moved-on
+    prompt's checkbox, "Use for gh"). It is shared `.git/config`. It clears
+    every `gh-resolved` key, then writes `base` where gh would
+    (`planGhSetDefault`).
+  - **gh does not hear "Pull from origin only".** That answer is in renderer
+    localStorage (`pull-choice.ts`). `ghDefaultNotice` (shared) compares it
+    with gh's target, so a default once set to `upstream` still warns. The MCP
+    server cannot see the answer, only the key.
+  - `gh-default.model.test.ts` drives remotes, gh's own writes, PwrGit's
+    writes and the answer against real Git. Extend it for any new path that
+    changes either side.
 - **Other remotes are read at the same time, only for naming.** `readRemotes`
   runs one `git remote -v` and stores every forge hostname in
   `RepoIdentity.remoteHostnames` (`repo_identity.remote_hosts`, JSON array). A

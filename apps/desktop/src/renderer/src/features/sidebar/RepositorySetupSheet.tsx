@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
-import type { GhDefaultRepository, IgnoreDestination, RepositorySetup, SetupIgnoreTest } from "@pwrgit/shared";
+import { ghDefaultMismatch, ghDefaultNotice, type GhDefaultRepository, type IgnoreDestination, type RepositorySetup, type SetupIgnoreTest } from "@pwrgit/shared";
+import { readMovedOnAnswer } from "../graph/pull-choice";
 import { copyText } from "../../lib/copyText";
 import { dispatch } from "../../lib/pwrgit";
 import { useModal } from "../../lib/useModal";
@@ -30,25 +31,45 @@ function ghReason(gh: GhDefaultRepository): string {
 
 /** What `gh` acts on in this clone without `--repo`. Shown so a fork
  *  checkout's `upstream` cannot silently receive a `gh pr create`. */
-function GhDefaultPage({ gh, scope }: { gh: GhDefaultRepository | null; scope: string }) {
+function GhDefaultPage({ gh, scope, movedOnRemote, busy, onUse }: {
+  gh: GhDefaultRepository | null;
+  scope: string;
+  /** The remote PwrGit pulls from because the fork moved on, else null. */
+  movedOnRemote: string | null;
+  busy: boolean;
+  /** Point gh at this remote's repository (an explicit click, never implied). */
+  onUse: (remote: string) => void;
+}) {
   const [copied, setCopied] = useState(false);
-  const risky = gh !== null && gh.warning !== null;
+  const notice = ghDefaultNotice(gh, movedOnRemote);
+  const movedOnConflict = movedOnRemote !== null && ghDefaultMismatch(gh, movedOnRemote) !== null;
+  const useRemote = notice?.useRemote ?? null;
+  const useCandidate = useRemote === null ? undefined : gh?.candidates.find((candidate) => candidate.remotes.includes(useRemote));
+  const useRepository = useCandidate?.repository ?? null;
+  // `gh repo set-default` takes `[HOST/]OWNER/REPO`; github.com needs no host.
+  const command = useCandidate === undefined ? null : `gh repo set-default ${useCandidate.host === "github.com" ? "" : `${useCandidate.host}/`}${useCandidate.repository}`;
   return <>
     <div className="repository-setup__heading"><h3>GitHub CLI</h3><span className="discovery-scope discovery-scope--exclude">{scope}</span></div>
     <p className="repository-setup__intro"><code>gh pr create</code> and other <code>gh</code> commands act on one repository when you do not pass <code>--repo</code>. gh keeps that choice in this clone’s Git config, so every worktree shares it.</p>
     {gh === null && <p>PwrGit could not read this clone’s remotes.</p>}
     {gh !== null && gh.status === "none" && <p>No remote points at a GitHub repository, so gh has nothing to choose from.</p>}
     {gh !== null && gh.repository !== null && <div className="repository-setup__resolved"><span>gh uses</span><code>{gh.repository}</code><span>because</span><code>{ghReason(gh)}</code></div>}
-    {risky && <div className="repository-setup__warning" role="status">
-      <strong>{gh.status === "invalid" ? "gh cannot read this clone’s default repository" : "No default repository is set"}</strong>
-      <p>{gh.status === "invalid" ? gh.warning : <>gh picks by remote name (<code>upstream</code>, then <code>github</code>, then <code>origin</code>), not by where you push. A <code>gh pr create</code> run by an agent or a script would open its pull request on <code>{gh.repository}</code>.</>} Run this in a terminal to choose. PwrGit does not change your Git config.</p>
-      {gh.fix !== null && <div className="repository-setup__fix"><code>{gh.fix}</code><button type="button" className="modal__cancel" onClick={() => { void copyText(gh.fix ?? "").then(() => setCopied(true)).catch(() => setCopied(false)); }}>{copied ? "Copied" : "Copy"}</button></div>}
+    {gh !== null && notice !== null && <div className="repository-setup__warning" role="status">
+      <strong>{movedOnConflict ? "gh still targets the repository this fork moved on from" : gh.status === "invalid" ? "gh cannot read this clone’s default repository" : "No default repository is set"}</strong>
+      <p>{movedOnConflict || gh.status === "invalid" ? notice.text : <>gh picks by remote name (<code>upstream</code>, then <code>github</code>, then <code>origin</code>), not by where you push. A <code>gh pr create</code> run by an agent or a script would open its pull request on <code>{gh.repository}</code>.</>}</p>
+      {useRemote !== null && useRepository !== null && command !== null && <div className="repository-setup__fix">
+        <code>{command}</code>
+        <button type="button" className="modal__cancel" onClick={() => { void copyText(command).then(() => setCopied(true)).catch(() => setCopied(false)); }}>{copied ? "Copied" : "Copy"}</button>
+        <button type="button" className="modal__create" aria-busy={busy} onClick={() => { if (!busy) onUse(useRemote); }}>Set as gh default</button>
+      </div>}
+      <p>Setting it changes this clone’s Git config, the same line <code>gh repo set-default</code> writes. PwrGit changes it only when you click.</p>
     </div>}
     {gh !== null && gh.candidates.length > 1 && <>
-      <p className="repository-setup__intro">GitHub repositories this clone has remotes for. To choose another, run <code>gh repo set-default OWNER/REPO</code>.</p>
+      <p className="repository-setup__intro">GitHub repositories this clone has remotes for.</p>
       <div className="repository-setup__candidates">{gh.candidates.map((candidate) => {
-        const chosen = candidate.repository === gh.repository && candidate.host === gh.host;
-        return <div key={`${candidate.host}/${candidate.repository}`} className={`repository-setup__candidate${chosen ? " is-chosen" : ""}`}><code>{candidate.repository}</code><span>{candidate.remotes.join(", ")}</span>{chosen && <strong>gh uses</strong>}</div>;
+        const chosen = candidate.repository === gh.repository && candidate.host === gh.host && gh.status !== "invalid";
+        const remote = candidate.remotes[0];
+        return <div key={`${candidate.host}/${candidate.repository}`} className={`repository-setup__candidate${chosen ? " is-chosen" : ""}`}><code>{candidate.repository}</code><span>{candidate.remotes.join(", ")}</span>{chosen ? <strong>{gh.status === "set" ? "gh default" : "gh guesses"}</strong> : remote !== undefined && <button type="button" className="modal__cancel" aria-busy={busy} onClick={() => { if (!busy) onUse(remote); }}>Use for gh</button>}</div>;
       })}</div>
     </>}
   </>;
@@ -101,6 +122,16 @@ export function RepositorySetupSheet({ repo, initialPage = "hooks", onClose, pla
     return setup?.ignore.find((layer) => layer.path === testResult.source || layer.displayPath === testResult.source || (layer.destination === "gitignore" && testResult.source === ".gitignore"))?.destination ?? null;
   }, [testResult, setup]);
 
+  const [ghBusy, setGhBusy] = useState(false);
+  const pointGhAt = async (remote: string): Promise<void> => {
+    setGhBusy(true);
+    const result = await dispatch("repo:setGhDefault", { repoId: repo.id, remote });
+    setGhBusy(false);
+    if (!result.ok) { setError(result.error.message); return; }
+    setSetup((current) => current === null ? current : { ...current, ghDefault: result.value });
+    setError(null);
+  };
+
   const saveExclude = async (): Promise<void> => {
     if (exclude === undefined || saving) return;
     setSaving(true);
@@ -136,7 +167,7 @@ export function RepositorySetupSheet({ repo, initialPage = "hooks", onClose, pla
           <nav className="repository-setup__nav" aria-label="Repository setup pages">
             <button type="button" className={page === "hooks" ? "is-selected" : ""} onClick={() => setPage("hooks")}>Hooks <span>{activeHooks.length}</span></button>
             <button type="button" className={page === "ignore" ? "is-selected" : ""} onClick={() => setPage("ignore")}>Ignore rules <span>{setup?.ignore.reduce((count, layer) => count + layer.lines.length, 0) ?? 0}</span></button>
-            <button type="button" className={page === "gh" ? "is-selected" : ""} onClick={() => setPage("gh")}>GitHub CLI <span>{(setup?.ghDefault?.warning ?? null) !== null ? "!" : ""}</span></button>
+            <button type="button" className={page === "gh" ? "is-selected" : ""} onClick={() => setPage("gh")}>GitHub CLI <span>{ghDefaultNotice(setup?.ghDefault ?? null, readMovedOnAnswer(repo.id) === "tracked" ? "origin" : null) !== null ? "!" : ""}</span></button>
           </nav>
           <main className="repository-setup__body">
             {error !== null && <div className="modal__error" role="alert">{error}</div>}
@@ -155,7 +186,7 @@ export function RepositorySetupSheet({ repo, initialPage = "hooks", onClose, pla
               <div className="repository-setup__actions"><button type="button" className="modal__cancel" onClick={() => void openPath(setup.hooks.directory)}>Open hooks directory</button><button type="button" className="modal__cancel" onClick={() => void dispatch("shell:revealPath", { path: setup.hooks.directory })}>Reveal directory</button><button type="button" className="modal__cancel" onClick={() => setMapOpen(!mapOpen)} aria-expanded={mapOpen}>{mapOpen ? "Hide hook map" : "Hook map…"}</button>{setup.hooks.manager !== null && <span>Managed by {setup.hooks.manager}</span>}</div>
               {mapOpen && <div className="repository-setup__map"><p className="repository-setup__intro">The hooks Git can run at each operation. Lit hooks are active in this clone; warning hooks are shadowed.</p>{hookLanes.map((lane) => <div className="repository-setup__lane" key={lane.name}><strong>{lane.name}<small>{lane.action}</small></strong><div>{lane.hooks.map((name) => { const active = activeHooks.some((hook) => hook.name === name); const shadowed = shadowedHooks.some((hook) => hook.name === name); return <button type="button" key={name} className={`${active ? "is-active" : shadowed ? "is-shadowed" : ""}${selectedMapHook === name ? " is-selected" : ""}`} onClick={() => setSelectedMapHook(name)}>{name}</button>; })}</div></div>)}{selectedMapHook !== null && <div className="repository-setup__map-detail"><strong><code>{selectedMapHook}</code></strong>{mappedHook === undefined ? <span>No executable <code>{selectedMapHook}</code> hook in this clone.</span> : <span><code>{mappedHook.displayPath}</code> → <code>{mappedHook.calls}</code>{shadowedHooks.includes(mappedHook) ? " · shadowed, not run" : mappedHook.lastRun ? ` · last ran ${(mappedHook.lastRun.elapsedMs / 1000).toFixed(1)}s, exit ${mappedHook.lastRun.exitCode}` : " · active"}</span>}</div>}</div>}
             </>}
-            {setup !== null && page === "gh" && <GhDefaultPage gh={setup.ghDefault} scope={scope} />}
+            {setup !== null && page === "gh" && <GhDefaultPage gh={setup.ghDefault} scope={scope} movedOnRemote={readMovedOnAnswer(repo.id) === "tracked" ? "origin" : null} busy={ghBusy} onUse={(remote) => void pointGhAt(remote)} />}
             {setup !== null && page === "ignore" && <>
               <div className="repository-setup__heading"><h3>Ignore rules</h3></div>
               <p className="repository-setup__intro">Git checks these three places in precedence order. Within a file, later matches can override earlier ones. Rules hide untracked files only.</p>
