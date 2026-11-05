@@ -14,7 +14,7 @@
 import { execFile } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
 import { createReadStream, createWriteStream } from "node:fs";
-import { mkdir, open, readdir, readFile, rename, rm, stat, unlink, writeFile } from "node:fs/promises";
+import { link, mkdir, readdir, readFile, rename, rm, stat, unlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { Readable, Transform } from "node:stream";
 import { pipeline } from "node:stream/promises";
@@ -59,6 +59,8 @@ type BuildRecord = {
   sourceRevision: string;
   key: PlatformKey;
   inventorySha256: string;
+  /** Linux: the CA bundle the release named (`ca_bundle.sha256`). */
+  caBundleSha256?: string;
   archiveSha256: string;
   catalogSha256: string;
   trust: "signed" | "checksum";
@@ -94,6 +96,8 @@ export type ManagedGitDeps = {
   onProgress?: (progress: ManagedGitProgress) => void;
   log?: (level: "info" | "warn" | "error", message: string) => void;
   isProcessAlive?: (pid: number) => boolean;
+  /** The pid the install lock names (tests run two "processes" in one). */
+  pid?: number;
 };
 
 export class ManagedGitInstallError extends Error {
@@ -166,6 +170,8 @@ export class ManagedGitService {
   /** Builds verified in this session, by id: their payload directories. */
   private readonly verified = new Map<string, string>();
   private selectedError: string | null = null;
+  /** Launch pruning; an install in this process waits for it. */
+  private pruning: Promise<void> = Promise.resolve();
 
   constructor(private readonly deps: ManagedGitDeps) {
     this.key = managedPlatformKey(deps.platform, deps.arch);
@@ -366,9 +372,21 @@ export class ManagedGitService {
       signal: signal === undefined ? timeout : AbortSignal.any([signal, timeout])
     });
     if (!response.ok) throw new Error(`Download failed with HTTP ${response.status} for ${url}`);
-    const bytes = Buffer.from(await response.arrayBuffer());
-    if (bytes.length > MAX_METADATA_BYTES) throw new CatalogError(`${url} is larger than a release catalog can be`);
-    return bytes;
+    const tooLarge = (): CatalogError => new CatalogError(`${url} is larger than a release catalog can be`);
+    if (Number(response.headers.get("content-length")) > MAX_METADATA_BYTES) throw tooLarge();
+    // Read no further than the cap: a body that lies about (or omits) its
+    // length is stopped there, not buffered whole.
+    const chunks: Buffer[] = [];
+    let size = 0;
+    if (response.body !== null) {
+      for await (const chunk of Readable.fromWeb(response.body as unknown as NodeReadableStream<Uint8Array>)) {
+        size += (chunk as Buffer).length;
+        // Leaving the loop destroys the stream, which cancels the body.
+        if (size > MAX_METADATA_BYTES) throw tooLarge();
+        chunks.push(chunk as Buffer);
+      }
+    }
+    return Buffer.concat(chunks);
   }
 
   // ---------- install ----------
@@ -412,12 +430,19 @@ export class ManagedGitService {
       if (candidate === undefined) throw new ManagedGitInstallError(`${version} is not a build this PwrGit can install.`, "checking");
       const accepted = await this.acceptCandidate(candidate, signal);
       const id = buildId(accepted.pin.version, accepted.pin.sourceRevision);
+      await this.pruning;
       release = await this.lock();
       const store = await this.readStore();
       if (store.builds.some((build) => build.id === id) && (await exists(this.payloadDir(id)))) {
-        await this.verifyBuild(id);
-        this.publish({ phase: "ready", version });
-        return await this.status();
+        try {
+          await this.verifyBuild(id);
+          this.publish({ phase: "ready", version });
+          return await this.status();
+        } catch (error) {
+          // A damaged copy is what a reinstall repairs: download it again
+          // and replace it below, rather than failing the same way forever.
+          this.deps.log?.("warn", `managed Git ${id} failed its check (${errorText(error)}); installing it again`);
+        }
       }
 
       await mkdir(this.deps.root, { recursive: true });
@@ -427,13 +452,15 @@ export class ManagedGitService {
       const cachedArchive = join(archivesDir, `${accepted.archiveSha256}.tar.gz`);
 
       step("downloading");
-      const fromCache = (await exists(cachedArchive)) && (await sha256File(cachedArchive)) === accepted.archiveSha256;
+      const cachedSha256 = (await exists(cachedArchive)) ? await sha256File(cachedArchive) : null;
+      const fromCache = cachedSha256 === accepted.archiveSha256;
       const archive = fromCache ? cachedArchive : join(staging, accepted.archiveName);
       if (!fromCache) await this.download(accepted.archiveUrl, archive, accepted.archiveSize, version, signal);
       // The check that gates extraction is always on the bytes about to be
-      // unpacked, whether they were just downloaded or came from the cache.
+      // unpacked, whether they were just downloaded or came from the cache
+      // (hashed once, just above).
       step("checksum");
-      const actual = await sha256File(archive);
+      const actual = fromCache ? cachedSha256 : await sha256File(archive);
       if (actual !== accepted.archiveSha256) {
         await rm(archive, { force: true });
         throw new ManagedGitInstallError(
@@ -474,6 +501,7 @@ export class ManagedGitService {
         sourceRevision: accepted.pin.sourceRevision,
         key: this.key,
         inventorySha256: accepted.pin.asset.inventory_sha256,
+        ...(accepted.pin.asset.ca_bundle_sha256 === undefined ? {} : { caBundleSha256: accepted.pin.asset.ca_bundle_sha256 }),
         archiveSha256: accepted.archiveSha256,
         catalogSha256: accepted.catalogSha256,
         trust: this.key === "darwin-universal" ? "signed" : "checksum",
@@ -565,7 +593,7 @@ export class ManagedGitService {
         "downloading"
       );
     }
-    if (total !== undefined && size !== null && received !== size) {
+    if (size !== null && received !== size) {
       throw new ManagedGitInstallError(`The download ended at ${received} of ${size} bytes.`, "downloading");
     }
   }
@@ -575,25 +603,33 @@ export class ManagedGitService {
    *  holder's lock is taken over. */
   private async lock(): Promise<() => Promise<void>> {
     const file = join(this.deps.root, ".install.lock");
+    const pid = this.deps.pid ?? process.pid;
     await mkdir(this.deps.root, { recursive: true });
-    for (let attempt = 0; attempt < 2; attempt += 1) {
-      try {
-        const handle = await open(file, "wx", 0o600);
-        await handle.writeFile(String(process.pid));
-        await handle.close();
-        return async () => {
+    // The pid is written first and linked into place, so the lock never
+    // exists without its holder: a reader can't mistake one being created
+    // (still empty) for a dead holder's and take it over.
+    const claim = join(this.deps.root, `.install.lock-${randomUUID()}`);
+    await writeFile(claim, String(pid), { mode: 0o600 });
+    try {
+      for (let attempt = 0; attempt < 2; attempt += 1) {
+        try {
+          await link(claim, file);
+          return async () => {
+            await unlink(file).catch(() => undefined);
+          };
+        } catch (error) {
+          if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
+          const holder = Number((await readFile(file, "utf8").catch(() => "")).trim());
+          if (Number.isSafeInteger(holder) && holder > 0 && holder !== pid && (this.deps.isProcessAlive ?? defaultProcessAlive)(holder)) {
+            throw new ManagedGitInstallError("Another PwrGit is installing a build of its Git.", "checking");
+          }
           await unlink(file).catch(() => undefined);
-        };
-      } catch (error) {
-        if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
-        const holder = Number((await readFile(file, "utf8").catch(() => "")).trim());
-        if (Number.isSafeInteger(holder) && holder > 0 && holder !== process.pid && (this.deps.isProcessAlive ?? defaultProcessAlive)(holder)) {
-          throw new ManagedGitInstallError("Another PwrGit is installing a build of its Git.", "checking");
         }
-        await unlink(file).catch(() => undefined);
       }
+      throw new ManagedGitInstallError("Couldn’t take the install lock.", "checking");
+    } finally {
+      await unlink(claim).catch(() => undefined);
     }
-    throw new ManagedGitInstallError("Couldn’t take the install lock.", "checking");
   }
 
   // ---------- verification and activation ----------
@@ -614,7 +650,12 @@ export class ManagedGitService {
       version: record.version,
       sourceRevision: record.sourceRevision,
       key: this.key,
-      asset: { sha256: record.archiveSha256, inventory_sha256: record.inventorySha256, url: "" }
+      asset: {
+        sha256: record.archiveSha256,
+        inventory_sha256: record.inventorySha256,
+        ...(record.caBundleSha256 === undefined ? {} : { ca_bundle_sha256: record.caBundleSha256 }),
+        url: ""
+      }
     };
     await (this.deps.verify ?? verifyManagedRuntime)(directory, pin, { probe: true });
     this.verified.set(id, directory);
@@ -665,8 +706,32 @@ export class ManagedGitService {
    * (just downloaded, maybe not yet used). Running this at launch is what
    * keeps a build a running command started on from being deleted under it.
    */
-  async prune(): Promise<void> {
+  prune(): Promise<void> {
+    const run = this.runPrune();
+    this.pruning = run.catch(() => undefined);
+    return run;
+  }
+
+  /** Under the install lock: another PwrGit sharing this directory may be
+   *  installing, and its staging directory and new build are not leftovers.
+   *  While one is, nothing is pruned; the next launch does it. */
+  private async runPrune(): Promise<void> {
     if (this.key === null) return;
+    let release: () => Promise<void>;
+    try {
+      release = await this.lock();
+    } catch (error) {
+      this.deps.log?.("info", `managed Git prune skipped: ${errorText(error)}`);
+      return;
+    }
+    try {
+      await this.pruneLocked();
+    } finally {
+      await release();
+    }
+  }
+
+  private async pruneLocked(): Promise<void> {
     const store = await this.readStore();
     const selection = this.deps.selection();
     const newest = (await this.status()).builds[0]?.id;

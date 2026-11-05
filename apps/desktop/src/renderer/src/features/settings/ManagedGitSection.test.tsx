@@ -4,6 +4,7 @@ import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
+  err,
   ok,
   type GitRuntimeStatus,
   type ManagedGitBuild,
@@ -220,6 +221,32 @@ describe("PwrGit’s Git", () => {
     expect(document.activeElement?.textContent).toBe("Try again");
     await act(async () => button("Try again").click());
     expect(calls("gitManaged:install")).toHaveLength(2);
+  });
+
+  // Rule: a failure is said once. One main reported as progress is the
+  // failed steps' alert; only one refused before it started is the field's.
+  it("says an install failure once, and a refusal before it started in the field", async () => {
+    const error = "libexec/git-core/git-remote-https isn’t signed by PwrDrvr (team T44CNHC4UH). Nothing was installed.";
+    let answer: (value: unknown) => void = () => undefined;
+    mocks.dispatch.mockImplementation(async (channel: string) => {
+      if (channel === "git:runtimeStatus") return ok(runtime);
+      if (channel === "gitManaged:install") return new Promise((resolve) => (answer = resolve));
+      return ok(managed);
+    });
+    await render();
+    await act(async () => button("Download and verify").click());
+    managed = { ...UPDATE, progress: { phase: "failed", version: V5, failedPhase: "verifying", error, updatedAt: 3 } };
+    await push({ phase: "failed", version: V5, failedPhase: "verifying", error });
+    await act(async () => answer(err({ kind: "git", code: "managed_install_failed", message: error })));
+    expect(card().textContent?.split(error).length).toBe(2);
+
+    // Try again is refused before it starts: nothing was published.
+    const refusal = "2.56.0-dev-pwrgit.6 is still installing.";
+    await act(async () => button("Try again").click());
+    managed = UPDATE;
+    await push({ phase: "idle" });
+    await act(async () => answer(err({ kind: "git", code: "managed_install_failed", message: refusal })));
+    expect(card().textContent).toContain(refusal);
   });
 
   it("keeps a Git chosen by path, and says so", async () => {

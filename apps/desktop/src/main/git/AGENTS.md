@@ -165,10 +165,15 @@ its own root; the two never share a directory.
 - **A chosen build runs as the whole bundle** (`useManagedGit`): its
   `LOCAL_GIT_DIRECTORY`, helpers, templates and, on Linux, `ssl/cacert.pem`.
 - **Launch verifies the chosen build before any Git runs.** Commands wait on
-  `gitReady()`; a build that fails its check fails every command by name, and
-  never falls back. Pruning runs only at launch, so a build in use by a running
-  operation is never removed mid-session. Known gap: a multi-step operation can
-  pick up a build chosen while it runs.
+  `gitReady()` and pick their Git only after it opens (a launch taken before
+  the wait binds the shipped bundle). A build that fails its check fails every
+  command by name, and never falls back. Pruning runs only at launch, so a
+  build in use by a running operation is never removed mid-session. Known gap:
+  a multi-step operation can pick up a build chosen while it runs.
+- **`.install.lock` is shared by every PwrGit on the data directory.** Pruning
+  takes it too, and skips while another holds it. The pid is written before the
+  lock is linked into place: an empty lock is never a dead holder's
+  (`install-lock.race.test.ts`).
 - **No E2E may reach GitHub.** `launchApp` sets
   `PWRGIT_E2E_MANAGED_GIT_OFFLINE`, so the check fails as offline.
 

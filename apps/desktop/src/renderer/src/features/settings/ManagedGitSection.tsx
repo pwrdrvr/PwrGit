@@ -190,6 +190,8 @@ export function ManagedGitSection(props: { git: GitSettingsState; onOpenUpdates?
   const useBuildRef = useRef<HTMLButtonElement | null>(null);
   const retryRef = useRef<HTMLButtonElement | null>(null);
   const kind = state?.kind;
+  // An action's error belongs to the state it was made in.
+  useEffect(() => setError(null), [kind]);
   useEffect(() => {
     if (!following.current) return;
     if (kind === "installing") cancelRef.current?.focus();
@@ -206,9 +208,7 @@ export function ManagedGitSection(props: { git: GitSettingsState; onOpenUpdates?
     setError(null);
     following.current = true;
     void git.install(version).then((failure) => {
-      // A failure main reported as progress is shown by the steps; this is
-      // for one it refused before starting ("still installing").
-      if (failure !== null && git.managed?.progress?.phase !== "failed") setError(failure);
+      if (failure !== null) setError(failure);
     });
   };
   const use = (build: ManagedGitBuild | null): void => {
@@ -217,6 +217,10 @@ export function ManagedGitSection(props: { git: GitSettingsState; onOpenUpdates?
   };
 
   const chip = state?.chip;
+  // A failure main reported as progress is already said by the failed
+  // steps; the field error is for one refused before it started. Decided
+  // from this render's state, never from the state the click saw.
+  const fieldError = kind === "failed" ? null : error;
   return (
     <SettingsSection
       eyebrow="Git"
@@ -245,7 +249,7 @@ export function ManagedGitSection(props: { git: GitSettingsState; onOpenUpdates?
           managed={managed}
           state={state as ManagedCardState}
           now={now}
-          error={error}
+          error={fieldError}
           copied={copied}
           refs={{ cancelRef, useBuildRef, retryRef }}
           onInstall={install}

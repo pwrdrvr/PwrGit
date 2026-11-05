@@ -2,7 +2,7 @@
 // at a time (installed path, downloaded build, or bundle), installed >
 // managed > bundled when both are stored, and the build being left is always
 // the one rollback offers. (Installing never chooses: managed-git-service.test.)
-import { mkdtempSync, mkdirSync, realpathSync, rmSync } from "node:fs";
+import { chmodSync, mkdtempSync, mkdirSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import fc from "fast-check";
@@ -10,6 +10,8 @@ import { afterEach, describe, expect, test } from "vitest";
 import {
   activeGitPath,
   execGit,
+  execGitBinary,
+  execGitRecords,
   gitLaunch,
   holdGitUntil,
   installedGitEnvironment,
@@ -119,5 +121,28 @@ describe("a downloaded build runs as the whole bundle", () => {
       expect(refused.error.code).toBe("spawn_failed");
       expect(refused.error.message).toMatch(/failed its check at launch/);
     }
+  });
+
+  // Rule: a command asked for while the launch check runs, runs the Git the
+  // check chose; it is never bound to the shipped bundle before the gate opens.
+  test.skipIf(process.platform === "win32")("a command queued behind the launch check runs the build the check chose", async () => {
+    scratch = realpathSync(mkdtempSync(join(tmpdir(), "pwrgit-managed-gate-")));
+    const build = join(scratch, "versions", "2.56.0-dev-pwrgit.5-aaaaaaa", "darwin-universal");
+    mkdirSync(join(build, "bin"), { recursive: true });
+    const git = join(build, "bin", "git");
+    // NUL-terminated, so the record reader keeps it as a record too.
+    writeFileSync(git, "#!/bin/sh\nprintf 'git version 2.56.0-dev-pwrgit.5\\n\\0'\n");
+    chmodSync(git, 0o755);
+    let release!: () => void;
+    holdGitUntil(new Promise<void>((resolve) => (release = resolve)));
+    const text = execGit(["--version"], tmpdir());
+    const binary = execGitBinary(["--version"], tmpdir());
+    const records = execGitRecords(["--version"], tmpdir(), { maxRecords: 10, maxChars: 1000, matches: () => true });
+    useManagedGit(build);
+    release();
+    const [a, b, c] = await Promise.all([text, binary, records]);
+    expect(a.ok && a.value.stdout).toContain("git version 2.56.0-dev-pwrgit.5");
+    expect(b.ok && b.value.stdout.toString()).toContain("git version 2.56.0-dev-pwrgit.5");
+    expect(c.ok && c.value.records.join("")).toContain("git version 2.56.0-dev-pwrgit.5");
   });
 });

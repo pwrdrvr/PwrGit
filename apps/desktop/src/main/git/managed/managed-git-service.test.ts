@@ -1,4 +1,4 @@
-import { existsSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, test } from "vitest";
@@ -69,7 +69,10 @@ function serve(releases: FixtureRelease[], listOverride?: unknown[]): Server {
   return server;
 }
 
-function service(server: Server, options: { key?: "x64" | "arm64"; selection?: ManagedGitSelection; installed?: boolean } = {}) {
+function service(
+  server: Server,
+  options: { key?: "x64" | "arm64"; selection?: ManagedGitSelection; installed?: boolean; pid?: number; alive?: (pid: number) => boolean } = {}
+) {
   const progress: ManagedGitProgress[] = [];
   const probes: string[] = [];
   const selection: ManagedGitSelection = options.selection ?? {};
@@ -85,7 +88,9 @@ function service(server: Server, options: { key?: "x64" | "arm64"; selection?: M
     probe: async (directory) => {
       probes.push(directory);
     },
-    onProgress: (event) => progress.push(event)
+    onProgress: (event) => progress.push(event),
+    ...(options.pid === undefined ? {} : { pid: options.pid }),
+    ...(options.alive === undefined ? {} : { isProcessAlive: options.alive })
   });
   return { svc, progress, probes, selection };
 }
@@ -341,5 +346,80 @@ describe("ManagedGitService", () => {
     expect(readdirSync(join(root(), "archives"))).toHaveLength(3);
     const stored = JSON.parse(readFileSync(join(root(), "builds.json"), "utf8")) as { builds: unknown[] };
     expect(stored.builds).toHaveLength(3);
+  });
+
+  // Rule: a reinstall repairs a damaged copy; it never fails the same check
+  // forever because a record of the build exists.
+  test("downloading a build again repairs a damaged copy of it", async () => {
+    const five = build("2.56.0-dev-pwrgit.5");
+    const { svc } = service(serve([five]));
+    await svc.check({ force: true });
+    await svc.install("2.56.0-dev-pwrgit.5");
+    const config = join(root(), "versions", "2.56.0-dev-pwrgit.5-97dd200", "linux-x64", "etc", "gitconfig");
+    const original = readFileSync(config, "utf8");
+    writeFileSync(config, "[core]\n\tfsmonitor = /tmp/x\n");
+    const again = service(serve([five])).svc;
+    await again.check({ force: true });
+    expect((await again.install("2.56.0-dev-pwrgit.5")).builds.map((b) => b.id)).toEqual(["2.56.0-dev-pwrgit.5-97dd200"]);
+    expect(readFileSync(config, "utf8")).toBe(original);
+    const launch = service(serve([five]), { selection: { selected: "2.56.0-dev-pwrgit.5-97dd200" } });
+    expect(await launch.svc.activateStored()).not.toBeNull();
+  });
+
+  // Rule: launch pruning never removes what another PwrGit sharing the
+  // directory is installing.
+  test("launch pruning leaves another PwrGit's install alone", async () => {
+    mkdirSync(join(root(), ".staging-elsewhere", "runtime"), { recursive: true });
+    writeFileSync(join(root(), ".install.lock"), "4242");
+    const { svc } = service(serve([]), { pid: 1000, alive: (pid) => pid === 4242 });
+    await svc.prune();
+    expect(existsSync(join(root(), ".staging-elsewhere", "runtime"))).toBe(true);
+    expect(readFileSync(join(root(), ".install.lock"), "utf8")).toBe("4242");
+    // Once nobody holds the lock, the leftover goes.
+    rmSync(join(root(), ".install.lock"));
+    await svc.prune();
+    expect(existsSync(join(root(), ".staging-elsewhere"))).toBe(false);
+  });
+
+  // Rule: the Linux CA bundle the release named is checked every time a
+  // build is verified, not only when it was installed.
+  test("launch checks a Linux build's CA bundle against the one its release named", async () => {
+    const five = build("2.56.0-dev-pwrgit.5");
+    const first = service(serve([five])).svc;
+    await first.check({ force: true });
+    await first.install("2.56.0-dev-pwrgit.5");
+    const store = JSON.parse(readFileSync(join(root(), "builds.json"), "utf8")) as { builds: Array<Record<string, unknown>> };
+    expect(store.builds[0]?.["caBundleSha256"]).toMatch(/^[0-9a-f]{64}$/);
+    store.builds[0]!["caBundleSha256"] = "c".repeat(64);
+    writeFileSync(join(root(), "builds.json"), JSON.stringify(store));
+    const launch = service(serve([five]), { selection: { selected: "2.56.0-dev-pwrgit.5-97dd200" } });
+    await expect(launch.svc.activateStored()).rejects.toThrow(/CA bundle doesn’t match its release/);
+  });
+
+  // Rule: release metadata is read no further than its size cap.
+  test("an oversized release catalog is refused without reading all of it", async () => {
+    const five = build("2.56.0-dev-pwrgit.5");
+    const server = serve([five]);
+    const catalogUrl = `https://github.com/huntharo/git/releases/download/${five.tag}/runtime-manifest.json`;
+    let pulled = 0;
+    const inner = server.fetch;
+    server.fetch = async (input, init) => {
+      if (String(input) !== catalogUrl) return inner(input, init);
+      const chunk = new Uint8Array(64 * 1024).fill(0x20);
+      return new Response(
+        new ReadableStream<Uint8Array>({
+          pull(controller) {
+            pulled += chunk.length;
+            if (pulled > 64 * 1024 * 1024) controller.close();
+            else controller.enqueue(chunk);
+          }
+        })
+      );
+    };
+    const { svc } = service(server);
+    const status = await svc.check({ force: true });
+    expect(status.latest).toBeNull();
+    expect(status.checkError ?? "").toMatch(/larger than a release catalog can be/);
+    expect(pulled).toBeLessThan(4 * 1024 * 1024);
   });
 });

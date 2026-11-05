@@ -350,7 +350,7 @@ type ExecFileResult<T> = { stdout: T; stderr: T; exitCode: number };
 /** `dugite.exec`'s contract for any Git: a non-zero exit resolves; only a
  *  failure to start (a string error code, such as ENOENT) rejects. */
 function execFileGit(
-  launch: GitLaunch,
+  overrides: GitExecOptions["env"],
   args: string[],
   cwd: string,
   options: {
@@ -360,7 +360,9 @@ function execFileGit(
     processCallback?: (child: ReturnType<typeof execFile>) => void;
   }
 ): Promise<ExecFileResult<string | Buffer>> {
-  return gitReady().then(() => runExecFileGit(launch, args, cwd, options));
+  // The Git is picked once the gate opens, not when the command was asked
+  // for: a command queued behind the launch check runs the build it chose.
+  return gitReady().then(() => runExecFileGit(gitLaunch(overrides), args, cwd, options));
 }
 
 function runExecFileGit(
@@ -493,7 +495,7 @@ export const execGit: GitExec = async (args, cwd, options) => {
   if (alreadyAborted !== null) return err(abortError(alreadyAborted));
   try {
     const invocation = gitProcessInvocation(args, cwd);
-    const result = await execFileGit(gitLaunch(options?.env), invocation.args, invocation.processCwd, {
+    const result = await execFileGit(options?.env, invocation.args, invocation.processCwd, {
       encoding: "utf8",
       ...(options?.signal !== undefined ? { signal: options.signal } : {}),
       ...(options?.killSignal !== undefined
@@ -684,7 +686,7 @@ export type GitExecBinary = (
 export const execGitBinary: GitExecBinary = async (args, cwd) => {
   try {
     const invocation = gitProcessInvocation(args, cwd);
-    const result = await execFileGit(gitLaunch(NO_OPTIONAL_LOCKS.env), invocation.args, invocation.processCwd, {
+    const result = await execFileGit(NO_OPTIONAL_LOCKS.env, invocation.args, invocation.processCwd, {
       encoding: "buffer"
     });
     return ok({
