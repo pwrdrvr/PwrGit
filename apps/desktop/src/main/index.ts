@@ -283,8 +283,10 @@ const managedGit = new ManagedGitService({
       }
     : {})
 });
+// Configured on every platform: where PwrGit offers no build (Windows), the
+// service answers "not offered" rather than Settings' reads going unanswered.
 configureManagedGitRuntime(
-  managedGit.key === null ? null : managedGit,
+  managedGit,
   app.isPackaged && managedGit.key !== null ? (managedGit.key === "darwin-universal" ? "signed" : "checksum") : undefined
 );
 holdGitUntil(

@@ -77,7 +77,9 @@ describe("a downloaded build runs as the whole bundle", () => {
     scratch = null;
   });
 
-  test("its own binary, exec path, templates and system config; an installed Git sees none of it", () => {
+  // PwrGit offers no build of its own on Windows, whose bundle layout
+  // (cmd/git.exe) this would otherwise have to spell.
+  test.skipIf(process.platform === "win32")("its own binary, exec path, templates and system config; an installed Git sees none of it", () => {
     scratch = realpathSync(mkdtempSync(join(tmpdir(), "pwrgit-managed-launch-")));
     const build = join(scratch, "versions", "2.56.0-dev-pwrgit.5-aaaaaaa", "darwin-universal");
     mkdirSync(join(build, "bin"), { recursive: true });

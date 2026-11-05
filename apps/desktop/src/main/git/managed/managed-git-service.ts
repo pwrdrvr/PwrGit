@@ -123,7 +123,7 @@ export function unsafeArchiveMember(name: string): boolean {
 /** List first, then unpack: tar's own guards differ by implementation (GNU
  *  tar strips a leading `/`, bsdtar refuses `..`), so the rule is ours. */
 async function defaultExtract(archive: string, destination: string, signal: AbortSignal): Promise<void> {
-  const members = (await runTar(["-tzf", archive], signal)).split("\n").filter((name) => name !== "");
+  const members = (await runTar(["-tzf", archive], signal)).split(/\r?\n/).filter((name) => name !== "");
   const unsafe = members.find(unsafeArchiveMember);
   if (unsafe !== undefined) throw new Error(`The archive has an unsafe member (${unsafe}), so nothing was unpacked.`);
   await runTar(["-xzf", archive, "-C", destination], signal);

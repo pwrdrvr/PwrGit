@@ -14,9 +14,20 @@ const mount = (page: Page, view: View): Promise<void> =>
     (window as unknown as { __harness: { mount: (view: string) => void } }).__harness.mount(name);
   }, view);
 
-/** The window's content size, as the Settings window would be resized. */
-const resize = (app: ElectronApplication, width: number, height: number): Promise<void> =>
-  app.evaluate(({ BrowserWindow }, [w, h]) => BrowserWindow.getAllWindows()[0]?.setContentSize(w!, h!), [width, height]);
+/**
+ * The window's content size, as the Settings window would be resized. The
+ * page is also pinned to the width itself: a hidden window's resize lands
+ * asynchronously on Linux CI, and a check that ran before it measured the
+ * old width.
+ */
+async function resize(app: ElectronApplication, width: number, height: number): Promise<void> {
+  await app.evaluate(({ BrowserWindow }, [w, h]) => BrowserWindow.getAllWindows()[0]?.setContentSize(w!, h!), [width, height]);
+  const page = await app.firstWindow();
+  await page.evaluate(async (w) => {
+    document.getElementById("root")!.style.width = `${w}px`;
+    await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+  }, width);
+}
 
 /**
  * Settings › Git, in a Vite build of the real Settings window against a fake
