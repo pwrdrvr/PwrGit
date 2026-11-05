@@ -97,12 +97,7 @@ function managerFor(cwd: string): string | null {
   return null;
 }
 
-/**
- * Which repository `gh` would act on here, and whether that is a guess. Two
- * Git reads, no gh process and no network: gh's own choice is a function of
- * the remote names and `remote.*.gh-resolved` (see `gh-default.ts`).
- * Best-effort: a failed read is null, never a failed setup sheet.
- */
+/** Every remote, as gh sees it: fetch URL parsed, gh-resolved attached. */
 async function readGhRemotes(git: GitExec, cwd: string, hosts: ForgeHostMap): Promise<GhRemoteInput[] | null> {
   const [remotes, resolvedConfig] = await Promise.all([
     git(["remote", "-v"], cwd, NO_OPTIONAL_LOCKS),
@@ -156,25 +151,32 @@ export async function setGhDefault(git: GitExec, cwd: string, remote: string, ho
   }
   const plan = planGhSetDefault(remotes, { host: named.host, repository: named.repository });
   if (plan === null) return err({ kind: "validation", code: "not_a_github_remote", message: `${remote} is not a GitHub remote gh can use.` });
-  for (const name of plan.unset) {
-    const unset = await git(["config", "--unset-all", `remote.${name}.gh-resolved`], cwd);
-    // 5: the key was already gone (another writer got there first).
+  // The new key first (`--replace-all` collapses a doubled one), then the
+  // others: a failure part-way leaves gh on the new default, never on none.
+  const setArgs = ["config", "--replace-all", `remote.${plan.set}.gh-resolved`, "base"];
+  const set = await git(setArgs, cwd);
+  if (!set.ok) return set;
+  const checked = requireExit0(set.value, setArgs);
+  if (!checked.ok) return checked;
+  for (const name of plan.unset.filter((candidate) => candidate !== plan.set)) {
+    const unsetArgs = ["config", "--unset-all", `remote.${name}.gh-resolved`];
+    const unset = await git(unsetArgs, cwd);
     if (!unset.ok) return unset;
+    // 5: the key was already gone (another writer got there first).
     if (unset.value.exitCode !== 0 && unset.value.exitCode !== 5) {
-      const failed = requireExit0(unset.value, ["config", "--unset-all", `remote.${name}.gh-resolved`]);
+      const failed = requireExit0(unset.value, unsetArgs);
       if (!failed.ok) return failed;
     }
   }
-  const set = await git(["config", `remote.${plan.set}.gh-resolved`, "base"], cwd);
-  if (!set.ok) return set;
-  const checked = requireExit0(set.value, ["config", `remote.${plan.set}.gh-resolved`, "base"]);
-  if (!checked.ok) return checked;
   const after = await readGhDefault(git, cwd, hosts);
   if (after === null) return err({ kind: "repo", code: "remotes_unreadable", message: "PwrGit could not read this repository’s remotes." });
   return ok(after);
 }
 
 export async function readRepositorySetup(git: GitExec, cwd: string, hosts: ForgeHostMap = {}): Promise<Result<RepositorySetup>> {
+  // Independent of the reads below, and re-run on every change event, so it
+  // overlaps them rather than adding two Git round trips to the end.
+  const ghDefaultRead = readGhDefault(git, cwd, hosts).catch(() => null);
   const locations = await ignoreDestinations(git, cwd);
   if (!locations.ok) return locations;
   const common = await commonDirectory(git, cwd);
@@ -202,7 +204,7 @@ export async function readRepositorySetup(git: GitExec, cwd: string, hosts: Forg
   const active = listHooks(activeDir, cwd, common.value, lastRuns);
   const shadowed = activeDir === defaultDir ? { hooks: [], sampleCount: 0 } : listHooks(defaultDir, cwd, common.value, undefined);
   const ignore = locations.value.destinations.map((destination) => ({ ...destination, ...readLines(destination.path) }));
-  const ghDefault = await readGhDefault(git, cwd, hosts);
+  const ghDefault = await ghDefaultRead;
   return ok({
     hooks: {
       directory: activeDir,

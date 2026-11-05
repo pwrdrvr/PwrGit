@@ -100,3 +100,31 @@ describe("RepositorySetupSheet GitHub CLI actions", () => {
     expect(container.querySelector(".repository-setup__fix code")?.textContent).toBe("gh repo set-default pwrdrvr/PwrDisk");
   });
 });
+
+describe("RepositorySetupSheet and the moved-on remote", () => {
+  afterEach(() => window.localStorage.clear());
+
+  // A contributor layout: origin is the original, the fork is another remote.
+  // The answer records which remote Pull reads; the sheet must not assume origin.
+  it("compares gh with the remote recorded alongside the moved-on answer", async () => {
+    window.localStorage.setItem("pwrgit.forkMovedOn.r1", "tracked");
+    window.localStorage.setItem("pwrgit.forkMovedOnRemote.r1", "mine");
+    const contributor: RepositorySetup = {
+      ...setup,
+      ghDefault: {
+        status: "implicit", host: "github.com", repository: "acme/widget", remote: "origin",
+        candidates: [
+          { host: "github.com", repository: "acme/widget", remotes: ["origin"] },
+          { host: "github.com", repository: "me/widget", remotes: ["mine"] }
+        ],
+        fix: null, warning: null
+      }
+    };
+    mocks.dispatch.mockImplementation(async (name: string) => name === "repo:setup" ? ok(contributor) : ok(null));
+    await act(async () => root.render(<RepositorySetupSheet repo={{ id: "r1", name: "widget", path: "/repo" }} initialPage="gh" onClose={vi.fn()} />));
+    expect(container.querySelector(".repository-setup__fix code")?.textContent).toBe("gh repo set-default me/widget");
+    const set = [...container.querySelectorAll<HTMLButtonElement>(".repository-setup__fix button")].find((b) => b.textContent === "Set as gh default");
+    await act(async () => set?.click());
+    expect(mocks.dispatch).toHaveBeenCalledWith("repo:setGhDefault", { repoId: "r1", remote: "mine" });
+  });
+});

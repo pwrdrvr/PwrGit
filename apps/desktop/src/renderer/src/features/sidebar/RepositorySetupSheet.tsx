@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { ghDefaultMismatch, ghDefaultNotice, type GhDefaultRepository, type IgnoreDestination, type RepositorySetup, type SetupIgnoreTest } from "@pwrgit/shared";
-import { readMovedOnAnswer } from "../graph/pull-choice";
+import { readMovedOnAnswer, readMovedOnRemote } from "../graph/pull-choice";
 import { copyText } from "../../lib/copyText";
 import { dispatch } from "../../lib/pwrgit";
 import { useModal } from "../../lib/useModal";
@@ -123,6 +123,8 @@ export function RepositorySetupSheet({ repo, initialPage = "hooks", onClose, pla
   }, [testResult, setup]);
 
   const [ghBusy, setGhBusy] = useState(false);
+  /** The fork's remote, when the user said the fork moved on from its original. */
+  const movedOnRemote = readMovedOnAnswer(repo.id) === "tracked" ? readMovedOnRemote(repo.id) : null;
   const pointGhAt = async (remote: string): Promise<void> => {
     setGhBusy(true);
     const result = await dispatch("repo:setGhDefault", { repoId: repo.id, remote });
@@ -167,7 +169,7 @@ export function RepositorySetupSheet({ repo, initialPage = "hooks", onClose, pla
           <nav className="repository-setup__nav" aria-label="Repository setup pages">
             <button type="button" className={page === "hooks" ? "is-selected" : ""} onClick={() => setPage("hooks")}>Hooks <span>{activeHooks.length}</span></button>
             <button type="button" className={page === "ignore" ? "is-selected" : ""} onClick={() => setPage("ignore")}>Ignore rules <span>{setup?.ignore.reduce((count, layer) => count + layer.lines.length, 0) ?? 0}</span></button>
-            <button type="button" className={page === "gh" ? "is-selected" : ""} onClick={() => setPage("gh")}>GitHub CLI <span>{ghDefaultNotice(setup?.ghDefault ?? null, readMovedOnAnswer(repo.id) === "tracked" ? "origin" : null) !== null ? "!" : ""}</span></button>
+            <button type="button" className={page === "gh" ? "is-selected" : ""} onClick={() => setPage("gh")}>GitHub CLI <span>{ghDefaultNotice(setup?.ghDefault ?? null, movedOnRemote) !== null ? "!" : ""}</span></button>
           </nav>
           <main className="repository-setup__body">
             {error !== null && <div className="modal__error" role="alert">{error}</div>}
@@ -186,7 +188,7 @@ export function RepositorySetupSheet({ repo, initialPage = "hooks", onClose, pla
               <div className="repository-setup__actions"><button type="button" className="modal__cancel" onClick={() => void openPath(setup.hooks.directory)}>Open hooks directory</button><button type="button" className="modal__cancel" onClick={() => void dispatch("shell:revealPath", { path: setup.hooks.directory })}>Reveal directory</button><button type="button" className="modal__cancel" onClick={() => setMapOpen(!mapOpen)} aria-expanded={mapOpen}>{mapOpen ? "Hide hook map" : "Hook map…"}</button>{setup.hooks.manager !== null && <span>Managed by {setup.hooks.manager}</span>}</div>
               {mapOpen && <div className="repository-setup__map"><p className="repository-setup__intro">The hooks Git can run at each operation. Lit hooks are active in this clone; warning hooks are shadowed.</p>{hookLanes.map((lane) => <div className="repository-setup__lane" key={lane.name}><strong>{lane.name}<small>{lane.action}</small></strong><div>{lane.hooks.map((name) => { const active = activeHooks.some((hook) => hook.name === name); const shadowed = shadowedHooks.some((hook) => hook.name === name); return <button type="button" key={name} className={`${active ? "is-active" : shadowed ? "is-shadowed" : ""}${selectedMapHook === name ? " is-selected" : ""}`} onClick={() => setSelectedMapHook(name)}>{name}</button>; })}</div></div>)}{selectedMapHook !== null && <div className="repository-setup__map-detail"><strong><code>{selectedMapHook}</code></strong>{mappedHook === undefined ? <span>No executable <code>{selectedMapHook}</code> hook in this clone.</span> : <span><code>{mappedHook.displayPath}</code> → <code>{mappedHook.calls}</code>{shadowedHooks.includes(mappedHook) ? " · shadowed, not run" : mappedHook.lastRun ? ` · last ran ${(mappedHook.lastRun.elapsedMs / 1000).toFixed(1)}s, exit ${mappedHook.lastRun.exitCode}` : " · active"}</span>}</div>}</div>}
             </>}
-            {setup !== null && page === "gh" && <GhDefaultPage gh={setup.ghDefault} scope={scope} movedOnRemote={readMovedOnAnswer(repo.id) === "tracked" ? "origin" : null} busy={ghBusy} onUse={(remote) => void pointGhAt(remote)} />}
+            {setup !== null && page === "gh" && <GhDefaultPage gh={setup.ghDefault} scope={scope} movedOnRemote={movedOnRemote} busy={ghBusy} onUse={(remote) => void pointGhAt(remote)} />}
             {setup !== null && page === "ignore" && <>
               <div className="repository-setup__heading"><h3>Ignore rules</h3></div>
               <p className="repository-setup__intro">Git checks these three places in precedence order. Within a file, later matches can override earlier ones. Rules hide untracked files only.</p>

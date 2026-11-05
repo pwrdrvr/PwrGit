@@ -49,6 +49,7 @@ import { PullMenu, type PullMenuRow } from "./PullMenu";
 import {
   forkMovedOn,
   readMovedOnAnswer,
+  readMovedOnRemote,
   readPullChoice,
   writeMovedOnAnswer,
   writePullChoice,
@@ -721,6 +722,9 @@ export function WorktreeHeader({
   /** The Push button, for the receipt's own Push after a tracking repair. */
   const pushButton = useRef<HTMLButtonElement>(null);
   const shownWorktreeId = useRef(worktree.id);
+  /** The repository on screen now, for writes that resolve after a switch. */
+  const shownRepoId = useRef(repo.id);
+  shownRepoId.current = repo.id;
   shownWorktreeId.current = worktree.id;
   /** The remotes a branch with no upstream can be published to, while the
    *  question is open. Loaded BEFORE the dialog opens, so its list never
@@ -1615,8 +1619,9 @@ export function WorktreeHeader({
   const movedOnUndecided = movedOn && movedOnAnswer === null;
   /** The remote PwrGit pulls from after "Pull from origin only". The answer
    *  is per repository, while the fork read is per branch (and absent on a
-   *  branch the original lacks), so fall back to `origin`, the fork. */
-  const movedOnRemote = movedOnAnswer === "tracked" ? (forkStatus?.tracked?.remote ?? "origin") : null;
+   *  branch the original lacks), so fall back to the remote recorded with
+   *  the answer. */
+  const movedOnRemote = movedOnAnswer === "tracked" ? (forkStatus?.tracked?.remote ?? readMovedOnRemote(repo.id)) : null;
   const ghNotice = ghDefaultNotice(repositorySetup?.ghDefault ?? null, movedOnRemote);
   const runs: PullChoice =
     (movedOn && movedOnAnswer !== "sync") ||
@@ -1670,18 +1675,24 @@ export function WorktreeHeader({
   });
   /** Point gh at a remote's repository: the user's own click, never implied. */
   const pointGhAt = async (remote: string): Promise<void> => {
-    const result = await dispatch("repo:setGhDefault", { repoId: repo.id, remote });
+    const repoId = repo.id;
+    const result = await dispatch("repo:setGhDefault", { repoId, remote });
     if (!result.ok) {
       showErrorToast({ title: "Could not set gh’s default repository", message: result.error.message, subject: { repoId: repo.id } });
       return;
     }
-    setRepositorySetup((current) => current === null ? current : { ...current, ghDefault: result.value });
+    // Only onto the repository it was read for: the user may have moved on
+    // to another one while the write ran, and its header would then show
+    // this repository's gh default until its own next re-read.
+    if (shownRepoId.current === repoId) {
+      setRepositorySetup((current) => current === null ? current : { ...current, ghDefault: result.value });
+    }
     showInfoToast({ title: "gh default repository set", message: `gh now opens pull requests on ${result.value.repository ?? remote}.`, subject: { repoId: repo.id } });
   };
   /** The prompt's "also point gh at the fork" box; read when it is answered. */
   const pointGhBox = useRef<HTMLInputElement | null>(null);
   const answerMovedOn = (answer: MovedOnAnswer, fork?: ForkChoice): void => {
-    writeMovedOnAnswer(repo.id, answer);
+    writeMovedOnAnswer(repo.id, answer, fork?.tracked.remote);
     setMovedOnAnswer(answer);
     if (answer === "tracked") {
       setPullChoice("tracked");
@@ -1753,7 +1764,7 @@ export function WorktreeHeader({
     // is how an earlier answer is changed ("Change it in the Pull menu").
     if (movedOn || movedOnAnswer !== null) {
       const answer: MovedOnAnswer = next === "tracked" ? "tracked" : "sync";
-      writeMovedOnAnswer(repo.id, answer);
+      writeMovedOnAnswer(repo.id, answer, forkChoice?.tracked.remote);
       setMovedOnAnswer(answer);
     }
     runPull(next, pullButton.current);

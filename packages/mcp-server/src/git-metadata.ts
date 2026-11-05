@@ -51,8 +51,10 @@ export async function readGhResolved(
     ["config", "--get-regexp", "^remote\\..*\\.gh-resolved$"],
     runner
   );
-  if (result.exitCode === 1) return new Map();
-  return parseGhResolvedConfig(requireSuccess(result, "reading gh default repository"));
+  // Best-effort, unlike the remotes read: an unreadable key must not fail the
+  // whole repository report. 1 is "no such key".
+  if (result.exitCode !== 0) return new Map();
+  return parseGhResolvedConfig(result.stdout);
 }
 
 export function parsePorcelainStatus(stdout: string): SafeStatusSummary {
