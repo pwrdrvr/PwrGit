@@ -15,10 +15,14 @@ export type AppSettings = {
   localAgentAccessEnabled?: boolean;
   /** Root under which PwrGit-managed worktrees are created (U14). */
   worktreeRoot?: string;
-  /** An installed Git chosen in Settings › General › Git runtime. Absent is
+  /** An installed Git chosen in Settings › Git. Absent is
    *  the bundled Git. Written only by `git:selectRuntime`, which probes it
    *  first; never through `settings:update`. `undefined` clears it. */
   gitPath?: string | undefined;
+  /** A downloaded build of PwrGit's Git chosen in Settings › Git, by id, and
+   *  the one chosen before it (kept for rollback). Written only by
+   *  `git:selectRuntime`; an installed `gitPath` outranks it. */
+  managedGit?: { selected?: string | undefined; previous?: string | undefined } | undefined;
   /** The macOS Safe Storage prompt has been explained before it can appear. */
   macKeychainAccessExplained?: boolean;
   general?: Partial<GeneralSettings>;
