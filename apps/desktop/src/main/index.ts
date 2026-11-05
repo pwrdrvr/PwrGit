@@ -51,8 +51,10 @@ import {
   type DiagnosticsCopyDeps
 } from "./diagnostics-copy";
 import { registerDialogHandlers } from "./dialog-handlers";
-import { refreshActiveGitReflink, registerGitRuntimeHandlers } from "./git/runtime-status";
-import { activeGitReflinkProbe, configureBundledGit, configureBundledGitConfig, execGit, useInstalledGit, useReflinkCheckout } from "./git/dugite";
+import { configureManagedGitRuntime, refreshActiveGitReflink, registerGitRuntimeHandlers } from "./git/runtime-status";
+import { ManagedGitService } from "./git/managed/managed-git-service";
+import customGitPin from "../../custom-git-runtime.json";
+import { activeGitReflinkProbe, configureBundledGit, configureBundledGitConfig, execGit, gitReady, holdGitUntil, installedGitSelection, useInstalledGit, useManagedGit, useReflinkCheckout } from "./git/dugite";
 import { openExternalUrlFromMenu } from "./external-links";
 import { registerBranchHandlers } from "./git/branch-handlers";
 import { registerBulkSyncHandlers } from "./git/bulk-sync-handlers";
@@ -257,6 +259,46 @@ const settings = new SettingsService(
 configureBundledGitConfig(join(app.getPath("userData"), "git"));
 const storedGitPath = settings.get().gitPath;
 useInstalledGit(typeof storedGitPath === "string" && storedGitPath.trim() !== "" ? storedGitPath : null);
+// Settings › Git › PwrGit's Git: newer verified builds of the bundled
+// runtime. An installed Git above outranks a chosen build. A chosen build is
+// verified before any Git command runs (they wait on the gate), and one that
+// fails its check makes every command fail naming it, as a broken installed
+// Git does. Pruning runs only here, before anything could be running a build.
+const managedGit = new ManagedGitService({
+  root: join(app.getPath("userData"), "git-runtimes"),
+  platform: process.platform,
+  arch: process.arch,
+  bundled: { version: customGitPin.version, consumerSha256: customGitPin.consumer_sha256 },
+  selection: () => settings.get().managedGit ?? {},
+  installedOverride: () => installedGitSelection() !== null,
+  onProgress: (progress) => emitEvent("gitManaged:progress", progress),
+  log: (level, message) => logMain(level, "git", message),
+  // PWRGIT_E2E_MANAGED_GIT_OFFLINE (e2e seam): no E2E may contact GitHub
+  // (e2e/AGENTS.md), so the release check fails as a network outage would.
+  ...(!app.isPackaged && process.env["PWRGIT_E2E_MANAGED_GIT_OFFLINE"] === "1"
+    ? {
+        fetch: async () => {
+          throw new TypeError("fetch failed: offline (e2e)");
+        }
+      }
+    : {})
+});
+// Configured on every platform: where PwrGit offers no build (Windows), the
+// service answers "not offered" rather than Settings' reads going unanswered.
+configureManagedGitRuntime(
+  managedGit,
+  app.isPackaged && managedGit.key !== null ? (managedGit.key === "darwin-universal" ? "signed" : "checksum") : undefined
+);
+holdGitUntil(
+  (async () => {
+    await managedGit.prune().catch((cause: unknown) =>
+      logMain("warn", "git", `managed Git prune failed: ${cause instanceof Error ? cause.message : String(cause)}`)
+    );
+    const directory = await managedGit.activateStored();
+    useManagedGit(directory);
+    if (directory !== null) logMain("info", "git", `repository commands use PwrGit’s Git at ${directory}`);
+  })()
+);
 // Copy-on-write checkout: the switch is read now and on every settings write;
 // the Git's support arrives with `refreshActiveGitReflink` below.
 const applyReflinkCheckout = (): void =>
@@ -264,7 +306,8 @@ const applyReflinkCheckout = (): void =>
 applyReflinkCheckout();
 settings.onWrite(applyReflinkCheckout);
 const probeReflink = (): void => {
-  void refreshActiveGitReflink().catch((cause: unknown) =>
+  // After the launch check of a chosen build: nothing probes an unchecked one.
+  void gitReady().then(() => refreshActiveGitReflink()).catch((cause: unknown) =>
     logMain("warn", "git", `copy-on-write probe failed: ${cause instanceof Error ? cause.message : String(cause)}`)
   );
 };

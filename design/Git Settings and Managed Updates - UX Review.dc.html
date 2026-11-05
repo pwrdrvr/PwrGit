@@ -1,0 +1,470 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Git Settings and Managed Updates - UX Review</title>
+    <script src="./support.js"></script>
+  </head>
+  <body>
+    <x-dc>
+      <helmet data-dc-atomics>
+        <meta name="design_doc_mode" content="canvas" />
+        <link href="https://fonts.googleapis.com/css2?family=Geist:wght@400..700&amp;family=Geist+Mono:wght@400..700&amp;display=swap" rel="stylesheet" />
+        <style>
+          :root {
+            /* review chrome: dark, house convention */
+            --t1: #f7f3eb; --t2: #b8b0a5; --t3: #8c857a; --tsub: rgba(247, 243, 235, 0.54);
+            --line: rgba(247, 243, 235, 0.1);
+            --acc-d: #ff8a1f; --accon-d: #160a00;
+            --bad-d: #b94232; --ok-d: #5fa969;
+            /* specimens: PwrGit light theme, tokens.css :root[data-theme="light"] */
+            --bg-app: #ffffff; --bg-sidebar: #f7f4ef; --bg-panel: #fdfcfa; --bg-elev: #ffffff; --bg-input: #ffffff;
+            --bg-hover: #f4f0e8;
+            --b-sub: rgba(0, 0, 0, 0.08); --b-def: rgba(0, 0, 0, 0.12); --b-str: rgba(0, 0, 0, 0.18);
+            --tx1: #1a1612; --tx2: #524a40; --tx3: #736c64; --txs: rgba(26, 22, 18, 0.68);
+            --acc: #b74c00; --acc2: #994c00; --accon: #ffffff;
+            --asoft: color-mix(in srgb, #b74c00 12%, transparent);
+            --atint: color-mix(in srgb, #b74c00 8%, transparent);
+            --abord: color-mix(in srgb, #b74c00 42%, transparent);
+            --okt: #1a5c2e; --oksoft: rgba(46, 110, 64, 0.14); --okdot: #2e7d3c;
+            --warn: #805200; --warnsoft: color-mix(in srgb, #805200 14%, transparent);
+            --bad: #8a1f12; --badsoft: rgba(138, 31, 18, 0.12); --badbord: rgba(138, 31, 18, 0.28);
+            --sans: "Geist", "SF Pro Text", "Inter", system-ui, sans-serif;
+            --mono: "Geist Mono", "SF Mono", "JetBrains Mono", Consolas, monospace;
+          }
+          *, *::before, *::after { box-sizing: border-box; }
+          html { background: #050505; }
+          body { margin: 0; background: #050505; font-family: var(--sans); }
+          a { color: #ffb35c; text-decoration: none; }
+
+          .dv-turn { padding: 40px 44px 32px; background: #050505; }
+          .dv-thd { display: flex; align-items: baseline; gap: 10px; margin: 0 0 6px; }
+          .dv-tid { font: 600 10px var(--mono); padding: 3px 7px; background: var(--t1); color: #050505; border-radius: 4px; }
+          .dv-tname { font: 600 13px/1.2 var(--sans); color: var(--t1); }
+          .dv-sub { margin: 0 0 22px; font: 400 11.5px/1.5 var(--sans); color: var(--t3); max-width: 820px; text-wrap: pretty; }
+          .dv-sub b { color: var(--t2); font-weight: 600; }
+          .dv-sub code, .note code, .fitem code, .tr code { font: 500 10px/1.4 var(--mono); color: var(--t2); }
+          .dv-opts { display: flex; flex-wrap: wrap; gap: 28px; align-items: flex-start; }
+          .dv-opt { flex: none; display: flex; flex-direction: column; gap: 9px; scroll-margin-top: 16px; }
+          .dv-oid { font: 600 10.5px var(--mono); padding: 3px 7px; background: rgba(247, 243, 235, 0.08); color: var(--t1); border-radius: 5px; }
+          .dv-opt:target .dv-oid { background: var(--acc-d); color: var(--accon-d); }
+          .dv-olabel { display: flex; align-items: baseline; gap: 8px; font: 400 11px/1.3 var(--sans); color: var(--tsub); max-width: 760px; }
+          .dv-next { margin: 22px 0 0; font: 12px/1.5 var(--sans); color: var(--t3); max-width: 900px; }
+
+          .stage { display: flex; flex-direction: column; gap: 11px; padding: 14px; border: 1px solid var(--line); border-radius: 9px; background: #0a0a0a; }
+          .stage-h { display: flex; align-items: center; gap: 8px; font: 600 9.5px/1 var(--sans); letter-spacing: 0.05em; text-transform: uppercase; color: var(--t3); }
+          .stage-h em { font: 500 9.5px/1 var(--mono); font-style: normal; color: var(--tsub); text-transform: none; letter-spacing: 0; }
+          .note { margin: 0; font: 400 10.5px/1.5 var(--sans); color: var(--t3); text-wrap: pretty; max-width: 760px; }
+          .note b { color: var(--t2); font-weight: 600; }
+          .shot { display: block; border-radius: 8px; border: 1px solid var(--line); }
+
+          .pin { display: inline-flex; align-items: center; justify-content: center; flex: none; width: 15px; height: 15px; border-radius: 999px; background: var(--bad-d); color: #fff; font: 700 9px/1 var(--mono); }
+          .pin.ok { background: var(--ok-d); color: #050505; }
+          .find { width: 420px; display: flex; flex-direction: column; gap: 12px; }
+          .fitem { display: grid; grid-template-columns: 15px minmax(0, 1fr); gap: 9px; align-items: start; }
+          .fitem h4 { margin: 0 0 3px; font: 650 11.5px/1.3 var(--sans); color: var(--t1); }
+          .fitem p { margin: 0; font: 400 10.5px/1.5 var(--sans); color: var(--t3); text-wrap: pretty; }
+          .fitem b { color: var(--t2); font-weight: 600; }
+
+          /* ---------- light specimens ---------- */
+          .win { display: flex; background: var(--bg-app); border-radius: 10px; overflow: hidden; border: 1px solid var(--b-def); color: var(--tx1); }
+          .nv { flex: 0 0 208px; background: var(--bg-sidebar); border-right: 1px solid var(--b-sub); padding: 0 10px 12px; }
+          .nv-g { margin: 12px 8px 6px; font: 600 10.5px/1 var(--sans); letter-spacing: 0.09em; text-transform: uppercase; color: var(--txs); }
+          .nv-r { display: flex; align-items: center; height: 28px; }
+          .nv-c { flex: 0 0 24px; display: flex; justify-content: center; color: var(--tx3); font-size: 9px; }
+          .nv-b { flex: 1; padding: 6px 8px; border-radius: 6px; font: 500 13px/1 var(--sans); color: var(--tx1); }
+          .nv-b.on { background: var(--atint); color: var(--acc); }
+          .nv-s { display: flex; align-items: center; gap: 7px; margin-left: 30px; padding: 5px 8px; border-radius: 6px; font: 500 12px/1.2 var(--sans); color: var(--tx2); }
+          .nv-s.on { background: var(--atint); color: var(--acc); }
+          .dot { flex: none; width: 6px; height: 6px; border-radius: 999px; background: var(--okdot); }
+          .dot.acc { background: var(--acc); } .dot.bad { background: var(--bad); } .dot.none { background: transparent; }
+          .nv-chip { margin-left: auto; font: 600 9.5px/1 var(--sans); letter-spacing: 0.04em; text-transform: uppercase; color: var(--acc); background: var(--asoft); border-radius: 999px; padding: 3px 6px; }
+
+          .pane { flex: 1; min-width: 0; padding: 18px 22px 22px; background: var(--bg-app); }
+          .ph { display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; padding: 2px 2px 10px; }
+          .ph-eb { margin: 0 0 3px; font: 650 10px/1 var(--sans); letter-spacing: 0.08em; text-transform: uppercase; color: var(--acc); }
+          .ph-t { margin: 0; font: 700 19px/1.2 var(--sans); color: var(--tx1); }
+          .ph-d { margin: 5px 0 0; font: 400 12px/1.5 var(--sans); color: var(--tx3); max-width: 60ch; }
+          .stack { display: flex; flex-direction: column; gap: 14px; max-width: 760px; }
+
+          .sp { background: var(--bg-panel); border: 1px solid var(--b-sub); border-radius: 10px; }
+          .sp-h { display: flex; gap: 10px; padding: 13px 16px 11px; border-bottom: 1px solid var(--b-sub); background: var(--bg-elev); border-radius: 10px 10px 0 0; }
+          .sp-chev { flex: none; width: 16px; color: var(--tx3); font-size: 11px; padding-top: 14px; }
+          .sp-hm { flex: 1; min-width: 0; }
+          .sp-eb { margin: 0 0 4px; font: 650 10px/1 var(--sans); letter-spacing: 0.08em; text-transform: uppercase; color: var(--acc); }
+          .sp-t { margin: 0; font: 700 15px/1.2 var(--sans); color: var(--tx1); }
+          .sp-d { margin: 5px 0 0; font: 400 12px/1.5 var(--sans); color: var(--tx3); max-width: 62ch; }
+          .sp-b { padding: 4px 16px 10px; }
+          .ch { flex: none; align-self: flex-start; font: 600 10.5px/1 var(--sans); letter-spacing: 0.03em; color: var(--tx3); background: var(--bg-elev); border: 1px solid var(--b-sub); border-radius: 999px; padding: 4px 9px; white-space: nowrap; }
+          .ch.ok { color: var(--okt); background: var(--oksoft); border-color: transparent; }
+          .ch.acc { color: var(--acc2); background: var(--asoft); border-color: var(--abord); }
+          .ch.warn { color: var(--warn); background: var(--warnsoft); border-color: transparent; }
+          .ch.err { color: var(--bad); background: var(--badsoft); border-color: transparent; }
+          .ch.sm { font-size: 9.5px; padding: 3px 7px; }
+
+          .f { display: flex; align-items: flex-start; gap: 18px; padding: 11px 0; }
+          .f + .f { border-top: 1px solid var(--b-sub); }
+          .f-l { display: flex; flex-direction: column; gap: 3px; flex: 0 0 200px; font: 550 12.5px/1.35 var(--sans); color: var(--tx1); }
+          .f-sub { font: 400 11.5px/1.45 var(--sans); color: var(--tx3); }
+          .f-c { display: flex; flex-direction: column; align-items: flex-start; gap: 6px; flex: 1; min-width: 0; }
+          .v { font: 550 11.5px/1.45 var(--mono); color: var(--tx1); overflow-wrap: anywhere; }
+          .vd { font: 400 10.5px/1.45 var(--mono); color: var(--tx3); overflow-wrap: anywhere; }
+          .help { font: 400 11px/1.45 var(--sans); color: var(--txs); max-width: 50ch; margin: 0; }
+          .err { margin: 0; font: 500 11.5px/1.4 var(--sans); color: var(--bad); max-width: 54ch; }
+          .row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+          .vline { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 8px; }
+
+          .bt { display: inline-flex; align-items: center; gap: 6px; height: 26px; padding: 0 11px; border: 1px solid var(--b-def); border-radius: 6px; background: var(--bg-elev); color: var(--tx1); font: 550 12px/1 var(--sans); white-space: nowrap; }
+          .bt.pri { background: var(--acc); border-color: var(--acc); color: var(--accon); }
+          .bt.focus { outline: 2px solid var(--acc); outline-offset: 2px; }
+          .bt.dis { color: var(--tx3); background: var(--bg-hover); }
+          .ib { font: 600 11.5px/1 var(--sans); color: var(--tx1); border: 1px solid var(--b-def); background: var(--bg-elev); border-radius: 6px; padding: 5px 8px; white-space: nowrap; }
+
+          .irs { display: flex; flex-direction: column; gap: 6px; width: 100%; margin: 0; padding: 0; list-style: none; }
+          .ir { display: flex; align-items: center; gap: 10px; padding: 7px 10px; background: var(--bg-input); border: 1px solid var(--b-sub); border-radius: 8px; }
+          .ir.use { border-color: var(--abord); background: var(--atint); }
+          .ir-b { display: flex; flex-direction: column; gap: 2px; flex: 1; min-width: 0; }
+          .ir-p { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: 500 11.5px/1.3 var(--mono); color: var(--tx1); }
+          .ir-m { font: 400 11px/1.35 var(--sans); color: var(--tx3); }
+          .ir-m b { font-weight: 600; color: var(--tx2); }
+
+          .sw { display: inline-flex; align-items: center; gap: 8px; font: 600 12px/1 var(--sans); color: var(--acc); }
+          .sw i { display: inline-block; width: 30px; height: 18px; border-radius: 999px; background: var(--asoft); border: 1px solid var(--abord); position: relative; }
+          .sw i::after { content: ""; position: absolute; right: 2px; top: 2px; width: 12px; height: 12px; border-radius: 999px; background: var(--acc); }
+
+          .pg { width: 100%; display: flex; flex-direction: column; gap: 6px; }
+          .pg-bar { height: 6px; border-radius: 999px; background: var(--bg-hover); overflow: hidden; border: 1px solid var(--b-sub); }
+          .pg-bar i { display: block; height: 100%; background: var(--acc); border-radius: 999px; }
+          .pg-steps { display: flex; flex-wrap: wrap; gap: 4px 12px; font: 500 10.5px/1.3 var(--sans); color: var(--tx3); }
+          .pg-steps .d { color: var(--okt); } .pg-steps .n { color: var(--acc); font-weight: 650; }
+          .pg-t { font: 500 11px/1.3 var(--mono); color: var(--tx2); }
+
+          .ann { font: 600 9px/1 var(--mono); color: #ffb0a1; }
+          .callout { border-left: 2px solid var(--acc-d); padding: 2px 0 2px 10px; }
+
+          .tbl { border: 1px solid var(--line); border-radius: 9px; background: #0a0a0a; overflow: hidden; width: 940px; }
+          .tr { display: grid; grid-template-columns: 210px 120px 120px minmax(0, 1fr); gap: 12px; align-items: start; padding: 8px 12px; border-bottom: 1px solid var(--line); font: 500 10.5px/1.45 var(--sans); color: var(--t2); }
+          .tr:last-child { border-bottom: 0; }
+          .tr.head { font: 600 9.5px/1.3 var(--sans); letter-spacing: 0.04em; text-transform: uppercase; color: var(--t3); background: rgba(247, 243, 235, 0.03); }
+          .tr b { color: var(--t1); font-weight: 600; }
+
+          /* narrow: the field column folds under its label below ~560px */
+          .narrow .f { flex-direction: column; gap: 6px; }
+          .narrow .f-l { flex: none; }
+        </style>
+      </helmet>
+
+      <!-- ============================ TURN 1 ============================ -->
+      <section class="dv-turn" id="t1">
+        <div class="dv-thd">
+          <a class="dv-tid" href="#t1">1</a>
+          <span class="dv-tname">Baseline: Git is the fourth card on General, and a newer PwrGit Git means pasting a path</span>
+        </div>
+        <p class="dv-sub">The operator's screenshot (1a) is the starting point. PwrGit runs its own Git build; since v0.53 that build ships copy-on-write and the Clones re-share, and the runtime now moves faster than the app (.3 → .4 landed between app releases). Today the only way to run a newer build is to download it by hand, unpack it, and paste the binary's path into <b>Custom path</b>. That is what the screenshot shows: an ad-hoc <code>2.56.0-dev-pwrgit.3</code> under <code>~/.local/share</code>, selected manually. PwrAgent (1c) already gives Git its own destination with status, available paths and a manual path.</p>
+        <div class="dv-opts">
+          <div class="dv-opt" id="1a" data-screen-label="1a As built">
+            <div class="dv-olabel"><a class="dv-oid" href="#1a">1a</a>Settings › General, scrolled to Git runtime (repo copy: a contrived render of <code>main</code> in the same state; the project holds the operator's screenshot)</div>
+            <div class="stage" style="width:688px">
+              <img class="shot" src="assets/git-settings-before-general-contrived.png" alt="PwrGit Settings General pane with the Git runtime card, a 2.56.0-dev-pwrgit.3 chosen by Custom path marked Using" width="660" />
+            </div>
+          </div>
+          <div class="dv-opt" id="1b" data-screen-label="1b Findings">
+            <div class="dv-olabel"><a class="dv-oid" href="#1b">1b</a>Findings</div>
+            <div class="stage find">
+              <div class="fitem"><span class="pin">1</span><div><h4>Nothing in the nav says "Git"</h4><p>The card sits below Color theme and Sidebar on <b>General</b>, a page whose nav row has no children. Clones' "Copy-on-write is off" link opens General at the top (<code>settings:open {page:"general"}</code>), so the reader still has to scroll to find the switch it pointed at.</p></div></div>
+              <div class="fitem"><span class="pin">2</span><div><h4>No way to get a newer PwrGit Git</h4><p>The card can choose a Git that already exists on disk. It cannot check for, download, verify or install one, so the runtime only moves with an app release, or by hand with no checksum or signature check at all (the ad-hoc <code>.3</code> in 1a).</p></div></div>
+              <div class="fitem"><span class="pin">3</span><div><h4>"Custom" hides what the Git is</h4><p>The selected row reads <b>Custom · 2.56.0-dev-pwrgit.3</b>. Whether that build was verified, and whether it is newer than the one PwrGit bundles, is not shown. PwrAgent marks rows <b>Notarized</b> / <b>Ad-hoc</b> / <b>System</b>; PwrGit has no equivalent.</p></div></div>
+              <div class="fitem"><span class="pin">4</span><div><h4>The path is the row's headline and it truncates</h4><p>Both the in-use row and the Custom path field cut the path at its most informative part (<code>…/runtimes/git/2…</code>). The version is in the meta line below in proportional type.</p></div></div>
+              <div class="fitem"><span class="pin">5</span><div><h4>At the 760&nbsp;px minimum window the 230&nbsp;px label column leaves ~260&nbsp;px</h4><p>The settings window's minimum width is 760; nav 208 + padding 44 leaves a 508&nbsp;px column. The field row never folds, so long versions wrap into a narrow strip.</p></div></div>
+              <div class="fitem"><span class="pin ok">✓</span><div><h4>Keep</h4><p>The Git/LFS readings, the copy-on-write switch and its Clones help text, "A Git needs Git LFS to be chosen", Re-check, and a chosen Git that never silently falls back.</p></div></div>
+            </div>
+          </div>
+          <div class="dv-opt" id="1c" data-screen-label="1c PwrAgent reference">
+            <div class="dv-olabel"><a class="dv-oid" href="#1c">1c</a>PwrAgent › Settings › Git (operator screenshot): take its structure, not its tokens</div>
+            <div class="stage" style="width:688px">
+              <p class="note">The operator's PwrAgent screenshot is in the Claude Design project only; it is not contrived, so the repo copy omits it.</p>
+              <p class="note">Taken: Git has its own nav destination; one <b>status</b> block says what runs; <b>available paths</b> carry a provenance badge; <b>manual path</b> is last. Not taken: PwrAgent's 20&nbsp;px Re-check and full-width path rows, which would break PwrGit's 760&nbsp;px card column and its existing <code>.settings-ai-install</code> rows.</p>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ============================ TURN 2 ============================ -->
+      <section class="dv-turn" id="t2">
+        <div class="dv-thd">
+          <a class="dv-tid" href="#t2">2</a>
+          <span class="dv-tname">Proposal: Settings › Git, three cards, one for each question</span>
+        </div>
+        <p class="dv-sub"><b>Git</b> becomes a nav group right after General. Its children route to cards on the Git page, as Forges' children do (a child scrolls to and unfolds its card; it never opens a pane). <b>In use</b> answers "which Git runs, and is it healthy". <b>PwrGit's Git</b> answers "is there a newer verified build, and do I want it". <b>Installs</b> lists every Git PwrGit can run, with Custom path last. General keeps Color theme, Sidebar and Search scope. Deep links to <code>general</code> + <code>git-runtime</code> keep working: they land on Git › In use.</p>
+        <div class="dv-opts">
+          <div class="dv-opt" id="2a" data-screen-label="2a Nav before and after">
+            <div class="dv-olabel"><a class="dv-oid" href="#2a">2a</a>Nav, before and after. The child chip appears only when a newer verified build is ready to download or use.</div>
+            <div class="stage" style="width:470px">
+              <div class="pair" style="display:flex; gap:16px">
+                <div class="win" style="width:208px"><div class="nv" style="flex-basis:208px">
+                  <p class="nv-g">Settings</p>
+                  <div class="nv-r"><span class="nv-c"></span><span class="nv-b on">General</span></div>
+                  <div class="nv-r"><span class="nv-c"></span><span class="nv-b">Updates</span></div>
+                  <div class="nv-r"><span class="nv-c">▸</span><span class="nv-b">Profiles</span></div>
+                  <div class="nv-r"><span class="nv-c">▸</span><span class="nv-b">Forges</span></div>
+                  <div class="nv-r"><span class="nv-c">▸</span><span class="nv-b">AI Providers</span></div>
+                  <div class="nv-r"><span class="nv-c">▸</span><span class="nv-b">AI Features</span></div>
+                  <div class="nv-r"><span class="nv-c"></span><span class="nv-b">Local Agents</span></div>
+                  <div class="nv-r"><span class="nv-c"></span><span class="nv-b">Experimental</span></div>
+                  <div class="nv-r"><span class="nv-c"></span><span class="nv-b">Troubleshooting</span></div>
+                  <div class="nv-r"><span class="nv-c"></span><span class="nv-b">About</span></div>
+                </div></div>
+                <div class="win" style="width:208px"><div class="nv" style="flex-basis:208px">
+                  <p class="nv-g">Settings</p>
+                  <div class="nv-r"><span class="nv-c"></span><span class="nv-b">General</span></div>
+                  <div class="nv-r"><span class="nv-c">▾</span><span class="nv-b">Git</span></div>
+                  <div class="nv-s on"><span class="dot"></span>In use</div>
+                  <div class="nv-s"><span class="dot acc"></span>PwrGit’s Git<span class="nv-chip">Update</span></div>
+                  <div class="nv-s"><span class="dot none"></span>Installs</div>
+                  <div class="nv-r"><span class="nv-c"></span><span class="nv-b">Updates</span></div>
+                  <div class="nv-r"><span class="nv-c">▸</span><span class="nv-b">Profiles</span></div>
+                  <div class="nv-r"><span class="nv-c">▸</span><span class="nv-b">Forges</span></div>
+                  <div class="nv-r"><span class="nv-c">▸</span><span class="nv-b">AI Providers</span></div>
+                  <div class="nv-r"><span class="nv-c">▸</span><span class="nv-b">AI Features</span></div>
+                  <div class="nv-r"><span class="nv-c"></span><span class="nv-b">Local Agents</span></div>
+                  <div class="nv-r"><span class="nv-c"></span><span class="nv-b">…</span></div>
+                </div></div>
+              </div>
+              <p class="note">Dots follow the nav rule: <code>aria-hidden</code>, and every state that isn't fine also shows a word. <b>In use</b> is green when the Git in use answered, red with "Unavailable" when it didn't. <b>PwrGit’s Git</b> has no dot until a check has run (a green dot would be a guess), accent + "Update" when a newer build can be downloaded or used, red + "Failed" after a failed install. The app's own <b>Updates</b> page keeps its name; the Git child says <b>PwrGit’s Git</b> so the two never read as the same thing.</p>
+            </div>
+          </div>
+
+          <div class="dv-opt" id="2b" data-screen-label="2b Git page">
+            <div class="dv-olabel"><a class="dv-oid" href="#2b">2b</a>The Git page at the default window (column 760&nbsp;px). Bundled .4 in use, .5 published.</div>
+            <div class="win" style="width:1010px">
+              <div class="nv">
+                <p class="nv-g">Settings</p>
+                <div class="nv-r"><span class="nv-c"></span><span class="nv-b">General</span></div>
+                <div class="nv-r"><span class="nv-c">▾</span><span class="nv-b">Git</span></div>
+                <div class="nv-s on"><span class="dot"></span>In use</div>
+                <div class="nv-s"><span class="dot acc"></span>PwrGit’s Git<span class="nv-chip">Update</span></div>
+                <div class="nv-s"><span class="dot none"></span>Installs</div>
+                <div class="nv-r"><span class="nv-c"></span><span class="nv-b">Updates</span></div>
+                <div class="nv-r"><span class="nv-c">▸</span><span class="nv-b">Profiles</span></div>
+                <div class="nv-r"><span class="nv-c">▸</span><span class="nv-b">Forges</span></div>
+              </div>
+              <div class="pane">
+                <div class="ph">
+                  <div><p class="ph-eb">Git</p><h2 class="ph-t">Git</h2><p class="ph-d">The Git and Git LFS PwrGit runs for every repository operation.</p></div>
+                  <div class="row"><span class="bt">Collapse all</span><span class="bt dis">Expand all</span></div>
+                </div>
+                <div class="stack">
+                  <div class="sp">
+                    <div class="sp-h"><span class="sp-chev">▾</span><div class="sp-hm"><p class="sp-eb">Git</p><h3 class="sp-t">In use</h3><p class="sp-d">PwrGit runs its own Git and Git LFS, so repository operations don’t depend on what’s installed on this machine.</p></div><span class="ch ok">Bundled</span></div>
+                    <div class="sp-b">
+                      <div class="f"><div class="f-l">Git</div><div class="f-c"><div class="vline"><span class="v">2.56.0-dev-pwrgit.4</span><span class="ch sm ok">Signed · PwrDrvr</span></div><span class="vd">/Applications/PwrGit.app/Contents/Resources/git/bin/git</span></div></div>
+                      <div class="f"><div class="f-l">Git LFS</div><div class="f-c"><span class="v">3.7.1</span><span class="vd">git-lfs/3.7.1 (GitHub; darwin arm64; go 1.25.1; git b84b3384)</span></div></div>
+                      <div class="f"><div class="f-l">HTTPS sign-in</div><div class="f-c"><span class="v">macOS keychain</span><span class="vd">/opt/homebrew/bin/git-credential-osxkeychain</span></div></div>
+                      <div class="f"><div class="f-l"><span>Copy-on-write checkout</span><span class="f-sub">Worktrees share unchanged files with the main checkout</span></div><div class="f-c"><span class="sw"><i></i>On</span><p class="help">Checkout, switch, reset and new worktrees clone files the main checkout holds unchanged, so the copies take no extra space until one is edited. <a style="color:var(--acc)">Maintenance › Clones</a> re-shares worktrees that lost it. APFS, Btrfs and XFS; elsewhere files are written as usual.</p></div></div>
+                      <div class="f"><div class="f-l"></div><div class="f-c"><span class="bt">⟳ Re-check</span></div></div>
+                    </div>
+                  </div>
+
+                  <div class="sp">
+                    <div class="sp-h"><span class="sp-chev">▾</span><div class="sp-hm"><p class="sp-eb">Git</p><h3 class="sp-t">PwrGit’s Git</h3><p class="sp-d">Newer builds of PwrGit’s Git are published between app releases. PwrGit checks each one’s checksum and signature before it can be used, and keeps the one you were on.</p></div><span class="ch acc">Update available</span></div>
+                    <div class="sp-b">
+                      <div class="f"><div class="f-l">Bundled with PwrGit</div><div class="f-c"><div class="vline"><span class="v">2.56.0-dev-pwrgit.4</span><span class="ch sm">In use</span></div></div></div>
+                      <div class="f"><div class="f-l"><span>Latest</span><span class="f-sub">Checked 2 minutes ago</span></div><div class="f-c"><div class="vline"><span class="v">2.56.0-dev-pwrgit.5</span><span class="vd">published Nov 7 · 38.9 MB</span></div><div class="row"><span class="bt pri">Download and verify</span><span class="bt">Check now</span></div><p class="help">Downloading doesn’t switch Git. You choose when to use it.</p></div></div>
+                      <div class="f"><div class="f-l"><span>Downloaded</span><span class="f-sub">Verified builds on this Mac</span></div><div class="f-c"><span class="help">None yet.</span></div></div>
+                    </div>
+                  </div>
+
+                  <div class="sp">
+                    <div class="sp-h"><span class="sp-chev">▾</span><div class="sp-hm"><p class="sp-eb">Git</p><h3 class="sp-t">Installs</h3><p class="sp-d">Every Git PwrGit can run. A Git needs Git LFS to be chosen.</p></div></div>
+                    <div class="sp-b">
+                      <div class="f"><div class="f-l">Available</div><div class="f-c">
+                        <ul class="irs">
+                          <li class="ir use"><span class="ir-b"><span class="ir-p">/Applications/PwrGit.app/Contents/Resources/git/bin/git</span><span class="ir-m"><b>Bundled</b> · 2.56.0-dev-pwrgit.4 · LFS 3.7.1 · Copy-on-write</span></span><span class="ch ok">Using</span></li>
+                          <li class="ir"><span class="ir-b"><span class="ir-p">/opt/homebrew/bin/git</span><span class="ir-m"><b>Homebrew</b> · 2.56.0 · LFS 3.8.1</span></span><span class="ib">Use</span></li>
+                          <li class="ir"><span class="ir-b"><span class="ir-p">/Applications/Xcode.app/Contents/Developer/usr/bin/git</span><span class="ir-m"><b>Apple</b> · 2.54.0 · LFS 3.8.1</span></span><span class="ib">Use</span></li>
+                        </ul>
+                      </div></div>
+                      <div class="f"><div class="f-l"><span>Custom path</span><span class="f-sub">A Git the list does not find</span></div><div class="f-c"><div class="row" style="width:100%"><span class="ir" style="flex:1; min-width:0; padding:5px 8px"><span class="ir-p" style="color:var(--tx3)">/path/to/git</span></span><span class="bt dis">Use path</span></div></div></div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+          <div class="dv-opt" id="2c" data-screen-label="2c Why three cards">
+            <div class="dv-olabel"><a class="dv-oid" href="#2c">2c</a>Decisions</div>
+            <div class="stage find">
+              <div class="fitem"><span class="pin ok">1</span><div><h4>Versions lead, paths follow</h4><p>The reading is the version in mono with its provenance chip; the path sits beneath, wrapping (In use) or ellipsised with the viewport tooltip (Installs rows). Long dev versions break between parts, never at their hyphens.</p></div></div>
+              <div class="fitem"><span class="pin ok">2</span><div><h4>Provenance is a chip PwrGit can prove</h4><p><b>Signed · PwrDrvr</b> only after <code>codesign --strict --all-architectures</code> passes team T44CNHC4UH on every Mach-O; <b>Checksum verified</b> on Linux; nothing on an installed Git (PwrGit did not check it, so it claims nothing).</p></div></div>
+              <div class="fitem"><span class="pin ok">3</span><div><h4>Download and Use are two buttons</h4><p>Install never switches Git. "Use" is the same selection the Installs list makes, so there is one rule for what runs: a Git you chose &gt; a downloaded build you chose &gt; bundled.</p></div></div>
+              <div class="fitem"><span class="pin ok">4</span><div><h4>Downloaded builds also appear in Installs</h4><p>As <b>PwrGit download</b> rows, so the list stays "every Git PwrGit can run" and Rollback is just Use on the previous row (3d).</p></div></div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ============================ TURN 3 ============================ -->
+      <section class="dv-turn" id="t3">
+        <div class="dv-thd">
+          <a class="dv-tid" href="#t3">3</a>
+          <span class="dv-tname">PwrGit’s Git, every state</span>
+        </div>
+        <p class="dv-sub">One card body per state, at the 760&nbsp;px column. The chip and the nav child read the same answer. Progress is announced at phase changes, not per byte.</p>
+        <div class="dv-opts">
+
+          <div class="dv-opt" id="3a" data-screen-label="3a Downloading">
+            <div class="dv-olabel"><a class="dv-oid" href="#3a">3a</a>Downloading. Checksum is checked before anything is unpacked.</div>
+            <div class="sp" style="width:760px">
+              <div class="sp-h"><span class="sp-chev">▾</span><div class="sp-hm"><p class="sp-eb">Git</p><h3 class="sp-t">PwrGit’s Git</h3></div><span class="ch acc">Downloading 42%</span></div>
+              <div class="sp-b">
+                <div class="f"><div class="f-l">Bundled with PwrGit</div><div class="f-c"><div class="vline"><span class="v">2.56.0-dev-pwrgit.4</span><span class="ch sm">In use</span></div></div></div>
+                <div class="f"><div class="f-l"><span>Latest</span><span class="f-sub">Checked 2 minutes ago</span></div><div class="f-c">
+                  <span class="v">2.56.0-dev-pwrgit.5</span>
+                  <div class="pg"><div class="pg-bar"><i style="width:42%"></i></div>
+                    <div class="row" style="justify-content:space-between; width:100%"><span class="pg-t">16.3 of 38.9 MB · 4.1 MB/s</span><span class="bt">Cancel</span></div>
+                    <div class="pg-steps"><span class="n">● Download</span><span>○ Checksum</span><span>○ Unpack</span><span>○ Files and signatures</span><span>○ Test run</span></div>
+                  </div>
+                  <p class="help">Repositories keep using 2.56.0-dev-pwrgit.4 meanwhile.</p>
+                </div></div>
+              </div>
+            </div>
+          </div>
+
+          <div class="dv-opt" id="3b" data-screen-label="3b Verified, not in use">
+            <div class="dv-olabel"><a class="dv-oid" href="#3b">3b</a>Verified and installed, not in use. The one new primary action is Use.</div>
+            <div class="sp" style="width:760px">
+              <div class="sp-h"><span class="sp-chev">▾</span><div class="sp-hm"><p class="sp-eb">Git</p><h3 class="sp-t">PwrGit’s Git</h3></div><span class="ch acc">Ready to use</span></div>
+              <div class="sp-b">
+                <div class="f"><div class="f-l">Bundled with PwrGit</div><div class="f-c"><div class="vline"><span class="v">2.56.0-dev-pwrgit.4</span><span class="ch sm">In use</span></div></div></div>
+                <div class="f"><div class="f-l"><span>Latest</span><span class="f-sub">Checked 4 minutes ago</span></div><div class="f-c"><div class="vline"><span class="v">2.56.0-dev-pwrgit.5</span><span class="ch sm ok">Downloaded</span></div></div></div>
+                <div class="f"><div class="f-l"><span>Downloaded</span><span class="f-sub">Verified builds on this Mac</span></div><div class="f-c">
+                  <ul class="irs"><li class="ir"><span class="ir-b"><span class="ir-p" style="font-weight:600">2.56.0-dev-pwrgit.5</span><span class="ir-m"><b>Signed · PwrDrvr</b> · LFS 3.7.1 · Copy-on-write · verified Nov 7</span></span><span class="bt pri">Use</span></li></ul>
+                  <p class="help">Operations already running finish on the Git they started with. Nothing is restarted.</p>
+                </div></div>
+              </div>
+            </div>
+          </div>
+
+          <div class="dv-opt" id="3c" data-screen-label="3c In use with rollback">
+            <div class="dv-olabel"><a class="dv-oid" href="#3c">3c</a>A downloaded build in use. The build it replaced stays, so going back is one click.</div>
+            <div class="sp" style="width:760px">
+              <div class="sp-h"><span class="sp-chev">▾</span><div class="sp-hm"><p class="sp-eb">Git</p><h3 class="sp-t">PwrGit’s Git</h3></div><span class="ch ok">Up to date</span></div>
+              <div class="sp-b">
+                <div class="f"><div class="f-l">Bundled with PwrGit</div><div class="f-c"><div class="vline"><span class="v">2.56.0-dev-pwrgit.4</span></div></div></div>
+                <div class="f"><div class="f-l"><span>Latest</span><span class="f-sub">Checked 1 hour ago</span></div><div class="f-c"><div class="vline"><span class="v">2.56.0-dev-pwrgit.6</span><span class="ch sm ok">In use</span></div><span class="bt">Check now</span></div></div>
+                <div class="f"><div class="f-l"><span>Downloaded</span><span class="f-sub">Verified builds on this Mac</span></div><div class="f-c">
+                  <ul class="irs">
+                    <li class="ir use"><span class="ir-b"><span class="ir-p" style="font-weight:600">2.56.0-dev-pwrgit.6</span><span class="ir-m"><b>Signed · PwrDrvr</b> · LFS 3.7.1 · Copy-on-write</span></span><span class="ch ok">Using</span></li>
+                    <li class="ir"><span class="ir-b"><span class="ir-p" style="font-weight:600">2.56.0-dev-pwrgit.5</span><span class="ir-m"><b>Signed · PwrDrvr</b> · Previous · kept for rollback</span></span><span class="ib">Use</span></li>
+                  </ul>
+                  <div class="row"><span class="bt">Use bundled 2.56.0-dev-pwrgit.4</span></div>
+                </div></div>
+              </div>
+            </div>
+          </div>
+
+          <div class="dv-opt" id="3d" data-screen-label="3d Verification failed">
+            <div class="dv-olabel"><a class="dv-oid" href="#3d">3d</a>Verification failed. Nothing was installed; the Git in use did not change.</div>
+            <div class="sp" style="width:760px">
+              <div class="sp-h"><span class="sp-chev">▾</span><div class="sp-hm"><p class="sp-eb">Git</p><h3 class="sp-t">PwrGit’s Git</h3></div><span class="ch err">Failed</span></div>
+              <div class="sp-b">
+                <div class="f"><div class="f-l">Bundled with PwrGit</div><div class="f-c"><div class="vline"><span class="v">2.56.0-dev-pwrgit.4</span><span class="ch sm">In use</span></div></div></div>
+                <div class="f"><div class="f-l"><span>Latest</span><span class="f-sub">Checked just now</span></div><div class="f-c">
+                  <span class="v">2.56.0-dev-pwrgit.5</span>
+                  <div class="pg-steps"><span class="d">✓ Download</span><span class="d">✓ Checksum</span><span class="d">✓ Unpack</span><span style="color:var(--bad); font-weight:650">✕ Files and signatures</span></div>
+                  <p class="err" role="alert">libexec/git-core/git-remote-https isn’t signed by PwrDrvr (team T44CNHC4UH). PwrGit deleted the download. You’re still on 2.56.0-dev-pwrgit.4.</p>
+                  <div class="row"><span class="bt">Try again</span><span class="bt">Copy details</span></div>
+                </div></div>
+              </div>
+            </div>
+            <p class="note">Other failure sentences, same slot: "The download’s checksum doesn’t match the release (expected 9f81c626…, got 1d0e…)" · "The release lists runtime-files.json differently from what was unpacked: bin/git changed" · "This build is for linux-arm64, not this Mac" · "The download stopped at 16.3 of 38.9 MB: connection reset".</p>
+          </div>
+
+          <div class="dv-opt" id="3e" data-screen-label="3e Offline">
+            <div class="dv-olabel"><a class="dv-oid" href="#3e">3e</a>Offline. Builds already verified keep working; the check says what it last knew.</div>
+            <div class="sp" style="width:760px">
+              <div class="sp-h"><span class="sp-chev">▾</span><div class="sp-hm"><p class="sp-eb">Git</p><h3 class="sp-t">PwrGit’s Git</h3></div><span class="ch warn">Couldn’t check</span></div>
+              <div class="sp-b">
+                <div class="f"><div class="f-l"><span>Latest</span><span class="f-sub">Last checked yesterday</span></div><div class="f-c"><div class="vline"><span class="v">2.56.0-dev-pwrgit.5</span><span class="ch sm ok">In use</span></div><p class="help">GitHub couldn’t be reached (getaddrinfo ENOTFOUND api.github.com). Downloaded builds are checked on disk before each use and work offline.</p><span class="bt">Check now</span></div></div>
+              </div>
+            </div>
+          </div>
+
+          <div class="dv-opt" id="3f" data-screen-label="3f Explicit choice kept">
+            <div class="dv-olabel"><a class="dv-oid" href="#3f">3f</a>The operator’s case: a Git chosen by path stays chosen. Downloads never take over.</div>
+            <div class="sp" style="width:760px">
+              <div class="sp-h"><span class="sp-chev">▾</span><div class="sp-hm"><p class="sp-eb">Git</p><h3 class="sp-t">PwrGit’s Git</h3></div><span class="ch acc">Ready to use</span></div>
+              <div class="sp-b">
+                <div class="f"><div class="f-l">In use instead</div><div class="f-c"><div class="vline"><span class="v">2.56.0-dev-pwrgit.3</span><span class="ch sm">Custom · not verified by PwrGit</span></div><span class="vd">/Users/huntharo/.local/share/pwrgit/runtimes/git/2.56.0-dev-pwrgit.3-ada47e4/darwin-arm64/bin/git</span><p class="help">You chose this Git by path, so PwrGit keeps running it. Use below switches to the verified build.</p></div></div>
+                <div class="f"><div class="f-l"><span>Downloaded</span><span class="f-sub">Verified builds on this Mac</span></div><div class="f-c"><ul class="irs"><li class="ir"><span class="ir-b"><span class="ir-p" style="font-weight:600">2.56.0-dev-pwrgit.4</span><span class="ir-m"><b>Signed · PwrDrvr</b> · LFS 3.7.1 · Copy-on-write</span></span><span class="bt pri">Use</span></li></ul></div></div>
+              </div>
+            </div>
+          </div>
+
+          <div class="dv-opt" id="3g" data-screen-label="3g Needs newer PwrGit">
+            <div class="dv-olabel"><a class="dv-oid" href="#3g">3g</a>A build this app can’t verify (newer stager contract). Offered as an app update, never downloaded.</div>
+            <div class="sp" style="width:760px">
+              <div class="sp-h"><span class="sp-chev">▾</span><div class="sp-hm"><p class="sp-eb">Git</p><h3 class="sp-t">PwrGit’s Git</h3></div><span class="ch ok">Up to date</span></div>
+              <div class="sp-b">
+                <div class="f"><div class="f-l"><span>Latest</span><span class="f-sub">Checked just now</span></div><div class="f-c"><div class="vline"><span class="v">2.56.0-dev-pwrgit.5</span><span class="ch sm ok">In use</span></div><p class="help">2.57.0-dev-pwrgit.1 is published but needs a newer PwrGit to verify it. <a style="color:var(--acc)">Settings › Updates</a></p></div></div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ============================ TURN 4 ============================ -->
+      <section class="dv-turn" id="t4">
+        <div class="dv-thd">
+          <a class="dv-tid" href="#t4">4</a>
+          <span class="dv-tname">Minimum width, keyboard and state table</span>
+        </div>
+        <p class="dv-sub">At the 760&nbsp;px window minimum the content column is 508&nbsp;px. Below 560&nbsp;px of card width the Git page's fields fold their label above the control (a container query on the Git stack only; other panes are untouched).</p>
+        <div class="dv-opts">
+          <div class="dv-opt" id="4a" data-screen-label="4a Minimum width">
+            <div class="dv-olabel"><a class="dv-oid" href="#4a">4a</a>508&nbsp;px column, downloading state with the operator’s long path</div>
+            <div class="sp narrow" style="width:508px">
+              <div class="sp-h"><span class="sp-chev">▾</span><div class="sp-hm"><p class="sp-eb">Git</p><h3 class="sp-t">PwrGit’s Git</h3></div><span class="ch acc">Downloading 42%</span></div>
+              <div class="sp-b">
+                <div class="f"><div class="f-l">In use instead</div><div class="f-c"><div class="vline"><span class="v">2.56.0-dev-pwrgit.3</span><span class="ch sm">Custom · not verified by PwrGit</span></div><span class="vd">/Users/huntharo/.local/share/pwrgit/runtimes/git/2.56.0-dev-pwrgit.3-ada47e4/darwin-arm64/bin/git</span></div></div>
+                <div class="f"><div class="f-l"><span>Latest</span><span class="f-sub">Checked 2 minutes ago</span></div><div class="f-c">
+                  <span class="v">2.56.0-dev-pwrgit.4</span>
+                  <div class="pg"><div class="pg-bar"><i style="width:42%"></i></div>
+                    <div class="row" style="justify-content:space-between; width:100%"><span class="pg-t">16.3 of 38.9 MB · 4.1 MB/s</span><span class="bt">Cancel</span></div>
+                    <div class="pg-steps"><span class="n">● Download</span><span>○ Checksum</span><span>○ Unpack</span><span>○ Files and signatures</span><span>○ Test run</span></div>
+                  </div>
+                </div></div>
+              </div>
+            </div>
+          </div>
+          <div class="dv-opt" id="4b" data-screen-label="4b Keyboard">
+            <div class="dv-olabel"><a class="dv-oid" href="#4b">4b</a>Keyboard and screen reader</div>
+            <div class="stage find">
+              <div class="fitem"><span class="pin ok">1</span><div><h4>Order</h4><p>Card header (Enter/Space folds, ↑↓ moves between headers, as every pane) → primary action → Check now → rows' Use buttons. A row's Use has <code>aria-label="Use 2.56.0-dev-pwrgit.5"</code>, not just "Use".</p></div></div>
+              <div class="fitem"><span class="pin ok">2</span><div><h4>Focus does not jump</h4><p>When Download becomes the progress block, focus moves to Cancel; when it finishes, to Use. A failure moves focus to Try again and the sentence is <code>role="alert"</code>.</p></div></div>
+              <div class="fitem"><span class="pin ok">3</span><div><h4>Progress</h4><p><code>role="progressbar"</code> with <code>aria-valuenow</code> and an <code>aria-valuetext</code> of "16.3 of 38.9 MB". The polite live region speaks only phase changes ("Checking signatures", "Ready to use"), never byte counts.</p></div></div>
+              <div class="fitem"><span class="pin ok">4</span><div><h4>Focus ring</h4><p>The house ring (<code>outline: 2px var(--focus-ring)</code>); rows inside the scroller keep <code>scroll-margin</code>.</p></div></div>
+            </div>
+          </div>
+          <div class="dv-opt" id="4c" data-screen-label="4c State table">
+            <div class="dv-olabel"><a class="dv-oid" href="#4c">4c</a>What the card, chip and nav say</div>
+            <div class="tbl">
+              <div class="tr head"><span>State</span><span>Chip</span><span>Nav child</span><span>Body / action</span></div>
+              <div class="tr"><span><b>Never checked</b> (first open, or Windows)</span><span>none</span><span>no dot</span><span>Check now. Windows: the card says PwrGit’s Git isn’t offered there and Git keeps Dugite’s bundle.</span></div>
+              <div class="tr"><span><b>Nothing newer than bundled</b></span><span>Up to date</span><span>no dot</span><span>Latest = bundled; Check now.</span></div>
+              <div class="tr"><span><b>Newer published</b></span><span>Update available</span><span>accent · Update</span><span>Download and verify.</span></div>
+              <div class="tr"><span><b>Downloading / verifying</b></span><span>Downloading 42% / Verifying</span><span>accent · Update</span><span>Progress, phase, Cancel. Another window shows the same progress.</span></div>
+              <div class="tr"><span><b>Verified, not in use</b></span><span>Ready to use</span><span>accent · Update</span><span>Use (3b).</span></div>
+              <div class="tr"><span><b>Downloaded build in use</b></span><span>Up to date</span><span>no dot</span><span>Rows with Using / Use previous / Use bundled (3c).</span></div>
+              <div class="tr"><span><b>Install failed</b></span><span>Failed</span><span>red · Failed</span><span>Step that failed, reason, Try again; Git in use unchanged (3d).</span></div>
+              <div class="tr"><span><b>Check failed</b> (offline, rate limit)</span><span>Couldn’t check</span><span>no dot</span><span>Last known answer and when; downloaded builds still work (3e).</span></div>
+              <div class="tr"><span><b>Newer needs app update</b></span><span>as above</span><span>no dot</span><span>One help line pointing to Settings › Updates (3g).</span></div>
+            </div>
+          </div>
+        </div>
+        <p class="dv-next">Provenance: specimens use PwrGit's light tokens (<code>tokens.css</code> <code>:root[data-theme="light"]</code>) and the shipped settings field, chip and install-row metrics from <code>app.css</code>. Versions after <code>.4</code>, sizes and dates are contrived. Baseline screenshots are the operator's, 2026-11-05. Drawn at <code>main @ 5c72a1ce</code>.</p>
+      </section>
+    </x-dc>
+  </body>
+</html>

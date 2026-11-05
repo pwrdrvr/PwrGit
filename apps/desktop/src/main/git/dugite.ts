@@ -12,6 +12,10 @@ import { logMain } from "../logs";
 let bundledDirectory = dugite.resolveEmbeddedGitDir();
 let generatedConfigDirectory: string | null = null;
 let installedGit: string | null = null;
+/** A verified downloaded build of PwrGit's Git, run in place of the bundle. */
+let managedDirectory: string | null = null;
+/** Held while the chosen build is checked at launch; rejects when it failed. */
+let gitGate: Promise<void> = Promise.resolve();
 
 /** Set once at startup: packaged Git lives outside the asar. */
 export function configureBundledGit(directory: string): void {
@@ -37,10 +41,42 @@ export function useInstalledGit(path: string | null): void {
   installedGit = path;
 }
 
+/**
+ * A downloaded build of PwrGit's Git (its whole directory, as the bundle's),
+ * or null for the bundle. It is the bundle for every purpose — helpers,
+ * templates, LFS, the generated system config and Linux's CA bundle all come
+ * from it — and an installed Git chosen in Settings still outranks it. Only
+ * a directory `managed/` verified this session is ever passed here.
+ */
+export function useManagedGit(directory: string | null): void {
+  managedDirectory = directory;
+}
+
+export function managedGitDirectory(): string | null {
+  return managedDirectory;
+}
+
+/**
+ * Make every Git command wait for `ready` before it starts, and fail with its
+ * rejection. Launch uses it while the chosen downloaded build is verified:
+ * nothing runs an unchecked build, and a build that failed its check fails
+ * every command loudly, as a broken installed Git does, rather than quietly
+ * running the bundle instead.
+ */
+export function holdGitUntil(ready: Promise<void>): void {
+  gitGate = ready;
+  ready.catch(() => undefined);
+}
+
+/** Resolves once Git may run; rejects with the reason it may not. */
+export function gitReady(): Promise<void> {
+  return gitGate;
+}
+
 let reflinkCheckoutWanted = false;
 let probedReflink: { path: string; version: string | null; support: GitReflinkSupport } | null = null;
 
-/** Settings › General › Git runtime › Copy-on-write checkout. */
+/** Settings › Git › In use › Copy-on-write checkout. */
 export function useReflinkCheckout(enabled: boolean): void {
   reflinkCheckoutWanted = enabled;
 }
@@ -80,9 +116,15 @@ export function bundledGitPath(): string {
   return dugite.resolveGitBinary(bundledDirectory);
 }
 
+/** The directory the app runs as its bundle: a chosen downloaded build, or
+ *  the one shipped inside the app. */
+function bundleInUse(): string {
+  return managedDirectory ?? bundledDirectory;
+}
+
 /** What `git` the app runs right now. */
 export function activeGitPath(): string {
-  return installedGit ?? bundledGitPath();
+  return installedGit ?? (managedDirectory !== null ? dugite.resolveGitBinary(managedDirectory) : bundledGitPath());
 }
 
 /** Directories launchd hands an app opened from Finder or the Dock. */
@@ -192,10 +234,11 @@ export function gitProcessInvocation(
 /** Preserve per-command overlays while enforcing the GUI's non-interactive
  * invariant even if a caller accidentally attempts to re-enable prompting. */
 export function gitExecutionEnvironment(
-  overrides: GitExecOptions["env"] = {}
+  overrides: GitExecOptions["env"] = {},
+  bundle: string = bundleInUse()
 ): Record<string, string | undefined> {
   return {
-    ...bundledGitEnvironment(bundledDirectory, overrides, {
+    ...bundledGitEnvironment(bundle, overrides, {
       configDirectory: generatedConfigDirectory,
       // Always written, off included, so the runtime's own config never
       // decides (runtime .2's forced it on). Global and repository config
@@ -225,8 +268,9 @@ export function installedGitEnvironment(
   command: string
 ): NodeJS.ProcessEnv {
   const env = { ...source };
-  const bundle = resolve(bundledDirectory);
-  const inBundle = (value: string): boolean => within(bundle, value);
+  const bundle = resolve(bundleInUse());
+  const shipped = resolve(bundledDirectory);
+  const inBundle = (value: string): boolean => within(bundle, value) || within(shipped, value);
   let inheritedPath = "";
   for (const key of Object.keys(env)) {
     const upper = key.toUpperCase();
@@ -271,10 +315,22 @@ export function gitLaunch(
   if (installed !== null) {
     return { binary: installed, env: installedGitEnvironment({ ...process.env, ...overrides }, installed) };
   }
-  // What `dugite.exec` does with the same overlay: process.env beneath it,
-  // then the bundle's own GIT_EXEC_PATH, templates and (unset) system config.
-  const { env, gitLocation } = dugite.setupEnvironment(gitExecutionEnvironment(overrides));
+  return bundleLaunch(bundleInUse(), overrides);
+}
+
+/** A bundle-shaped Git (the shipped one, or a downloaded build) launched the
+ *  way the bundle runs: what `dugite.exec` does with the same overlay, so
+ *  process.env beneath it, then that directory's own GIT_EXEC_PATH,
+ *  templates, system config and (Linux) CA bundle. Settings probes a build
+ *  that is not in use this way. */
+export function bundleLaunch(directory: string, overrides: GitExecOptions["env"] = {}): GitLaunch {
+  const { env, gitLocation } = dugite.setupEnvironment(gitExecutionEnvironment(overrides, directory));
   return { binary: gitLocation, env };
+}
+
+/** The shipped bundle's directory, never a downloaded build's. */
+export function shippedBundleDirectory(): string {
+  return bundledDirectory;
 }
 
 /** Name the Git that failed to start; for an installed one, say where it was chosen. */
@@ -282,7 +338,7 @@ function spawnFailureMessage(binary: string, cause: unknown): string {
   const message = cause instanceof Error ? cause.message : String(cause);
   const code = (cause as { code?: unknown } | null)?.code;
   if (binary === installedGit) {
-    return `The Git selected in Settings could not run (${binary}): ${message}. Choose another Git, or the bundled one, in Settings › General › Git runtime.`;
+    return `The Git selected in Settings could not run (${binary}): ${message}. Choose another Git, or the bundled one, in Settings › Git.`;
   }
   return code === "ENOENT"
     ? `PwrGit's bundled Git could not run (${binary}). Reinstalling PwrGit restores it.`
@@ -294,6 +350,22 @@ type ExecFileResult<T> = { stdout: T; stderr: T; exitCode: number };
 /** `dugite.exec`'s contract for any Git: a non-zero exit resolves; only a
  *  failure to start (a string error code, such as ENOENT) rejects. */
 function execFileGit(
+  overrides: GitExecOptions["env"],
+  args: string[],
+  cwd: string,
+  options: {
+    encoding: "utf8" | "buffer";
+    signal?: AbortSignal;
+    killSignal?: ExecFileOptions["killSignal"];
+    processCallback?: (child: ReturnType<typeof execFile>) => void;
+  }
+): Promise<ExecFileResult<string | Buffer>> {
+  // The Git is picked once the gate opens, not when the command was asked
+  // for: a command queued behind the launch check runs the build it chose.
+  return gitReady().then(() => runExecFileGit(gitLaunch(overrides), args, cwd, options));
+}
+
+function runExecFileGit(
   launch: GitLaunch,
   args: string[],
   cwd: string,
@@ -423,7 +495,7 @@ export const execGit: GitExec = async (args, cwd, options) => {
   if (alreadyAborted !== null) return err(abortError(alreadyAborted));
   try {
     const invocation = gitProcessInvocation(args, cwd);
-    const result = await execFileGit(gitLaunch(options?.env), invocation.args, invocation.processCwd, {
+    const result = await execFileGit(options?.env, invocation.args, invocation.processCwd, {
       encoding: "utf8",
       ...(options?.signal !== undefined ? { signal: options.signal } : {}),
       ...(options?.killSignal !== undefined
@@ -488,6 +560,18 @@ const MAX_STREAM_STDERR_CHARS = 32_768;
  * is stopped and the bounded result is marked truncated.
  */
 export const execGitRecords: GitRecordExec = (args, cwd, options) =>
+  gitReady().then(
+    () => runGitRecords(args, cwd, options),
+    (cause: unknown) =>
+      err({
+        kind: "git",
+        code: "spawn_failed",
+        message: cause instanceof Error ? cause.message : String(cause),
+        cause
+      })
+  );
+
+const runGitRecords: GitRecordExec = (args, cwd, options) =>
   new Promise((resolveResult) => {
     let child: ChildProcessWithoutNullStreams;
     const launch = gitLaunch(options.env);
@@ -602,7 +686,7 @@ export type GitExecBinary = (
 export const execGitBinary: GitExecBinary = async (args, cwd) => {
   try {
     const invocation = gitProcessInvocation(args, cwd);
-    const result = await execFileGit(gitLaunch(NO_OPTIONAL_LOCKS.env), invocation.args, invocation.processCwd, {
+    const result = await execFileGit(NO_OPTIONAL_LOCKS.env, invocation.args, invocation.processCwd, {
       encoding: "buffer"
     });
     return ok({

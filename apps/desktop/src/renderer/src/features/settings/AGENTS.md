@@ -100,6 +100,24 @@ component's table cannot catch an error in it.
 `src/main/forge/AGENTS.md` explains why a product is chosen and never guessed
 from a hostname.
 
+## Git is three cards and one shared read
+
+`GitRuntimeSettings.tsx` is Settings › Git: In use, PwrGit’s Git
+(`ManagedGitSection.tsx`) and Installs. `GitSettingsContext` sits above the nav
+and the pane, as `AiProvidersContext` does, so the nav's dots and the cards
+render one answer from `git-settings-view.ts`.
+
+- `git:runtimeStatus` probes every Git it lists, so it runs only when the Git
+  pane mounts or its group unfolds. `gitManaged:status` reads a file and runs
+  on open. The network check runs once per pane visit; main throttles it.
+- **Focus follows the reader's own action only** (Download → Cancel → Use or
+  Try again). The live region speaks phase changes, never byte counts.
+- **Nav words must fit beside "PwrGit’s Git"** in the 208px nav ("new",
+  "41%", "failed", "retry"). `e2e/git-settings.spec.ts` fails on a truncated
+  nav label in any state.
+- The Git stack folds labels above controls below 560px (a container query on
+  `.settings-stack--git` only).
+
 ## AI Providers and AI Features are per profile, in a window that is not
 
 `AiProvidersSettings.tsx` has one card per provider (Codex, then ACP agents).

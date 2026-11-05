@@ -23,13 +23,16 @@ import {
 import type { AiProviderStatus, AiProviderTone } from "./ai-provider-status";
 import { folderCardChip } from "../identity/folder-view";
 
+export type SettingsNavDot = AiProviderTone | "accent";
+
 export type SettingsNavChild = {
   label: string;
   /** The `SettingsSection` `sectionId` this scrolls the pane to. Also the
    *  React key — one value, so the key and the route id cannot drift apart. */
   sectionId: string;
-  /** Status dot tone. Absent while nothing is known, and on a jump link. */
-  dot?: AiProviderTone;
+  /** Status dot tone. Absent while nothing is known, and on a jump link.
+   *  `accent` is news, not trouble: a newer build to download or use. */
+  dot?: SettingsNavDot;
   /** Trailing word, so colour is never the only channel. */
   chip?: string;
   /** Accessible name, once there is a state to report. */

@@ -330,7 +330,7 @@ describe("selectGitRuntime", () => {
     const store = settings();
     const machine = fakeMachine({ "/opt/homebrew/bin/git": HEALTHY });
     expect(await selectGitRuntime(store, "/opt/homebrew/bin/git", machine)).toEqual({ ok: true, value: null });
-    expect(store.update).toHaveBeenCalledWith({ gitPath: "/opt/homebrew/bin/git" });
+    expect(store.update).toHaveBeenCalledWith({ gitPath: "/opt/homebrew/bin/git", managedGit: {} });
     expect(installedGitSelection()).toBe("/opt/homebrew/bin/git");
   });
 
@@ -356,7 +356,7 @@ describe("selectGitRuntime", () => {
       useInstalledGit("/opt/homebrew/bin/git");
       const store = settings();
       expect(await selectGitRuntime(store, path, fakeMachine({}))).toEqual({ ok: true, value: null });
-      expect(store.update).toHaveBeenCalledWith({ gitPath: undefined });
+      expect(store.update).toHaveBeenCalledWith({ gitPath: undefined, managedGit: {} });
       expect(installedGitSelection()).toBeNull();
     }
   });

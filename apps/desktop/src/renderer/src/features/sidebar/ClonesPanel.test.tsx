@@ -119,8 +119,8 @@ describe("ClonesPanel", () => {
     expect(container.textContent).toContain("Refreshing clones needs PwrGit’s Git");
     expect(container.textContent).toContain("The Git in use (2.56.0) has no git worktree reflink.");
     expect(button("Refresh clones").disabled).toBe(true);
-    await act(async () => button("Open Git runtime settings").click());
-    expect(dispatch).toHaveBeenCalledWith("settings:open", { page: "general" });
+    await act(async () => button("Open Git settings").click());
+    expect(dispatch).toHaveBeenCalledWith("settings:open", { page: "git", sub: "runtime" });
   });
 
   it("says runtime .1 clones but cannot re-share", async () => {

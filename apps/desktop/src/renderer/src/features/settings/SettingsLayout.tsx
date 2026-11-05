@@ -37,7 +37,7 @@ import { prefersReducedMotion } from "../../lib/reducedMotion";
  * with no disclosure, because there is nothing to remember its state.
  */
 
-export type SettingsChipTone = "default" | "ok" | "warn" | "err";
+export type SettingsChipTone = "default" | "ok" | "warn" | "err" | "accent";
 
 /** The chip's class for one tone. Exported so a pane rendering its own chip
  *  gets the same pill as `SettingsSection`'s header rather than a second copy of

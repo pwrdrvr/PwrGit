@@ -1,4 +1,3 @@
-import { GitRuntimeSettings } from "./GitRuntimeSettings";
 import type {
   AppearanceTheme,
   AppSettingsSnapshot,
@@ -43,7 +42,6 @@ export function GeneralSettings(props: {
   onSearchAllProfilesChange: (enabled: boolean) => void;
   onSidebarTextSizeChange: (size: SidebarTextSize) => void;
   onSidebarDensityChange: (density: SidebarDensity) => void;
-  onReflinkCheckoutChange: (enabled: boolean) => void;
 }) {
   const searchAllProfiles = props.snapshot.general.searchAllProfiles;
   const theme = props.snapshot.general.theme;
@@ -123,14 +121,6 @@ export function GeneralSettings(props: {
           />
         </div>
       </SettingsSection>
-
-      <GitRuntimeSettings
-        reflinkCheckout={{
-          enabled: props.snapshot.general.gitReflinkCheckout,
-          saving: props.saving,
-          onChange: props.onReflinkCheckoutChange
-        }}
-      />
 
       <SettingsSection
         eyebrow="Search"

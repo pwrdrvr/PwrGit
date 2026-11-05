@@ -1,0 +1,40 @@
+{
+  "html_url": "https://github.com/huntharo/git/releases/tag/v2.56.0-dev-pwrgit.4",
+  "prerelease": true,
+  "published_at": "2026-11-05T15:33:24Z",
+  "id": 435385876,
+  "draft": false,
+  "tag_name": "v2.56.0-dev-pwrgit.4",
+  "assets": [
+    {
+      "name": "pwrgit-2.56.0-dev-pwrgit.4-97dd200-darwin-universal.tar.gz",
+      "browser_download_url": "https://github.com/huntharo/git/releases/download/v2.56.0-dev-pwrgit.4/pwrgit-2.56.0-dev-pwrgit.4-97dd200-darwin-universal.tar.gz",
+      "digest": "sha256:ac017760d56e45395b692ab85c51c213bdde659fdc30dd8905adaeaf6050f220",
+      "size": 38890030
+    },
+    {
+      "name": "pwrgit-2.56.0-dev-pwrgit.4-97dd200-linux-arm64.tar.gz",
+      "browser_download_url": "https://github.com/huntharo/git/releases/download/v2.56.0-dev-pwrgit.4/pwrgit-2.56.0-dev-pwrgit.4-97dd200-linux-arm64.tar.gz",
+      "digest": "sha256:9f81c626da93b0a0743d1efe4b85ae82a3fe7e614ee19b4c486a18426cb13a7d",
+      "size": 25791922
+    },
+    {
+      "name": "pwrgit-2.56.0-dev-pwrgit.4-97dd200-linux-x64.tar.gz",
+      "browser_download_url": "https://github.com/huntharo/git/releases/download/v2.56.0-dev-pwrgit.4/pwrgit-2.56.0-dev-pwrgit.4-97dd200-linux-x64.tar.gz",
+      "digest": "sha256:4c204d577aa073b11df9b9b27e408f7db2a8658798a657bbddbb0da097ac9f71",
+      "size": 26474340
+    },
+    {
+      "name": "runtime-manifest.json",
+      "browser_download_url": "https://github.com/huntharo/git/releases/download/v2.56.0-dev-pwrgit.4/runtime-manifest.json",
+      "digest": "sha256:1f65def5b71046b3201ecdb2e7b5d8c1816c9f839d8acdc8261acd7f93203b15",
+      "size": 2821
+    },
+    {
+      "name": "SHA256SUMS",
+      "browser_download_url": "https://github.com/huntharo/git/releases/download/v2.56.0-dev-pwrgit.4/SHA256SUMS",
+      "digest": "sha256:0e604675a72633c8eddd8bf61bd961b9e8424540583f96cd450e6069f183e791",
+      "size": 2721
+    }
+  ]
+}
