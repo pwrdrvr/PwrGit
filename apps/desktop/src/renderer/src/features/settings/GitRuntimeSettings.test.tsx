@@ -3,11 +3,17 @@
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { err, ok, pwrGitError, type Res } from "@pwrgit/shared";
+import { err, ok, pwrGitError, type ManagedGitStatus, type Res } from "@pwrgit/shared";
 
-const mocks = vi.hoisted(() => ({ dispatch: vi.fn() }));
+const mocks = vi.hoisted(() => ({ dispatch: vi.fn(), managed: vi.fn() }));
 
-vi.mock("../../lib/pwrgit", () => ({ dispatch: mocks.dispatch }));
+// `mocks.dispatch` answers the runtime commands these tests are about; the
+// PwrGit’s Git card's reads go to `mocks.managed` (ManagedGitSection.test).
+vi.mock("../../lib/pwrgit", () => ({
+  dispatch: (channel: string, req: unknown) =>
+    channel.startsWith("gitManaged:") ? mocks.managed(channel, req) : mocks.dispatch(channel, req),
+  subscribe: () => () => undefined
+}));
 
 import { describeVersion, GitRuntimeSettings } from "./GitRuntimeSettings";
 
@@ -52,6 +58,21 @@ const HOMEBREW_SELECTED: Status = {
   path: "/fixture/homebrew/bin/git"
 };
 
+const NO_BUILDS: ManagedGitStatus = {
+  supported: true,
+  bundledVersion: "2.50.9",
+  latest: null,
+  needsAppUpdate: null,
+  checkedAt: null,
+  checkError: null,
+  builds: [],
+  selected: null,
+  previous: null,
+  inUse: false,
+  selectedError: null,
+  progress: null
+};
+
 let container: HTMLDivElement;
 let root: Root;
 
@@ -63,6 +84,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   installBridge("darwin");
   mocks.dispatch.mockResolvedValue(ok(HEALTHY));
+  mocks.managed.mockResolvedValue(ok(NO_BUILDS));
   container = document.createElement("div");
   document.body.appendChild(container);
   root = createRoot(container);
@@ -79,9 +101,9 @@ async function render(): Promise<void> {
   });
 }
 
-/** The header's status chip. Install rows carry chips of their own. */
+/** The In use card's status chip. Install rows carry chips of their own. */
 function chip(): HTMLElement | null {
-  return container.querySelector(".settings-panel__header .settings-card__chip");
+  return container.querySelector("section[aria-label='In use'] .settings-panel__header .settings-card__chip");
 }
 
 function values(): string[] {

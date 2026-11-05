@@ -27,6 +27,9 @@ import { AiProvidersSettings } from "./AiProvidersSettings";
 import { DiagnosticsSettings } from "./DiagnosticsSettings";
 import { ExperimentalSettings } from "./ExperimentalSettings";
 import { GeneralSettings } from "./GeneralSettings";
+import { GitSettings } from "./GitRuntimeSettings";
+import { GitSettingsProvider, useGitSettingsContext, type GitSettingsState } from "./GitSettingsContext";
+import { gitNavChildren } from "./git-settings-view";
 import { ProfilesSettings } from "./ProfilesSettings";
 import { ForgesSettings } from "./ForgesSettings";
 import { UpdatesSettings } from "./UpdatesSettings";
@@ -65,6 +68,7 @@ import {
  */
 const SECTIONS: Array<{ id: SettingsPage; label: string }> = [
   { id: "general", label: "General" },
+  { id: "git", label: "Git" },
   { id: "updates", label: "Updates" },
   { id: "profiles", label: "Profiles" },
   { id: "forges", label: "Forges" },
@@ -172,7 +176,11 @@ export function SettingsWindow() {
   // cards they point at are one read (AiProvidersContext).
   return (
     <AiProvidersProvider profileId={aiProfile.value}>
-      <SettingsWindowBody aiProfile={aiProfile} />
+      {/* Same reason for Git: the nav's "In use" and "PwrGit’s Git" dots and
+          the cards they point at are one read. */}
+      <GitSettingsProvider>
+        <SettingsWindowBody aiProfile={aiProfile} />
+      </GitSettingsProvider>
     </AiProvidersProvider>
   );
 }
@@ -193,6 +201,7 @@ function SettingsWindowBody(props: {
   // The By folder card and its nav row: one read of every profile's repos.
   const folders = useFolderIdentity({ active: true });
   const ai = useAiProvidersContext();
+  const git = useGitSettingsContext() as GitSettingsState;
   const [route, setRoute] = useState<SettingsRoute>(() =>
     routeFromDeepLink(parseSettingsRouteHash(window.location.hash), 0)
   );
@@ -274,6 +283,14 @@ function SettingsWindowBody(props: {
     element.scrollTo({ top: 0, behavior: prefersReducedMotion() ? "auto" : "smooth" });
   }, [route]);
 
+  // Unfolding Git asks for the runtime probe its "In use" dot reports, as
+  // unfolding AI Providers asks for discovery. Opening General starts nothing.
+  const gitNavOpen = openGroups.git === true;
+  const { requestRuntime } = git;
+  useEffect(() => {
+    if (gitNavOpen) requestRuntime();
+  }, [gitNavOpen, requestRuntime]);
+
   const editDefaults = (): void => openRoute("ai-features", "default-agents");
 
   return (
@@ -287,7 +304,7 @@ function SettingsWindowBody(props: {
             const open = openGroups[item.id] === true;
             const sublistId = `settings-nav-sublist-${item.id}`;
             const holdsRoute = route.section === item.id;
-            const children = isGroup ? navChildren(item.id, forges, ai.statuses, machine, folders.report) : [];
+            const children = isGroup ? navChildren(item.id, forges, ai.statuses, machine, folders.report, git) : [];
             // The child that actually carries the marker — routed to, and
             // reachable. Derived rather than inferred from "is there a focus,
             // is the group open", because those are proxies: a folded group's
@@ -406,6 +423,7 @@ function SettingsWindowBody(props: {
               machine={machine}
               folders={folders}
               onEditDefaults={editDefaults}
+              onOpenUpdates={() => openRoute("updates")}
             />
             {settings.error !== null && (
               <p className="settings-field__error" role="alert">
@@ -432,8 +450,10 @@ function navChildren(
   forges: ForgeStatus[] | undefined,
   aiStatuses: readonly AiProviderStatus[],
   machine: MachineGitIdentity | null,
-  folders: FolderIdentityReport | null
+  folders: FolderIdentityReport | null,
+  git: GitSettingsState
 ): SettingsNavChild[] {
+  if (section === "git") return gitNavChildren(git.runtime, git.runtimeError !== null, git.managed);
   if (section === "profiles") return profilesNavChildren(machine, folders);
   if (section === "forges") {
     return FORGE_KINDS.map((kind) => forgeNavChild(kind, forges));
@@ -452,6 +472,7 @@ function SettingsSectionBody(props: {
   machine: MachineGitIdentity | null;
   folders: FolderIdentityState;
   onEditDefaults: () => void;
+  onOpenUpdates: () => void;
 }) {
   const { settings } = props;
   const focus = props.focus === undefined ? {} : { focusSection: props.focus };
@@ -522,9 +543,22 @@ function SettingsSectionBody(props: {
         onSidebarDensityChange={(sidebarDensity) => {
           update({ general: { sidebarDensity } });
         }}
-        onReflinkCheckoutChange={(gitReflinkCheckout) => {
-          update({ general: { gitReflinkCheckout } });
+      />
+    );
+  }
+
+  if (props.section === "git") {
+    return (
+      <GitSettings
+        reflinkCheckout={{
+          enabled: snapshot.general.gitReflinkCheckout,
+          saving: settings.saving,
+          onChange: (gitReflinkCheckout) => {
+            update({ general: { gitReflinkCheckout } });
+          }
         }}
+        onOpenUpdates={props.onOpenUpdates}
+        {...focus}
       />
     );
   }

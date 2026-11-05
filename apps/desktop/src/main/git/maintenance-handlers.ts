@@ -281,7 +281,7 @@ export function registerMaintenanceHandlers(
           kind: "git",
           code: "reflink_unavailable",
           message:
-            "Refreshing clones needs PwrGit’s Git with git worktree reflink. Choose it in Settings › General › Git runtime."
+            "Refreshing clones needs PwrGit’s Git with git worktree reflink. Choose it in Settings › Git."
         });
       // Another Start may have taken the slot while this one waited for the
       // probe. From here to `active = current` nothing awaits, so this check

@@ -16709,6 +16709,9 @@ body.is-col-resizing {
 .settings-nav__subdot--bad {
   background: var(--status-error);
 }
+.settings-nav__subdot--accent {
+  background: var(--accent);
+}
 
 .settings-nav__sublabel {
   min-width: 0;
@@ -16915,6 +16918,13 @@ body.is-col-resizing {
 .settings-card__chip--err {
   color: var(--danger-text);
   background: var(--danger-soft);
+  border-color: transparent;
+}
+/* News, not trouble: a newer build to download or use. Text in
+   --accent-bright only on its own --accent-soft tint (tokens.css). */
+.settings-card__chip--accent {
+  color: var(--accent-bright);
+  background: var(--accent-soft);
   border-color: transparent;
 }
 
@@ -22014,4 +22024,125 @@ button.agent-auth-node:focus-visible,
   margin: 0 0 8px;
   color: var(--status-error);
   font: 500 11.5px/1.45 var(--font-sans);
+}
+
+/* ---- Settings → Git ---- */
+
+/* The Git page folds each field's label above its control once its cards are
+   narrower than 560px (the 760px window minimum leaves a 508px column, and a
+   230px label column there leaves a strip for versions and paths). Scoped to
+   this stack: other panes keep their side-by-side rows. */
+.settings-stack--git {
+  container: git-settings / inline-size;
+}
+@container git-settings (max-width: 560px) {
+  .settings-stack--git .settings-field {
+    flex-direction: column;
+    gap: 6px;
+  }
+  .settings-stack--git .settings-field__label {
+    flex-basis: auto;
+  }
+  .settings-stack--git .settings-field__control {
+    width: 100%;
+  }
+}
+/* A version and the chip that qualifies it, on one line while they fit. */
+.settings-git-version {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 8px;
+  max-width: 100%;
+}
+.settings-git-version .settings-card__chip {
+  align-self: center;
+}
+.settings-git-recheck {
+  padding-top: 11px;
+  border-top: 1px solid var(--border-subtle);
+}
+.settings-git-progress {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  width: 100%;
+}
+.settings-git-progress__row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+}
+.settings-git-progress__bar {
+  position: relative;
+  flex: 1;
+  min-width: 0;
+  height: 6px;
+  overflow: hidden;
+  background: var(--bg-input);
+  border: 1px solid var(--border-subtle);
+  border-radius: 999px;
+}
+.settings-git-progress__fill {
+  position: absolute;
+  inset: 0 auto 0 0;
+  background: var(--accent);
+  border-radius: inherit;
+  transition: width 200ms ease-out;
+}
+@media (prefers-reduced-motion: reduce) {
+  .settings-git-progress__fill {
+    transition: none;
+  }
+}
+.settings-git-steps {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 14px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  font: 500 11px/1.4 var(--font-sans);
+  color: var(--text-subtle);
+}
+.settings-git-step {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 5px;
+  white-space: nowrap;
+}
+.settings-git-step__mark {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  align-self: center;
+  width: 10px;
+  height: 10px;
+}
+.settings-git-step__dot {
+  width: 7px;
+  height: 7px;
+  box-sizing: border-box;
+  border: 1.5px solid currentColor;
+  border-radius: 50%;
+}
+.settings-git-step.is-active .settings-git-step__dot {
+  background: currentColor;
+}
+.settings-git-step.is-done {
+  color: var(--text-muted);
+}
+.settings-git-step.is-done .settings-git-step__mark {
+  color: var(--success-text);
+}
+.settings-git-step.is-active {
+  color: var(--text-primary);
+}
+.settings-git-step.is-active .settings-git-step__mark {
+  color: var(--accent);
+}
+.settings-git-step.is-failed {
+  color: var(--danger-text);
 }

@@ -15,6 +15,7 @@ import type { ContributionIdentity, ContributionSnapshot } from "./contributions
 import type { GhDefaultRepository, HookRun, IgnoreDestination, IgnoreOptions, IgnorePatternChoice, IgnoredSummary, RepositorySetup, SetupIgnoreTest } from "./git-discovery";
 import type { MaintenanceScope, MaintenanceAction, MaintenanceSummary, MaintenanceProgress, MaintenanceCurrent, BranchCleanupKeepDays } from "./maintenance";
 import { DEFAULT_BRANCH_CLEANUP_OPTIONS } from "./maintenance";
+import type { ManagedGitProgress, ManagedGitStatus } from "./managed-git";
 import { STALE_AGE_DAYS, type WorktreeFinishedAfterDays } from "./prunable";
 import type {
   AgentChoice,
@@ -727,7 +728,7 @@ export type GeneralSettings = {
    */
   gitIdentityReminder: boolean;
   /**
-   * Settings › General › Git runtime: Git runs with `checkout.reflink` on,
+   * Settings › Git: Git runs with `checkout.reflink` on,
    * so checkouts clone files the main checkout holds unchanged. Applies only
    * while the Git in use supports it; with any other Git the switch is shown
    * disabled. Set in PwrGit's generated system config for the bundle (where
@@ -2481,7 +2482,25 @@ export interface Commands {
    * Main probes the path first and refuses one that cannot run Git and Git
    * LFS, so a typo is never written as the runtime.
    */
-  "git:selectRuntime": { req: { path: string | null }; res: GitRuntimeStatus };
+  "git:selectRuntime": {
+    /** `managed` picks a verified downloaded build by id (and clears an
+     *  installed Git); otherwise `path` is an installed Git, or null for the
+     *  bundle. */
+    req: { path: string | null; managed?: string };
+    res: GitRuntimeStatus;
+  };
+  /** Settings › Git › PwrGit's Git, from what main already knows. No network. */
+  "gitManaged:status": { req: void; res: ManagedGitStatus };
+  /** Ask GitHub for newer builds. `force` skips the cooldown (Check now);
+   *  without it a recent answer is reused. A failed check keeps the last
+   *  good answer and reports `checkError`. */
+  "gitManaged:check": { req: { force: boolean }; res: ManagedGitStatus };
+  /** Download, verify and install one build. Never changes which Git runs:
+   *  that is `git:selectRuntime` with `managed`. Progress arrives as
+   *  `gitManaged:progress`; the result is the status after it. */
+  "gitManaged:install": { req: { version: string }; res: ManagedGitStatus };
+  /** Stop the running install, if any. Nothing partial is kept. */
+  "gitManaged:cancel": { req: void; res: null };
   /** What the Git in use can do with copy-on-write clones. Answered from the
    *  probe main keeps for the running Git (refreshed when Settings changes
    *  it), so Maintenance can ask on open without spawning a Git. */
@@ -2652,6 +2671,8 @@ export interface Events {
   /** Per-repository progress for profile-wide fetch / conservative pull. */
   "remote:bulkSyncProgress": BulkSyncProgress;
   "maintenance:progress": MaintenanceProgress;
+  /** A PwrGit's Git install moved to a new phase, or its byte meter moved. */
+  "gitManaged:progress": ManagedGitProgress;
   /** A worktree finished being removed (streamed during a batch remove). */
   "worktree:removed": { worktreeId: string };
   /**

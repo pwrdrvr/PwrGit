@@ -219,7 +219,7 @@ export function ClonesPanel({
   };
 
   const openSettings = (): void => {
-    void dispatch("settings:open", { page: "general" }).then((result) => {
+    void dispatch("settings:open", { page: "git", sub: "runtime" }).then((result) => {
       if (!result.ok) setError(result.error.message);
     });
   };
@@ -282,10 +282,10 @@ export function ClonesPanel({
                   The Git in use{version === null ? "" : ` (${version})`} has no <code>git worktree reflink</code>.
                   {support.support.checkout
                     ? " It clones files on checkout, but re-sharing a worktree needs PwrGit’s Git 2.56.0-dev-pwrgit.2 or newer."
-                    : " Choose PwrGit’s Git in Settings › General › Git runtime."}
+                    : " Choose PwrGit’s Git in Settings › Git."}
                 </p>
                 <button className="maintenance__clones-link" type="button" onClick={openSettings}>
-                  Open Git runtime settings
+                  Open Git settings
                 </button>
               </div>
             ) : (

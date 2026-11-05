@@ -38,9 +38,9 @@ vi.mock("../../lib/pwrgit", () => ({
 
 import { SettingsWindow } from "./SettingsWindow";
 
-/** General's Git runtime card reads this on mount, and General renders in every
- *  test. The catch-all `ok(undefined)` below is not a runtime status, and the
- *  card is right to trust the typed IPC rather than guard against one. */
+/** The Git page's probe, which runs only once the reader goes near Git. The
+ *  catch-all `ok(undefined)` below is not a runtime status, and the card is
+ *  right to trust the typed IPC rather than guard against one. */
 const GIT_RUNTIME: Res<"git:runtimeStatus"> = {
   active: "bundled",
   path: "/fixture/git/bin/git",
@@ -56,6 +56,24 @@ const GIT_RUNTIME: Res<"git:runtimeStatus"> = {
   ]
 };
 import { __resetCollapsedPanesForTests } from "./SettingsLayout";
+
+/** PwrGit’s Git: read by the window on open (a file read, never the network),
+ *  because the Git group's nav child reports on it. */
+let managedGit: Res<"gitManaged:status">;
+const NO_NEWER_GIT: Res<"gitManaged:status"> = {
+  supported: true,
+  bundledVersion: "2.56.0-dev-pwrgit.4",
+  latest: null,
+  needsAppUpdate: null,
+  checkedAt: null,
+  checkError: null,
+  builds: [],
+  selected: null,
+  previous: null,
+  inUse: false,
+  selectedError: null,
+  progress: null
+};
 
 /**
  * The Settings nav's group rows and their children.
@@ -184,6 +202,7 @@ async function answer(name: string, req?: unknown): Promise<unknown> {
   if (name === "forge:status") return ok({ forges });
   if (name === "forge:hosts") return ok({ hosts: [], overrides: {} });
   if (name === "git:runtimeStatus") return ok(GIT_RUNTIME);
+  if (name === "gitManaged:status" || name === "gitManaged:check") return ok(managedGit);
   if (name === "identity:machine") return ok(machineIdentity);
   if (name === "repo:hiddenList") return ok([]);
   if (name === "identity:folders") {
@@ -221,6 +240,7 @@ beforeEach(() => {
   installBridge();
   vi.clearAllMocks();
   forges = [];
+  managedGit = NO_NEWER_GIT;
   machineIdentity = CONFIGURED_GIT;
   aiSettings = DEFAULT_AI_PROVIDER_SETTINGS;
   codexDiscovery = codex();
@@ -703,5 +723,57 @@ describe("Settings nav — AI", () => {
 
     expect(navChild("Codex").getAttribute("aria-current")).toBe("page");
     expect(mocks.dispatch).toHaveBeenCalledWith("aiProviders:read", { profileId: "acme" });
+  });
+});
+
+describe("Settings nav — Git", () => {
+  function dispatched(): string[] {
+    return mocks.dispatch.mock.calls.map(([name]) => String(name));
+  }
+
+  it("sits right after General, and probes no Git until the reader goes near it", async () => {
+    await render();
+    const rows = [...container.querySelectorAll(".settings-nav__button")].map((row) => row.textContent?.trim());
+    expect(rows.slice(0, 3)).toEqual(["General", "Git", "Updates"]);
+    // General no longer holds the runtime card.
+    expect(container.querySelector("section[aria-label='In use']")).toBeNull();
+    expect(dispatched()).not.toContain("git:runtimeStatus");
+    expect(dispatched()).not.toContain("gitManaged:check");
+
+    await act(async () => navButton("Git").click());
+
+    expect(dispatched()).toContain("git:runtimeStatus");
+    const labels = [...sublist("git").querySelectorAll(".settings-nav__sublabel")].map((node) => node.textContent?.trim());
+    expect(labels).toEqual(["In use", "PwrGit’s Git", "Installs"]);
+    expect(container.querySelector("section[aria-label='In use']")).not.toBeNull();
+    expect(dotTone(navChild("In use"))).toBe("ok");
+  });
+
+  it("says new beside PwrGit’s Git while a newer build waits, from the card's own answer", async () => {
+    managedGit = {
+      ...NO_NEWER_GIT,
+      latest: { version: "2.56.0-dev-pwrgit.5", tag: "v2.56.0-dev-pwrgit.5", publishedAt: null, size: null },
+      checkedAt: Date.now()
+    };
+    await render();
+    await act(async () => navButton("Git").click());
+
+    const child = navChild("PwrGit’s Git");
+    expect(dotTone(child)).toBe("accent");
+    expect(chip(child)).toBe("new");
+    expect(child.getAttribute("aria-label")).toBe("PwrGit’s Git: Update available");
+    expect(
+      container.querySelector("section[aria-label='PwrGit’s Git'] .settings-panel__header .settings-card__chip")?.textContent
+    ).toBe("Update available");
+  });
+
+  it("lands a deep link to Git › In use on its card", async () => {
+    window.location.hash = "#settings?page=git&sub=runtime";
+    await render();
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+    expect(document.activeElement).toBe(card("In use"));
+    expect(navChild("In use").getAttribute("aria-current")).toBe("page");
   });
 });

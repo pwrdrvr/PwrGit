@@ -93,7 +93,7 @@ normalize it. Do not depend on either behavior.
 ## Which Git runs: the bundle, set up the way an installed Git would be
 
 Every Git process goes through `gitLaunch` in `dugite.ts`. It returns the
-bundled Git unless Settings › General › Git runtime chose an installed Git
+bundled Git unless Settings › Git chose an installed Git
 (`useInstalledGit`, persisted as `gitPath`). `execGit`, `execGitRecords` and
 `execGitBinary` spawn what `gitLaunch` returns. They do not call
 `dugite.exec`.
@@ -136,6 +136,46 @@ developer tools, that shim opens the installer dialog. Discovery lists the Git
 under `xcode-select -p` instead, only when that Git exists. A Git without
 working Git LFS is listed but cannot be chosen. `git:selectRuntime` probes a
 path before it saves it.
+
+## PwrGit's Git: downloaded builds of the bundled runtime (`managed/`)
+
+Settings › Git › PwrGit’s Git checks `huntharo/git` for builds newer than
+the bundled `custom-git-runtime.json`, and downloads, verifies and installs
+them under `<userData>/git-runtimes`. Design: `design/Git Settings and
+Managed Updates - UX Review.dc.html`. PwrAgent has the same downloader under
+its own root; the two never share a directory.
+
+- **Every release is a GitHub prerelease.** List `/releases`, never
+  `/releases/latest`. Order by version, never by publish date
+  (`eligibleReleases`).
+- **Trust is the stager's, not new.** `acceptCatalog` requires SHA256SUMS,
+  the catalog and GitHub's asset `digest` to agree (a missing digest is
+  allowed), and a catalog whose `consumer_sha256` is not this app's pin is
+  "needs a newer PwrGit", never installed. `verifyManagedRuntime` is an async
+  port of `stage-runtime.mjs`'s `verifyRuntime`;
+  `verify-runtime.oracle.test.ts` holds the two to one verdict. Change both
+  together.
+- **Install order is fixed:** hash the archive (also a cached one) → list its
+  members and refuse `/` or `..` → unpack into same-volume staging → verify
+  → test-run → atomic rename. A failure leaves nothing.
+- **Installing never selects.** Use is `git:selectRuntime` with `managed`,
+  the same command the Installs list uses. Precedence: an installed Git
+  chosen in Settings > a chosen build > the bundle. `selectionPatch` keeps the
+  build being left as `previous` for rollback.
+- **A chosen build runs as the whole bundle** (`useManagedGit`): its
+  `LOCAL_GIT_DIRECTORY`, helpers, templates and, on Linux, `ssl/cacert.pem`.
+- **Launch verifies the chosen build before any Git runs.** Commands wait on
+  `gitReady()` and pick their Git only after it opens (a launch taken before
+  the wait binds the shipped bundle). A build that fails its check fails every
+  command by name, and never falls back. Pruning runs only at launch, so a
+  build in use by a running operation is never removed mid-session. Known gap:
+  a multi-step operation can pick up a build chosen while it runs.
+- **`.install.lock` is shared by every PwrGit on the data directory.** Pruning
+  takes it too, and skips while another holds it. The pid is written before the
+  lock is linked into place: an empty lock is never a dead holder's
+  (`install-lock.race.test.ts`).
+- **No E2E may reach GitHub.** `launchApp` sets
+  `PWRGIT_E2E_MANAGED_GIT_OFFLINE`, so the check fails as offline.
 
 ## Copy-on-write clones: a `-c` flag and Maintenance › Clones
 
