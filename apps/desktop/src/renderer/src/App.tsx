@@ -52,7 +52,7 @@ import { ForkCheckoutDialog } from "./features/sidebar/ForkCheckoutDialog";
 import { routeBranch } from "./features/sidebar/fork-checkout-dialog";
 import { NewWorktreeModal } from "./features/sidebar/NewWorktreeModal";
 import { RepoSwitcherOverlay } from "./features/sidebar/RepoSwitcherOverlay";
-import { RepositorySetupSheet } from "./features/sidebar/RepositorySetupSheet";
+import { RepositorySetupSheet, type RepositorySetupPage } from "./features/sidebar/RepositorySetupSheet";
 import {
   reachableLocation,
   worktreeArgsFor
@@ -108,6 +108,7 @@ export function App() {
   const showRail = useCallback(() => setRailCollapsed(false), []);
   const [overlayOpen, setOverlayOpen] = useState(false);
   const [setupRepo, setSetupRepo] = useState<Repo | null>(null);
+  const [setupPage, setSetupPage] = useState<RepositorySetupPage>("hooks");
   const [cloneOpen, setCloneOpen] = useState(false);
   /** null = closed. Open carries a `seed`: a CloneRepository opens the dialog
    *  on the repository the sidebar had selected, and `seed: null` opens it
@@ -1079,7 +1080,7 @@ export function App() {
           onCloneRepo={() => setCloneOpen(true)}
           onForkRepo={(seed, checkout) => setForkOpen({ seed, checkout })}
           onForkCheckout={openForkCheckout}
-          onOpenRepoSetup={setSetupRepo}
+          onOpenRepoSetup={(repo) => { setSetupPage("hooks"); setSetupRepo(repo); }}
           onAddFolder={() => void addFolders()}
           onNewProfile={() => setProfileModal({ mode: "create" })}
           onManageProfile={() =>
@@ -1128,7 +1129,7 @@ export function App() {
                 repo={selectedRepo}
                 worktree={selectedWorktree}
                 state={worktreeState}
-                onOpenSetup={() => setSetupRepo(selectedRepo)}
+                onOpenSetup={(page = "hooks") => { setSetupPage(page); setSetupRepo(selectedRepo); }}
                 {...(railCollapsed ? { onShowRail: showRail } : {})}
               />
               {/* Keep the lineage graph mounted while a diff is shown — hidden,
@@ -1380,12 +1381,12 @@ export function App() {
           onPick={onPickSearch}
           onPickCommit={onPickCommitSearch}
           onPickFile={onPickFileSearch}
-          {...(selectedRepo === null ? {} : { onOpenSetup: () => { setOverlayOpen(false); setSetupRepo(selectedRepo); } })}
+          {...(selectedRepo === null ? {} : { onOpenSetup: () => { setOverlayOpen(false); setSetupPage("hooks"); setSetupRepo(selectedRepo); } })}
           profileCount={profiles.length}
         />
       )}
 
-      {setupRepo !== null && <RepositorySetupSheet repo={setupRepo} onClose={() => setSetupRepo(null)} />}
+      {setupRepo !== null && <RepositorySetupSheet repo={setupRepo} initialPage={setupPage} onClose={() => setSetupRepo(null)} />}
 
       {searchNewWorktree !== null && (
         <NewWorktreeModal

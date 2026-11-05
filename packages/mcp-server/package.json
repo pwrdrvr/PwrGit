@@ -19,6 +19,7 @@
     ".": "./src/index.ts",
     "./access-policy": "./src/access-policy.ts",
     "./agent-access-protocol": "./src/agent-access-protocol.ts",
+    "./gh-default": "./src/gh-default.ts",
     "./nested-worktrees": "./src/nested-worktrees.ts"
   },
   "scripts": {

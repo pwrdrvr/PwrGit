@@ -65,11 +65,28 @@ export function readMovedOnAnswer(repoId: string): MovedOnAnswer | null {
   }
 }
 
-export function writeMovedOnAnswer(repoId: string, answer: MovedOnAnswer): void {
+const movedOnRemoteKey = (repoId: string): string => `pwrgit.forkMovedOnRemote.${repoId}`;
+
+/** `remote`: the fork's remote Pull now reads (`fork.tracked.remote`), kept
+ *  so surfaces without the fork read (the setup sheet) compare gh's default
+ *  with the right repository. Omitted when the caller does not know it. */
+export function writeMovedOnAnswer(repoId: string, answer: MovedOnAnswer, remote?: string): void {
   try {
     window.localStorage.setItem(movedOnKey(repoId), answer);
+    if (remote !== undefined) window.localStorage.setItem(movedOnRemoteKey(repoId), remote);
   } catch {
     // As above: the question comes back, nothing else is lost.
+  }
+}
+
+/** The remote PwrGit pulls from once the fork moved on: the one recorded with
+ *  the answer, else `origin` (the fork, by convention; answers given before
+ *  the remote was recorded). */
+export function readMovedOnRemote(repoId: string): string {
+  try {
+    return window.localStorage.getItem(movedOnRemoteKey(repoId)) ?? "origin";
+  } catch {
+    return "origin";
   }
 }
 

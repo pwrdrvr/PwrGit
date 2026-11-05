@@ -2776,6 +2776,71 @@ describe("WorktreeHeader keeps a fork up with its source", () => {
     expect(document.querySelector(".pull-menu__note")?.textContent).toContain("Watching upstream/main");
   });
 
+  /** gh's view of the same checkout: `upstream` is the original. */
+  const ghSetup = (status: "ambiguous" | "set", repository: string) => ok({
+    hooks: { directory: "/r/.git/hooks", displayDirectory: ".git/hooks", configuredPath: null, origin: null, manager: null, active: [], shadowed: [], sampleCount: 0, lfsShadowed: false, worktreeCount: 1 },
+    ignore: [],
+    ghDefault: {
+      status,
+      host: "github.com",
+      repository,
+      remote: repository === "octo-labs/sparkline" ? "upstream" : "origin",
+      candidates: [
+        { host: "github.com", repository: "octo-labs/sparkline", remotes: ["upstream"] },
+        { host: "github.com", repository: "mara/sparkline", remotes: ["origin"] }
+      ],
+      fix: status === "ambiguous" ? "gh repo set-default mara/sparkline" : null,
+      warning: status === "ambiguous" ? "No gh default repository is set." : null
+    }
+  });
+
+  // 2026-11-05: "Pull from origin only" told PwrGit the work lives on the
+  // fork, but gh still ranked `upstream` first and opened PRs there.
+  it("offers to point gh at the fork when the fork moves on, and does it only if kept checked", async () => {
+    for (const keep of [true, false]) {
+      window.localStorage.clear();
+      answer(movedOnFork(), {
+        "remote:pull": ok({ stashed: false, reappliedWithConflicts: false }),
+        "repo:setup": ghSetup("ambiguous", "octo-labs/sparkline"),
+        "repo:setGhDefault": ok(ghSetup("set", "mara/sparkline").value.ghDefault)
+      });
+      await remount();
+      await act(async () => {
+        pull()?.click();
+        await settle();
+      });
+      const box = document.querySelector<HTMLInputElement>(".pull-moved-on__gh input");
+      expect(box?.checked).toBe(true);
+      expect(document.querySelector(".pull-moved-on__gh")?.textContent).toContain("It targets octo-labs/sparkline now");
+      if (!keep) await act(async () => box?.click());
+      const only = [...document.querySelectorAll<HTMLButtonElement>(".pull-moved-on button")].find(
+        (b) => b.textContent === "Pull from origin only"
+      );
+      await act(async () => { only?.click(); await settle(); });
+      if (keep) {
+        expect(bridge.dispatch).toHaveBeenCalledWith("repo:setGhDefault", { repoId: "repo-1", remote: "origin" });
+        // gh now targets the fork, so the header has nothing left to say.
+        expect(container.querySelector(".discovery-gh-chip")).toBeNull();
+      }
+      else expect(bridge.dispatch).not.toHaveBeenCalledWith("repo:setGhDefault", expect.anything());
+      bridge.dispatch.mockClear();
+    }
+  });
+
+  it("warns when gh's default is set to the original that the fork moved on from", async () => {
+    window.localStorage.setItem("pwrgit.forkMovedOn.repo-1", "tracked");
+    answer(movedOnFork(), { "repo:setup": ghSetup("set", "octo-labs/sparkline") });
+    await remount();
+    await act(async () => settle());
+    const chip = container.querySelector(".discovery-gh-chip");
+    expect(chip?.getAttribute("aria-label")).toContain("gh still opens pull requests on octo-labs/sparkline");
+
+    answer(movedOnFork(), { "repo:setup": ghSetup("set", "mara/sparkline") });
+    await remount();
+    await act(async () => settle());
+    expect(container.querySelector(".discovery-gh-chip")).toBeNull();
+  });
+
   it("says in the Pull menu that a moved-on fork's question is still open", async () => {
     answer(movedOnFork());
     await remount();
@@ -3391,5 +3456,49 @@ describe("WorktreeHeader publishes a branch Push has nowhere to send", () => {
     });
 
     expect(dialog()).toBeNull();
+  });
+});
+
+describe("gh default chip", () => {
+  const ghSetup = (warning: string | null) => ({
+    hooks: { directory: "/r/.git/hooks", displayDirectory: ".git/hooks", configuredPath: null, origin: null, manager: null, active: [], shadowed: [], sampleCount: 0, lfsShadowed: false, worktreeCount: 1 },
+    ignore: [],
+    ghDefault: {
+      status: warning === null ? "set" : "ambiguous",
+      host: "github.com",
+      repository: warning === null ? "pwrdrvr/PwrDisk" : "tobi/disktree",
+      remote: warning === null ? "origin" : "upstream",
+      candidates: [],
+      fix: warning === null ? null : "gh repo set-default pwrdrvr/PwrDisk",
+      warning
+    }
+  });
+
+  async function renderWith(warning: string | null, onOpenSetup = vi.fn()) {
+    bridge.dispatch.mockImplementation((name: string) =>
+      name === "repo:setup"
+        ? Promise.resolve(ok(ghSetup(warning)))
+        : name === "remote:activities"
+          ? Promise.resolve(ok([]))
+          : new Promise(() => undefined)
+    );
+    await act(async () => {
+      root.render(<WorktreeHeader repo={{ ...repo, id: `gh-${String(warning)}` }} worktree={worktree} state={null} onOpenSetup={onOpenSetup} />);
+    });
+    return onOpenSetup;
+  }
+
+  it("warns when gh would guess, and opens the setup sheet on its page", async () => {
+    const onOpenSetup = await renderWith("No gh default repository is set.");
+    const chip = container.querySelector<HTMLButtonElement>(".discovery-gh-chip");
+    expect(chip?.textContent).toBe("gh default");
+    expect(chip?.getAttribute("aria-label")).toContain("No gh default repository is set.");
+    await act(async () => chip?.click());
+    expect(onOpenSetup).toHaveBeenCalledWith("gh");
+  });
+
+  it("says nothing once a default is set", async () => {
+    await renderWith(null);
+    expect(container.querySelector(".discovery-gh-chip")).toBeNull();
   });
 });

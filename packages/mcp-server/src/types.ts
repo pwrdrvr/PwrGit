@@ -1,3 +1,5 @@
+import type { GhDefaultRepository } from "./gh-default.js";
+
 export type ForgeProvider = "github" | "gitlab" | "gitcafe" | "other";
 
 export type RemoteIdentity = {
@@ -47,6 +49,15 @@ export type RepositoryInfo = {
   defaultBranch: string | null;
   canonicalRemote: RemoteSummary | null;
   remotes: RemoteSummary[];
+  /**
+   * The repository `gh` acts on here when no `--repo` is given (what
+   * `gh pr create` opens a PR against), and whether that is a guess. Read it
+   * before running gh: `ambiguous` means gh will pick by remote NAME
+   * (`upstream` first), which in a fork checkout is the original repository.
+   * `warning` says so in a sentence and `fix` is the `gh repo set-default`
+   * command; PwrGit never runs it.
+   */
+  ghDefaultRepository: GhDefaultRepository & { warning: string | null };
   fork: {
     isFork: true | null;
     upstream: RemoteIdentity | null;

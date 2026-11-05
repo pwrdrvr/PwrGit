@@ -113,6 +113,37 @@ describe("safe repository metadata", () => {
     expect(serialized).not.toContain("tracked.txt");
   });
 
+  // 2026-11-04: an agent's bare `gh pr create` in a fork checkout opened its
+  // PR on the original repository, because gh ranks `upstream` first and no
+  // default was set. Nothing PwrGit reported said so.
+  it("reports which repository gh would target, and when that is a guess", async () => {
+    const root = mkdtempSync(join(tmpdir(), "pwrgit-mcp-gh-default-"));
+    cleanup.push(root);
+    execFileSync("git", ["init", "-b", "main", root], { stdio: "ignore" });
+    git(root, ["remote", "add", "origin", "git@github.com:pwrdrvr/PwrDisk.git"]);
+    git(root, ["remote", "add", "pwrdrvr", "git@github.com:pwrdrvr/PwrDisk.git"]);
+    git(root, ["remote", "add", "upstream", "git@github.com:tobi/disktree.git"]);
+
+    const unset = await readRepositoryInfo(root);
+    expect(unset.ghDefaultRepository).toMatchObject({
+      status: "ambiguous",
+      repository: "tobi/disktree",
+      remote: "upstream",
+      fix: "gh repo set-default pwrdrvr/PwrDisk"
+    });
+    expect(unset.ghDefaultRepository.warning).toContain("gh pr create");
+
+    git(root, ["config", "remote.origin.gh-resolved", "base"]);
+    const set = await readRepositoryInfo(root);
+    expect(set.ghDefaultRepository).toMatchObject({
+      status: "set",
+      repository: "pwrdrvr/PwrDisk",
+      remote: "origin",
+      fix: null,
+      warning: null
+    });
+  });
+
   it("does not mislabel the current branch as an unknown default branch", async () => {
     const root = mkdtempSync(join(tmpdir(), "pwrgit-mcp-default-"));
     cleanup.push(root);

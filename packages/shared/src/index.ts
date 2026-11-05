@@ -1,5 +1,6 @@
 export * from "./result";
 export * from "./git-discovery";
+export * from "./gh-default-intent";
 export * from "./types";
 export * from "./forge-host-name";
 export * from "./forge-product";

@@ -1265,7 +1265,7 @@ if (!gotSingleInstanceLock) {
     );
     registerGraphHandlers(bus, db, stateService);
     registerChangesHandlers(bus, db, refresher, worktreeOperations);
-    registerRepositorySetupHandlers(bus, db, worktreeOperations);
+    registerRepositorySetupHandlers(bus, db, worktreeOperations, () => forgeHosts.overrides());
     registerOperationHandlers(bus, db, refresher, worktreeOperations);
     registerSubmoduleHandlers(bus, db);
     const fileInsightHandlers = registerFileInsightHandlers(bus, db);

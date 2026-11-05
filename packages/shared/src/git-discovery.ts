@@ -53,6 +53,26 @@ export type SetupIgnoreLayer = IgnoreDestinationOption & {
   content: string;
 };
 
+/**
+ * The repository the GitHub CLI acts on in this clone when no `--repo` is
+ * given: what `gh pr create` opens a PR against. The rule (gh ranks remotes
+ * `upstream` > `github` > `origin` > others unless `gh repo set-default`
+ * wrote `remote.<name>.gh-resolved`) lives in `@pwrgit/mcp-server/gh-default`,
+ * which main calls; this is its result, so the renderer need not import it.
+ *
+ * `ambiguous` and `invalid` are the risky states: `warning` says why and `fix`
+ * is the command to run. PwrGit never runs it (it writes shared .git/config).
+ */
+export type GhDefaultRepository = {
+  status: "set" | "implicit" | "ambiguous" | "invalid" | "none";
+  host: string | null;
+  repository: string | null;
+  remote: string | null;
+  candidates: { host: string; repository: string; remotes: string[] }[];
+  fix: string | null;
+  warning: string | null;
+};
+
 export type RepositorySetup = {
   hooks: {
     directory: string;
@@ -67,6 +87,8 @@ export type RepositorySetup = {
     worktreeCount: number;
   };
   ignore: SetupIgnoreLayer[];
+  /** Null when the remotes could not be read. */
+  ghDefault: GhDefaultRepository | null;
 };
 
 export type SetupIgnoreTest = {

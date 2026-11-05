@@ -12,7 +12,7 @@
 
 import type { ForgeHostMap } from "./forge-remote";
 import type { ContributionIdentity, ContributionSnapshot } from "./contributions";
-import type { HookRun, IgnoreDestination, IgnoreOptions, IgnorePatternChoice, IgnoredSummary, RepositorySetup, SetupIgnoreTest } from "./git-discovery";
+import type { GhDefaultRepository, HookRun, IgnoreDestination, IgnoreOptions, IgnorePatternChoice, IgnoredSummary, RepositorySetup, SetupIgnoreTest } from "./git-discovery";
 import type { MaintenanceScope, MaintenanceAction, MaintenanceSummary, MaintenanceProgress, MaintenanceCurrent, BranchCleanupKeepDays } from "./maintenance";
 import { DEFAULT_BRANCH_CLEANUP_OPTIONS } from "./maintenance";
 import { STALE_AGE_DAYS, type WorktreeFinishedAfterDays } from "./prunable";
@@ -1314,6 +1314,9 @@ export interface Commands {
     res: GitLfsReport;
   };
   "repo:setup": { req: { repoId: string }; res: RepositorySetup };
+  /** Make `remote`'s repository gh's default, as `gh repo set-default`
+   *  would. Only on an explicit user action: it writes shared .git/config. */
+  "repo:setGhDefault": { req: { repoId: string; remote: string }; res: GhDefaultRepository };
   "repo:testIgnorePath": { req: { repoId: string; path: string }; res: SetupIgnoreTest };
   "repo:saveExclude": {
     req: { repoId: string; previous: string; content: string };
