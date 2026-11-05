@@ -271,7 +271,7 @@ export async function createPwrGitMcpServer(
     {
       title: "Inspect repository metadata",
       description:
-        "Read canonical provider identity, credential-free remotes, fork/upstream evidence, worktrees, branches, and safe aggregate status. Does not return filenames, commit messages, author data, or remote credentials.",
+        "Read canonical provider identity, credential-free remotes, fork/upstream evidence, the gh CLI default repository (ghDefaultRepository: what `gh pr create` targets without --repo; check it before running gh, since `ambiguous` means gh will pick the `upstream` remote), worktrees, branches, and safe aggregate status. Does not return filenames, commit messages, author data, or remote credentials.",
       inputSchema: {
         path: z
           .string()

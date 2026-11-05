@@ -1,13 +1,17 @@
 import { availableParallelism } from "node:os";
 import {
   DEFAULT_BRANCH_CLEANUP_OPTIONS,
+  EMPTY_MAINTENANCE_RUN_VIEW,
   err,
+  foldMaintenanceProgress,
   isBranchCleanupKeepDays,
   ok,
   type BranchCleanupOptions,
   type DeletedBranchResult,
   type MaintenanceRepo,
   type MaintenanceRepoResult,
+  type MaintenanceRunRecord,
+  type MaintenanceRunView,
   type MaintenanceScope,
   type MaintenanceSummary,
   type MaintenanceProgress
@@ -162,15 +166,60 @@ export function registerMaintenanceHandlers(
 ): { releaseWebContents: (id: number) => void } {
   // One sweep across all windows, regardless of operation ids or profiles.
   // Renderer bugs cannot create an unbounded GC process/queue per click.
+  // A reload keeps the webContents (and its id), so the run outlives the
+  // dialog that started it. `run` and `view` are what the reloaded dialog
+  // needs to draw it again; `view` is folded from the same events the
+  // renderer is sent, in `progress()`.
+  type RunRecord = Omit<MaintenanceRunRecord, "ownWindow">;
   let active:
-    | { id: string; owner: number | undefined; controller: AbortController }
+    | {
+        id: string;
+        owner: number | undefined;
+        controller: AbortController;
+        run: RunRecord;
+        view: MaintenanceRunView;
+      }
     | undefined;
+  /** Each profile's last finished run, for its receipt. Memory only. */
+  const finished = new Map<
+    string,
+    { owner: number | undefined; run: RunRecord; summary: MaintenanceSummary; seen: boolean }
+  >();
 
   bus.register("maintenance:cancel", (req, ctx) => {
     if (active?.id !== req.operationId || active.owner !== ctx.webContentsId)
       return ok({ cancelled: false });
     active.controller.abort();
     return ok({ cancelled: true });
+  });
+
+  // Scoped by the profile the renderer names (src/main/AGENTS.md): one
+  // profile's window never reattaches to another's run, even an
+  // all-profiles run whose repositories include its own.
+  bus.register("maintenance:current", (req, ctx) => {
+    const profileId = typeof req?.profileId === "string" ? req.profileId : null;
+    if (profileId === null) return ok(null);
+    if (active !== undefined && active.run.profileId === profileId)
+      return ok({
+        state: "running",
+        run: { ...active.run, ownWindow: active.owner === ctx.webContentsId },
+        view: active.view,
+        cancelling: active.controller.signal.aborted
+      });
+    const last = finished.get(profileId);
+    if (last === undefined) return ok(null);
+    return ok({
+      state: "finished",
+      run: { ...last.run, ownWindow: last.owner === ctx.webContentsId },
+      summary: last.summary,
+      seen: last.seen
+    });
+  });
+
+  bus.register("maintenance:seen", (req) => {
+    const last = finished.get(req?.profileId);
+    if (last !== undefined && last.summary.operationId === req.operationId) last.seen = true;
+    return ok(null);
   });
 
   bus.register("maintenance:restoreBranch", async (req) => {
@@ -234,6 +283,16 @@ export function registerMaintenanceHandlers(
           message:
             "Refreshing clones needs PwrGit’s Git with git worktree reflink. Choose it in Settings › General › Git runtime."
         });
+      // Another Start may have taken the slot while this one waited for the
+      // probe. From here to `active = current` nothing awaits, so this check
+      // holds: one run at a time is what a reloaded window reattaches to.
+      if (active !== undefined)
+        return err({
+          kind: "repo",
+          code: "maintenance_running",
+          message:
+            "Repository maintenance is already running in another dialog. Wait for it to finish."
+        });
     }
     const knownRepos = maintenanceRepos(db, req);
     if (knownRepos === null)
@@ -267,8 +326,28 @@ export function registerMaintenanceHandlers(
     const abort = (): void => controller.abort();
     if (ctx.signal?.aborted === true) abort();
     else ctx.signal?.addEventListener("abort", abort, { once: true });
-    active = { id: req.operationId, owner: ctx.webContentsId, controller };
     const startedAt = new Date().toISOString();
+    const run: RunRecord = {
+      operationId: req.operationId,
+      profileId: req.profileId,
+      allProfiles: req.allProfiles === true,
+      ...(req.repoIds === undefined ? {} : { repoIds: req.repoIds }),
+      action,
+      startedAt
+    };
+    const current = {
+      id: req.operationId,
+      owner: ctx.webContentsId,
+      controller,
+      run,
+      view: EMPTY_MAINTENANCE_RUN_VIEW
+    };
+    active = current;
+    // This run supersedes the profile's last receipt. If it ends on an
+    // error there is no newer one, and the older one is not the latest.
+    finished.delete(req.profileId);
+    let seq = 0;
+    let ended = false;
     const results = new Map<string, MaintenanceRepoResult>();
     const commonDirectories = new Set<string>();
     const storeTurns = new Map<string, Promise<unknown>>();
@@ -287,14 +366,20 @@ export function registerMaintenanceHandlers(
       );
       return turn;
     };
+    /** The one place a run reports: the event every window hears, and the
+     *  snapshot a reloaded window reattaches to. */
     const progress = (
-      event: Omit<MaintenanceProgress, "operationId" | "profileId">
-    ): void =>
-      emitEvent("maintenance:progress", {
+      event: Omit<MaintenanceProgress, "operationId" | "profileId" | "seq">
+    ): void => {
+      const full: MaintenanceProgress = {
         ...event,
         operationId: req.operationId,
-        profileId: req.profileId
-      });
+        profileId: req.profileId,
+        seq: ++seq
+      };
+      current.view = foldMaintenanceProgress(current.view, full);
+      emitEvent("maintenance:progress", full);
+    };
 
     try {
       progress({ phase: "starting", repos, ...(linkedCounts === null ? {} : { noWorktrees }) });
@@ -634,10 +719,18 @@ export function registerMaintenanceHandlers(
         results: repos.map((repo) => results.get(repo.id)!),
         ...(linkedCounts === null ? {} : { noWorktrees })
       };
+      // Recorded before the run lets go, so a window asking in between
+      // finds it either running or finished, never neither.
+      finished.set(req.profileId, { owner: ctx.webContentsId, run, summary, seen: false });
+      active = undefined;
+      ended = true;
+      progress({ phase: "finished", summary });
       return ok(summary);
     } finally {
       active = undefined;
       ctx.signal?.removeEventListener("abort", abort);
+      // A reattached window awaits no answer; tell it the run is over.
+      if (!ended) progress({ phase: "finished" });
     }
   });
   return {

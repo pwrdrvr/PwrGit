@@ -1,6 +1,11 @@
 import { access, realpath } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 import { git, requireSuccess, type CommandRunner } from "./command.js";
+import {
+  describeGhDefaultRisk,
+  parseGhResolvedConfig,
+  resolveGhDefaultRepository
+} from "./gh-default.js";
 import { summarizeRemotes } from "./remote.js";
 import { nestedWorktreePathspec } from "./nested-worktrees.js";
 import type {
@@ -34,6 +39,22 @@ export async function readConfiguredRemotes(
     configured.push({ name: match[1], url: match[2] });
   }
   return summarizeRemotes(configured);
+}
+
+/** `remote.<name>.gh-resolved`, the key `gh repo set-default` writes. */
+export async function readGhResolved(
+  cwd: string,
+  runner?: CommandRunner
+): Promise<Map<string, string>> {
+  const result = await git(
+    cwd,
+    ["config", "--get-regexp", "^remote\\..*\\.gh-resolved$"],
+    runner
+  );
+  // Best-effort, unlike the remotes read: an unreadable key must not fail the
+  // whole repository report. 1 is "no such key".
+  if (result.exitCode !== 0) return new Map();
+  return parseGhResolvedConfig(result.stdout);
 }
 
 export function parsePorcelainStatus(stdout: string): SafeStatusSummary {
@@ -370,11 +391,12 @@ export async function readRepositoryInfo(
   const reads = [
     git(topLevel, ["worktree", "list", "--porcelain", "-z"], runner),
     readConfiguredRemotes(topLevel, runner),
-    readSafeStatus(requested, runner)
+    readSafeStatus(requested, runner),
+    readGhResolved(topLevel, runner)
   ] as const;
   // Settle every read before surfacing a failure, as `mapLimit` does.
   await Promise.allSettled(reads);
-  const [worktreeResult, remotes, status] = await Promise.all(reads);
+  const [worktreeResult, remotes, status, ghResolved] = await Promise.all(reads);
   const parsedWorktrees = parseWorktreeList(
     requireSuccess(worktreeResult, "listing git worktrees")
   );
@@ -437,6 +459,7 @@ export async function readRepositoryInfo(
     ),
     canonicalRemote,
     remotes,
+    ghDefaultRepository: ghDefaultRepositoryFor(remotes, ghResolved),
     fork: {
       isFork: differentUpstream === null ? null : true,
       upstream:
@@ -456,6 +479,22 @@ export async function readRepositoryInfo(
     worktrees,
     status
   };
+}
+
+function ghDefaultRepositoryFor(
+  remotes: readonly RemoteSummary[],
+  ghResolved: ReadonlyMap<string, string>
+): RepositoryInfo["ghDefaultRepository"] {
+  const state = resolveGhDefaultRepository(
+    remotes.map((remote) => ({
+      name: remote.name,
+      host: remote.host,
+      repository: remote.path,
+      github: remote.provider === "github",
+      resolved: ghResolved.get(remote.name) ?? null
+    }))
+  );
+  return { ...state, warning: describeGhDefaultRisk(state) };
 }
 
 export async function repositoryRootFor(

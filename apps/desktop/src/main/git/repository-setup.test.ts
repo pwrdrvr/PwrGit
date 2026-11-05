@@ -32,6 +32,38 @@ describe("repository setup in linked worktrees", () => {
 
   afterEach(() => rmSync(base, { recursive: true, force: true }));
 
+  // 2026-11-04: a fork checkout with `upstream` and no `gh repo set-default`
+  // sent an agent's `gh pr create` to the original repository. The setup read
+  // must say so from either worktree, since the key is shared .git/config.
+  it("reports gh's default repository, risky until gh repo set-default runs", async () => {
+    git(["remote", "add", "origin", "git@github.com:pwrdrvr/PwrDisk.git"]);
+    git(["remote", "add", "pwrdrvr", "https://github.com/pwrdrvr/PwrDisk.git"]);
+    git(["remote", "add", "upstream", "git@github.com:tobi/disktree.git"]);
+    git(["remote", "add", "mirror", "git@gitlab.com:pwrdrvr/PwrDisk.git"]);
+
+    const unset = await readRepositorySetup(systemGit, linked);
+    expect(unset.ok && unset.value.ghDefault).toMatchObject({
+      status: "ambiguous",
+      repository: "tobi/disktree",
+      remote: "upstream",
+      fix: "gh repo set-default pwrdrvr/PwrDisk",
+      candidates: [
+        { repository: "tobi/disktree", remotes: ["upstream"] },
+        { repository: "pwrdrvr/PwrDisk", remotes: ["origin", "pwrdrvr"] }
+      ]
+    });
+
+    git(["config", "remote.origin.gh-resolved", "base"]);
+    const set = await readRepositorySetup(systemGit, linked);
+    expect(set.ok && set.value.ghDefault).toMatchObject({ status: "set", repository: "pwrdrvr/PwrDisk", warning: null, fix: null });
+  });
+
+  it("has nothing to say about a checkout with one GitHub repository", async () => {
+    git(["remote", "add", "origin", "git@github.com:pwrdrvr/PwrGit.git"]);
+    const setup = await readRepositorySetup(systemGit, root);
+    expect(setup.ok && setup.value.ghDefault).toMatchObject({ status: "implicit", repository: "pwrdrvr/PwrGit", warning: null });
+  });
+
   it("resolves active and shadowed hooks from the shared common directory", async () => {
     mkdirSync(join(root, ".husky", "_"), { recursive: true });
     const active = join(root, ".husky", "_", "pre-commit");

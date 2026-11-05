@@ -4,7 +4,10 @@ import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type {
   GitReflinkStatus,
+  MaintenanceCurrent,
   MaintenanceProgress,
+  MaintenanceRunRecord,
+  MaintenanceRunView,
   MaintenanceRepo,
   MaintenanceRepoResult,
   MaintenanceSummary
@@ -175,5 +178,126 @@ describe("ClonesPanel", () => {
     ).toEqual(["b", "a"]);
     expect(container.textContent).toContain("9 files re-shared · 2 left as they are (2 changed).");
     expect(button("Run again").disabled).toBe(false);
+  });
+});
+
+describe("ClonesPanel after a window reload", () => {
+  const run: MaintenanceRunRecord = {
+    operationId: "op-live",
+    profileId: "one",
+    allProfiles: true,
+    action: { kind: "reshare", updateMain: false },
+    startedAt: "2026-11-04T12:00:00Z",
+    ownWindow: true
+  };
+  /** Main's snapshot: `a` finished, `b` running, `c` queued. */
+  const snapshot: MaintenanceRunView = {
+    repos: [repo("a"), repo("b"), repo("c")],
+    noWorktrees: [],
+    running: ["b"],
+    details: { b: "Worktree 3 of 408 · feature" },
+    results: [reshared("a", 1024 * 1024, 3)],
+    seq: 6
+  };
+  async function renderWith(current: MaintenanceCurrent): Promise<void> {
+    dispatch.mockImplementation(async (name: string) =>
+      name === "git:reflinkSupport"
+        ? { ok: true, value: capable }
+        : name === "maintenance:current"
+          ? { ok: true, value: current }
+          : name === "maintenance:run"
+            ? new Promise(() => undefined)
+            : { ok: true, value: name === "maintenance:cancel" ? { cancelled: true } : null }
+    );
+    await act(async () => {
+      root.render(<ClonesPanel profileId="one" platform="darwin" onClose={() => undefined} onBusyChange={() => undefined} />);
+    });
+  }
+  const send = (event: Omit<MaintenanceProgress, "operationId" | "profileId">): void =>
+    progress?.({ operationId: "op-live", profileId: "one", ...event });
+
+  it("picks the live run up where main's snapshot left it, and can still cancel it", async () => {
+    await renderWith({ state: "running", run, view: snapshot, cancelling: false });
+    expect(dispatch).toHaveBeenCalledWith("maintenance:current", { profileId: "one" });
+    expect(dispatch.mock.calls.some(([name]) => name === "maintenance:run")).toBe(false);
+    expect(container.textContent).toContain("Refreshing clones in 1 repository");
+    expect(container.textContent).toContain("Worktree 3 of 408 · feature");
+    expect(container.textContent).toContain("3 files re-shared");
+
+    await act(async () => {
+      // Already in the snapshot: must not move the line back.
+      send({ phase: "repo_progress", seq: 5, repo: repo("b"), detail: "Worktree 2 of 408 · old" });
+      send({ phase: "repo_progress", seq: 7, repo: repo("b"), detail: "Worktree 4 of 408 · next" });
+    });
+    expect(container.textContent).toContain("Worktree 4 of 408 · next");
+    expect(container.textContent).not.toContain("Worktree 2 of 408 · old");
+
+    await act(async () => button("Cancel").click());
+    expect(dispatch).toHaveBeenCalledWith("maintenance:cancel", { operationId: "op-live" });
+
+    const summary: MaintenanceSummary = {
+      operationId: "op-live",
+      startedAt: run.startedAt,
+      finishedAt: "2026-11-04T12:16:40Z",
+      cancelled: false,
+      results: [reshared("a", 1024 * 1024, 3), reshared("b", 2 * 1024 * 1024, 5), reshared("c", 0, 0)]
+    };
+    await act(async () => send({ phase: "finished", seq: 8, summary }));
+    expect(container.querySelector(".maintenance__done-status")?.textContent).toContain(
+      "3.0 MiB of file data now shared with main checkouts"
+    );
+    expect(container.textContent).toContain("took 16m 40s");
+    expect(dispatch).toHaveBeenCalledWith("maintenance:seen", { profileId: "one", operationId: "op-live" });
+    // Run again repeats the reattached run's options, not this panel's defaults.
+    await act(async () => button("Run again").click());
+    expect(dispatch.mock.calls.find(([name]) => name === "maintenance:run")?.[1]).toMatchObject({
+      allProfiles: true,
+      action: { kind: "reshare", updateMain: false }
+    });
+  });
+
+  it("shows the receipt of a run that finished while no dialog was open, once", async () => {
+    const summary: MaintenanceSummary = {
+      operationId: "op-live",
+      startedAt: run.startedAt,
+      finishedAt: "2026-11-04T12:00:30Z",
+      cancelled: false,
+      results: [reshared("a", 1024 * 1024, 3)]
+    };
+    await renderWith({ state: "finished", run, summary, seen: false });
+    expect(container.querySelector(".maintenance__done-status")?.textContent).toContain(
+      "1.0 MiB of file data now shared with main checkouts"
+    );
+    expect(dispatch).toHaveBeenCalledWith("maintenance:seen", { profileId: "one", operationId: "op-live" });
+  });
+
+  it("opens on its setup when the last receipt was already seen", async () => {
+    await renderWith({
+      state: "finished",
+      run,
+      summary: { operationId: "op-live", startedAt: run.startedAt, finishedAt: run.startedAt, cancelled: false, results: [] },
+      seen: true
+    });
+    expect(container.querySelector(".maintenance__done-status")).toBeNull();
+    expect(button("Refresh clones").disabled).toBe(false);
+  });
+
+  it("draws a run that was already stopping as stopping, not live", async () => {
+    await renderWith({ state: "running", run, view: snapshot, cancelling: true });
+    expect(container.textContent).toContain("Stopping after the worktrees already running…");
+    expect(button("Cancelling…").disabled).toBe(true);
+  });
+
+  it("does not offer Cancel on a run another window started", async () => {
+    await renderWith({ state: "running", run: { ...run, ownWindow: false }, view: snapshot, cancelling: false });
+    expect(container.textContent).toContain("Refreshing clones in 1 repository");
+    expect(button("Cancel").disabled).toBe(true);
+    expect(container.textContent).toContain("Started in another window, which alone can cancel it.");
+  });
+
+  it("leaves another kind of run to the dialog", async () => {
+    await renderWith({ state: "running", run: { ...run, action: { kind: "gc", mode: "standard" } }, view: snapshot, cancelling: false });
+    expect(container.textContent).not.toContain("Refreshing clones in");
+    expect(button("Refresh clones")).toBeDefined();
   });
 });
