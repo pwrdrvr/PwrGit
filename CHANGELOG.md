@@ -1,5 +1,12 @@
 # Changelog
 
+## v0.54.0 - 2026-11-05
+
+- Git settings - Added a dedicated Settings > Git page to inspect the Git in use and, on macOS and Linux, check for, download, verify, and choose newer PwrGit Git builds between app releases. Downloading does not switch Git; an explicitly chosen custom path stays selected, and downloaded builds can be switched back to the bundled runtime.
+- Git build tracks - Added Latest and Prerelease choices for Git runtime updates. Latest is the default and offers promoted builds only; Prerelease includes testing builds. Changing tracks only changes what is offered, not which Git runs, and older promoted builds are not offered as updates over a newer build in use.
+- Bundled Git - Updated macOS and Linux to PwrDrvr Git development build 2.56.0-dev-pwrgit.4, improving APFS copy-on-write mode and timestamp repair and handling of the kernel-managed provenance attribute. Windows retains its existing Git runtime; explicit runtime choices remain unchanged.
+- GitHub CLI - Added a warning when gh's repository choice is ambiguous or disagrees with a fork-only Pull preference. Repository setup shows the target and candidates and offers an explicit default-setting action; the fork-only prompt can set that default too. Repository-info MCP responses now expose gh's target and guidance so agents can check before opening a pull request.
+
 ## v0.53.0 - 2026-11-04
 
 - Copy-on-write checkout - Added a Git runtime setting that lets supported checkout, switch, reset, and worktree-add operations share unchanged file data on compatible filesystems. macOS and Linux now bundle the pinned PwrDrvr Git development build 2.56.0-dev-pwrgit.3; Windows retains its existing Git runtime. The setting is disabled when the selected Git lacks support.
