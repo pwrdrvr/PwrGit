@@ -21,6 +21,13 @@ for (const [width, height] of [[1280, 960], [1000, 650]]) {
       const page = await app.firstWindow();
       const dialog = page.getByRole("dialog", { name: "Repository maintenance" });
       await expect(dialog.getByRole("button", { name: "Start", exact: true })).toBeEnabled();
+      // The real loaded FontFace entries, captured before any dialog text
+      // mounts, are the oracle for avoiding fallback metrics in this harness.
+      const fonts = await page.evaluate(() => (window as unknown as {
+        __maintenanceFonts: { family: string; weight: string; status: string }[]
+      }).__maintenanceFonts);
+      for (const [family, weights] of [["Geist Sans", ["400", "500", "600", "700"]], ["Geist Mono", ["400", "500", "600"]]] as const)
+        for (const weight of weights) expect(fonts).toContainEqual({ family, weight, status: "loaded" });
       const repair = dialog.getByRole("checkbox", { name: "Repair broken worktree links", exact: true });
       if (process.env["PWRGIT_HARNESS_BEFORE"] !== "1") {
         await expect(repair).not.toBeChecked();
