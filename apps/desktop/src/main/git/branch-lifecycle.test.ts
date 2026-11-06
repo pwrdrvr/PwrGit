@@ -3,6 +3,7 @@ import {
   mkdirSync,
   mkdtempSync,
   realpathSync,
+  renameSync,
   rmSync,
   writeFileSync
 } from "node:fs";
@@ -11,7 +12,7 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { ok } from "@pwrgit/shared";
 import type { GitExec } from "./dugite";
-import { deleteLocalBranch, renameLocalBranch } from "./branch-lifecycle";
+import { deleteLocalBranch, deleteReviewedBranches, renameLocalBranch } from "./branch-lifecycle";
 import { timedGitSync } from "./test-support/git-tripwire";
 import { createSystemGit } from "./test-support/system-git";
 
@@ -23,7 +24,7 @@ function git(cwd: string, ...args: string[]): void {
 
 function gitOut(cwd: string, ...args: string[]): string {
   return timedGitSync(args, cwd, () =>
-    execFileSync("git", args, { cwd, encoding: "utf8" })
+    execFileSync("git", args, { cwd, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] })
   ).trim();
 }
 
@@ -151,6 +152,48 @@ describe("safe local branch lifecycle", () => {
       true
     );
     expect(!held.ok && held.error.code).toBe("branch_checked_out");
+  });
+
+  it("deletes unrelated branches after the primary repo moves without worktree repair", async () => {
+    const { root, path } = repo("relocated");
+    const linked = join(root, "linked");
+    git(path, "worktree", "add", "--detach", linked);
+    git(path, "branch", "finished");
+    const expectedHead = head(path, "finished");
+    const moved = join(root, "moved");
+    renameSync(path, moved);
+    // The checkout exists and Git does not mark it prunable, but its .git
+    // file still names the old primary path: exactly the reported failure.
+    expect(gitOut(moved, "worktree", "list", "--porcelain")).not.toContain("prunable");
+    expect(() => gitOut(linked, "rev-parse", "--absolute-git-dir")).toThrow();
+
+    const result = await deleteReviewedBranches(systemGit, moved, [
+      { branch: "finished", expectedHead }
+    ]);
+    expect(result.ok && result.value.get("finished")).toEqual(ok(undefined));
+    expect(hasRef(moved, "refs/heads/finished")).toBe(false);
+    expect(gitOut(moved, "worktree", "list", "--porcelain")).toContain(linked.replaceAll("\\", "/"));
+  });
+
+  it("retains branches if a broken checkout's registration disappears during inspection", async () => {
+    const { root, path } = repo("registration-race");
+    const linked = join(root, "linked");
+    git(path, "worktree", "add", "--detach", linked);
+    git(path, "branch", "finished");
+    const expectedHead = head(path, "finished");
+    const moved = join(root, "moved");
+    renameSync(path, moved);
+    const racingGit: GitExec = async (args, cwd, options) => {
+      const result = await systemGit(args, cwd, options);
+      if (args.includes("--absolute-git-dir") && cwd.replaceAll("\\", "/") === linked.replaceAll("\\", "/"))
+        rmSync(join(moved, ".git", "worktrees", "linked", "gitdir"));
+      return result;
+    };
+
+    // A failed metadata read cannot establish that mutation is safe.
+    const result = await deleteReviewedBranches(racingGit, moved, [{ branch: "finished", expectedHead }]);
+    expect(!result.ok && result.error.code).toBe("operation_check_failed");
+    expect(head(moved, "finished")).toBe(expectedHead);
   });
 
   it("rejects a rename target held by an unborn worktree", async () => {
