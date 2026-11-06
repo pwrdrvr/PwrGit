@@ -255,11 +255,15 @@ jobs:
     needs: prepare
     runs-on: windows-latest
     timeout-minutes: 25
-    env:
-      # Keep temporary I/O on the hosted runner work volume.
-      TEMP: ${{ runner.temp }}
-      TMP: ${{ runner.temp }}
     steps:
+      - name: Move temporary I/O to runner work volume
+        shell: pwsh
+        env:
+          TEMP: ${{ runner.temp }}
+          TMP: ${{ runner.temp }}
+        run: |
+          "TEMP=$env:TEMP" >> $env:GITHUB_ENV
+          "TMP=$env:TMP" >> $env:GITHUB_ENV
       - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
         with:
           persist-credentials: false

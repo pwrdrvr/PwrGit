@@ -14,13 +14,16 @@ test("hosted Windows disk work inherits the runner temp volume", () => {
     for (const name of names) {
       const body = source.split(`\n  ${name}:\n`)[1]?.split(/\n  [\w-]+:\n/)[0];
       expect(body, `${file}: ${name}`).toBeDefined();
-      const jobEnv = body.split(/^    env:\s*$/m)[1]?.split(/^    [\w-]+:/m)[0];
+      const steps = body.split("\n    steps:\n")[1];
+      const [first, ...remaining] = steps.split(/^      - /m).filter(Boolean);
+      expect(first, `${file}: ${name}`).toContain("name: Move temporary I/O to runner work volume");
       for (const variable of ["TEMP", "TMP"]) {
-        expect(jobEnv?.split("\n"), `${file}: ${name} ${variable}`).toContain(
-          `      ${variable}: \${{ runner.temp }}`,
+        expect(first.split("\n"), `${file}: ${name} ${variable}`).toContain(
+          `          ${variable}: \${{ runner.temp }}`,
         );
-        // A step override would take precedence over the job environment.
-        expect(body, `${file}: ${name} overrides ${variable}`).not.toMatch(new RegExp(`^          ${variable}:`, "m"));
+        expect(first).toContain(`"${variable}=$env:${variable}" >> $env:GITHUB_ENV`);
+        // A later step override would take precedence over the exported value.
+        expect(remaining.join("\n"), `${file}: ${name} overrides ${variable}`).not.toMatch(new RegExp(`^          ${variable}:`, "m"));
       }
     }
   }

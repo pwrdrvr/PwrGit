@@ -87,11 +87,15 @@ jobs:
       (github.event.action == 'synchronize' && contains(github.event.pull_request.labels.*.name, 'build-preview'))
     runs-on: windows-latest
     timeout-minutes: 30
-    env:
-      # Keep temporary I/O on the hosted runner work volume.
-      TEMP: ${{ runner.temp }}
-      TMP: ${{ runner.temp }}
     steps:
+      - name: Move temporary I/O to runner work volume
+        shell: pwsh
+        env:
+          TEMP: ${{ runner.temp }}
+          TMP: ${{ runner.temp }}
+        run: |
+          "TEMP=$env:TEMP" >> $env:GITHUB_ENV
+          "TMP=$env:TMP" >> $env:GITHUB_ENV
       - name: Checkout PR branch
         uses: actions/checkout@v5
 
