@@ -1,3 +1,4 @@
+import { app } from "electron";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
@@ -33,6 +34,7 @@ import {
   PWRGIT_SERVICE_NAME,
   toAgentKitLogger
 } from "./agent-kit-bindings";
+import { ChatGptCodexClient, ChatGptPlanError } from "./chatgpt-codex-client";
 import type { ResolvedAgentJob } from "./ai-provider-service";
 
 const REQUEST_TIMEOUT_MS = 30_000;
@@ -626,7 +628,7 @@ export class LocalAgentSession implements AgentSession {
     }
     return ok({
       job: job.value,
-      client: await this.clientFor(profileId, backend.command, backend.codexHome, backend.env)
+      client: await this.clientFor(profileId, backend.command, backend.codexHome, backend.env, backend.chatGptCredential)
     });
   }
 
@@ -638,6 +640,7 @@ export class LocalAgentSession implements AgentSession {
     if (isAbort(cause) || signal?.aborted === true) {
       return agentError("cancelled", "Cancelled. Nothing changed.");
     }
+    if (cause instanceof ChatGptPlanError) return agentError(cause.code, cause.message);
     const message = cause instanceof Error ? cause.message : String(cause);
     // Account routing rebuilds retained configuration before sending content.
     // Codex reports this category without the underlying configuration error.
@@ -669,16 +672,22 @@ export class LocalAgentSession implements AgentSession {
     profileId: string,
     command: string,
     codexHome: string,
-    env: NodeJS.ProcessEnv
+    env: NodeJS.ProcessEnv,
+    chatGptCredential?: NonNullable<Extract<ResolvedAgentJob["backend"], { kind: "codex" }>["chatGptCredential"]>
   ): Promise<StructuredAgentClient> {
-    const key = JSON.stringify([command, codexHome]);
+    const key = JSON.stringify([command, codexHome, chatGptCredential !== undefined]);
     const current = this.clients.get(profileId);
     if (current?.key === key) return current.client;
     if (current !== undefined) {
       this.clients.delete(profileId);
       await current.client.close();
     }
-    const client = this.dependencies.createCodexClient({
+    const client = chatGptCredential
+      ? new ChatGptCodexClient({
+          command, env, credential: chatGptCredential, version: app.getVersion(),
+          workspaceDir: join(this.dependencies.tempRoot, safeProfileSegment(profileId), "chatgpt")
+        })
+      : this.dependencies.createCodexClient({
       command,
       env,
       clientName: PWRGIT_CLIENT_NAME,
