@@ -11,7 +11,7 @@ import { StatusGlyph } from "./BulkSyncStatus";
 import type { StepIssue } from "./maintenance-issues";
 import { StepLine } from "./MaintenanceProblem";
 
-export type MaintenancePlan = { worktrees: boolean; branches: boolean; gc: boolean };
+export type MaintenancePlan = { repair: boolean; worktrees: boolean; branches: boolean; gc: boolean };
 export type StepKey = keyof MaintenancePlan;
 export type StepResult = {
   state: "done" | "partial" | "skipped" | "failed";
@@ -24,6 +24,7 @@ export type StepResult = {
 };
 
 const steps: { key: StepKey; title: string }[] = [
+  { key: "repair", title: "Repair links" },
   { key: "worktrees", title: "Worktrees" },
   { key: "branches", title: "Local branches" },
   { key: "gc", title: "Garbage collection" }
@@ -59,9 +60,10 @@ export function MaintenanceSteps({ plan, current, results, branchMode, gcMode, p
   gcMode: GarbageCollectionMode;
   progress?: string;
 }) {
-  const currentIndex = steps.findIndex((step) => step.key === current);
-  return <div className="maintenance__steps" aria-label="Maintenance steps">
-    {steps.map((step, index) => {
+  const visibleSteps = steps.filter((step) => step.key !== "repair" || plan.repair);
+  const currentIndex = visibleSteps.findIndex((step) => step.key === current);
+  return <div className="maintenance__steps" aria-label="Maintenance steps" style={{ gridTemplateColumns: `repeat(${visibleSteps.length}, minmax(0, 1fr))` }}>
+    {visibleSteps.map((step, index) => {
       const result = results[step.key];
       // The running step is live whatever an earlier attempt recorded, and
       // shows its progress, not a stale summary.
@@ -70,7 +72,7 @@ export function MaintenanceSteps({ plan, current, results, branchMode, gcMode, p
           result?.state === "done" ? "done" : !plan[step.key] || result?.state === "skipped" ? "off" :
             current === "done" || index < currentIndex ? "off" : "next";
       const detail = state === "on" ? progress ?? "Running" : result?.summary !== undefined ? <StepLine line={result.summary} /> : (state === "off" ? current === "done" && plan[step.key] ? "Not started" : "Skipped" :
-        step.key === "worktrees" ? "next · pauses for review" :
+        step.key === "repair" ? "first · reconnects worktrees" : step.key === "worktrees" ? "next · pauses for review" :
           step.key === "branches" ? `next · ${branchMode === "review" ? "pauses for review" : "deletes without asking"}` :
             `last · ${gcMode}`);
       return <div key={step.key} className={`maintenance__step is-${state}`}>
@@ -132,9 +134,16 @@ export function MaintenancePlanForm({
   return <div className="maintenance__body">
     <p className="maintenance__help">Runs top to bottom in this window’s profile. Each step works on what the step before it left.</p>
     <div className="maintenance__plan">
+      <article className={`maintenance__plan-step${plan.repair ? "" : " is-off"}`}>
+        <input aria-label="Repair broken worktree links" type="checkbox" checked={plan.repair} onChange={(event) => onChange({ ...plan, repair: event.target.checked })} />
+        <span className="maintenance__step-num">1</span><div>
+          <div className="maintenance__plan-head"><h3>Repair broken worktree links</h3><span className="maintenance__pause is-last">Runs first, no pause</span></div>
+          <p>Reconnect known worktrees after their repository moves. Keeps files and branches unchanged; missing folders remain registered.</p>
+        </div>
+      </article>
       <article className={`maintenance__plan-step${plan.worktrees ? "" : " is-off"}`}>
         <input aria-label="Remove finished worktrees" type="checkbox" checked={plan.worktrees} onChange={(event) => onChange({ ...plan, worktrees: event.target.checked })} />
-        <span className="maintenance__step-num">1</span><div>
+        <span className="maintenance__step-num">2</span><div>
           <div className="maintenance__plan-head"><h3>Remove finished worktrees</h3><span className="maintenance__pause">Pauses for review</span></div>
           <p>{finishedWorktreesSentence(finishedAfterDays)}</p>
           {plan.worktrees && <div className="maintenance__plan-rules"><div className="maintenance__plan-rule"><label><input type="checkbox" checked={protectRecent} onChange={(event) => onProtectRecent(event.target.checked)} />Keep worktrees touched in the last</label>
@@ -147,7 +156,7 @@ export function MaintenancePlanForm({
       </article>
       <article className={`maintenance__plan-step${plan.branches ? "" : " is-off"}`}>
         <input aria-label="Delete finished local branches" type="checkbox" checked={plan.branches} onChange={(event) => onChange({ ...plan, branches: event.target.checked })} />
-        <span className="maintenance__step-num">2</span><div>
+        <span className="maintenance__step-num">3</span><div>
           <div className="maintenance__plan-head"><h3>Delete finished local branches</h3><span className={`maintenance__pause${branchMode === "auto" ? " is-auto" : ""}`}>{branchMode === "auto" ? "Deletes without asking" : "Pauses for review"}</span></div>
           <p>Branches whose upstream is gone and whose commits are proven to exist elsewhere.</p>
           {plan.branches && <div className="maintenance__plan-rules">
@@ -167,9 +176,9 @@ export function MaintenancePlanForm({
       </article>
       <article className={`maintenance__plan-step${plan.gc ? "" : " is-off"}`}>
         <input aria-label="Collect garbage" type="checkbox" checked={plan.gc} onChange={(event) => onChange({ ...plan, gc: event.target.checked })} />
-        <span className="maintenance__step-num">3</span><div>
+        <span className="maintenance__step-num">4</span><div>
           <div className="maintenance__plan-head"><h3>Collect garbage</h3><span className="maintenance__pause is-last">Runs last, no pause</span></div>
-          <p>Repacks objects and expires unreachable ones. Runs last so it can reclaim what steps 1 and 2 freed.</p>
+          <p>Repacks objects and expires unreachable ones. Runs last, after worktree and branch cleanup.</p>
           {plan.gc && <div className="maintenance__plan-rules"><label>Mode <select aria-label="Combined Git collection mode" value={gcMode} onChange={(event) => onGcMode(event.target.value as GarbageCollectionMode)}>
             <option value="standard">Standard (recommended)</option><option value="keep-largest">Keep largest pack</option><option value="aggressive">Aggressive compression (slower)</option>
           </select></label></div>}

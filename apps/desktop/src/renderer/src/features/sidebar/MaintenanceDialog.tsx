@@ -126,7 +126,7 @@ export function MaintenanceDialog({
     ids: string[],
     options?: { force?: boolean }
   ) => Promise<RemoveWorktreesOutcome>;
-  initialTab?: "combined" | "gc" | "branches" | "worktrees" | "clones";
+  initialTab?: "combined" | "gc" | "branches" | "worktrees" | "clones" | "repair";
   /** Review one repository only — the refs browser's "Clean up finished
    *  branches…" opens the dialog on the repository it was showing. */
   repoScope?: { id: string; name: string } | undefined;
@@ -135,16 +135,16 @@ export function MaintenanceDialog({
   autoReview?: boolean;
   now?: () => number;
 }) {
-  const [tab, setTab] = useState<"combined" | "gc" | "branches" | "worktrees" | "clones">(initialTab);
+  const [tab, setTab] = useState<"combined" | "gc" | "branches" | "worktrees" | "clones" | "repair">(initialTab);
   const [prunerBusy, setWorktreesBusy] = useState(false);
   const [clonesBusy, setClonesBusy] = useState(false);
   /** A panel that owns its own run (the pruner, Clones) holds the tabs. */
   const worktreesBusy = prunerBusy || clonesBusy;
   const [worktreeCandidateCount, setWorktreeCandidateCount] = useState<number | null>(null);
   const [scopeRepoCount, setScopeRepoCount] = useState<number | null>(null);
-  const [plan, setPlan] = useState<MaintenancePlan>({ worktrees: true, branches: true, gc: true });
+  const [plan, setPlan] = useState<MaintenancePlan>({ repair: false, worktrees: true, branches: true, gc: true });
   const [branchMode, setBranchMode] = useState<"review" | "auto">("review");
-  const [workflowStep, setWorkflowStep] = useState<"setup" | "worktrees" | "branches" | "gc" | "done">("setup");
+  const [workflowStep, setWorkflowStep] = useState<"setup" | StepKey | "done">("setup");
   const [workflowStopped, setWorkflowStopped] = useState(false);
   const [stepResults, setStepResults] = useState<Partial<Record<StepKey, StepResult>>>({});
   const [receiptExpanded, setReceiptExpanded] = useState<Set<StepKey>>(new Set(["branches"]));
@@ -160,7 +160,7 @@ export function MaintenanceDialog({
   const workflowStartedAt = useRef(0);
   const [workflowDurationMs, setWorkflowDurationMs] = useState(0);
   const workflowActive = tab === "combined" && workflowStep !== "setup" && workflowStep !== "done";
-  const taskTab = tab === "combined" ? (workflowStep === "branches" ? "branches" : "gc") : tab;
+  const taskTab = tab === "combined" ? (workflowStep === "repair" ? "repair" : workflowStep === "branches" ? "branches" : "gc") : tab;
 
   const [mode, setMode] = useState<GarbageCollectionMode>("standard");
   const [allProfiles, setAllProfiles] = useState(false);
@@ -428,7 +428,7 @@ export function MaintenanceDialog({
             setTab("clones");
             return false;
           }
-          setTab(kind === "gc" ? "gc" : "branches");
+          setTab(kind === "repair-worktrees" ? "repair" : kind === "gc" ? "gc" : "branches");
           setAllProfiles(found.run.allProfiles);
           const only = found.run.repoIds?.length === 1 ? found.run.repoIds[0] : undefined;
           const rows = found.state === "running" ? found.view.repos : found.summary.results.map((row) => row.repo);
@@ -554,8 +554,22 @@ export function MaintenanceDialog({
     setBranchReceipt(null);
     // The whole combined run stays in the profile named above, regardless of
     // what scope an individual task tab was last used with.
-    if (plan.worktrees) setWorkflowStep("worktrees");
-    else void continueAfterWorktrees();
+    void (async () => {
+      if (plan.repair) {
+        setWorkflowStep("repair");
+        const result = await run({ kind: "repair-worktrees" });
+        if (stopped(result, "repair", "repair")) return;
+        const issues = stepIssues(result!, "repair");
+        const checked = result!.results.filter((row) => row.outcome === "success");
+        recordStep("repair", {
+          state: issues.length > 0 ? "partial" : "done",
+          summary: `${checked.length} ${checked.length === 1 ? "repository" : "repositories"} checked${issues.length > 0 ? ` · ${issues.length} failed` : ""}`,
+          items: checked.map((row) => ({ label: row.repo.name, detail: row.repo.path })), issues
+        });
+      }
+      if (plan.worktrees) setWorkflowStep("worktrees");
+      else await continueAfterWorktrees();
+    })();
   };
   const changeBranchMode = (next: "auto" | "review"): void => {
     setBranchMode(next);
@@ -694,9 +708,11 @@ export function MaintenanceDialog({
   const collectedBefore = gcReceipt?.results.reduce((sum, row) => sum + (row.beforeBytes ?? 0), 0) ?? 0;
   const collectedAfter = gcReceipt?.results.reduce((sum, row) => sum + (row.afterBytes ?? 0), 0) ?? 0;
   const deleting = action?.kind === "delete-branches";
+  const repairing = action?.kind === "repair-worktrees";
+  const repairIssues = stepResults.repair?.issues ?? [];
   const branchIssues = stepResults.branches?.issues ?? [];
   const gcIssues = stepResults.gc?.issues ?? [];
-  const hasIssues = branchIssues.length > 0 || gcIssues.length > 0;
+  const hasIssues = repairIssues.length > 0 || branchIssues.length > 0 || gcIssues.length > 0;
   const gcAfter: GcAfter = workflowStep === "gc" ? "running"
     : stepResults.gc !== undefined && stepResults.gc.state !== "failed" ? "ran" : "none";
   const branchCard = branchCardCopy(branchIssues, deletedCount, gcAfter, gcIssues.length > 0);
@@ -705,6 +721,9 @@ export function MaintenanceDialog({
    *  card, in step order, above the receipt (or under the live status card
    *  while a later step runs). */
   const problems = hasIssues && <div className="maintenance__problems">
+    {repairIssues.length > 0 && <ProblemCard headline="Worktree link repair needs attention" sub="See each repository’s result below." listLabel="Worktree repair problems">
+      {repairIssues.map((issue, index) => <IssueRow key={`${issue.path ?? issue.repo}:${index}`} issue={issue} />)}
+    </ProblemCard>}
     {branchIssues.length > 0 && <ProblemCard headline={branchCard.headline} sub={branchCard.sub} listLabel={branchCard.listLabel}>
       {branchIssues.map((issue, index) => <IssueRow key={`${issue.path ?? issue.repo}:${issue.branch ?? ""}:${index}`} issue={issue} />)}
     </ProblemCard>}
@@ -713,7 +732,7 @@ export function MaintenanceDialog({
     </ProblemCard>}
   </div>;
   const receiptRows = (key: StepKey): number =>
-    key === "branches" ? deletedCount : key === "gc" ? gcReceipt?.results.length ?? 0 : 0;
+    key === "repair" ? stepResults.repair?.items?.length ?? 0 : key === "branches" ? deletedCount : key === "gc" ? gcReceipt?.results.length ?? 0 : 0;
   /** A receipt step lists its first FINISHED_SLICE rows until "Show all":
    *  382 deleted branches must not bury the garbage-collection card. */
   const sliceReceipt = <T,>(key: StepKey, rows: T[]): T[] =>
@@ -727,7 +746,7 @@ export function MaintenanceDialog({
         ? "scanning"
         : `review · ${worktreeCandidateCount} finished`
       : running
-        ? `${deleting ? "deleting" : collecting ? "collecting" : "reviewing"} ${results.size} of ${repos.length}`
+        ? `${repairing ? "repairing" : deleting ? "deleting" : collecting ? "collecting" : "reviewing"} ${results.size} of ${repos.length}`
         : workflowStep === "branches" && scanComplete
           ? `review · ${candidates.length} in ${proposingCount} repos`
           : "running";
@@ -778,6 +797,11 @@ export function MaintenanceDialog({
               onClick={() => { setTab("combined"); restartWorkflow(); }}>
               Combined
             </button>
+          )}
+          {repoScope === undefined && (
+            <button aria-pressed={tab === "repair"}
+              disabled={running || worktreesBusy || workflowActive}
+              onClick={() => { setTab("repair"); reset(); }}>Repair links</button>
           )}
           {repoScope === undefined && (
             <button aria-pressed={tab === "worktrees"}
@@ -846,12 +870,12 @@ export function MaintenanceDialog({
           <div className="maintenance__body">
             {problems}
             <div className="maintenance__receipt-steps">
-              {(["worktrees", "branches", "gc"] as StepKey[]).map((key, index) => {
+              {(["repair", "worktrees", "branches", "gc"] as StepKey[]).filter((key) => key !== "repair" || plan.repair).map((key, index) => {
                 const result = stepResults[key];
                 const state = result?.state ?? (plan[key] ? "not-started" : "skipped");
-                const title = key === "gc" ? "Garbage collection" : key === "branches" ? "Local branches" : "Worktrees";
+                const title = key === "repair" ? "Repair links" : key === "gc" ? "Garbage collection" : key === "branches" ? "Local branches" : "Worktrees";
                 const expandedNow = receiptExpanded.has(key);
-                const listed = key === "worktrees" ? result?.items?.length ?? 0 : receiptRows(key);
+                const listed = key === "worktrees" || key === "repair" ? result?.items?.length ?? 0 : receiptRows(key);
                 return <article key={key} className={`maintenance__receipt-step is-${state}${(result?.issues?.length ?? 0) > 0 ? " has-issues" : ""}`}>
                   <div className="maintenance__receipt-head"><span className="maintenance__step-num">{index + 1}</span><strong>{title}</strong><span>{result?.summary !== undefined ? <StepLine line={result.summary} /> : state === "not-started" ? "Not started" : "Skipped"}</span>
                     {result !== undefined && (result.state === "done" || result.state === "partial") && listed > 0 && <button onClick={() => setReceiptExpanded((old) => { const next = new Set(old); if (next.has(key)) next.delete(key); else next.add(key); return next; })}>{expandedNow ? "Hide" : "Show"}</button>}
@@ -861,8 +885,8 @@ export function MaintenanceDialog({
                     return <div className="maintenance__receipt-row" key={`${row.repo.id}:${branch.branch}`}><strong>{row.repo.name} · {branch.branch}</strong><code>{branch.head.slice(0, 8)}</code><button className="maintenance__restore" disabled={state === "restored" || state === "restoring"} onClick={() => void restore(row.repo.id, branch)}>{state === "restored" ? "Restored" : state === "restoring" ? "Restoring…" : state ?? "Restore"}</button></div>;
                   })}
                   {expandedNow && key === "gc" && sliceReceipt(key, [...(gcReceipt?.results ?? [])].sort((a, b) => ((b.beforeBytes ?? 0) - (b.afterBytes ?? 0)) - ((a.beforeBytes ?? 0) - (a.afterBytes ?? 0)))).map((row) => <div className="maintenance__receipt-row" key={row.repo.id}><strong>{row.repo.name}</strong><span>{row.beforeBytes !== undefined && row.afterBytes !== undefined ? `${bytes(row.beforeBytes)} → ${bytes(row.afterBytes)}` : row.message}</span></div>)}
+                  {expandedNow && (key === "worktrees" || key === "repair") && (key === "repair" ? sliceReceipt(key, result?.items ?? []) : result?.items ?? []).map((item) => <div className="maintenance__receipt-row" key={item.detail}><strong>{item.label}</strong><code className="selectable">{displayPath(item.detail, platform)}</code></div>)}
                   {expandedNow && receiptRows(key) > FINISHED_SLICE && <div className="maintenance__receipt-more"><button onClick={() => setReceiptAll((old) => { const next = new Set(old); if (next.has(key)) next.delete(key); else next.add(key); return next; })}>{receiptAll.has(key) ? "Show fewer" : `Show all ${receiptRows(key)}`}</button></div>}
-                  {expandedNow && key === "worktrees" && result?.items?.map((item) => <div className="maintenance__receipt-row" key={item.detail}><strong>{item.label}</strong><code className="selectable">{displayPath(item.detail, platform)}</code></div>)}
                 </article>;
               })}
             </div>
@@ -888,9 +912,9 @@ export function MaintenanceDialog({
                 ? cancelling
                   ? "Stopping after active repository operations…"
                   : current.size > 1
-                    ? `${collecting ? "Collecting" : deleting ? "Deleting branches in" : "Reviewing"} ${current.size} repositories`
+                    ? `${repairing ? "Repairing worktree links in" : collecting ? "Collecting" : deleting ? "Deleting branches in" : "Reviewing"} ${current.size} repositories`
                     : currentRepo
-                      ? `${collecting ? "Collecting" : branchScan ? "Reviewing" : "Deleting branches in"} ${currentRepo.name}`
+                      ? `${repairing ? "Repairing worktree links in" : collecting ? "Collecting" : branchScan ? "Reviewing" : "Deleting branches in"} ${currentRepo.name}`
                       : "Waiting for the next repository…"
                 : summary?.cancelled
                   ? "Cancelled"
@@ -957,7 +981,7 @@ export function MaintenanceDialog({
               Only <strong>{repoScope.name}</strong>, from its branch list.
             </p>
           )}
-          {taskTab === "gc" ? (
+          {taskTab === "repair" ? <p className="maintenance__help">Reconnect known worktrees after their repository moves. Files and branches stay unchanged. Missing folders remain registered; a worktree that also moved needs its new location supplied to Git.</p> : taskTab === "gc" ? (
             <fieldset
               className="maintenance__options"
               disabled={running}
@@ -1369,7 +1393,7 @@ export function MaintenanceDialog({
                   Change options
                 </button>
               )}
-              {taskTab === "gc" ? (
+              {taskTab === "repair" ? <button className="modal__create" onClick={() => void run({ kind: "repair-worktrees" })}>Repair worktree links</button> : taskTab === "gc" ? (
                 <button
                   className="modal__create"
                   onClick={() =>

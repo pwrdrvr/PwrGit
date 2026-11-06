@@ -26,7 +26,7 @@ export type StepIssue = {
 };
 
 /** Which command produced a result, so its rows explain the right thing. */
-export type IssueSource = "review" | "delete" | "gc";
+export type IssueSource = "review" | "delete" | "gc" | "repair";
 
 const RAW_GIT = /^(?:error|fatal|warning|usage):/i;
 /** Git's own output, not a sentence PwrGit wrote: it never leads a row. */

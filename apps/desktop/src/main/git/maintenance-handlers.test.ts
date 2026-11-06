@@ -92,6 +92,18 @@ afterEach(() => {
   vi.clearAllMocks();
 });
 
+it("repairs worktree links only in the requested profile without pruning or indexing", async () => {
+  const result = await bus.dispatch("maintenance:run", {
+    operationId: "repair", profileId: "one",
+    action: { kind: "repair-worktrees" }
+  });
+  expect(result.ok, JSON.stringify(result)).toBe(true);
+  const repairs = git.mock.calls.filter(([args]) => args[0] === "worktree" && args[1] === "repair");
+  expect(repairs.map(([, cwd]) => cwd).sort()).toEqual([join(root, "a"), join(root, "b")]);
+  expect(git.mock.calls.some(([args]) => args.includes("prune"))).toBe(false);
+  expect(refreshRepoWorktrees).not.toHaveBeenCalled();
+});
+
 function value(result: Result<MaintenanceSummary>): MaintenanceSummary {
   if (!result.ok) throw new Error(result.error.message);
   return result.value;

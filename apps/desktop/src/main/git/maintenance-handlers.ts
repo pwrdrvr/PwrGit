@@ -21,7 +21,7 @@ import { emitEvent } from "../ipc";
 import { logMain } from "../logs";
 import { mapLimit } from "../util/map-limit";
 import type { DB } from "../persistence/db";
-import { sanitizeGitLogDetail, type GitExec } from "./dugite";
+import { requireExit0, sanitizeGitLogDetail, type GitExec } from "./dugite";
 import type { RepoIndexer } from "./repo-indexer";
 import type { WorktreeOperationQueue } from "./worktree-operation-queue";
 import type { PrService } from "../github/pr-service";
@@ -254,7 +254,7 @@ export function registerMaintenanceHandlers(
   bus.register("maintenance:run", async (req, ctx) => {
     if (
       !req.operationId?.trim() ||
-      !["gc", "scan-branches", "delete-branches", "reshare"].includes(req.action?.kind) ||
+      !["gc", "scan-branches", "delete-branches", "reshare", "repair-worktrees"].includes(req.action?.kind) ||
       (req.action.kind === "reshare" && typeof req.action.updateMain !== "boolean") ||
       (req.action.kind === "gc" &&
         !["standard", "keep-largest", "aggressive"].includes(req.action.mode))
@@ -452,6 +452,23 @@ export function registerMaintenanceHandlers(
                   };
                 }
                 commonDirectories.add(directory.value);
+                if (action.kind === "repair-worktrees") {
+                  report("Checking and repairing worktree links…");
+                  // Git uses its surviving registrations to reconnect known
+                  // checkouts after a primary repo moves. No path search,
+                  // pruning, branch changes, or checkout/index writes.
+                  const args = ["worktree", "repair"];
+                  const raw = await git(args, repo.path);
+                  const repaired = raw.ok ? requireExit0(raw.value, args) : raw;
+                  emitEvent("repo:changed", { profileId: repo.profileId, repoIds: [repo.id] });
+                  return {
+                    repo,
+                    outcome: repaired.ok ? "success" : "failed",
+                    message: repaired.ok
+                      ? "Worktree links checked and repaired. Missing folders remain registered."
+                      : `Worktree link repair did not complete; some links may have been repaired. ${sanitizeGitLogDetail(repaired.error.message)}`
+                  };
+                }
                 /** The review, with the evidence the action asked for. */
                 const review = async (options: BranchCleanupOptions) =>
                   reviewStaleBranches(git, repo.path, repo.id, {
