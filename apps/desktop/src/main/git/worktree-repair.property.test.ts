@@ -88,8 +88,10 @@ it("maintenance repair reconnects moved repositories without changing work or an
           action: { kind: "repair-worktrees" }
         });
         expect(result.ok && result.value.results.map((row) => row.outcome), JSON.stringify(result)).toEqual(["success"]);
-        expect(git(selected.linked, "rev-parse", "--path-format=absolute", "--git-common-dir"))
-          .toBe(join(selected.moved, ".git").replaceAll("\\", "/"));
+        // Git expands Windows short paths (RUNNER~1 -> runneradmin). The
+        // oracle is the same existing object store, not its path spelling.
+        expect(realpathSync.native(git(selected.linked, "rev-parse", "--path-format=absolute", "--git-common-dir")))
+          .toBe(realpathSync.native(join(selected.moved, ".git")));
         expect(readFileSync(join(git(selected.linked, "rev-parse", "--absolute-git-dir"), "index"))).toEqual(selected.index);
         expect(git(selected.linked, "status", "--porcelain", "--ignored")).toBe(selected.status);
         for (const [file, content] of [["tracked", "unstaged\n"], ["untracked", "keep untracked\n"], ["ignored", "keep ignored\n"]])
