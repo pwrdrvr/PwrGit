@@ -137,6 +137,14 @@ jobs:
     needs: changes
     if: needs.changes.outputs.code_impacting == 'true'
     steps:
+      - name: Move temporary I/O to runner work volume
+        shell: pwsh
+        env:
+          TEMP: ${{ runner.temp }}
+          TMP: ${{ runner.temp }}
+        run: |
+          "TEMP=$env:TEMP" >> $env:GITHUB_ENV
+          "TMP=$env:TMP" >> $env:GITHUB_ENV
       - name: Checkout repository
         uses: actions/checkout@v5
 
@@ -648,6 +656,14 @@ jobs:
       # Completed-tree consumers must never trigger pnpm implicit installs.
       PNPM_CONFIG_VERIFY_DEPS_BEFORE_RUN: "false"
     steps:
+      - name: Move temporary I/O to runner work volume
+        shell: pwsh
+        env:
+          TEMP: ${{ runner.temp }}
+          TMP: ${{ runner.temp }}
+        run: |
+          "TEMP=$env:TEMP" >> $env:GITHUB_ENV
+          "TMP=$env:TMP" >> $env:GITHUB_ENV
       - name: Checkout repository
         uses: actions/checkout@v5
 
@@ -709,6 +725,14 @@ jobs:
       # Completed-tree consumers must never trigger pnpm implicit installs.
       PNPM_CONFIG_VERIFY_DEPS_BEFORE_RUN: "false"
     steps:
+      - name: Move temporary I/O to runner work volume
+        shell: pwsh
+        env:
+          TEMP: ${{ runner.temp }}
+          TMP: ${{ runner.temp }}
+        run: |
+          "TEMP=$env:TEMP" >> $env:GITHUB_ENV
+          "TMP=$env:TMP" >> $env:GITHUB_ENV
       - name: Checkout repository
         uses: actions/checkout@v5
 
@@ -812,6 +836,14 @@ jobs:
       # Completed-tree consumers must never trigger pnpm implicit installs.
       PNPM_CONFIG_VERIFY_DEPS_BEFORE_RUN: "false"
     steps:
+      - name: Move temporary I/O to runner work volume
+        shell: pwsh
+        env:
+          TEMP: ${{ runner.temp }}
+          TMP: ${{ runner.temp }}
+        run: |
+          "TEMP=$env:TEMP" >> $env:GITHUB_ENV
+          "TMP=$env:TMP" >> $env:GITHUB_ENV
       - name: Checkout repository
         uses: actions/checkout@v5
 
