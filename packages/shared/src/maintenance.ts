@@ -98,6 +98,7 @@ export type KeptBranch = {
 };
 
 export type MaintenanceAction =
+  | { kind: "repair-worktrees" }
   | {
       kind: "gc";
       mode: GarbageCollectionMode;

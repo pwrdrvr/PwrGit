@@ -29,7 +29,7 @@ vi.mock("../logs", () => ({ logMain: vi.fn() }));
 
 /**
  * Model test for reattaching to a maintenance run. The real handler runs a
- * collection over profile one; every Git call finishes when fast-check's
+ * collection or worktree repair over profile one; every Git call finishes when fast-check's
  * scheduler decides. In between, windows ask what is running (as a
  * reloaded window does), cancel, and acknowledge a receipt. Oracle: the
  * progress events main actually sent. Rules, at every point:
@@ -92,8 +92,9 @@ it("a reloaded window always finds its own profile's run, exactly as the events 
     fc.asyncProperty(
       fc.scheduler(),
       fc.boolean(),
+      fc.boolean(),
       fc.array(step, { minLength: 1, maxLength: 24 }),
-      async (s, allProfiles, steps) => {
+      async (s, allProfiles, repair, steps) => {
         const operationId = `run-${++runs}`;
         const bus = new CommandBus();
         const git = vi.fn<GitExec>((args, cwd) =>
@@ -157,7 +158,7 @@ it("a reloaded window always finds its own profile's run, exactly as the events 
 
         let settled = false;
         const pending = bus
-          .dispatch("maintenance:run", { profileId: "one", allProfiles, operationId, action: { kind: "gc", mode: "standard" } }, { webContentsId: OWNER })
+          .dispatch("maintenance:run", { profileId: "one", allProfiles, operationId, action: repair ? { kind: "repair-worktrees" } : { kind: "gc", mode: "standard" } }, { webContentsId: OWNER })
           .finally(() => (settled = true));
         let accepted = false;
         let seenEarly = false;

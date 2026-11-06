@@ -1,5 +1,6 @@
 import { existsSync } from "node:fs";
-import { isAbsolute, join, resolve } from "node:path";
+import { readdir, readFile } from "node:fs/promises";
+import { dirname, isAbsolute, join, resolve } from "node:path";
 import { err, ok, type PwrGitError, type Result } from "@pwrgit/shared";
 import { requireExit0, type GitExec } from "./dugite";
 import { listWorktrees, type WorktreeInfo } from "./git-service";
@@ -106,30 +107,66 @@ async function reviewedLocalHead(
 
 async function gitDirectory(
   git: GitExec,
-  worktree: WorktreeInfo
+  worktree: WorktreeInfo,
+  registeredDirectories: () => Promise<Result<Map<string, string>>>
 ): Promise<Result<string>> {
   const args = ["rev-parse", "--absolute-git-dir"];
   const raw = await git(args, worktree.path);
   if (!raw.ok) return raw;
   const checked = requireExit0(raw.value, args);
-  if (!checked.ok) {
-    return err(
-      lifecycleError(
-        "operation_check_failed",
-        `Could not inspect Git state in ${worktree.path}. No branch was changed.`
-      )
-    );
+  const path = checked.ok ? checked.value.stdout.trim() : "";
+  if (path !== "") return ok(isAbsolute(path) ? path : resolve(worktree.path, path));
+
+  // Moving the primary repo leaves linked checkouts' .git files pointing at
+  // its old location. Git still lists them without `prunable`. The surviving
+  // registration has the operation metadata and a gitdir backlink to the
+  // checkout, so inspect that instead of requiring a repair before cleanup.
+  const registered = await registeredDirectories();
+  if (!registered.ok) return registered;
+  const directory = registered.value.get(resolve(worktree.path));
+  return directory !== undefined ? ok(directory) : err(operationCheckFailed(worktree.path));
+}
+
+function operationCheckFailed(path: string): PwrGitError {
+  return lifecycleError(
+    "operation_check_failed",
+    `Could not inspect Git state in ${path}. No branch was changed.`
+  );
+}
+
+/** Only used after checkout-based discovery fails; never repairs or prunes. */
+async function registeredWorktreeDirectories(
+  git: GitExec,
+  cwd: string,
+  primaryPath: string
+): Promise<Result<Map<string, string>>> {
+  const args = ["rev-parse", "--path-format=absolute", "--git-common-dir"];
+  const raw = await git(args, cwd);
+  if (!raw.ok) return raw;
+  const checked = requireExit0(raw.value, args);
+  if (!checked.ok) return checked;
+  const common = checked.value.stdout.trim();
+  if (common === "") return err(operationCheckFailed(cwd));
+  const directories = new Map([[resolve(primaryPath), common]]);
+  try {
+    const entries = await readdir(join(common, "worktrees"), { withFileTypes: true });
+    for (const entry of entries) {
+      if (!entry.isDirectory()) continue;
+      const directory = join(common, "worktrees", entry.name);
+      const backlink = (await readFile(join(directory, "gitdir"), "utf8")).trim();
+      if (backlink === "") return err(operationCheckFailed(cwd));
+      // Newer Git can write relative worktree links; those are relative to
+      // the registration, not to the caller's checkout.
+      const checkout = dirname(resolve(directory, backlink));
+      if (directories.has(checkout)) return err(operationCheckFailed(checkout));
+      directories.set(checkout, directory);
+    }
+  } catch {
+    // Unreadable or disappearing registrations are not evidence that no
+    // operation is active. Keep refusing mutations when inspection fails.
+    return err(operationCheckFailed(cwd));
   }
-  const path = checked.value.stdout.trim();
-  if (path === "") {
-    return err(
-      lifecycleError(
-        "operation_check_failed",
-        `Could not inspect Git state in ${worktree.path}. No branch was changed.`
-      )
-    );
-  }
-  return ok(isAbsolute(path) ? path : resolve(worktree.path, path));
+  return ok(directories);
 }
 
 /**
@@ -143,6 +180,10 @@ async function worktreeHolders(
   const listed = await listWorktrees(git, cwd);
   if (!listed.ok) return listed;
   const holders = new Map<string, string>();
+  let registered: Promise<Result<Map<string, string>>> | undefined;
+  const registeredDirectories = () => registered ??= registeredWorktreeDirectories(
+    git, cwd, listed.value[0]?.path ?? cwd
+  );
   const inspections = await mapLimit(listed.value, 4, async (worktree): Promise<Result<void>> => {
     // A prunable entry has no checkout to be mid-operation in, and running
     // git inside its missing directory fails — which used to refuse every
@@ -150,7 +191,7 @@ async function worktreeHolders(
     // still refuses to delete a branch such an entry holds, so the
     // checked-out test below keeps applying to it.
     if (!worktree.prunable) {
-      const directory = await gitDirectory(git, worktree);
+      const directory = await gitDirectory(git, worktree, registeredDirectories);
       if (!directory.ok) return directory;
       const operation = operationMarkers.find(([marker]) =>
         existsSync(join(directory.value, marker))

@@ -113,6 +113,37 @@ afterEach(async () => {
 });
 
 describe("maintenance dialog", () => {
+  it("offers optional worktree repair before cleanup and can run repair alone", async () => {
+    dispatch.mockImplementation(async (name: string) => name === "maintenance:run"
+      ? { ok: true, value: summary([{ repo, outcome: "success", message: "Worktree links checked and repaired." }]) }
+      : { ok: true, value: null });
+    await click("Combined");
+    const checkbox = (label: string) => container.querySelector<HTMLInputElement>(`input[aria-label="${label}"]`)!;
+    expect(checkbox("Repair broken worktree links")).not.toBeNull();
+    expect(checkbox("Repair broken worktree links").checked).toBe(false);
+    for (const label of ["Repair broken worktree links", "Remove finished worktrees", "Delete finished local branches", "Collect garbage"])
+      await act(async () => checkbox(label).click());
+    await click("Start");
+    expect(runCalls().map(([, req]) => req.action.kind)).toEqual(["repair-worktrees"]);
+    expect(container.textContent).toContain("Maintenance finished");
+    expect(container.textContent).toContain("1 repository checked");
+  });
+  it("keeps a large repair receipt folded to twenty repositories until Show all", async () => {
+    const rows = Array.from({ length: 41 }, (_, index) => ({
+      repo: { ...repo, id: `r${index}`, name: `repo-${index}`, path: `/fixtures/r${index}` },
+      outcome: "success" as const, message: "Links checked."
+    }));
+    dispatch.mockImplementation(async (name: string) => name === "maintenance:run"
+      ? { ok: true, value: summary(rows) } : { ok: true, value: null });
+    await click("Combined");
+    for (const label of ["Repair broken worktree links", "Remove finished worktrees", "Delete finished local branches", "Collect garbage"])
+      await act(async () => container.querySelector<HTMLInputElement>(`input[aria-label="${label}"]`)!.click());
+    await click("Start");
+    await click("Show");
+    expect(container.querySelectorAll(".maintenance__receipt-row")).toHaveLength(20);
+    await click("Show all 41");
+    expect(container.querySelectorAll(".maintenance__receipt-row")).toHaveLength(41);
+  });
   it("hosts worktree review in one modal and blocks leaving while the sweep runs", async () => {
     let resolveScan!: (value: unknown) => void;
     const scan = new Promise((resolve) => { resolveScan = resolve; });
@@ -634,9 +665,41 @@ describe("combined maintenance workflow", () => {
     dispatch.mockClear();
   }
   async function task(index: number) {
-    const input = container.querySelectorAll<HTMLInputElement>(".maintenance__plan-step > input[type=checkbox]")[index]!;
+    const label = ["Remove finished worktrees", "Delete finished local branches", "Collect garbage"][index];
+    const input = container.querySelector<HTMLInputElement>(`input[aria-label="${label}"]`)!;
     await act(async () => input.click());
   }
+  it("waits for repair before inspecting worktrees or branches", async () => {
+    await open();
+    const normal = dispatch.getMockImplementation()!;
+    let finish!: (value: unknown) => void;
+    dispatch.mockImplementation((name, req) => name === "maintenance:run" && req.action.kind === "repair-worktrees"
+      ? new Promise((resolve) => { finish = resolve; }) : normal(name, req));
+    await act(async () => container.querySelector<HTMLInputElement>('[aria-label="Repair broken worktree links"]')!.click());
+    await click("Start");
+    expect(actions()).toEqual(["repair-worktrees"]);
+    expect(dispatch.mock.calls.some(([name]) => name === "prune:scan")).toBe(false);
+    expect(button("Combined").disabled).toBe(true);
+    await act(async () => finish({ ok: true, value: summary([{ repo, outcome: "success", message: "Links repaired." }]) }));
+    expect(dispatch.mock.calls.some(([name]) => name === "prune:scan")).toBe(true);
+    await click("Skip worktrees");
+    await click("Skip branches");
+    expect(actions()).toEqual(["repair-worktrees", "scan-branches", "gc"]);
+    expect(container.textContent).toContain("1 repository checked");
+  });
+  it.each([false, true])("repair failure continues cleanup; cancellation stops it (cancelled: %s)", async (cancelled) => {
+    await open("auto");
+    const normal = dispatch.getMockImplementation()!;
+    dispatch.mockImplementation((name, req) => name === "maintenance:run" && req.action.kind === "repair-worktrees"
+      ? Promise.resolve({ ok: true, value: { ...summary([{ repo, outcome: cancelled ? "cancelled" : "failed", message: "Could not repair a worktree link." }]), cancelled } })
+      : normal(name, req));
+    await act(async () => container.querySelector<HTMLInputElement>('[aria-label="Repair broken worktree links"]')!.click());
+    await task(0);
+    await click("Start");
+    expect(actions()).toEqual(cancelled ? ["repair-worktrees"] : ["repair-worktrees", "scan-branches", "delete-branches", "gc"]);
+    expect(container.textContent).toContain(cancelled ? "Maintenance stopped" : "Maintenance finished with errors");
+    expect(container.textContent).toContain("Could not repair a worktree link.");
+  });
   it("defaults to a checked three-step plan and does no work before Analyze", async () => {
     await open();
     expect(button("Combined").getAttribute("aria-pressed")).toBe("true");
@@ -757,7 +820,7 @@ describe("combined maintenance workflow", () => {
   it("restores Auto, enforces an age guard, and sequences scan → removal → GC", async () => {
     await open("auto");
     expect(container.querySelector<HTMLSelectElement>('[aria-label="Branch removal"]')!.value).toBe("auto");
-    await act(async () => container.querySelector<HTMLInputElement>('.maintenance__plan-step:nth-child(2) .maintenance__plan-rule:nth-child(2) input')!.click());
+    await act(async () => container.querySelector<HTMLInputElement>('[aria-label="Delete finished local branches"]')!.closest("article")!.querySelector<HTMLInputElement>('.maintenance__plan-rule:nth-child(2) input')!.click());
     await task(0);
     await click("Start");
     expect(actions()).toEqual(["scan-branches", "delete-branches", "gc"]);
@@ -1076,6 +1139,20 @@ describe("maintenance dialog after a window reload", () => {
   }
   const pressedTab = (): string | null | undefined =>
     container.querySelector(".maintenance__tabs [aria-pressed=true]")?.textContent;
+
+  it("reattaches to worktree repair on its own tab without starting another run", async () => {
+    await reopen({ state: "running", cancelling: false, run: record({ kind: "repair-worktrees" }),
+      view: { repos: [repo], running: ["repo"], details: { repo: "Checking and repairing worktree links…" }, results: [], seq: 1 }
+    });
+    expect(pressedTab()).toBe("Repair links");
+    expect(runCalls()).toEqual([]);
+    expect(container.textContent).toContain("Repairing worktree links in example");
+    await act(async () => listener?.({ operationId: "op-live", profileId: "one", phase: "finished", seq: 2,
+      summary: summary([{ repo, outcome: "success", message: "Worktree links checked and repaired." }])
+    }));
+    expect(container.textContent).toContain("Worktree links checked and repaired.");
+    expect(button("Repair worktree links")).toBeTruthy();
+  });
 
   it("reattaches to a live collection: same card, Escape still held, Cancel reaches main", async () => {
     await reopen({
