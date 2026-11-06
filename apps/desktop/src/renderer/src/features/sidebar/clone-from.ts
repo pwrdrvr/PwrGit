@@ -1,5 +1,6 @@
 import {
   forgeCloneUrls,
+  forgeProductFor,
   forgeProductOrAssumed,
   type CloneRepository,
   type ForgeOwner,
@@ -76,7 +77,7 @@ export function offersCloneFrom(input: {
 }): boolean {
   const { source, owners } = input;
   if (source === null || source.localPath !== undefined) return false;
-  if (source.host === "other") return false;
+  if (source.host === "other" || forgeProductFor(source.host)?.capabilities.repositoryApi === false) return false;
   if (owners === null) return source.viewerCanPush === false;
   const owner = source.owner.toLowerCase();
   if (owners.some((o) => o.kind === "user" && o.login.toLowerCase() === owner)) {

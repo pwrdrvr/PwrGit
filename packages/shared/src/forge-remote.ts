@@ -1,7 +1,9 @@
+import { parseArtifactsRemote } from "./artifacts";
 import {
   FORGE_PRODUCTS,
   forgeAllowsPathDepth,
-  forgeProduct
+  forgeProduct,
+  forgeProductFor
 } from "./forge-product";
 import {
   FORGE_KINDS,
@@ -216,6 +218,9 @@ export function classifyForgeHost(
   overrides: ForgeHostMap = {}
 ): ForgeHost {
   const normalized = hostname.trim().toLowerCase().replace(/^www\./, "");
+  // Local file URLs and Windows drive paths have no URL hostname. A product
+  // without a shared SaaS host must never claim those remotes.
+  if (normalized === "") return "other";
   // `Object.hasOwn`, not a bare index: `overrides` is a plain object, and a
   // hostname is attacker-adjacent input straight out of a git remote. A single
   // label of `constructor` or `__proto__` — both legal intranet hostnames —
@@ -268,9 +273,16 @@ export function parseForgeRemote(
   // A local path (`/srv/git/repo.git`, `C:\repos\thing`) has no forge.
   if (hostname === "" || hostname.includes("\\")) return null;
 
+  const host = classifyForgeHost(hostname, overrides);
+  if (forgeProductFor(host)?.authentication === "repo-token") {
+    const remote = parseArtifactsRemote(trimmed);
+    return remote === null ? null : {
+      host, hostname: remote.hostname, owner: remote.namespace, repo: remote.repo,
+      nameWithOwner: `${remote.namespace}/${remote.repo}`
+    };
+  }
   const split = splitPath(path);
   if (split === null) return null;
-  const host = classifyForgeHost(hostname, overrides);
   // A product with no subgroups has projects that are exactly `owner/repo`; a
   // deeper path there is a wiki, a gist, or a page URL that merely looks like a
   // repository (`.../repo/issues`), and reading it as a project would send a
@@ -321,8 +333,8 @@ export function remoteMatchesForgeRepo(
 }
 
 /** The browser URL for a repository on a forge. */
-export function forgeWebUrl(hostname: string, nameWithOwner: string): string {
-  return `https://${hostname}/${nameWithOwner}`;
+export function forgeWebUrl(hostname: string, nameWithOwner: string, kind?: ForgeHost): string {
+  return forgeProductFor(kind)?.browseUrl ?? `https://${hostname}/${nameWithOwner}`;
 }
 
 /** Whether a hostname is safe to interpolate into a git remote URL. */
@@ -375,10 +387,12 @@ export function forgeRemoteUrlLike(
  *  same two shapes, so this is not host-specific. */
 export function forgeCloneUrls(
   hostname: string,
-  nameWithOwner: string
+  nameWithOwner: string,
+  kind?: ForgeHost
 ): { sshUrl: string; httpsUrl: string } {
+  const product = forgeProductFor(kind);
   return {
-    sshUrl: `git@${hostname}:${nameWithOwner}.git`,
-    httpsUrl: `https://${hostname}/${nameWithOwner}.git`
+    sshUrl: product?.capabilities.ssh === false ? "" : `git@${hostname}:${nameWithOwner}.git`,
+    httpsUrl: `https://${hostname}/${product?.gitPathPrefix ?? ""}${nameWithOwner}.git`
   };
 }

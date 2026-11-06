@@ -2,6 +2,7 @@ export * from "./result";
 export * from "./git-discovery";
 export * from "./gh-default-intent";
 export * from "./types";
+export * from "./artifacts";
 export * from "./forge-host-name";
 export * from "./forge-product";
 export * from "./change-request-query";

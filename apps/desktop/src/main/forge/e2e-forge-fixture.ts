@@ -1,4 +1,5 @@
 import type { DiscoveredForgeHost } from "./cli-hosts";
+import { ArtifactsWrangler } from "./artifacts/wrangler";
 import {
   appendFileSync,
   mkdirSync,
@@ -62,6 +63,8 @@ export type E2EForgeHostFixture = {
 };
 
 export type E2EForgeFixtureFile = {
+  /** Contrived CLI stdout keyed by argv. Missing commands always fail locally. */
+  wranglerResponses?: Record<string, unknown>;
   discoveredHosts?: DiscoveredForgeHost[];
   callsPath?: string;
   hosts: Partial<Record<ForgeKind, E2EForgeHostFixture>>;
@@ -272,7 +275,7 @@ class E2EForgeRepoProvider implements ForgeRepoProvider {
         false
       );
     }
-    const urls = forgeCloneUrls(this.hostname, nameWithOwner);
+    const urls = forgeCloneUrls(this.hostname, nameWithOwner, this.host);
     return {
       name: split.name,
       owner: split.owner,
@@ -346,7 +349,7 @@ export function createE2EForgeFixtureServices(
   fixturePath: string,
   git: GitExec,
   hosts?: ForgeStatusServiceDeps["hosts"]
-): { forges: ForgeRepoRegistry; status: ForgeStatusService; discoverHosts: () => Promise<DiscoveredForgeHost[]> } {
+): { forges: ForgeRepoRegistry; status: ForgeStatusService; artifacts: ArtifactsWrangler; discoverHosts: () => Promise<DiscoveredForgeHost[]> } {
   const forges = new ForgeRepoRegistry();
   for (const host of FORGE_KINDS) {
     // The factory matters even here. Every provider lookup on the clone and
@@ -375,5 +378,12 @@ export function createE2EForgeFixtureServices(
         readFixture(fixturePath).hosts[kind]?.loggedIn === true
     }))
   });
-  return { forges, status, discoverHosts: async () => readFixture(fixturePath).discoveredHosts ?? [] };
+  const artifacts = new ArtifactsWrangler(async (args, options) => {
+    const fixture = readFixture(fixturePath);
+    const response = fixture.wranglerResponses?.[args.join(" ")];
+    if (response === undefined) throw new Error("Wrangler command unavailable in this fixture.");
+    if (fixture.callsPath) appendFileSync(fixture.callsPath, `${JSON.stringify({ host: "artifacts", operation: "wrangler", input: { args, accountId: options?.env?.CLOUDFLARE_ACCOUNT_ID } })}\n`);
+    return typeof response === "string" ? response : JSON.stringify(response);
+  });
+  return { forges, status, artifacts, discoverHosts: async () => readFixture(fixturePath).discoveredHosts ?? [] };
 }

@@ -6,6 +6,7 @@ import {
 } from "@pwrgit/shared";
 import { runGh } from "../github/gh-cli";
 import { runGlab } from "./gitlab/glab-cli";
+import { artifactsWrangler, ArtifactsWrangler, type WranglerRunner } from "./artifacts/wrangler";
 
 /**
  * One forge host a CLI has actually authenticated to.
@@ -129,6 +130,7 @@ export function parseGlabHosts(text: string): DiscoveredForgeHost[] {
 }
 
 export type ForgeCliRunners = {
+  wrangler?: WranglerRunner;
   cafe?: CafeRunner;
   gh?: (args: string[]) => Promise<string>;
   /** Resolves glab's **stderr**, not its stdout — see `readGlabAuthStatus`. */
@@ -196,6 +198,11 @@ type ForgeHostEnumerator = (
 ) => Promise<DiscoveredForgeHost[]>;
 
 const HOST_ENUMERATORS: Readonly<Record<ForgeKind, ForgeHostEnumerator>> = {
+  artifacts: async (runners) => {
+    const client = runners.wrangler === undefined ? artifactsWrangler : new ArtifactsWrangler(runners.wrangler);
+    const status = await client.accounts(true);
+    return status.accounts.map((account) => ({ kind: "artifacts", host: account.hostname, account: account.name }));
+  },
   gitcafe: async (runners) => {
     const status = parseCafeAuthStatus(await (runners.cafe ?? runCafe)(["auth", "status", "--json"]));
     return status === null ? [] : [{ kind: "gitcafe", host: status.host, account: status.account }];

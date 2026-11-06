@@ -6,9 +6,11 @@ import { chmodSync, mkdtempSync, mkdirSync, realpathSync, rmSync, writeFileSync 
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import fc from "fast-check";
+import { ok } from "@pwrgit/shared";
 import { afterEach, describe, expect, test } from "vitest";
 import {
   activeGitPath,
+  configureGitAuthentication,
   execGit,
   execGitBinary,
   execGitRecords,
@@ -72,11 +74,30 @@ describe("selectionPatch", () => {
 describe("a downloaded build runs as the whole bundle", () => {
   let scratch: string | null = null;
   afterEach(() => {
+    configureGitAuthentication(null);
     useManagedGit(null);
     useInstalledGit(null);
     holdGitUntil(Promise.resolve());
     if (scratch !== null) rmSync(scratch, { recursive: true, force: true });
     scratch = null;
+  });
+
+  test("authentication overrides survive the runtime gate, as observed by Git config", async () => {
+    await fc.assert(fc.asyncProperty(fc.stringMatching(/^[a-zA-Z0-9]{1,20}$/), async (value) => {
+      configureGitAuthentication(async (_args, _cwd, env) => ok({
+        ...env, GIT_CONFIG_COUNT: "1", GIT_CONFIG_KEY_0: "fixture.authentication", GIT_CONFIG_VALUE_0: value
+      }));
+      let release!: () => void;
+      holdGitUntil(new Promise<void>((resolve) => { release = resolve; }));
+      const pending = execGit(["config", "--get", "fixture.authentication"], tmpdir());
+      release();
+      const result = await pending;
+      expect(result.ok).toBe(true);
+      if (result.ok) {
+        expect(result.value.exitCode).toBe(0);
+        expect(result.value.stdout.trim()).toBe(value);
+      }
+    }), { numRuns: 20 });
   });
 
   // PwrGit offers no build of its own on Windows, whose bundle layout

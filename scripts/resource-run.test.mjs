@@ -106,7 +106,10 @@ describe("shared resource lease", () => {
     const f = await fixture();
     // A live private lane must not delay an automatically detected CI job.
     await mkdir(`${f.lockPath}.lock`);
-    const owner = { pid: process.pid, path: f.lockPath, token: "another-build", ownerStartedAt: processStartedAt(process.pid) };
+    // A legacy live owner without a start identity must be treated as alive
+    // (ownerRunning fails closed). CI must bypass it without inspecting any
+    // process identities, including an unrelated cold PowerShell at setup.
+    const owner = { pid: process.pid, path: f.lockPath, token: "another-build" };
     await writeFile(`${f.lockPath}.owner.json`, JSON.stringify(owner));
     const originalStat = await stat(`${f.lockPath}.lock`);
     const args = ["--max-old-space-size=6144", "-e", "console.log(JSON.stringify({options:process.env.NODE_OPTIONS,argv:process.argv.slice(1),marker:process.env.PWRAGENT_TOOL_DESCENDANT_TOKEN}));process.exitCode=7", "--", "application-arg"];
@@ -123,7 +126,7 @@ describe("shared resource lease", () => {
     const f = await fixture();
     const result = await launch(f, { args: ["--max-old-space-size=6144", "--max-old-space-size-percentage=90", "-e", "console.log(JSON.stringify({options:process.env.NODE_OPTIONS,heap:require('v8').getHeapStatistics().heap_size_limit}))"] },
       { NODE_OPTIONS: "--trace-warnings --max_old_space_size=6144 --max-old-space-size-percentage=90" }).completed;
-    expect(result.code).toBe(0);
+    expect(result.code, result.stderr).toBe(0);
     const data = JSON.parse(result.stdout);
     expect(data.options).toBe("--trace-warnings --max-old-space-size=2048");
     // V8 includes young generation on top of the configured old space.

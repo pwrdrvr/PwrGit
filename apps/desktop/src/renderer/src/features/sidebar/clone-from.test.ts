@@ -92,6 +92,14 @@ describe("forkCardState", () => {
 });
 
 describe("offersCloneFrom", () => {
+  it.each([null, owners])("never offers forks for read-only Artifacts repositories with accounts %s", (accounts) => {
+    expect(offersCloneFrom({
+      source: { ...source, host: "artifacts", viewerCanPush: false },
+      owners: accounts,
+      preflight: null
+    })).toBe(false);
+  });
+
   it("offers the pair for a forge repository someone else owns", () => {
     expect(offersCloneFrom({ source, owners, preflight: null })).toBe(true);
   });

@@ -37,9 +37,15 @@ describe("resolveForge", () => {
 });
 
 describe("providerFor", () => {
+  it("locally declines change requests for Artifacts", () => {
+    expect(providerFor("artifacts")).toBeNull();
+    const hostname = "0123456789abcdef0123456789abcdef.artifacts.cloudflare.net";
+    expect(resolveForge(`https://${hostname}/git/default/example.git`, { [hostname]: "artifacts" })).toBeNull();
+  });
   it("exposes all providers under the ForgeProvider contract", () => {
     for (const kind of ["github", "gitlab", "gitcafe"] as const) {
       const provider = providerFor(kind);
+      if (provider === null) throw new Error(`Missing ${kind} provider`);
       expect(provider.kind).toBe(kind);
       if (provider.authentication !== "cli") expect(typeof provider.getToken).toBe("function");
       expect(typeof provider.fetchPrsForBranches).toBe("function");

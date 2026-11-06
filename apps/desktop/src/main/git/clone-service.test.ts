@@ -10,7 +10,7 @@ import {
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { ok, type CloneProgress } from "@pwrgit/shared";
+import { err, ok, type CloneProgress } from "@pwrgit/shared";
 import { openDatabase } from "../persistence/db";
 import { ProfileService } from "../profiles/profile-service";
 import {
@@ -306,6 +306,23 @@ describe("clone destinations", () => {
 });
 
 describe("CloneService", () => {
+  it("clones Artifacts by its documented HTTPS route and declines SSH/CLI before invoking Git", async () => {
+    const root = temporaryRoot(); const db = openDatabase(":memory:"); const profiles = new ProfileService(db);
+    const profile = profiles.create({ name: "Artifacts", email: "fixture@example.test", roots: [root] });
+    const indexer = new RepoIndexer(db, systemGit); const calls: string[][] = [];
+    const git: GitExec = async (args) => { calls.push(args); return err({ kind: "git", code: "fixture_stop", message: "Transport covered by local smart HTTP integration test." }); };
+    const gh = vi.fn(fakeGh());
+    const service = new CloneService(db, git, indexer, profiles, githubOnly(gh), fakeForgeStatus());
+    const hostname = "0123456789abcdef0123456789abcdef.artifacts.cloudflare.net";
+    const input = { profileId: profile.id, parentPath: root, nameWithOwner: "default/demo", host: "artifacts" as const, hostname };
+    for (const protocol of ["ssh", "cli"] as const) {
+      expect(await service.clone({ ...input, protocol })).toMatchObject({ ok: false, error: { code: "unsupported_protocol" } });
+    }
+    expect(calls).toEqual([]);
+    expect(await service.clone({ ...input, protocol: "https" })).toMatchObject({ ok: false, error: { code: "fixture_stop" } });
+    expect(calls).toEqual([["clone", "--progress", "--", `https://${hostname}/git/default/demo.git`, join(root, "demo")]]);
+    expect(gh).not.toHaveBeenCalled();
+  });
   it("opens on stored identities alone — no forge call, no git subprocess", async () => {
     const root = temporaryRoot();
     const existingPath = join(root, "services", "existing");

@@ -7,6 +7,16 @@ import {
 } from "./remote.js";
 
 describe("remote identity", () => {
+  it("requires opt-in for Artifacts and parses its documented Git route", () => {
+    const host = "0123456789abcdef0123456789abcdef.artifacts.cloudflare.net";
+    const remote = `https://${host}/git/default/demo.git`;
+    const env = { PWRGIT_ARTIFACTS_HOSTS: host };
+    expect(parseRemoteIdentity(remote, {})?.provider).toBe("other");
+    expect(parseRemoteIdentity(remote, env)).toEqual({ provider: "artifacts", host, path: "default/demo" });
+    expect(parseRepositoryTarget(remote, "artifacts", env)).toEqual({ provider: "artifacts", host, path: "default/demo" });
+    expect(parseRepositoryTarget("default/demo", "artifacts", env)).toEqual({ provider: "artifacts", host: null, path: "default/demo" });
+    for (const invalid of [remote.replace("https:", "ssh:"), remote.replace("https://", "https://x:secret@"), `${remote}?token=secret`]) expect(parseRemoteIdentity(invalid, env)).toBeNull();
+  });
   it("normalizes GitHub and nested GitLab remotes without credentials", () => {
     expect(
       parseRemoteIdentity("https://oauth2:super-secret@github.com/pwrdrvr/PwrGit.git")
@@ -21,6 +31,22 @@ describe("remote identity", () => {
     expect(JSON.stringify(parseRemoteIdentity("https://u:p@github.com/o/r.git"))).not.toContain(
       "u:p"
     );
+  });
+  it("matches host-qualified Artifacts coordinates while keeping remote validation strict", () => {
+    const host = "0123456789abcdef0123456789abcdef.artifacts.cloudflare.net";
+    const env = { PWRGIT_ARTIFACTS_HOSTS: host };
+    const identity = parseRemoteIdentity(`https://${host}/git/default/demo.git`, env)!;
+    for (const spelling of [`${host}/default/demo`, `${host}/default/demo.git`]) {
+      const target = parseRepositoryTarget(spelling, "artifacts", env);
+      expect(target).toEqual({ provider: "artifacts", host, path: "default/demo" });
+      expect(targetMatchesRemote(target!, identity)).toBe(true);
+      expect(parseRepositoryTarget(spelling, "github", env)).toBeNull();
+    }
+    expect(parseRemoteIdentity(`https://${host}/default/demo`, env)).toBeNull();
+    expect(parseRemoteIdentity(`https://${host}/git/default/demo`, env)).toBeNull();
+    for (const path of ["a/demo", "default/nested/demo", "default/..", "default/demo?token=secret"]) {
+      expect(parseRepositoryTarget(`${host}/${path}`, "artifacts", env)).toBeNull();
+    }
   });
 
   it("does not guess a provider for an unknown self-hosted forge", () => {

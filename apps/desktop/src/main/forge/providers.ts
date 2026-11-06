@@ -4,13 +4,14 @@ import { gitlabProvider } from "./gitlab/provider";
 import { resolveForgeRepo, type ForgeHostOverrides } from "./resolve";
 import type { ForgeKind, ForgeProvider, ForgeRepo } from "./types";
 
-const PROVIDERS: Readonly<Record<ForgeKind, ForgeProvider>> = {
+const PROVIDERS: Readonly<Record<ForgeKind, ForgeProvider | null>> = {
+  artifacts: null,
   github: githubProvider,
   gitlab: gitlabProvider,
   gitcafe: gitcafeProvider
 };
 
-export function providerFor(kind: ForgeKind): ForgeProvider {
+export function providerFor(kind: ForgeKind): ForgeProvider | null {
   return PROVIDERS[kind];
 }
 
@@ -27,5 +28,6 @@ export function resolveForge(
   overrides: ForgeHostOverrides = {}
 ): ResolvedForge | null {
   const repo = resolveForgeRepo(remoteUrl, overrides);
-  return repo === null ? null : { provider: providerFor(repo.kind), repo };
+  const provider = repo === null ? null : providerFor(repo.kind);
+  return repo === null || provider === null ? null : { provider, repo };
 }

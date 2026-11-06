@@ -1,6 +1,7 @@
 import {
   forgeCliNames,
   forgeCloneUrls,
+  forgeProductFor,
   forgeKindForCli,
   forgeSaasHost,
   isSafeProjectPath,
@@ -221,11 +222,11 @@ export function unverifiedCloneRepository(
     name: exact.nameWithOwner.slice(slash + 1),
     owner: exact.nameWithOwner.slice(0, slash),
     nameWithOwner: exact.nameWithOwner,
-    description: "Not verified — clone with SSH or HTTPS",
+    description: forgeProductFor(exact.host)?.capabilities.ssh === false ? "Use HTTPS with a saved repository token" : "Not verified — clone with SSH or HTTPS",
     visibility: "unknown",
     host: exact.host,
     hostname: exact.hostname,
-    ...forgeCloneUrls(exact.hostname, exact.nameWithOwner),
+    ...forgeCloneUrls(exact.hostname, exact.nameWithOwner, exact.host),
     localPaths: []
   };
 }

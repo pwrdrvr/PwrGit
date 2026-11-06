@@ -39,6 +39,16 @@ const repositories: CloneRepository[] = [
   }
 ];
 
+it("offers an Artifacts remote as an HTTPS-only unverified Git source", () => {
+  const hostname = "0123456789abcdef0123456789abcdef.artifacts.cloudflare.net";
+  const remote = `https://${hostname}/git/default/demo.git`;
+  const exact = exactRepository(remote, "github", { [hostname]: "artifacts" });
+  expect(exact).toEqual({ host: "artifacts", hostname, nameWithOwner: "default/demo" });
+  if (exact === null) throw new Error("Expected exact source");
+  expect(unverifiedCloneRepository(exact)).toMatchObject({ host: "artifacts", hostname, httpsUrl: remote, sshUrl: "", visibility: "unknown" });
+  expect(unverifiedCloneRepository(exact)?.viewerCanPush).toBeUndefined();
+});
+
 const destinations: CloneDestination[] = [
   {
     path: "/projects/pwrdrvr",

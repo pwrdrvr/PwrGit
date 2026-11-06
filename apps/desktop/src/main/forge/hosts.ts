@@ -178,7 +178,7 @@ export class ForgeHosts {
     if (found !== undefined) return { kind: found.kind, source: "auto" };
 
     // The SaaS hosts only. Everything else must be signed in to or added.
-    const saas = FORGE_KINDS.find((kind) => forgeProduct(kind).saasHost === key);
+    const saas = key === "" ? undefined : FORGE_KINDS.find((kind) => forgeProduct(kind).saasHost === key);
     return saas === undefined
       ? { kind: null, source: "auto" }
       : { kind: saas, source: "auto" };
@@ -315,6 +315,7 @@ export class ForgeHosts {
     }
     for (const kind of FORGE_KINDS) {
       const host = forgeProduct(kind).saasHost;
+      if (host === "") continue;
       // Keyed by kind AND host. Matching on the hostname alone let a row that
       // resolves a SaaS hostname to the *other* product — `PWRGIT_GITHUB_HOSTS`
       // naming gitlab.com, say — suppress that product's own target, leaving it

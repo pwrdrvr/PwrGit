@@ -1,7 +1,9 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { ArtifactsRepositoryBrowser } from "./ArtifactsRepositoryBrowser";
 import {
   forgeLabel,
   isForgeKind,
+  forgeProductFor,
   type CloneCatalog,
   type CloneDestination,
   type CloneProgress,
@@ -359,7 +361,7 @@ export function CloneRepoDialog({
   // toggle that leads straight to "install the CLI" is a dead end dressed up
   // as a choice.
   const usableHosts = (catalog?.forges ?? [])
-    .filter((status) => forgeCanAnswerAnywhere(status))
+    .filter((status) => (status.capabilities.repositoryApi !== false || status.capabilities.repositoryBrowser === true) && forgeCanAnswerAnywhere(status))
     .map((status) => status.kind);
   // Snap onto a forge that can actually answer. Without this a machine with
   // only GitLab signed in leaves `host` on its "github" default forever: the
@@ -386,6 +388,9 @@ export function CloneRepoDialog({
   const cliDisabled =
     catalog !== null && !forgeCanAnswerDialog(forgeStatus, activeHostname);
 
+  const gitOnly = forgeProductFor(activeHost)?.authentication === "repo-token";
+  useEffect(() => { if (gitOnly) setProtocol("https"); }, [gitOnly]);
+
   // ── Clone from: the original, or your fork ──────────────────────────────
   // Asked only once a forge repository is picked, never per keystroke: the
   // accounts a fork could land in (one forge call per instance), then one
@@ -394,7 +399,8 @@ export function CloneRepoDialog({
   const forgeSource =
     selectedRepository !== null &&
     selectedRepository.localPath === undefined &&
-    isForgeKind(selectedRepository.host)
+    isForgeKind(selectedRepository.host) &&
+    forgeProductFor(selectedRepository.host)?.capabilities.repositoryApi !== false
       ? selectedRepository
       : null;
   const forkOwnersHost: ForgeKind | null =
@@ -438,6 +444,7 @@ export function CloneRepoDialog({
     forkOwnersHost !== null && ownersKey !== null
       ? { host: forkOwnersHost, hostname: forkOwnersHostname, key: ownersKey }
       : queryHost !== null &&
+          forgeProductFor(queryHost)?.capabilities.repositoryApi !== false &&
           queryHostname !== null &&
           catalog !== null &&
           forgeCanAnswerDialog(statusFor(catalog.forges, queryHost), queryHostname)
@@ -650,7 +657,7 @@ export function CloneRepoDialog({
     profileId: profile.id,
     query: sourceQuery,
     host,
-    enabled: usableHosts.includes(host) && localSourcePath === null
+    enabled: usableHosts.includes(host) && localSourcePath === null && forgeProductFor(host)?.capabilities.repositoryApi !== false && forgeProductFor(exactHost ?? undefined)?.capabilities.repositoryApi !== false
   });
 
   useEffect(() => setSourceSelection(0), [sourceQuery]);
@@ -741,9 +748,10 @@ export function CloneRepoDialog({
   // One line for every reason the list is empty, so the states cannot
   // contradict each other. `checkError` wins over a bare "no matches": when
   // the box holds an exact slug, why THAT lookup failed is the useful answer.
+  const hasRepositoryBrowser = forgeProductFor(host)?.capabilities.repositoryBrowser === true;
   const emptyMessage =
     checkError ??
-    sourceEmptyMessage({
+    (hasRepositoryBrowser ? catalogError : sourceEmptyMessage({
       catalogLoaded: catalog !== null,
       catalogError,
       status: forgeStatus,
@@ -754,7 +762,7 @@ export function CloneRepoDialog({
       owners: (catalog?.owners ?? [])
         .filter((owner) => owner.host === host)
         .map((owner) => owner.login)
-    });
+    }));
 
   const destinationResults = useMemo(
     () => filterCloneDestinations(destinations, destinationQuery),
@@ -785,7 +793,8 @@ export function CloneRepoDialog({
       hostname: repository.hostname,
       nameWithOwner: repository.nameWithOwner
     });
-    setSourceQuery(repository.nameWithOwner);
+    setSourceQuery(forgeProductFor(repository.host)?.authentication === "repo-token"
+      ? repository.httpsUrl : repository.nameWithOwner);
     clearSubmitError();
     window.requestAnimationFrame(() => destinationInputRef.current?.focus());
   };
@@ -936,7 +945,7 @@ export function CloneRepoDialog({
           <span>
             <strong>Clone a repository</strong>
             <small>
-              Find GitHub repos from owners already used in {profile.name}
+              {hasRepositoryBrowser ? "Browse an account and namespace, or paste an HTTPS remote" : `Find ${forgeLabel(host)} repos from owners already used in ${profile.name}`}
             </small>
           </span>
           <button
@@ -985,7 +994,7 @@ export function CloneRepoDialog({
                 disabled={busy}
                 autoComplete="off"
                 spellCheck={false}
-                placeholder="Search, enter owner/name, or paste a local path…"
+                placeholder={hasRepositoryBrowser ? "Paste an HTTPS remote or a local path…" : "Search, enter owner/name, or paste a local path…"}
                 onChange={(event) => {
                   setSourceQuery(event.target.value);
                   setSelectedRepository(null);
@@ -1032,7 +1041,8 @@ export function CloneRepoDialog({
               )}
             </div>
 
-            <div className="clone-source-results" role="listbox">
+            {hasRepositoryBrowser && <ArtifactsRepositoryBrowser disabled={busy} status={statusFor(catalog?.forges ?? [], host)} onChoose={chooseRepository} />}
+            {(sourceResults.length > 0 || emptyMessage !== null) && <div className="clone-source-results" role="listbox">
               {sourceResults.map((repository, index) => (
                 <button
                   type="button"
@@ -1079,7 +1089,7 @@ export function CloneRepoDialog({
                   {emptyMessage}
                 </div>
               )}
-            </div>
+            </div>}
           </section>
 
           {offerPair && selectedRepository !== null && (
@@ -1285,7 +1295,7 @@ export function CloneRepoDialog({
                     <strong>Local path</strong>
                     <small>git clone</small>
                   </button>
-                ) : PROTOCOL_IDS.map((candidate) => {
+                ) : PROTOCOL_IDS.filter((candidate) => !gitOnly || candidate === "https").map((candidate) => {
                   const disabled = candidate === "cli" && cliDisabled;
                   const detail = protocolDetail(
                     candidate,
@@ -1527,7 +1537,7 @@ export function CloneRepoDialog({
                       void copyText(hostVerificationCommand).then(() => setCommandCopied(true)).catch(() => setCommandCopied(false));
                     }}>{commandCopied ? "Copied" : "Copy command"}</button>
                   </p>
-                  {!cliDisabled && (
+                  {!cliDisabled && !gitOnly && (
                     <p>
                       <button type="button" className="ssh-trust__button ssh-trust__button--quiet" onClick={() => {
                         setProtocol("cli");
