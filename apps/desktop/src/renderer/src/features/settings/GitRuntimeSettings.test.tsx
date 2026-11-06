@@ -61,6 +61,8 @@ const HOMEBREW_SELECTED: Status = {
 const NO_BUILDS: ManagedGitStatus = {
   supported: true,
   bundledVersion: "2.50.9",
+  track: "latest",
+  tracks: { latest: null, prerelease: null },
   latest: null,
   needsAppUpdate: null,
   checkedAt: null,

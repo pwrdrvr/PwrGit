@@ -21,12 +21,16 @@ import { pipeline } from "node:stream/promises";
 import type { ReadableStream as NodeReadableStream } from "node:stream/web";
 import {
   compareManagedGitVersions,
+  isManagedGitTrack,
+  MANAGED_GIT_TRACK_DEFAULT,
+  MANAGED_GIT_TRACKS,
   parseManagedGitVersion,
   type ManagedGitBuild,
   type ManagedGitInstallPhase,
   type ManagedGitProgress,
   type ManagedGitRelease,
-  type ManagedGitStatus
+  type ManagedGitStatus,
+  type ManagedGitTrack
 } from "@pwrgit/shared";
 import {
   CatalogError,
@@ -69,11 +73,37 @@ type BuildRecord = {
   publishedAt: string | null;
 };
 
-type LastCheck = {
-  checkedAt: number;
-  latest: ManagedGitRelease | null;
+/** What one track offered at the last check. */
+type TrackAnswer = {
+  release: ManagedGitRelease | null;
+  /** A newer release on the track this app cannot verify. */
   needsAppUpdate: string | null;
 };
+
+/** Both tracks are answered by every check, so switching needs no network. */
+type LastCheck = {
+  checkedAt: number;
+  tracks: Record<ManagedGitTrack, TrackAnswer>;
+};
+
+function isTrackAnswer(value: unknown): value is TrackAnswer {
+  if (typeof value !== "object" || value === null) return false;
+  const answer = value as Record<string, unknown>;
+  const release = answer["release"] as Record<string, unknown> | null | undefined;
+  return (release === null ||
+      (typeof release === "object" && typeof release["version"] === "string" && typeof release["tag"] === "string")) &&
+    (answer["needsAppUpdate"] === null || typeof answer["needsAppUpdate"] === "string");
+}
+
+/** A check written before tracks existed knew one list with no promotion in
+ *  it, so it answers for neither: it is dropped and the next check refills. */
+function isLastCheck(value: unknown): value is LastCheck {
+  if (typeof value !== "object" || value === null) return false;
+  const check = value as Record<string, unknown>;
+  const tracks = check["tracks"] as Record<string, unknown> | undefined;
+  return typeof check["checkedAt"] === "number" && typeof tracks === "object" && tracks !== null &&
+    MANAGED_GIT_TRACKS.every((track) => isTrackAnswer(tracks[track]));
+}
 
 type StoreFile = { version: 1; builds: BuildRecord[]; lastCheck?: LastCheck };
 
@@ -86,6 +116,8 @@ export type ManagedGitDeps = {
    *  its `consumer_sha256` the stager contract a catalog must match. */
   bundled: { version: string; consumerSha256: string };
   selection: () => ManagedGitSelection;
+  /** The track Settings follows; Latest when unset. */
+  track?: () => ManagedGitTrack;
   /** True while an installed Git chosen in Settings outranks the build. */
   installedOverride: () => boolean;
   fetch?: typeof fetch;
@@ -163,7 +195,12 @@ export class ManagedGitService {
   private readonly now: () => number;
   private readonly cache: ReleaseMetadataCache;
   private candidates: ReleaseCandidate[] = [];
+  /** The whole check failed (offline, GitHub refused): the last good answer
+   *  is still shown. */
   private checkError: string | null = null;
+  /** Per track: why no release could be offered, when releases were listed
+   *  but none was usable. */
+  private trackFailures: Record<ManagedGitTrack, string | null> = { latest: null, prerelease: null };
   private progress: ManagedGitProgress | null = null;
   private running: { version: string; promise: Promise<ManagedGitStatus>; abort: AbortController } | null = null;
   private checking: Promise<ManagedGitStatus> | null = null;
@@ -178,6 +215,11 @@ export class ManagedGitService {
     this.fetchImpl = deps.fetch ?? globalThis.fetch;
     this.now = deps.now ?? Date.now;
     this.cache = new ReleaseMetadataCache({ directory: deps.root, fetch: this.fetchImpl, now: this.now });
+  }
+
+  private track(): ManagedGitTrack {
+    const track = this.deps.track?.();
+    return isManagedGitTrack(track) ? track : MANAGED_GIT_TRACK_DEFAULT;
   }
 
   // ---------- paths and store ----------
@@ -205,7 +247,7 @@ export class ManagedGitService {
         return {
           version: 1,
           builds: parsed.builds.filter((build) => isBuildId(build.id) && build.key === this.key),
-          ...(parsed.lastCheck ? { lastCheck: parsed.lastCheck } : {})
+          ...(isLastCheck(parsed.lastCheck) ? { lastCheck: parsed.lastCheck } : {})
         };
       }
     } catch {
@@ -260,13 +302,20 @@ export class ManagedGitService {
       })
       .map((record) => this.toBuild(record));
     const selected = selection.selected !== undefined && builds.some((build) => build.id === selection.selected) ? selection.selected : null;
+    const track = this.track();
+    const answer = store.lastCheck?.tracks[track];
     return {
       supported: this.key !== null,
       bundledVersion: this.deps.bundled.version,
-      latest: store.lastCheck?.latest ?? null,
-      needsAppUpdate: store.lastCheck?.needsAppUpdate ?? null,
+      track,
+      tracks: {
+        latest: store.lastCheck?.tracks.latest.release?.version ?? null,
+        prerelease: store.lastCheck?.tracks.prerelease.release?.version ?? null
+      },
+      latest: answer?.release ?? null,
+      needsAppUpdate: answer?.needsAppUpdate ?? null,
       checkedAt: store.lastCheck?.checkedAt ?? null,
-      checkError: this.checkError,
+      checkError: this.checkError ?? (answer?.release == null ? this.trackFailures[track] : null),
       builds,
       selected,
       previous: selection.previous !== undefined && builds.some((build) => build.id === selection.previous) ? selection.previous : null,
@@ -297,34 +346,45 @@ export class ManagedGitService {
         headers: { Accept: "application/vnd.github+json", "User-Agent": USER_AGENT, "X-GitHub-Api-Version": "2022-11-28" }
       });
       const candidates = eligibleReleases(JSON.parse(answer.body), key, this.deps.bundled.version);
-      let latest: ManagedGitRelease | null = null;
-      let needsAppUpdate: string | null = null;
-      let firstFailure: string | null = null;
+      const tracks: Record<ManagedGitTrack, TrackAnswer> = {
+        latest: { release: null, needsAppUpdate: null },
+        prerelease: { release: null, needsAppUpdate: null }
+      };
+      const failures: Record<ManagedGitTrack, string | null> = { latest: null, prerelease: null };
       const usable: ReleaseCandidate[] = [];
+      // Newest first. Prerelease takes the first usable release; Latest the
+      // first usable promoted one. A release is fetched and checked only
+      // while a track it belongs to is still open.
       for (const candidate of candidates) {
+        const open = MANAGED_GIT_TRACKS.filter(
+          (track) => tracks[track].release === null && (track === "prerelease" || candidate.promoted)
+        );
+        if (open.length === 0) continue;
         try {
           await this.acceptCandidate(candidate);
           usable.push(candidate);
-          latest ??= {
+          const release: ManagedGitRelease = {
             version: candidate.version,
             tag: candidate.tag,
             publishedAt: candidate.publishedAt,
             size: candidate.archive.size
           };
-          break;
+          for (const track of open) tracks[track].release = release;
         } catch (error) {
           if (error instanceof NeedsAppUpdateError) {
-            needsAppUpdate ??= candidate.version;
+            for (const track of open) tracks[track].needsAppUpdate ??= candidate.version;
             continue;
           }
-          firstFailure ??= `${candidate.version}: ${errorText(error)}`;
+          for (const track of open) failures[track] ??= `${candidate.version}: ${errorText(error)}`;
           this.deps.log?.("warn", `managed Git ${candidate.version} skipped: ${errorText(error)}`);
         }
+        if (tracks.latest.release !== null) break;
       }
       this.candidates = usable;
-      this.checkError = latest === null && firstFailure !== null ? firstFailure : null;
+      this.checkError = null;
+      this.trackFailures = failures;
       const store = await this.readStore();
-      await this.writeStore({ ...store, lastCheck: { checkedAt: answer.fetchedAt, latest, needsAppUpdate } });
+      await this.writeStore({ ...store, lastCheck: { checkedAt: answer.fetchedAt, tracks } });
     } catch (error) {
       this.checkError = errorText(error);
       this.deps.log?.("warn", `managed Git check failed: ${this.checkError}`);

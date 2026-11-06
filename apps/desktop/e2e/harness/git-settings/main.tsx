@@ -63,6 +63,8 @@ const latest = (version: string) => ({ version, tag: `v${version}`, publishedAt:
 const base: ManagedGitStatus = {
   supported: true,
   bundledVersion: V4,
+  track: "latest",
+  tracks: { latest: V5, prerelease: V5 },
   latest: latest(V5),
   needsAppUpdate: null,
   checkedAt: Date.now() - 2 * MINUTE,
@@ -89,7 +91,11 @@ export type View =
   | "failed"
   | "offline"
   | "chosen-by-path"
-  | "needs-app";
+  | "needs-app"
+  /** Latest track; the newest build is published for testing only. */
+  | "unpromoted"
+  /** Prerelease track, a build ahead of the promoted one. */
+  | "prerelease";
 
 const VIEWS: Record<Exclude<View, "general">, () => { runtime: GitRuntimeStatus; managed: ManagedGitStatus }> = {
   update: () => ({ runtime: runtimeFor("bundled", APP_GIT, []), managed: base }),
@@ -98,7 +104,7 @@ const VIEWS: Record<Exclude<View, "general">, () => { runtime: GitRuntimeStatus;
   rollback: () => ({
     runtime: runtimeFor("managed", build(V6).path, [build(V6), build(V5)]),
     managed: {
-      ...base, latest: latest(V6), checkedAt: Date.now() - 60 * MINUTE, builds: [build(V6), build(V5)],
+      ...base, tracks: { latest: V6, prerelease: V6 }, latest: latest(V6), checkedAt: Date.now() - 60 * MINUTE, builds: [build(V6), build(V5)],
       selected: build(V6).id, previous: build(V5).id, inUse: true
     }
   }),
@@ -128,6 +134,14 @@ const VIEWS: Record<Exclude<View, "general">, () => { runtime: GitRuntimeStatus;
   "needs-app": () => ({
     runtime: runtimeFor("managed", build(V5).path, [build(V5)]),
     managed: { ...base, checkedAt: Date.now(), builds: [build(V5)], selected: build(V5).id, inUse: true, needsAppUpdate: "2.57.0-dev-pwrgit.1" }
+  }),
+  unpromoted: () => ({
+    runtime: runtimeFor("bundled", APP_GIT, []),
+    managed: { ...base, tracks: { latest: null, prerelease: V5 }, latest: null }
+  }),
+  prerelease: () => ({
+    runtime: runtimeFor("bundled", APP_GIT, []),
+    managed: { ...base, track: "prerelease", tracks: { latest: V5, prerelease: V6 }, latest: latest(V6) }
   })
 };
 
@@ -146,7 +160,7 @@ const bridge = {
   runWindowControl: async () => undefined,
   readWindowFrameState: async () => null,
   onWindowFrameState: () => () => undefined,
-  dispatch: async (name: string) => {
+  dispatch: async (name: string, req?: unknown) => {
     if (name === "settings:read") return ok(snapshot);
     if (name === "appearance:read") return ok({ theme: "light", resolvedTheme: "light" });
     if (name === "profile:list") {
@@ -166,6 +180,11 @@ const bridge = {
     if (name === "identity:folders") return ok({ enabled: false, globalFile: "/Users/demo/.gitconfig", machine: null, profiles: [] });
     if (name === "repo:hiddenList") return ok([]);
     if (name === "git:runtimeStatus" || name === "git:selectRuntime") return ok(state.runtime);
+    if (name === "gitManaged:setTrack") {
+      const track = (req as { track: ManagedGitStatus["track"] }).track;
+      state = { ...state, managed: { ...state.managed, track } };
+      return ok(state.managed);
+    }
     if (name.startsWith("gitManaged:")) return ok(state.managed);
     return ok(null);
   },

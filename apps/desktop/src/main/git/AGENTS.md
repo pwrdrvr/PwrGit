@@ -145,9 +145,17 @@ them under `<userData>/git-runtimes`. Design: `design/Git Settings and
 Managed Updates - UX Review.dc.html`. PwrAgent has the same downloader under
 its own root; the two never share a directory.
 
-- **Every release is a GitHub prerelease.** List `/releases`, never
+- **Two tracks, as PwrAgent's managed Codex and grok-build.** Latest (the
+  default) offers releases promoted out of testing: GitHub's prerelease flag
+  cleared (`promoted`). Prerelease offers the newest, promoted or not. huntharo/git
+  publishes every release as a prerelease, so Latest offers nothing newer than
+  the bundle until one is promoted on GitHub. List `/releases`, never
   `/releases/latest`. Order by version, never by publish date
   (`eligibleReleases`).
+- **One check answers both tracks** (`lastCheck.tracks`), fetching a release's
+  catalog only while a track it belongs to is open. `gitManaged:setTrack`
+  re-reads that answer: no network, and the build in use stays in use. A
+  check saved before tracks existed is dropped.
 - **Trust is the stager's, not new.** `acceptCatalog` requires SHA256SUMS,
   the catalog and GitHub's asset `digest` to agree (a missing digest is
   allowed), and a catalog whose `consumer_sha256` is not this app's pin is

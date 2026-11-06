@@ -53,6 +53,9 @@ export type ReleaseCandidate = {
   version: string;
   parsed: ManagedGitVersion;
   publishedAt: string | null;
+  /** Promoted out of testing: GitHub's prerelease flag is `false`. Anything
+   *  else (true, missing) is a prerelease, so only the Prerelease track sees it. */
+  promoted: boolean;
   catalog: ReleaseAsset;
   checksums: ReleaseAsset;
   archive: ReleaseAsset;
@@ -91,8 +94,8 @@ function readAsset(value: unknown, tag: string): ReleaseAsset | null {
  * counts only when it is not a draft, its tag is `v<version>` in the runtime's
  * version shape, the version is newer than the bundled build (the bundle
  * already covers anything older), and it carries the catalog, SHA256SUMS and
- * exactly one archive for this platform. Whether GitHub calls it a
- * prerelease does not matter: every custom release is one.
+ * exactly one archive for this platform. GitHub's prerelease flag decides
+ * only the track: see `promoted`.
  */
 export function eligibleReleases(
   releases: unknown,
@@ -130,6 +133,7 @@ export function eligibleReleases(
       version,
       parsed,
       publishedAt: typeof release.published_at === "string" ? release.published_at : null,
+      promoted: release.prerelease === false,
       catalog,
       checksums,
       archive: archives[0] as ReleaseAsset

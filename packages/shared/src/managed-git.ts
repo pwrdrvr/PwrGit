@@ -24,6 +24,20 @@ export function compareManagedGitVersions(left: ManagedGitVersion, right: Manage
   return 0;
 }
 
+/**
+ * Which builds PwrGit offers, as PwrAgent's managed Codex and grok-build
+ * tracks do. `latest`: releases promoted out of testing (GitHub's prerelease
+ * flag cleared). `prerelease`: the newest release, promoted or not. Latest is
+ * the default: a build published for testing is opted into, never inherited.
+ */
+export const MANAGED_GIT_TRACKS = ["latest", "prerelease"] as const;
+export type ManagedGitTrack = (typeof MANAGED_GIT_TRACKS)[number];
+export const MANAGED_GIT_TRACK_DEFAULT: ManagedGitTrack = "latest";
+
+export function isManagedGitTrack(value: unknown): value is ManagedGitTrack {
+  return typeof value === "string" && (MANAGED_GIT_TRACKS as readonly string[]).includes(value);
+}
+
 /** The install phases, in the order they run. */
 export const MANAGED_GIT_INSTALL_PHASES = [
   "downloading",
@@ -83,9 +97,16 @@ export type ManagedGitStatus = {
   supported: boolean;
   /** The build this app ships (`custom-git-runtime.json`). */
   bundledVersion: string;
-  /** Newest eligible release newer than the bundle, or null when none is. */
+  /** The track followed (Settings › Git › Build track). */
+  track: ManagedGitTrack;
+  /** Each track's newest build newer than the bundle, as of the last check;
+   *  null when it has none (or no check has answered). Switching tracks
+   *  reads this; it never asks GitHub again. */
+  tracks: Record<ManagedGitTrack, string | null>;
+  /** The followed track's newest release newer than the bundle, or null. */
   latest: ManagedGitRelease | null;
-  /** A newer release this app cannot verify (it needs a newer PwrGit). */
+  /** A newer release on the followed track this app cannot verify (it needs
+   *  a newer PwrGit). */
   needsAppUpdate: string | null;
   checkedAt: number | null;
   /** Why the last check failed; the last good answer is still shown. */

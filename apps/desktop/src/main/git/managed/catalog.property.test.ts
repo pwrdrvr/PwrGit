@@ -199,12 +199,18 @@ describe("eligibleReleases", () => {
     );
   });
 
-  test("GitHub's prerelease flag never changes the answer", () => {
+  test("GitHub's prerelease flag changes only whether a release is promoted", () => {
     fc.assert(
       fc.property(fc.array(genRelease, { maxLength: 8 }), fc.constantFrom<PlatformKey>(...KEYS), (releases, key) => {
         const flipped = releases.map((r) => ({ ...r, prerelease: !r.prerelease }));
         const answer = (list: GenRelease[]) => eligibleReleases(list.map((r) => render(r, key)), key, "2.56.0-dev-pwrgit.0").map((c) => c.version);
         expect(answer(flipped)).toEqual(answer(releases));
+        // It decides only the track: promoted is exactly "not a prerelease".
+        const promoted = (list: GenRelease[]) =>
+          eligibleReleases(list.map((r) => render(r, key)), key, "2.56.0-dev-pwrgit.0").map((c) => [c.version, c.promoted]);
+        for (const [version, isPromoted] of promoted(releases)) {
+          expect(promoted(flipped).find(([other]) => other === version)?.[1]).toBe(!isPromoted);
+        }
       })
     );
   });

@@ -5,6 +5,7 @@ import type {
   ForgeSettings,
   ExperimentalSettings,
   GeneralSettings,
+  ManagedGitTrack,
   UpdatesSelection
 } from "@pwrgit/shared";
 
@@ -23,6 +24,9 @@ export type AppSettings = {
    *  the one chosen before it (kept for rollback). Written only by
    *  `git:selectRuntime`; an installed `gitPath` outranks it. */
   managedGit?: { selected?: string | undefined; previous?: string | undefined } | undefined;
+  /** Settings › Git › Build track: which releases of PwrGit's Git are
+   *  offered. Absent is Latest. Written only by `gitManaged:setTrack`. */
+  managedGitTrack?: ManagedGitTrack | undefined;
   /** The macOS Safe Storage prompt has been explained before it can appear. */
   macKeychainAccessExplained?: boolean;
   general?: Partial<GeneralSettings>;
