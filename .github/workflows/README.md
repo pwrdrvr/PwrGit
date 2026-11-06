@@ -373,3 +373,22 @@ The complete inventory has 34 assets. Linux package files are not signed;
 updates verify manifest SHA-512, and downloadable SHA-256 sums include aliases.
 See the [runbook](../../docs/desktop-release-runbook.md) for filenames, update
 behavior, distro smoke checks and the first-publication boundary.
+
+## Unit and desktop E2E retry reports
+
+Each CI test slice runs its original selection once, without Playwright's
+in-process retry. A subsequent step retries at most 20 initially failed tests
+in that same job and prepared build. The selection and reports must prove that
+the first run completed, no collection, hook or runner error occurred, and
+every selected test passed on retry. Only identifiable assertion failures are
+eligible; infrastructure, other errors, missing or ambiguous evidence fail the
+slice. Local Playwright retries retain their existing default.
+
+The `ci-flake-report-<attempt>` artifact contains `flake-report.json` with
+per-platform, per-slice initial failures and observed retry outcomes. Missing
+slices and incomplete or unavailable first reports are explicit; counts are
+not complete when any are missing. A partial workflow rerun produces a separate
+attempt report, and cancellation of the entire workflow can prevent aggregation.
+Raw retry reports, first-attempt Playwright diagnostics, and Git tripwires are
+retained separately. Test discovery is generated during each run; tests excluded
+before runner discovery cannot be measured by the completion check.

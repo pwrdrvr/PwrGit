@@ -12,5 +12,7 @@ export default defineConfig({
   retries: 1,
   fullyParallel: false,
   workers: 1,
-  reporter: [["list"]]
+  reporter: process.env.PWRGIT_CI_TEST_REPORT
+    ? [["list"], ["../../scripts/ci/playwright-ci-reporter.mjs"]]
+    : [["list"]]
 });
