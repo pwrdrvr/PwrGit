@@ -143,10 +143,11 @@ Ghostty (MIT) ships the same pair.
 
 ## e2e needs a build first
 
-`pnpm test:e2e` launches the BUILT app at `out/main/index.js`, with no
-dev-server fallback. Run `pnpm build` first on a fresh worktree and after
-changes to `src/main/**` or `src/preload/**`. Otherwise Electron dies with
-"Unable to find Electron app at .../out/main/index.js".
+Full-app E2E opens real desktop windows, including without `--headed`. Run it
+through Control MCP on the dedicated lab VM; read
+[the lab procedure](../../docs/headed-e2e-pwrsuitelab.md) first. The guest's
+`test:e2e` pretest builds `out/main/index.js`. A direct Playwright invocation
+needs that build in the guest first. Hidden harnesses need no app build.
 
 ## Profiling the renderer with React DevTools
 
