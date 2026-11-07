@@ -79,7 +79,8 @@ export function LocalAgentsSettings() {
   }, [selectedRoleId, selectedSession, snapshot]);
 
   const effectivePermissions = selectedRole?.permissions.filter(permission =>
-    !selectedSession?.oauth || selectedSession.oauth.scopes.includes(permission)
+    (!selectedSession?.oauth || selectedSession.oauth.scopes.includes(permission)) &&
+    (!selectedSession?.consent || selectedSession.consent.permissions.includes(permission))
   ) ?? [];
 
   const assignRole = async (sessionId: string, roleId: string): Promise<void> => {
@@ -235,9 +236,15 @@ export function LocalAgentsSettings() {
 
             <GraphColumn title="Permissions & scope" count={MCP_AGENT_CAPABILITIES.length}>
               <div className="agent-auth-scope">
-                <span>Repository boundary</span>
+                <span>{selectedSession?.consent ? "Current role boundary" : "Repository boundary"}</span>
                 <b>{selectedRole === null ? "Select a role" : scopeLabel(selectedRole)}</b>
                 {selectedRole?.repositoryRoots?.map((root) => <code key={root}>{root}</code>)}
+                {selectedSession?.consent ? <>
+                  <span>Native consent ceiling</span>
+                  <b>{selectedSession.consent.repositoryRoots === null ? "All bounded repositories" : "Approved roots"}</b>
+                  {selectedSession.consent.repositoryRoots?.map(root => <code key={root}>{root}</code>)}
+                  <small>Both boundaries apply. A role change cannot widen this Session; reconnect to approve more access.</small>
+                </> : null}
               </div>
               {MCP_AGENT_CAPABILITIES.map((capability) => {
                 const detail = MCP_AGENT_CAPABILITY_DETAILS[capability];

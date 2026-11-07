@@ -79,3 +79,7 @@ __pycache__/
 
 # Local task artifacts and PR descriptions
 .local/
+
+# Native MCP build output
+crates/*/target/
+apps/desktop/build/mcp/

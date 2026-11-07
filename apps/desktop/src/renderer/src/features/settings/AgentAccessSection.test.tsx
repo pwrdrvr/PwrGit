@@ -5,13 +5,13 @@ import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { ok } from "@pwrgit/shared";
 const mocks = vi.hoisted(() => ({ dispatch: vi.fn(), subscribe: vi.fn() }));
 vi.mock("../../lib/pwrgit", () => mocks);
-import { AgentAccessSection, CONNECT_RECIPES } from "./AgentAccessSection";
+import { AgentAccessSection, connectionRecipes } from "./AgentAccessSection";
 let container: HTMLDivElement;
 let root: Root;
 beforeEach(() => {
   vi.clearAllMocks();
   mocks.subscribe.mockReturnValue(() => undefined);
-  mocks.dispatch.mockResolvedValue(ok({ enabled: false, listening: false, mcpUrl: "http://127.0.0.1:51731/mcp" }));
+  mocks.dispatch.mockResolvedValue(ok({ enabled: false, listening: false, mcpUrl: "unix:///tmp/pg/m.sock#/mcp", executable: "/Applications/PwrGit.app/Contents/Resources/pwrgit-mcp", platform: "darwin" }));
   container = document.createElement("div");
   document.body.append(container);
   root = createRoot(container);
@@ -25,16 +25,27 @@ it("shows the opt-in toggle and hides commands until listening", async () => {
   await act(async () => { (container.querySelector("[role=switch]") as HTMLElement).click(); });
   expect(mocks.dispatch).toHaveBeenCalledWith("agentAccess:setEnabled", { enabled: true });
 });
-it("prints the same OAuth recipes as PwrSnap with PwrGit's name and port", async () => {
-  mocks.dispatch.mockResolvedValue(ok({ enabled: true, listening: true, mcpUrl: "http://127.0.0.1:51731/mcp" }));
+it("offers the native relay and direct IPC bootstrap, without TCP or OAuth recipes", async () => {
+  mocks.dispatch.mockResolvedValue(ok({ enabled: true, listening: true, mcpUrl: "unix:///tmp/pg/m.sock#/mcp", executable: "/Applications/PwrGit.app/Contents/Resources/pwrgit-mcp", platform: "darwin" }));
   await render();
-  expect(CONNECT_RECIPES).toEqual([
-    { name: "Claude Code", command: "claude mcp add --scope user --transport http pwrgit http://127.0.0.1:51731/mcp\nclaude mcp login pwrgit" },
-    { name: "Codex CLI", command: "codex mcp add pwrgit --url http://127.0.0.1:51731/mcp --oauth-client-registration dcr" }
-  ]);
-  for (const recipe of CONNECT_RECIPES) expect(container.textContent).toContain(recipe.command);
-  expect(container.textContent).not.toContain("pair");
+  for (const recipe of connectionRecipes("/Applications/PwrGit.app/Contents/Resources/pwrgit-mcp", "darwin")) expect(container.textContent).toContain(recipe.command);
+  expect(container.textContent).not.toContain("127.0.0.1");
+  expect(container.textContent).not.toContain("mcp login");
 });
+it("keeps the HTTP secret out of copyable configuration and rotates its input reference", async () => {
+  mocks.dispatch.mockImplementation((command: string) => Promise.resolve(ok(command === "agentAccess:bootstrapHttp" ? { token: "fixture-secret", expiresAt: "2026-11-07T17:02:00Z" } : { enabled: true, listening: true, mcpUrl: "unix:///tmp/pg/m.sock#/mcp", executable: "/fixture/pwrgit-mcp", platform: "darwin" })));
+  await render();
+  const approve = [...container.querySelectorAll("button")].find(button => button.textContent === "Approve a direct HTTP Session")!;
+  await act(async () => approve.click());
+  const first = [...container.querySelectorAll("pre")].find(pre => pre.textContent?.includes('"inputs"'))!.textContent!;
+  expect(first).not.toContain("fixture-secret");
+  expect(first).toContain('"password": true');
+  expect(container.querySelector<HTMLInputElement>('input[type="password"]')?.value).toBe("fixture-secret");
+  await act(async () => approve.click());
+  const second = [...container.querySelectorAll("pre")].find(pre => pre.textContent?.includes('"inputs"'))!.textContent!;
+  expect(second).not.toBe(first);
+});
+
 it("shows bind failures without offering unusable commands", async () => {
   mocks.dispatch.mockResolvedValue(ok({ enabled: true, listening: false, error: "Port is in use" }));
   await render();

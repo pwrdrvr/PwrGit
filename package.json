@@ -5,7 +5,7 @@
   "description": "Cross-platform desktop git client (Pwr family)",
   "author": "PwrDrvr LLC",
   "license": "MIT",
-  "copyright": "Copyright \u00a9 2026 PwrDrvr LLC",
+  "copyright": "Copyright © 2026 PwrDrvr LLC",
   "packageManager": "pnpm@12.13.0+sha512.1e55719bf26e809dce5c5084fdebaa64efb3da9038ae5d68a9f8a68311f1a45841c8c3b76a37298c3b66f6bcc80409a9b7f33c78a7168a3e90fb65a5d8235ae4",
   "scripts": {
     "preinstall": "node ./scripts/check-node-version.mjs",
@@ -17,7 +17,7 @@
     "lint:forge-kinds": "node scripts/resource-run.mjs node ./scripts/check-forge-kind-branching.mjs",
     "deps:maturity": "node scripts/resource-run.mjs node ./scripts/check-dependency-maturity.mjs",
     "licenses:allowlist": "node scripts/resource-run.mjs node ./scripts/check-third-party-license-allowlist.mjs",
-    "licenses:check": "node scripts/resource-run.mjs node ./scripts/check-package-license-policy.mjs && node scripts/resource-run.mjs node ./scripts/check-third-party-license-allowlist.mjs && node scripts/resource-run.mjs node ./scripts/generate-third-party-licenses.mjs --check",
+    "licenses:check": "node scripts/resource-run.mjs node scripts/check-mcp-rust-licenses.mjs && node scripts/resource-run.mjs node ./scripts/check-package-license-policy.mjs && node scripts/resource-run.mjs node ./scripts/check-third-party-license-allowlist.mjs && node scripts/resource-run.mjs node ./scripts/generate-third-party-licenses.mjs --check",
     "licenses:generate": "node scripts/resource-run.mjs node ./scripts/generate-third-party-licenses.mjs",
     "typecheck": "node scripts/resource-run.mjs pnpm -r --if-present typecheck",
     "test": "node scripts/resource-run.mjs vitest run",
@@ -29,7 +29,8 @@
     "distribution:prepare": "node scripts/package-manager-release.mjs prepare",
     "fix:linux-sandbox": "node ./scripts/linux-sandbox.mjs --fix",
     "check:linux-sandbox": "node ./scripts/linux-sandbox.mjs --warn",
-    "lint:syntax": "node scripts/resource-run.mjs oxlint"
+    "lint:syntax": "node scripts/resource-run.mjs oxlint",
+    "pretest": "pnpm --filter @pwrgit/desktop build:mcp --host"
   },
   "devDependencies": {
     "@types/node": "24.19.2",

@@ -93,6 +93,9 @@ files:
   - "!**/node_modules/dugite/.pwrgit-stage-*/**"
 
 extraResources:
+  - from: build/mcp
+    to: .
+    filter: ["pwrgit-mcp", "pwrgit-mcp.exe"]
   - from: LICENSE
     to: LICENSE
   # Linux windows carry their own icon (src/main/index.ts): a desktop shell

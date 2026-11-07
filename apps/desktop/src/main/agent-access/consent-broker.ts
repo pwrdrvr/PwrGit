@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import { err, ok, type AgentConsentDecision, type AgentConsentPrompt } from "@pwrgit/shared";
 import type { McpPolicyStore } from "@pwrgit/mcp-server/access-policy";
 import type { CommandBus, CommandContext } from "../command-bus";
-import type { RequestConsent, ConsentDecision } from "./agent-oauth";
+import type { RequestConsent, ConsentDecision } from "./agent-consent";
 
 export type ConsentWindow = {
   webContents: { id: number };
@@ -64,6 +64,12 @@ export class ConsentBroker {
         request.sessionName.trim().length > 200 ||
         !pending.prompt.roles.some(r => r.id === request.roleId)
       )) return err({ kind: "validation", code: "invalid_consent", message: "Enter a Session Name and choose an available role." });
+      if (request.decision === "allow") {
+        const shown = pending.prompt.roles.find(role => role.id === request.roleId);
+        const current = this.policy.snapshot().roles.find(role => role.id === request.roleId);
+        if (!shown || !current || JSON.stringify(shown) !== JSON.stringify(current))
+          return err({ kind: "validation", code: "role_changed", message: "This role changed while consent was open. Deny and reconnect to review its current permissions." });
+      }
       pending.finish(request);
       return ok(null);
     });

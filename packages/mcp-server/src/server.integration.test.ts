@@ -133,7 +133,7 @@ describe("PwrGit MCP integration", () => {
           primary: "subscribable_status_resource",
           resourceSubscriptions: { supported: true }
         },
-        websocket: { subprotocol: "pwrgit.events.v1" }
+
       });
 
       const watched = await client.callTool({

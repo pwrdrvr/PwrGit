@@ -70,7 +70,7 @@ export const MCP_AGENT_CAPABILITY_DETAILS: Record<
   },
   "status.subscribe": {
     label: "Subscribe to live status",
-    detail: "Keep MCP resources or the WebSocket fallback active for repository updates.",
+    detail: "Keep MCP status resources and subscriptions active for repository updates.",
     danger: "sensitive"
   }
 };
@@ -93,6 +93,7 @@ type McpAgentSessionRecord = {
   updatedAt: string;
   revokedAt: string | null;
   oauth?: { clientId: string; scopes: McpAgentCapability[] };
+  consent?: { permissions: McpAgentCapability[]; repositoryRoots: string[] | null };
 };
 
 export type McpAgentSession = Omit<McpAgentSessionRecord, "tokenHash">;
@@ -315,6 +316,7 @@ function publicSession(session: McpAgentSessionRecord): McpAgentSession {
     createdAt: session.createdAt,
     updatedAt: session.updatedAt,
     revokedAt: session.revokedAt,
+    ...(session.consent ? { consent: { permissions: [...session.consent.permissions], repositoryRoots: session.consent.repositoryRoots === null ? null : [...session.consent.repositoryRoots] } } : {}),
     ...(session.oauth ? { oauth: { clientId: session.oauth.clientId, scopes: [...session.oauth.scopes] } } : {})
   };
 }
@@ -410,6 +412,13 @@ function parseSession(value: unknown): McpAgentSessionRecord {
     typeof session.oauth.clientId !== "string" || !ID_PATTERN.test(session.oauth.clientId) ||
     !Array.isArray(session.oauth.scopes) || !session.oauth.scopes.every(isCapability)
   )) throw new McpAccessError("invalid_policy", "invalid OAuth session binding");
+  if (session.consent !== undefined) {
+    try {
+      const ceiling = normalizedRoleInput({ name: "Native consent", description: "", ...session.consent });
+      if (JSON.stringify(ceiling.permissions) !== JSON.stringify(session.consent.permissions) ||
+          JSON.stringify(ceiling.repositoryRoots) !== JSON.stringify(session.consent.repositoryRoots)) throw new Error("noncanonical consent");
+    } catch { throw new McpAccessError("invalid_policy", "invalid native consent ceiling"); }
+  }
   return session as McpAgentSessionRecord;
 }
 
@@ -491,7 +500,15 @@ export class McpPolicyStore {
     };
   }
 
-  createSession(nameInput: string, roleId: string, oauth?: McpAgentSessionRecord["oauth"]): {
+  createNativeSession(name: string, roleId: string) {
+    const role = this.read().roles.find(candidate => candidate.id === roleId);
+    if (!role) throw new McpAccessError("invalid_role", "approved role is unavailable");
+    return this.createSession(name, roleId, undefined, {
+      permissions: [...role.permissions], repositoryRoots: role.repositoryRoots === null ? null : [...role.repositoryRoots]
+    });
+  }
+
+  createSession(nameInput: string, roleId: string, oauth?: McpAgentSessionRecord["oauth"], consent?: McpAgentSessionRecord["consent"]): {
     session: McpAgentSession;
     token: string;
     environment: {
@@ -521,6 +538,7 @@ export class McpPolicyStore {
       createdAt: timestamp,
       updatedAt: timestamp,
       revokedAt: null,
+      ...(consent === undefined ? {} : { consent }),
       ...(oauth === undefined ? {} : { oauth: { clientId: oauth.clientId, scopes: [...oauth.scopes] } })
     };
     policy.sessions.push(record);
@@ -616,7 +634,8 @@ export class McpPolicyStore {
     const role = policy.roles.find((candidate) => candidate.id === session.roleId);
     if (role === undefined) throw new McpAccessError("invalid_role", "MCP session has no valid role");
     const permissions = role.permissions.filter((capability) =>
-      session.oauth === undefined || session.oauth.scopes.includes(capability)
+      (session.oauth === undefined || session.oauth.scopes.includes(capability)) &&
+      (session.consent === undefined || session.consent.permissions.includes(capability))
     );
     const missing = (requirement.capabilities ?? []).filter(
       (capability) => !permissions.includes(capability)
@@ -627,7 +646,8 @@ export class McpPolicyStore {
         `MCP role does not grant: ${missing.join(", ")}`
       );
     }
-    if (role.repositoryRoots !== null) {
+    const roots = intersectRepositoryRoots(role.repositoryRoots, session.consent?.repositoryRoots ?? null);
+    if (roots !== null) {
       for (const requestedPath of requirement.repositoryPaths ?? []) {
         let candidate: string;
         try {
@@ -635,7 +655,7 @@ export class McpPolicyStore {
         } catch {
           throw new McpAccessError("repository_outside_scope", "repository path is unavailable or outside the assigned role");
         }
-        if (!role.repositoryRoots.some((root) => pathInside(root, candidate))) {
+        if (!roots.some((root) => pathInside(root, candidate))) {
           throw new McpAccessError("repository_outside_scope", "repository path is outside the assigned role");
         }
       }
@@ -646,7 +666,7 @@ export class McpPolicyStore {
       roleId: role.id,
       roleName: role.name,
       capabilities: [...permissions],
-      repositoryRoots: role.repositoryRoots === null ? null : [...role.repositoryRoots]
+      repositoryRoots: roots === null ? null : [...roots]
     };
   }
 
@@ -738,4 +758,11 @@ export function fullAccessAuthorization(): McpAuthorization {
     capabilities: [...MCP_AGENT_CAPABILITIES],
     repositoryRoots: null
   };
+}
+
+/** The narrower root of each overlapping pair; null is an unrestricted side. */
+function intersectRepositoryRoots(current: string[] | null, ceiling: string[] | null): string[] | null {
+  if (current === null) return ceiling;
+  if (ceiling === null) return current;
+  return [...new Set(current.flatMap(a => ceiling.flatMap(b => pathInside(a, b) ? [b] : pathInside(b, a) ? [a] : [])))];
 }

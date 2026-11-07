@@ -459,6 +459,8 @@ if (!signStageOnly) {
   // 2. Build (electron-vite -> apps/desktop/out/).
   step("electron-vite build");
   runChecked("pnpm", ["--filter", "@pwrgit/desktop", "build"], { cwd: repoRoot });
+  step("native MCP relay (universal on macOS)");
+  runChecked("pnpm", ["--filter", "@pwrgit/desktop", "build:mcp"], { cwd: repoRoot });
 
   // 3. Materialize the release stage. Windows must include electron-builder in
   // the staged tree: its protected signing job receives only this tree, and
@@ -609,6 +611,10 @@ if (win) {
     { env: { PWRGIT_NOTICE_SOURCE_ROOT: stageDir } },
   );
 
+  const nativeRelay = join(builtApp, "resources", "pwrgit-mcp.exe");
+  if (!existsSync(nativeRelay)) throw new Error("Packaged native MCP relay is missing");
+  if (requireSigning) runChecked("powershell", ["-NoProfile", "-Command", `$s = Get-AuthenticodeSignature -LiteralPath '${nativeRelay.replaceAll("'", "''")}'; if ($s.Status -ne 'Valid') { throw 'MCP relay Authenticode verification failed' }`]);
+
   step("verify installer artifact + write checksums");
   const checksumPath = writeWindowsChecksums(dist);
   console.log(`  checksum: ${checksumPath}`);
@@ -644,6 +650,11 @@ for (const arch of MAC_ARCHITECTURES) {
       throw new Error(`Wrong slices in ${binary}: ${actual.join(", ")}; expected ${expected.join(", ")}`);
     }
   }
+
+  const relay = join(builtApp, "Contents", "Resources", "pwrgit-mcp");
+  const relayArchitectures = runQuiet("lipo", [relay, "-archs"]).trim().split(/\s+/).sort();
+  if (JSON.stringify(relayArchitectures) !== JSON.stringify(["arm64", "x86_64"])) throw new Error("Native MCP relay must be universal");
+  runChecked("codesign", ["--verify", "--strict", relay]);
 
   step("verify packaged asar contents");
   runChecked("node", [join(desktopRoot, "scripts", "verify-asar-contents.mjs"), builtApp]);

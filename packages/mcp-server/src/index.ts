@@ -6,9 +6,7 @@ export {
 } from "./server.js";
 export {
   LIVE_EVENT_CONTRACT_VERSION,
-  LIVE_EVENT_PROTOCOL,
-  LIVE_EVENT_SUBPROTOCOL,
-  LiveEventServer,
+  liveStatusCapabilities,
   changedEvents,
   type LiveEventCapabilities
 } from "./live-events.js";

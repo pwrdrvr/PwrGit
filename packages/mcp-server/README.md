@@ -1,27 +1,15 @@
 # @pwrgit/mcp-server
 
-PwrGit app profiles, indexed repositories, recent navigation, open/refresh actions,
-and read-only Git metadata and live status. App-backed tools require the desktop
-HTTP server; standalone stdio remains filesystem-based. Standalone stdio always
-runs the bundled Git and Git LFS, with the app's Git LFS filter and macOS keychain
-helper. App-backed tools run whichever Git is chosen in the app's Settings, which
-is the bundled Git unless someone picks an installed one.
+Desktop-owned MCP handlers for PwrGit. The independently launched Electron main
+process provides the Git runner, app backend, policy authorizer and app version.
 
-The desktop app exposes OAuth-protected MCP at
-`http://127.0.0.1:51731/mcp`. Enable local-agent access in Settings → Local Agents,
-connect a standard MCP OAuth client, and approve it in PwrGit’s native window.
-See [the connection guide](../../docs/mcp-server.md#connect-an-agent).
+Configure clients with the bundled Rust `pwrgit-mcp` executable shown in
+Settings → Local Agents. It relays stdio to the running desktop's protected Unix
+socket or Windows named pipe. Compatible hosts can use HTTP directly over that
+endpoint. Every connection requires native consent; there is no TCP listener,
+app-launch fallback, standalone server fallback or request replay.
 
-The package also retains its original standalone stdio entry point for existing
-clients. It requires `PWRGIT_MCP_SESSION_TOKEN` and reads the desktop policy
-file (or `PWRGIT_MCP_POLICY_FILE`). Workspace installation builds the standalone
-server automatically. Start it with:
+The old Node/npm executable is retired. It exits with migration instructions. It never imports server handlers, starts
+the app or runs repository work.
 
-```sh
-pnpm --filter @pwrgit/mcp-server start
-```
-
-After changing its source, rebuild with `pnpm --filter @pwrgit/mcp-server build`.
-
-The desktop HTTP interface uses OAuth rather than a pairing CLI or copied
-tokens. Revocation and repository boundaries apply to both transports.
+See [desktop MCP documentation](../../docs/mcp-server.md).
