@@ -32,6 +32,46 @@ test.afterEach(async () => {
  * with a Range. Icons are fixed-size, so the only thing that can go wrong now
  * is the ROW overflowing its container, which is one measurement.
  */
+/**
+ * Records where each press event lands from now on (target row, point,
+ * drags, scrolls), plus the selected row after each one. Returns a reader
+ * for a failure message.
+ */
+async function tracePress(window: Page): Promise<() => Promise<string>> {
+  await window.evaluate(() => {
+    const log: string[] = [];
+    (window as unknown as { __pressTrace: string[] }).__pressTrace = log;
+    const t0 = performance.now();
+    const label = (el: EventTarget | null): string => {
+      if (!(el instanceof Element)) return String(el);
+      const row = el.closest(".wt-row");
+      const wt = row === null ? "" : ` row=${row.getAttribute("data-wt-id")}`;
+      return `${el.tagName.toLowerCase()}.${String(el.className)}${wt}`;
+    };
+    const selected = (): string =>
+      [...document.querySelectorAll(".wt-row.is-selected")]
+        .map((r) => r.getAttribute("data-wt-id"))
+        .join(",") || "none";
+    const types = ["pointerdown", "mousedown", "mouseup", "click", "dragstart", "dragend", "scroll"];
+    for (const type of types) {
+      document.addEventListener(
+        type,
+        (e) => {
+          const at = e instanceof MouseEvent ? ` @${e.clientX},${e.clientY}` : "";
+          const ms = (performance.now() - t0).toFixed(0);
+          log.push(`${ms}ms ${type} ${label(e.target)}${at}`);
+          requestAnimationFrame(() => log.push(`  selected=${selected()}`));
+        },
+        true
+      );
+    }
+  });
+  return () =>
+    window.evaluate(() =>
+      (window as unknown as { __pressTrace: string[] }).__pressTrace.join("\n")
+    );
+}
+
 async function lensRowOverflow(window: Page): Promise<number> {
   return window.locator(".lens-filter").evaluate((el) => {
     const parent = el.parentElement;
@@ -367,8 +407,21 @@ test("the selected worktree row clears BOTH sticky bars when grouped", async () 
 
   const row = window.locator(".wt-row", { hasText: "feature/w-1" }).first();
   await expect(row).toBeVisible({ timeout: 15_000 });
+  const id = await row.getAttribute("data-wt-id");
+  expect(id).not.toBeNull();
+  const pressTrace = await tracePress(window);
   await row.click();
-  await expect(row).toHaveClass(/is-selected/);
+  // Ask which row holds the selection, so a failure names it (or says none
+  // does). This click once failed on one macOS runner, twice in a row, and
+  // never locally; the trace says where the press went.
+  try {
+    await expect(window.locator(".wt-row.is-selected")).toHaveAttribute(
+      "data-wt-id",
+      id as string
+    );
+  } catch (error) {
+    throw new Error(`${String(error)}\n\nPress trace:\n${await pressTrace()}`);
+  }
 
   // Scroll far enough that the row would have left the viewport unaided. The
   // selected row is sticky so the active worktree stays reachable down a long
