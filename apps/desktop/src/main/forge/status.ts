@@ -318,17 +318,28 @@ async function probeOne(
       };
     }
   );
+  const assumed = probed.find((entry) => entry.assumed);
   return {
     ...base,
     installed: true,
     // The summary counts an assumed host: a credential found through the CLI's
     // own default host is still a credential this forge can be read with.
     loggedIn: probed.some((entry) => entry.loggedIn),
-    // The report does not. See `ForgeProbeTarget.assumed` — the pane has no row
-    // for it, so naming it would put a host on screen the user cannot switch.
+    // The row list does not. See `ForgeProbeTarget.assumed` — the pane has no
+    // row for it, so naming it would put a host on screen the user cannot
+    // switch. It goes in its own field, so `forgeBlockAt` still finds it.
     hosts: probed
       .filter((entry) => !entry.assumed)
-      .map(({ host, enabled, loggedIn }) => ({ host, enabled, loggedIn }))
+      .map(({ host, enabled, loggedIn }) => ({ host, enabled, loggedIn })),
+    ...(assumed === undefined
+      ? {}
+      : {
+          assumedHost: {
+            host: assumed.host,
+            enabled: assumed.enabled,
+            loggedIn: assumed.loggedIn
+          }
+        })
   };
 }
 
@@ -357,7 +368,12 @@ function sameStatuses(left: ForgeStatus[], right: ForgeStatus[]): boolean {
       // Per-host state is rendered, so it has to wake listeners too. Two enabled
       // hosts where one is switched off leaves the summary `loggedIn` alone, and
       // comparing only the summary would leave the pane painting the old list.
-      sameHosts(status.hosts, other.hosts)
+      sameHosts(status.hosts, other.hosts) &&
+      // Not rendered as a row, but the dialogs gate on it.
+      sameHosts(
+        status.assumedHost === undefined ? [] : [status.assumedHost],
+        other.assumedHost === undefined ? [] : [other.assumedHost]
+      )
     );
   });
 }

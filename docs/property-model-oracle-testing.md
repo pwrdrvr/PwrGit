@@ -60,6 +60,10 @@ Each test below ran against the code from just before the fix, extracted with
 | #486, #542 | Repository and worktree queues deadlocked. Three PRs wrote the same inverted lock order over 31 days. | Model with `fc.scheduler` | 100 of 100 seeds; median under 20 runs |
 | #544 | `mapLimit` turned every worker error into success for 4 months, at 15 call sites. | Property | Run 1 |
 | #467, #468 | Update Restart offered an installer that was no longer on disk. | Model with `fc.commands` | About 3 s |
+| #226 | A `gitlab.*` host resolved for PR status while Settings called it unknown. The divergence was documented, not tested. | Differential: every forge surface against `ForgeHosts` | 1–5 runs; shrunk to `gitlab.example` with no sign-in |
+| #229 | "GitLab: Signed out" under a signed-in host row; its first push stopped probing the SaaS host. | The same differential | 1–39 runs, at #229^ and its first push |
+| #225 | GitLab retried a header-less 429 four times at 0 ms. | Property, and a GitHub/GitLab differential through both clients | 13–22 runs; shrunk to a bare 429 |
+| #230 | A failed late batch threw away the batches that had resolved. | Property through both clients | 1–6 runs; shrunk to 51 branches, second batch failing |
 
 ## When to write one
 
