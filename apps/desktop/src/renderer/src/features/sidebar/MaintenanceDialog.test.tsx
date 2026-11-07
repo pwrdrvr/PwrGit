@@ -115,6 +115,18 @@ afterEach(async () => {
 });
 
 describe("maintenance dialog", () => {
+  it("ends a branch review that found nothing with Close, last and in the CTA colour", async () => {
+    dispatch.mockImplementation(async (name: string) => name === "maintenance:run"
+      ? { ok: true, value: summary([{ repo, outcome: "success", message: "Reviewed", candidates: [] }]) }
+      : { ok: true, value: null });
+    await click("Local branches");
+    await click("Review local branches");
+    expect(container.textContent).toContain("No finished branches found");
+    const footer = [...container.querySelectorAll<HTMLButtonElement>(".modal__actions button")];
+    expect(footer.map((node) => node.textContent)).toEqual(["Review again", "Close"]);
+    expect(footer.at(-1)?.classList.contains("modal__create")).toBe(true);
+    expect(document.activeElement).toBe(footer.at(-1));
+  });
   it("offers optional worktree repair before cleanup and can run repair alone", async () => {
     dispatch.mockImplementation(async (name: string) => name === "maintenance:run"
       ? { ok: true, value: summary([{ repo, outcome: "success", message: "Worktree links checked and repaired." }]) }

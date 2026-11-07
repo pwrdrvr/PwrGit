@@ -178,6 +178,11 @@ describe("ClonesPanel", () => {
     ).toEqual(["b", "a"]);
     expect(container.textContent).toContain("9 files re-shared · 2 left as they are (2 changed).");
     expect(button("Run again").disabled).toBe(false);
+    // The run is over: Close is the primary, last, in the CTA colour, and focused.
+    const footer = [...container.querySelectorAll<HTMLButtonElement>(".modal__actions button")];
+    expect(footer.map((node) => node.textContent?.trim())).toEqual(["Run again", "Close"]);
+    expect(footer.at(-1)?.classList.contains("modal__create")).toBe(true);
+    expect(document.activeElement).toBe(footer.at(-1));
   });
 });
 

@@ -726,6 +726,9 @@ export function MaintenanceDialog({
   const currentRepo = repos.find((repo) => current.has(repo.id));
   const complete = summary !== null;
   const scanComplete = complete && action?.kind === "scan-branches";
+  /** A single-step tab whose run is over, with nothing left to review
+   *  (a branch review that found nothing is over too). */
+  const finished = complete && tab !== "combined" && (!scanComplete || candidates.length === 0);
   const branchScan = action?.kind === "scan-branches";
   const collecting = action?.kind === "gc";
   const sharing = action?.kind === "reshare";
@@ -967,11 +970,11 @@ export function MaintenanceDialog({
             </div>
             {(runPlan.branches || runPlan.worktrees) && <p className="maintenance__help">Restore recreates a branch at the tip it had when it was deleted, for as long as Git still holds that commit. Removed worktrees cannot be restored.</p>}
           </div>
-          <div className="modal__actions"><button className="modal__cancel" onClick={onClose}>Close</button><button className="modal__cancel" onClick={() => {
+          <div className="modal__actions"><button className="modal__cancel" onClick={() => {
             // The offer ran Clones alone; a new plan starts from the usual one.
             if (initialPlan !== undefined) setPlan(DEFAULT_MAINTENANCE_PLAN);
             restartWorkflow();
-          }}>New plan</button></div>
+          }}>New plan</button><button ref={footerFocus} className="modal__create" onClick={onClose}>Close</button></div>
         </> : <>
         {(running || complete) && (
           <BulkSyncStatus
@@ -1458,6 +1461,18 @@ export function MaintenanceDialog({
                 </>
               ) : null}
             </>
+          ) : finished ? (
+            // The job is done: running it again is secondary, and Close is
+            // the primary, last and in the CTA colour.
+            <>
+              {tab === "gc" && <button className="modal__cancel" onClick={reset}>Change options</button>}
+              <button className="modal__cancel" onClick={() => void run(
+                taskTab === "repair" ? { kind: "repair-worktrees" }
+                  : taskTab === "gc" ? { kind: "gc", mode, branchOptions: options }
+                    : { kind: "scan-branches", options }
+              )}>{taskTab === "repair" ? "Repair worktree links" : taskTab === "gc" ? "Run garbage collection" : "Review again"}</button>
+              <button ref={footerFocus} className="modal__create" onClick={onClose}>Close</button>
+            </>
           ) : (
             <>
               <button
@@ -1484,7 +1499,7 @@ export function MaintenanceDialog({
               ) : (
                 <>
                   <button
-                    className="modal__cancel"
+                    className={scanComplete ? "modal__cancel" : "modal__create"}
                     onClick={() => void run({ kind: "scan-branches", options })}
                   >
                     {action === null ? "Review local branches" : "Review again"}
