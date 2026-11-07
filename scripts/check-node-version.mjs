@@ -10,20 +10,36 @@
 import { existsSync, readFileSync, realpathSync } from "node:fs";
 import { dirname, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
+import { isCliEntrypoint } from "./lib/cli-entrypoint.mjs";
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
-const pinned = readFileSync(resolve(repoRoot, ".nvmrc"), "utf8").trim();
 
-// `.nvmrc` may pin a major (`24`) or an exact version (`v24.14.1`); compare at
-// whatever precision it asks for.
-const wanted = pinned.replace(/^v/, "").split(".");
-const active = process.version.replace(/^v/, "").split(".");
-if (!wanted.every((part, i) => active[i] === part)) {
-  fail([
-    `expected Node ${pinned} from .nvmrc, got ${process.version}.`,
-    "Run: source ~/.nvm/nvm.sh && nvm use",
-    "Then re-run pnpm install from the repo root."
-  ]);
+/**
+ * The version `.nvmrc` pins, and whether `version` (`process.version`)
+ * satisfies it. `.nvmrc` may pin a major (`24`) or an exact version
+ * (`v24.14.1`); compare at whatever precision it asks for. Surrounding
+ * whitespace, CRLF and a byte-order mark are not part of the pin.
+ */
+export function checkNvmrc(nvmrc, version) {
+  const pinned = nvmrc.trim();
+  const wanted = pinned.replace(/^v/, "").split(".");
+  const active = version.replace(/^v/, "").split(".");
+  return { pinned, matches: wanted.every((part, i) => active[i] === part) };
+}
+
+function runCli() {
+  const { pinned, matches } = checkNvmrc(
+    readFileSync(resolve(repoRoot, ".nvmrc"), "utf8"),
+    process.version
+  );
+  if (!matches) {
+    fail([
+      `expected Node ${pinned} from .nvmrc, got ${process.version}.`,
+      "Run: source ~/.nvm/nvm.sh && nvm use",
+      "Then re-run pnpm install from the repo root."
+    ]);
+  }
+  checkNvmOwnsNode();
 }
 
 // CI installs Node without nvm, so only developer machines that have nvm at
@@ -32,18 +48,20 @@ if (!wanted.every((part, i) => active[i] === part)) {
 // resolved through realpath first: `process.execPath` comes back with symlinks
 // already resolved, so an `~/.nvm` that is itself a symlink (a dev volume, a
 // dotfiles farm) would otherwise fail a Node that nvm really did activate.
-const nvmDir = process.env.NVM_DIR || resolve(process.env.HOME ?? "", ".nvm");
-const inCi = process.env.CI === "true" || process.env.CI === "1";
-if (!inCi && existsSync(nvmDir)) {
-  const nvmRoot = realpath(nvmDir);
-  const nodePath = realpath(process.execPath);
-  if (!nodePath.startsWith(nvmRoot.endsWith(sep) ? nvmRoot : `${nvmRoot}${sep}`)) {
-    fail([
-      `Node ${process.version} is not running from nvm.`,
-      `  node: ${nodePath}`,
-      `  nvm:  ${nvmRoot}`,
-      "Run: source ~/.nvm/nvm.sh && nvm use"
-    ]);
+function checkNvmOwnsNode() {
+  const nvmDir = process.env.NVM_DIR || resolve(process.env.HOME ?? "", ".nvm");
+  const inCi = process.env.CI === "true" || process.env.CI === "1";
+  if (!inCi && existsSync(nvmDir)) {
+    const nvmRoot = realpath(nvmDir);
+    const nodePath = realpath(process.execPath);
+    if (!nodePath.startsWith(nvmRoot.endsWith(sep) ? nvmRoot : `${nvmRoot}${sep}`)) {
+      fail([
+        `Node ${process.version} is not running from nvm.`,
+        `  node: ${nodePath}`,
+        `  nvm:  ${nvmRoot}`,
+        "Run: source ~/.nvm/nvm.sh && nvm use"
+      ]);
+    }
   }
 }
 
@@ -59,3 +77,5 @@ function fail(lines) {
   console.error(["[check-node-version]", ...lines].join("\n"));
   process.exit(1);
 }
+
+if (isCliEntrypoint(import.meta.url)) runCli();
