@@ -105,11 +105,17 @@ import { AiFeaturesSwitch } from "./AiFeaturesSwitch";
 import { useHoverStableOrder } from "./useHoverStableOrder";
 import { useListReorder } from "./useListReorder";
 import { FinishedAfterDaysContext, useFinishedAfterDaysSetting } from "./finished-after";
+import { useChangeRequestSelection } from "../change-request/change-request-selection";
+import {
+  neighbourOf,
+  primaryUnlessHeld,
+  removableIds,
+  selectionHolder,
+  useWorktreeBatch
+} from "./worktree-batch";
 
 /** Distinguishes repo drags from worktree drags (see useListReorder). */
 const REPO_MIME = "application/x-pwrgit-repo";
-
-const EMPTY_IDS: Set<string> = new Set();
 
 /**
  * The lens survives a restart (and an HMR remount) so the app reopens on the
@@ -149,9 +155,6 @@ function readStoredLens(): Lens | null {
 /** The repo tree, named so the lens switch can point `aria-controls` at it. */
 const REPO_TREE_ID = "sidebar-repo-tree";
 
-// Multi-selection is scoped to a single repo's worktrees (a range needs one
-// ordering). `anchor` is the pivot for shift-click ranges.
-type Selection = { repoId: string; ids: Set<string>; anchor: string | null };
 type ContextState = { x: number; y: number; repo: Repo; targets: Worktree[] };
 type OptionsState = { x: number; y: number };
 type NewWorktreeState = {
@@ -345,11 +348,10 @@ export function Sidebar({
   useReopenMaintenanceAfterReload(activeProfile?.id, () => setMaintenance((old) => old ?? {}));
   /** The repository the Remove review is open on. */
   const [removing, setRemoving] = useState<Repo | null>(null);
-  const [sel, setSel] = useState<Selection>({
-    repoId: "",
-    ids: EMPTY_IDS,
-    anchor: null
-  });
+  const changeRequestKey = useChangeRequestSelection().selectedKey;
+  // ⌘/Shift-click batch: see worktree-batch.ts.
+  const batch = useWorktreeBatch({ repos, selectedWorktreeId, changeRequestKey });
+  const holderRepoId = selectionHolder(repos, selectedWorktreeId, changeRequestKey);
   const [ctx, setCtx] = useState<ContextState | null>(null);
   const [options, setOptions] = useState<OptionsState | null>(null);
   const optionsTriggerRef = useRef<HTMLButtonElement>(null);
@@ -574,46 +576,7 @@ export function Sidebar({
     return () => list.removeEventListener("scroll", onScroll);
   }, []);
 
-  // A plain row click seeds the batch (shift-range) set — but selection can
-  // also move WITHOUT a row click (⌘F/⌘K pick, expanding a repo auto-selects
-  // its primary). Re-seed the batch to the new selection then, or the old
-  // repo's seeded row keeps its tint forever and the sidebar shows two
-  // "selected" worktrees at once. ⌘/Shift gestures don't move the app
-  // selection, so ranges in progress are never disturbed.
-  useEffect(() => {
-    if (selectedWorktreeId === null) return;
-    setSel((prev) => {
-      if (prev.ids.has(selectedWorktreeId)) return prev;
-      if (prev.repoId === "" && prev.ids.size === 0) return prev;
-      const repo = repos.find((r) =>
-        r.worktrees.some((w) => w.id === selectedWorktreeId)
-      );
-      if (repo === undefined) return prev;
-      return {
-        repoId: repo.id,
-        ids: new Set([selectedWorktreeId]),
-        anchor: selectedWorktreeId
-      };
-    });
-  }, [selectedWorktreeId, repos]);
-
-  // Drop selected ids that no longer exist (e.g. after a batch remove reloads).
-  useEffect(() => {
-    setSel((prev) => {
-      if (prev.ids.size === 0 && prev.anchor === null) return prev;
-      const repo = repos.find((r) => r.id === prev.repoId);
-      if (repo === undefined) return { repoId: "", ids: EMPTY_IDS, anchor: null };
-      const present = new Set(repo.worktrees.map((w) => w.id));
-      const ids = new Set([...prev.ids].filter((id) => present.has(id)));
-      const anchor =
-        prev.anchor !== null && present.has(prev.anchor) ? prev.anchor : null;
-      if (ids.size === prev.ids.size && anchor === prev.anchor) return prev;
-      return { repoId: prev.repoId, ids, anchor };
-    });
-  }, [repos]);
-
-  const clearSel = (): void =>
-    setSel({ repoId: "", ids: EMPTY_IDS, anchor: null });
+  const clearSel = batch.clear;
 
   const focusContext = { selectedWorktreeId, visits: focusVisits };
   // Fetch recent fetches the Focused list, every page of it; the lens count
@@ -802,7 +765,7 @@ export function Sidebar({
         entries: groupRepos.map((repo) => ({
           id: repo.id,
           name: repo.name,
-          containsSelection: repo.worktrees.some((w) => w.id === selectedWorktreeId)
+          containsSelection: repo.id === holderRepoId
         }))
       }));
 
@@ -1029,11 +992,8 @@ export function Sidebar({
   /** A repo row click, or a name in the index: select the repository's
    *  primary worktree, unless the selection is already one of its own. */
   function selectPrimaryUnlessHeld(repo: Repo): string | null {
-    const hasSelection = repo.worktrees.some((w) => w.id === selectedWorktreeId);
-    if (hasSelection) return null;
-    const primary =
-      repo.worktrees.find((w) => w.isPrimary) ?? repo.worktrees[0];
-    if (primary === undefined) return null;
+    const primary = primaryUnlessHeld(repo, selectedWorktreeId);
+    if (primary === null) return null;
     onSelectWorktree(repo, primary);
     return primary.id;
   }
@@ -1047,34 +1007,7 @@ export function Sidebar({
     e: SelectionModifiers,
     orderedIds: string[]
   ): void => {
-    if (e.shiftKey && sel.repoId === repo.id && sel.anchor !== null) {
-      const a = orderedIds.indexOf(sel.anchor);
-      const b = orderedIds.indexOf(w.id);
-      if (a !== -1 && b !== -1) {
-        const [lo, hi] = a < b ? [a, b] : [b, a];
-        setSel({
-          repoId: repo.id,
-          ids: new Set(orderedIds.slice(lo, hi + 1)),
-          anchor: sel.anchor
-        });
-        return;
-      }
-    }
-    if (e.metaKey || e.ctrlKey) {
-      setSel((prev) => {
-        const base =
-          prev.repoId === repo.id ? new Set(prev.ids) : new Set<string>();
-        if (base.has(w.id)) base.delete(w.id);
-        else base.add(w.id);
-        return { repoId: repo.id, ids: base, anchor: w.id };
-      });
-      return;
-    }
-    // A plain click IS the first member of the selection — so a following
-    // ⌘/Shift-click extends from it (2 selected), rather than leaving the
-    // viewed row in a separate state from the batch.
-    setSel({ repoId: repo.id, ids: new Set([w.id]), anchor: w.id });
-    onSelectWorktree(repo, w);
+    if (batch.click(repo, w.id, e, orderedIds)) onSelectWorktree(repo, w);
   };
 
   const handleRowContext = (
@@ -1085,30 +1018,21 @@ export function Sidebar({
   ): void => {
     e.preventDefault();
     e.stopPropagation();
-    const inSelection =
-      sel.repoId === repo.id && sel.ids.has(w.id) && sel.ids.size > 1;
-    let targets: Worktree[];
-    if (inSelection) {
-      const byId = new Map(repo.worktrees.map((x) => [x.id, x]));
-      targets = orderedIds
-        .filter((id) => sel.ids.has(id))
-        .map((id) => byId.get(id))
-        .filter((x): x is Worktree => x !== undefined);
-    } else {
-      // Right-clicking outside the selection acts on just that row.
-      targets = [w];
-      setSel({ repoId: repo.id, ids: EMPTY_IDS, anchor: w.id });
-    }
+    const byId = new Map(repo.worktrees.map((x) => [x.id, x]));
+    const targets = batch
+      .context(repo, w.id, orderedIds)
+      .map((id) => byId.get(id))
+      .filter((x): x is Worktree => x !== undefined);
     setCtx({ x: e.clientX, y: e.clientY, repo, targets });
   };
 
   const contextItems = (repo: Repo, targets: Worktree[]): MenuItem[] => {
     if (targets.length > 1) {
-      const ids = targets.map((t) => t.id);
+      const ids = removableIds(repo, targets.map((t) => t.id));
       return [
         {
           type: "item",
-          label: `Remove ${targets.length} worktrees…`,
+          label: `Remove ${ids.length} worktree${ids.length === 1 ? "" : "s"}…`,
           danger: true,
           onSelect: () => void onRemoveWorktrees(ids)
         },
@@ -1153,12 +1077,8 @@ export function Sidebar({
    *  the one after it as drawn (or before it, at the end). Without this the
    *  window falls back to the first repository, a jump across the list. */
   const selectNeighbourOf = (repo: Repo): void => {
-    if (!repo.worktrees.some((w) => w.id === selectedWorktreeId)) return;
-    const list = filtered.some((r) => r.id === repo.id) ? filtered : repos;
-    const at = list.findIndex((r) => r.id === repo.id);
-    const next = list[at + 1] ?? list[at - 1];
-    const worktree = next?.worktrees.find((w) => w.isPrimary) ?? next?.worktrees[0];
-    if (next !== undefined && worktree !== undefined) onSelectWorktree(next, worktree);
+    const next = neighbourOf(repo, filtered, repos, selectedWorktreeId);
+    if (next !== null) onSelectWorktree(next.repo, next.worktree);
   };
 
   /** Hide asks nothing: it loses nothing, and Undo is on the toast. */
@@ -1209,11 +1129,9 @@ export function Sidebar({
         setsize={list.length}
         repo={repo}
         expanded={expanded.has(repo.id)}
-        containsSelection={repo.worktrees.some(
-          (w) => w.id === selectedWorktreeId
-        )}
+        containsSelection={repo.id === holderRepoId}
         selectedWorktreeId={selectedWorktreeId}
-        selectedIds={sel.repoId === repo.id ? sel.ids : EMPTY_IDS}
+        selectedIds={batch.idsFor(repo.id)}
         sort={sortByRepo[repo.id] ?? "recent"}
         customOrder={orderByRepo[repo.id]}
         now={now}
@@ -1238,7 +1156,7 @@ export function Sidebar({
           onSetBranchPin(repo.id, branch, pinned)
         }
         onRemoveWorktree={onRemoveWorktree}
-        onRemoveSelected={() => void onRemoveWorktrees(Array.from(sel.ids))}
+        onRemoveSelected={() => void onRemoveWorktrees(removableIds(repo, batch.idsFor(repo.id)))}
         onClearSelected={clearSel}
         onCycleSort={() => cycleSort(repo.id)}
         onReorder={(ids) => {

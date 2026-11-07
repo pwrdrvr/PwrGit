@@ -459,6 +459,20 @@ remote's name:**
 
 Design: `design/Fork Route Graphic - UX Review.dc.html`.
 
+## At most one thing looks selected
+
+A row is lit by `is-selected` (the worktree on screen) or `is-multiselected`
+(the ⌘/Shift batch). This broke five times before the rules moved into
+`worktree-batch.ts`, held by the model in `worktree-batch.property.test.ts`.
+A new selection gesture goes there, and into the model as a command.
+
+- **The row on screen is always a member of the batch** when the batch is in
+  its repository; otherwise "N selected" counts one row fewer than are lit.
+- **The batch follows the row on screen only when that row changes** (a pick,
+  an expand, a jump, Hide, a change request), never on a refresh.
+- **A change request on screen empties the batch** and holds the selection
+  for its own repository (`selectionHolder`).
+
 ## The sidebar holds the reader's row across a selection change
 
 `sidebar-anchor.ts` remembers the last pressed, focused or scrolled row

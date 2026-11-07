@@ -199,3 +199,22 @@ export function repoIndexMenuHint(fit: RepoIndexFit): string | undefined {
     ? "Widen the sidebar to show it"
     : "Shown with two or more repositories";
 }
+
+/**
+ * An index name's classes. Only `is-selected` (the repository holding the
+ * selection) is tinted; `is-current` and `is-in-view` say where the scroll
+ * is, and draw only a rail. A tint on the scroll marker read as a second
+ * selection (#494).
+ */
+export function repoIndexItemClass(input: {
+  current: boolean;
+  inView: boolean;
+  containsSelection: boolean;
+  dragging: boolean;
+}): string {
+  return `repo-index__item${input.current ? " is-current" : ""}${
+    !input.current && input.inView ? " is-in-view" : ""
+  }${input.containsSelection ? " is-selected" : ""}${
+    input.dragging ? " is-dragging" : ""
+  }`;
+}

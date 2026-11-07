@@ -76,6 +76,7 @@ import {
 } from "./section-fit";
 import type { CreateWorktreeFromRef } from "./RepoChangeRequestSection";
 import { useChangeRequestSelection } from "../change-request/change-request-selection";
+import { selectionBarCount, worktreeRowLook } from "./worktree-batch";
 
 /** Distinguishes worktree drags from repo drags (see useListReorder). */
 const WORKTREE_MIME = "application/x-pwrgit-worktree";
@@ -173,7 +174,7 @@ export function RepoRow({
   expanded: boolean;
   containsSelection: boolean;
   selectedWorktreeId: string | null;
-  selectedIds: Set<string>;
+  selectedIds: ReadonlySet<string>;
   sort: WorktreeSort;
   customOrder: string[] | undefined;
   now: number;
@@ -661,7 +662,15 @@ export function RepoRow({
     }
   };
 
-  const renderWorktree = (worktree: Worktree, ghost?: typeof ghostTag) => (
+  const selectedCount = selectionBarCount(selectedIds);
+  const renderWorktree = (worktree: Worktree, ghost?: typeof ghostTag) => {
+    const look = worktreeRowLook({
+      worktreeId: worktree.id,
+      selectedWorktreeId,
+      changeRequestKey: changeRequestSelection.selectedKey,
+      batchIds: selectedIds
+    });
+    return (
     <WorktreeRow
       key={worktree.id}
       ghost={ghost}
@@ -670,10 +679,8 @@ export function RepoRow({
       posinset={displayIds.indexOf(worktree.id) + 1}
       setsize={displayIds.length}
       worktree={worktree}
-      // A change request on screen holds the selection; the worktree it will
-      // return to is not drawn as selected meanwhile.
-      selected={worktree.id === selectedWorktreeId && changeRequestSelection.selectedKey === null}
-      multiSelected={selectedIds.has(worktree.id)}
+      selected={look.selected}
+      multiSelected={look.multiSelected}
       now={now}
       onSelect={(event) => {
         if (wtDrag.isPostDragClick()) return;
@@ -709,7 +716,8 @@ export function RepoRow({
       onFocus={() => setFocusedWtId(worktree.id)}
       platform={platform}
     />
-  );
+    );
+  };
 
   const pinSource = repoPinSource(repo);
   // Why the repo is in Pinned when its own star is unlit.
@@ -1078,10 +1086,10 @@ export function RepoRow({
             {ghostAbove && renderWorktree(ghostWorktree, ghostTag)}
           </div>
 
-          {selectedIds.size > 1 && (
+          {selectedCount !== null && (
             <div className="wt-selbar">
               <span className="wt-selbar__count">
-                {selectedIds.size} selected
+                {selectedCount} selected
               </span>
               <span style={{ flex: 1 }} />
               <button
