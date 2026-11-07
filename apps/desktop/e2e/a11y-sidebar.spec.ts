@@ -1,6 +1,7 @@
 import { expect, test, type Locator } from "@playwright/test";
 import { launchApp, type AppHandle } from "./fixtures/electron-app";
 import { createGitSandbox, type GitSandbox } from "./fixtures/git-sandbox";
+import { setSidebarWidth } from "./fixtures/sidebar-width";
 import {
   addRootAndExpand,
   branchRow,
@@ -558,11 +559,10 @@ test("the sidebar reflows at its narrowest width and largest text notch", async 
   // 240 is useColumnResize's floor; xl is the top of the text axis. SC 1.4.10
   // asks for no two-dimensional scrolling, so the list must fit its scrollport
   // horizontally however long the names are.
-  await window.evaluate(() => {
-    window.localStorage.setItem("pwrgit.sidebarWidth", "240");
-    document.documentElement.setAttribute("data-sidebar-text", "xl");
-  });
-  await window.reload();
+  await setSidebarWidth(window, 240);
+  await expect(
+    window.getByRole("separator", { name: "Resize sidebar" })
+  ).toHaveAttribute("aria-valuenow", "240");
   await window.evaluate(() =>
     document.documentElement.setAttribute("data-sidebar-text", "xl")
   );
