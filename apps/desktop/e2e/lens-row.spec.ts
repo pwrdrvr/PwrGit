@@ -2,6 +2,7 @@ import { join } from "node:path";
 import { expect, test, type Page } from "@playwright/test";
 import { launchApp, type AppHandle } from "./fixtures/electron-app";
 import { createGitSandbox, type GitSandbox } from "./fixtures/git-sandbox";
+import { setSidebarWidth } from "./fixtures/sidebar-width";
 import {
   collapseWorktrees,
   expandRepoGroup,
@@ -163,11 +164,10 @@ test("the lens row survives the narrowest sidebar at the largest text size", asy
   // is the case the OLD row could not survive at all: its own CSS note recorded
   // "Pinned 13" clearing by ~0.5px at 320px, so one notch overflowed it. Icons
   // don't read the type scale, which is the whole point of the change.
-  await window.evaluate(() => {
-    window.localStorage.setItem("pwrgit.sidebarWidth", "240");
-    document.documentElement.setAttribute("data-sidebar-text", "xl");
-  });
-  await window.reload();
+  await setSidebarWidth(window, 240);
+  await expect(
+    window.getByRole("separator", { name: "Resize sidebar" })
+  ).toHaveAttribute("aria-valuenow", "240");
   await window.evaluate(() =>
     document.documentElement.setAttribute("data-sidebar-text", "xl")
   );
@@ -204,18 +204,11 @@ test("the lens chips divide the sidebar's surplus width", async () => {
       .first()
       .evaluate((el) => el.getBoundingClientRect().width);
 
-  // Read the width back off the resizer rather than trusting the write: a
-  // renamed storage key would otherwise leave every measurement below taken at
-  // the default 320, and the floor assertion would be measuring the wrong
-  // sidebar while still passing.
+  // Establish each layout through the resizer and read its width back before
+  // measuring. Storage belongs to the mounted hook; writing it behind the
+  // hook's back and reloading races its pending 200ms persistence timer.
   const setWidth = async (px: string): Promise<void> => {
-    await window.evaluate((value) => {
-      window.localStorage.setItem("pwrgit.sidebarWidth", value);
-    }, px);
-    await window.reload();
-    await expect(window.locator(".lens-chip").first()).toBeVisible({
-      timeout: 20_000
-    });
+    await setSidebarWidth(window, Number(px));
     await expect(
       window.getByRole("separator", { name: "Resize sidebar" })
     ).toHaveAttribute("aria-valuenow", px);
