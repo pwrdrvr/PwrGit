@@ -1785,7 +1785,115 @@ fn cow_same_device(a: &Path, b: &Path) -> io::Result<bool> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use proptest::prelude::*;
+    use std::collections::BTreeSet;
 
+    /// Generated packages, each with metadata edges (an extern name or none)
+    /// and units with their own fingerprint names and OUT_DIR owners.
+    #[derive(Debug, Clone)]
+    struct Generated {
+        deps: Vec<Vec<(usize, Option<String>)>>,
+        units: Vec<(usize, HashSet<String>, Vec<Option<usize>>)>,
+        initial: BTreeSet<usize>,
+    }
+    fn graphs() -> impl Strategy<Value = Generated> {
+        let name = prop::option::of(prop::sample::select(vec!["a", "b", "c"]))
+            .prop_map(|n| n.map(String::from));
+        (1usize..9).prop_flat_map(move |n| {
+            let deps = prop::collection::vec(prop::collection::vec((0..n, name.clone()), 0..4), n);
+            let uses = prop::collection::hash_set(
+                prop::sample::select(vec!["a", "b", "c"]).prop_map(String::from),
+                0..3,
+            );
+            let outs = prop::collection::vec(prop::option::weighted(0.85, 0..n), 0..3);
+            let units = prop::collection::vec((0..n, uses, outs), 0..14);
+            let initial = prop::collection::btree_set(0..n, 0..3);
+            (deps, units, initial).prop_map(|(deps, units, initial)| Generated {
+                deps,
+                units,
+                initial,
+            })
+        })
+    }
+
+    /// The oracle: plain reverse reachability. A package is rejected when it
+    /// was rejected up front, names an OUT_DIR no staged run owns, or can
+    /// reach such a package along edges its units were built against.
+    fn reachability(g: &Generated) -> BTreeSet<usize> {
+        let mut into: HashMap<usize, Vec<usize>> = HashMap::new();
+        let mut bad: BTreeSet<usize> = g.initial.clone();
+        for (pkg, uses, outs) in &g.units {
+            for (d, name) in &g.deps[*pkg] {
+                if name.as_ref().is_none_or(|n| uses.contains(n)) {
+                    into.entry(*d).or_default().push(*pkg);
+                }
+            }
+            for owner in outs {
+                match owner {
+                    Some(p) => into.entry(*p).or_default().push(*pkg),
+                    None => {
+                        bad.insert(*pkg);
+                    }
+                }
+            }
+        }
+        let mut seen = bad.clone();
+        let mut todo: Vec<usize> = bad.into_iter().collect();
+        while let Some(p) = todo.pop() {
+            for q in into.get(&p).into_iter().flatten() {
+                if seen.insert(*q) {
+                    todo.push(*q);
+                }
+            }
+        }
+        seen
+    }
+
+    proptest! {
+        #![proptest_config(ProptestConfig::with_cases(2000))]
+        #[test]
+        fn fixed_point_rejects_exactly_what_reaches_a_rejected_package(g in graphs()) {
+            let reach: Vec<Reach> = g
+                .units
+                .iter()
+                .map(|(pkg, uses, outs)| Reach {
+                    pkg: *pkg,
+                    deps: &g.deps[*pkg],
+                    uses,
+                    out_dirs: outs.clone(),
+                })
+                .collect();
+            let mut rejected: HashMap<usize, String> =
+                g.initial.iter().map(|p| (*p, "donor-path".into())).collect();
+            close_rejections(&reach, &mut rejected);
+            let got: BTreeSet<usize> = rejected.keys().copied().collect();
+            prop_assert_eq!(&got, &reachability(&g));
+            for (pkg, why) in &rejected {
+                if g.initial.contains(pkg) {
+                    prop_assert_eq!(why, "donor-path", "a first reason is kept");
+                } else {
+                    prop_assert!(why == "depends-on-rejected" || why == "out-dir-not-seeded");
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn an_edge_the_unit_was_not_built_against_rejects_nothing() {
+        // fd68b375: cc lists jobserver in metadata, but the build never used
+        // it, so a rejected jobserver must not take cc down with it.
+        let deps = vec![(1, Some("jobserver".to_string()))];
+        let uses = HashSet::from(["shlex".to_string()]);
+        let units = [Reach {
+            pkg: 0,
+            deps: &deps,
+            uses: &uses,
+            out_dirs: vec![],
+        }];
+        let mut rejected = HashMap::from([(1, "not-built".to_string())]);
+        close_rejections(&units, &mut rejected);
+        assert!(!rejected.contains_key(&0));
+    }
     #[test]
     fn failed_staging_is_private_and_owned_only() {
         let parent = std::env::temp_dir();
