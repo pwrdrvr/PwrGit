@@ -120,7 +120,9 @@ async function footerButtons(dialog: Locator): Promise<{ name: string; primary: 
  *  measurement never reads a mid-animation or mid-swap layout. */
 async function settle(page: Page): Promise<void> {
   await page.evaluate(async () => {
-    await Promise.all(document.getAnimations().map((animation) => animation.finished.catch(() => undefined)));
+    // An infinite animation (a spinner) never finishes; wait only for finite ones.
+    const finite = document.getAnimations().filter((animation) => animation.effect?.getComputedTiming().iterations !== Infinity);
+    await Promise.all(finite.map((animation) => animation.finished.catch(() => undefined)));
     await new Promise<void>((done) => requestAnimationFrame(() => requestAnimationFrame(() => done())));
   });
 }

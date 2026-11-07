@@ -682,8 +682,9 @@ export function MaintenanceDialog({
   const currentRepo = repos.find((repo) => current.has(repo.id));
   const complete = summary !== null;
   const scanComplete = complete && action?.kind === "scan-branches";
-  /** A single-step tab whose run is over, with nothing left to review. */
-  const finished = complete && !scanComplete && tab !== "combined";
+  /** A single-step tab whose run is over, with nothing left to review
+   *  (a branch review that found nothing is over too). */
+  const finished = complete && tab !== "combined" && (!scanComplete || candidates.length === 0);
   const branchScan = action?.kind === "scan-branches";
   const collecting = action?.kind === "gc";
   const saved = (id: string): number => {

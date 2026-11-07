@@ -103,6 +103,7 @@ export function ClonesPanel({
   /** Main has said whether a run is here to reattach to. */
   const [attachChecked, setAttachChecked] = useState(false);
   const operation = useRef<string | null>(null);
+  const closeRef = useRef<HTMLButtonElement>(null);
   const live = useRef(true);
   const repos = view.repos;
   const noWorktrees = view.noWorktrees ?? [];
@@ -126,6 +127,11 @@ export function ClonesPanel({
   }, []);
 
   useEffect(() => onBusyChange(running), [running, onBusyChange]);
+  // A finished run hands focus to Close, as the other maintenance tabs do.
+  const hasReceipt = summary !== null;
+  useEffect(() => {
+    if (hasReceipt && !running) closeRef.current?.focus({ preventScroll: true });
+  }, [hasReceipt, running]);
 
   // A window reload loses this panel but not main's run: pick a live
   // Clones run up again, or show the receipt of one that ended unattended.
@@ -387,7 +393,7 @@ export function ClonesPanel({
               {summary === null ? "Refresh clones" : "Run again"}
             </button>
             {/* Once the run is over, Close is the primary: last, in the CTA colour. */}
-            {summary !== null && <button className="modal__create" onClick={onClose}>Close</button>}
+            {summary !== null && <button ref={closeRef} className="modal__create" onClick={onClose}>Close</button>}
           </>
         )}
       </div>
