@@ -4,6 +4,9 @@ on:
     paths:
       - 'tools/pwrgit-share/**'
       - '.github/workflows/pwrgit-share.yml'
+      # The gate creates worktrees with PwrGit's pinned Git runtime.
+      - 'apps/desktop/custom-git-runtime.json'
+      - 'apps/desktop/scripts/stage-runtime.mjs'
   workflow_dispatch:
 permissions:
   contents: read
@@ -25,6 +28,11 @@ jobs:
         run: rustup toolchain install 1.94.1 --profile minimal --component rustfmt --component clippy
       - name: Install the Cargo the seeding gate proves
         run: rustup toolchain install 1.97.1 --profile minimal
+      - name: Stage PwrGit's Git runtime for copy-on-write worktrees
+        if: runner.os == 'macOS'
+        run: |
+          node ../../apps/desktop/scripts/stage-runtime.mjs ../../apps/desktop/custom-git-runtime.json darwin universal "${RUNNER_TEMP}/pwrgit-git"
+          echo "PWRGIT_SHARE_GIT=${RUNNER_TEMP}/pwrgit-git/bin/git" >> "$GITHUB_ENV"
       - run: cargo fmt --check
       - run: cargo test --locked -- --nocapture
       - run: cargo clippy --locked --all-targets -- -D warnings
