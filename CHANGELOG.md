@@ -1,5 +1,15 @@
 # Changelog
 
+## v0.55.0 - 2026-11-07
+
+- Maintenance - Added an opt-in Repair broken worktree links step before Combined cleanup and a standalone Repair links tab. It reconnects known linked checkouts after the primary repository moves, preserving working files, the index, branches, locks, and missing-folder registrations. Linked checkouts that also moved still need their new paths supplied explicitly. Unrelated branch cleanup can proceed without repair when registered Git state can be safely inspected.
+- Quick navigation - Fixed repository names falling behind their own branches or disappearing from busy repositories' search results. Exact repository names now lead even inside that repository; name prefixes rank ahead of their own same-tier checkouts and branches, files, and commits. Exact Unicode case variants such as STRASSE and straße now match too.
+- Sidebar - Fixed selection highlights and counts disagreeing, background refreshes clearing multi-selection, and Shift ranges including non-worktree rows. Viewing a pull request clears the worktree batch and highlights the repository holding that request; duplicate worktree rows are reconciled consistently.
+- Forge connections - Fixed custom host spellings, host overrides, and CLI sign-ins producing conflicting answers across Settings, connection status, clone/fork dialogs, and MCP. GitHub and GitLab retries now reject waits beyond their ceiling instead of retrying before the server permits, and malformed fractional retry delays no longer cause rapid retry bursts.
+- Async controls - Fixed Cancel leaving commit-message drafting active or allowing a late draft to overwrite the message. Tag and remote-branch searches now discard older responses as soon as the query changes.
+- App menus - Fixed Settings and other custom menu actions re-entering an active SQLite query and failing with a busy-connection error. Deferred actions retain the window that opened them even if focus changes.
+- Shutdown - Improved macOS and Linux system shutdown cleanup by shortening the diagnostics flush allowance so normal quit cleanup can run before the shutdown deadline.
+
 ## v0.54.0 - 2026-11-05
 
 - Git settings - Added a dedicated Settings > Git page to inspect the Git in use and, on macOS and Linux, check for, download, verify, and choose newer PwrGit Git builds between app releases. Downloading does not switch Git; an explicitly chosen custom path stays selected, and downloaded builds can be switched back to the bundled runtime.
