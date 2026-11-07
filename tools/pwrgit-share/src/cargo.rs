@@ -1491,6 +1491,55 @@ fn verify_out_dir(ctx: &Ctx, stage: &Path, unit: &Unit) -> Result<Option<String>
     Ok(None)
 }
 
+/// What the R3 fixed point needs to know about one staged unit.
+struct Reach<'a> {
+    pkg: usize,
+    /// The package's dependency edges from `cargo metadata`, with the extern
+    /// name Cargo gave each one (`None` when it gave none).
+    deps: &'a [(usize, Option<String>)],
+    /// Extern names the unit's own fingerprint was built against.
+    uses: &'a HashSet<String>,
+    /// For each OUT_DIR the unit's artifacts name, the package whose staged
+    /// build-script run owns it; `None` when no staged run does.
+    out_dirs: Vec<Option<usize>>,
+}
+
+/// R3 fixed point: a unit built against a rejected or unbuilt package would
+/// meet different bytes in the recipient, so its whole package is rejected
+/// too, and so on until nothing changes. Metadata's resolve over-approximates
+/// (optional and platform edges the build never used), so an edge counts
+/// only when the unit's own fingerprint names it, or when Cargo gave no name.
+/// A named OUT_DIR must belong to a seeded build-script run, never a
+/// workspace or path package's. A package keeps the first reason it got.
+fn close_rejections(units: &[Reach], rejected: &mut HashMap<usize, String>) {
+    loop {
+        let mut more = Vec::new();
+        for u in units {
+            if rejected.contains_key(&u.pkg) {
+                continue;
+            }
+            let dep = u.deps.iter().any(|(d, name)| {
+                rejected.contains_key(d) && name.as_ref().is_none_or(|n| u.uses.contains(n))
+            });
+            let out = u
+                .out_dirs
+                .iter()
+                .any(|owner| owner.is_none_or(|p| rejected.contains_key(&p)));
+            if dep {
+                more.push((u.pkg, "depends-on-rejected"));
+            } else if out {
+                more.push((u.pkg, "out-dir-not-seeded"));
+            }
+        }
+        if more.is_empty() {
+            return;
+        }
+        for (pkg, why) in more {
+            rejected.entry(pkg).or_insert_with(|| why.into());
+        }
+    }
+}
+
 fn publish(ctx: &Ctx, found: Discovery) -> Result<SeedReport> {
     let g = ctx.graph;
     let mut report = SeedReport::default();
@@ -1565,41 +1614,27 @@ fn publish(ctx: &Ctx, found: Discovery) -> Result<SeedReport> {
         .filter(|(u, _)| u.kind == Kind::BuildRun)
         .map(|(u, i)| ((u.profile.as_path(), u.dir.as_str()), i))
         .collect();
-    let notes: HashMap<usize, &Notes> = staged.iter().map(|(i, r)| (*i, &r.notes)).collect();
-    // R3 fixed point: a unit built against a rejected or unbuilt package
-    // would meet different bytes in the recipient, so its whole package is
-    // rejected too. Metadata's resolve over-approximates (optional and
-    // platform edges the build never used), so an edge counts when the
-    // unit's own fingerprint names it, or when Cargo gave no name.
-    // A named OUT_DIR must belong to a seeded build-script run, never a
-    // workspace or path package's.
-    loop {
-        let mut more = Vec::new();
-        for (i, _) in &staged {
+    let reach: Vec<Reach> = staged
+        .iter()
+        .map(|(i, r)| {
             let u = &found.units[*i];
-            if rejected.contains_key(&u.pkg) {
-                continue;
+            Reach {
+                pkg: u.pkg,
+                deps: &g.pkgs[u.pkg].deps,
+                uses: &u.uses,
+                out_dirs: r
+                    .notes
+                    .out_dirs
+                    .iter()
+                    .map(|d| {
+                        runs.get(&(u.profile.as_path(), d.as_str()))
+                            .map(|r| found.units[*r].pkg)
+                    })
+                    .collect(),
             }
-            let dep = g.pkgs[u.pkg].deps.iter().any(|(d, name)| {
-                rejected.contains_key(d) && name.as_ref().is_none_or(|n| u.uses.contains(n))
-            });
-            let out = notes[i].out_dirs.iter().any(|d| {
-                runs.get(&(u.profile.as_path(), d.as_str()))
-                    .is_none_or(|r| rejected.contains_key(&found.units[*r].pkg))
-            });
-            if dep {
-                more.push((u.pkg, "depends-on-rejected"));
-            } else if out {
-                more.push((u.pkg, "out-dir-not-seeded"));
-            }
-        }
-        if more.is_empty() {
-            break;
-        }
-        for (i, why) in more {
-            rejected.entry(i).or_insert_with(|| why.into());
-        }
-    }
+        })
+        .collect();
+    close_rejections(&reach, &mut rejected);
     for why in rejected.values() {
         *report.packages_rejected.entry(why.clone()).or_default() += 1;
     }
@@ -1750,6 +1785,7 @@ fn cow_same_device(a: &Path, b: &Path) -> io::Result<bool> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
     #[test]
     fn failed_staging_is_private_and_owned_only() {
         let parent = std::env::temp_dir();

@@ -1,9 +1,9 @@
-use pwrgit_share::{Error, Options, Result};
+use pwrgit_share::{Error, Result};
 use std::{
     ffi::OsString,
     path::{Path, PathBuf},
 };
-const HELP: &str = "pwrgit-share — reflink-only Git worktrees (MIT, PwrDrvr LLC)\n\n  probe --json <directory>\n  worktree add [-b <branch>] [--seed-cargo[=strict]] [--donor <worktree>] [--json] [--] <path> <commit-ish>\n  cargo seed [--strict] --from <donor-target> --to <dest-target> --json\n  measure --json <path>\n\nUnsupported filesystems use a normal Git checkout; targets are never copied or\nhardlinked. --seed-cargo clones only third-party units (registry and git\ndependencies under CARGO_HOME) that name no donor path, and only for Cargo\nversions that passed the freshness gate; otherwise it reports a reason and seeds\nnothing. Workspace crates always build in the new worktree. The default\n(bounded) mode also seeds third-party units whose artifacts name a seeded build\nscript's OUT_DIR, verified to be an exact copy, so their debug and panic paths\npoint into the donor's target. --seed-cargo=strict seeds none of those.\n\nFor compiler-level reuse, users may install sccache or Kache themselves. This\ntool does not configure or spawn either. Smaller debug info (line-tables-only)\nand a faster linker are separate user-side options. There is no --copy flag.";
+const HELP: &str = "pwrgit-share — copy-on-write Cargo target seeding (MIT, PwrDrvr LLC)\n\n  cargo seed [--strict] --from <donor-target> --to <dest-target> --json\n  probe --json <directory>\n  measure --json <path>\n\nCreate the worktree with Git first; PwrGit's Git shares its source files with\n`git -c checkout.reflink=true worktree add`. `cargo seed` then clones only\nthird-party units (registry and git dependencies under CARGO_HOME) from the\ndonor's target into the new worktree's target, before that worktree's first\nbuild. It needs the same toolchain, Cargo home and config in both worktrees,\nreflinks every file (never a copy or hardlink), refuses an existing target,\nand runs only on Cargo versions that passed the freshness gate; otherwise it\nreports a reason and seeds nothing. Workspace crates always build in the new\nworktree. The default (bounded) mode also seeds third-party units whose\nartifacts name a seeded build script's OUT_DIR, verified to be an exact copy,\nso their debug and panic paths point into the donor's target. --strict seeds\nnone of those. It never shares other build output or node_modules.";
 fn bad(s: &str) -> Error {
     Error::new(2, s)
 }
@@ -42,54 +42,6 @@ fn run() -> Result<()> {
             } else {
                 json(pwrgit_share::measure(path)?)
             }
-        }
-        Some("worktree") if a.get(1).is_some_and(|v| v == "add") => {
-            let mut opts = Options {
-                force_no_cow: std::env::var_os("PWRGIT_SHARE_FORCE_NONE").is_some_and(|v| v == "1"),
-                ..Default::default()
-            };
-            let mut donor = std::env::current_dir()?;
-            let mut pos = Vec::new();
-            let mut end = false;
-            let mut i = 2;
-            while i < a.len() {
-                if end {
-                    pos.push(a[i].clone());
-                } else {
-                    match a[i].to_str() {
-                        Some("--") => end = true,
-                        Some("--json") => {}
-                        Some("--seed-cargo" | "--seed-cargo=bounded") => opts.seed_cargo = true,
-                        Some("--seed-cargo=strict") => {
-                            opts.seed_cargo = true;
-                            opts.seed_strict = true;
-                        }
-                        Some("--donor") => donor = PathBuf::from(value(&a, &mut i)?),
-                        Some("-b") => {
-                            opts.branch = Some(
-                                value(&a, &mut i)?
-                                    .into_string()
-                                    .map_err(|_| bad("branch must be UTF-8"))?,
-                            )
-                        }
-                        Some(s) if s.starts_with('-') => {
-                            return Err(bad("unknown worktree flag (including --detach/--force)"));
-                        }
-                        _ => pos.push(a[i].clone()),
-                    }
-                }
-                i += 1;
-            }
-            if pos.len() != 2 {
-                return Err(bad("expected <path> <commit-ish>"));
-            }
-            let commit = pos[1].to_str().ok_or_else(|| bad("commit must be UTF-8"))?;
-            json(pwrgit_share::worktree_add(
-                &donor,
-                Path::new(&pos[0]),
-                commit,
-                &opts,
-            )?)
         }
         Some("cargo") if a.get(1).is_some_and(|v| v == "seed") => {
             let mut from = None;

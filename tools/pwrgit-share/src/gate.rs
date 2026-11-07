@@ -1,5 +1,12 @@
 //! Offline, real-Cargo freshness gate for registry-only target seeding.
 //!
+//! Each recipient is created the way PwrGit creates one: Git's own
+//! `worktree add` with `-c checkout.reflink=true`, followed by a separate
+//! seed into the new worktree's empty target. Set PWRGIT_SHARE_GIT to
+//! PwrGit's Git runtime (`bin/git` from apps/desktop/scripts/stage-runtime.mjs)
+//! and the gate also requires the source files to be copy-on-write clones;
+//! without it, `git` on PATH creates ordinary checkouts.
+//!
 //! The fixture's registry is a Cargo local registry configured in the
 //! fixture's own CARGO_HOME, so its sources unpack under CARGO_HOME exactly as
 //! crates.io sources do; a `file://` Git dependency covers `git/checkouts`.
@@ -60,10 +67,144 @@ fn ok(o: Output, what: &str) -> String {
     assert!(o.status.success(), "{what}:\n{err}");
     err
 }
+/// Fixture Git: `git` on PATH, with no repository-local environment.
+fn git_with(git: &Path, dir: &Path, args: &[&std::ffi::OsStr]) -> Output {
+    let mut cmd = Command::new(git);
+    for (k, _) in std::env::vars_os() {
+        if k.to_string_lossy().starts_with("GIT_") {
+            cmd.env_remove(k);
+        }
+    }
+    let o = cmd.current_dir(dir).args(args).output().unwrap();
+    assert!(
+        o.status.success(),
+        "git {args:?}: {}",
+        String::from_utf8_lossy(&o.stderr)
+    );
+    o
+}
+fn git_s(dir: &Path, args: &[&str]) -> Output {
+    let args: Vec<_> = args.iter().map(std::ffi::OsStr::new).collect();
+    git_with(Path::new("git"), dir, &args)
+}
 fn git_init(dir: &Path) {
-    git_s(dir, &["init", "-q", "-b", "main"], 1).unwrap();
-    git_s(dir, &["config", "user.email", "fixture@example.invalid"], 1).unwrap();
-    git_s(dir, &["config", "user.name", "Fixture"], 1).unwrap();
+    git_s(dir, &["init", "-q", "-b", "main"]);
+    git_s(dir, &["config", "user.email", "fixture@example.invalid"]);
+    git_s(dir, &["config", "user.name", "Fixture"]);
+}
+
+/// The Git that creates recipients, and whether it is PwrGit's runtime.
+fn worktree_git() -> (PathBuf, bool) {
+    match std::env::var_os("PWRGIT_SHARE_GIT") {
+        Some(git) if !git.is_empty() => {
+            let help = Command::new(&git)
+                .args(["worktree", "-h"])
+                .output()
+                .unwrap();
+            assert!(
+                String::from_utf8_lossy(&help.stdout).contains("--[no-]reflink"),
+                "PWRGIT_SHARE_GIT is not a Git with checkout.reflink"
+            );
+            (PathBuf::from(git), true)
+        }
+        _ => (PathBuf::from("git"), false),
+    }
+}
+
+/// Let committed files serve as clone sources: Git never shares a file it
+/// cannot trust its index for, and a file written in the index's own second
+/// is racy. Backdate the tracked files, then rewrite the index.
+fn settle(dir: &Path) {
+    let old = std::time::SystemTime::now() - std::time::Duration::from_secs(3600);
+    let files = git_s(dir, &["ls-files", "-z"]).stdout;
+    for name in files.split(|b| *b == 0).filter(|n| !n.is_empty()) {
+        let path = dir.join(String::from_utf8_lossy(name).as_ref());
+        fs::File::options()
+            .write(true)
+            .open(&path)
+            .unwrap()
+            .set_modified(old)
+            .unwrap();
+    }
+    git_s(dir, &["update-index", "-q", "--really-refresh"]);
+}
+
+/// APFS clone ID: equal and nonzero on two paths means shared extents.
+#[cfg(target_os = "macos")]
+fn clone_id(path: &Path) -> u64 {
+    use std::os::unix::ffi::OsStrExt;
+    const RETURNED_ATTRS: u32 = 0x8000_0000;
+    const CMNEXT_CLONEID: u32 = 0x100;
+    const NOFOLLOW_EXTENDED: u32 = 0x1 | 0x20;
+    let c = std::ffi::CString::new(path.as_os_str().as_bytes()).unwrap();
+    let mut list: libc::attrlist = unsafe { std::mem::zeroed() };
+    list.bitmapcount = 5;
+    list.commonattr = RETURNED_ATTRS;
+    list.forkattr = CMNEXT_CLONEID;
+    let mut buf = [0u8; 64];
+    let r = unsafe {
+        libc::getattrlist(
+            c.as_ptr(),
+            (&mut list as *mut libc::attrlist).cast(),
+            buf.as_mut_ptr().cast(),
+            buf.len(),
+            NOFOLLOW_EXTENDED,
+        )
+    };
+    assert_eq!(r, 0, "getattrlist {}", path.display());
+    // u32 length, then the returned attribute_set_t (5 x u32), then the id.
+    let returned = u32::from_ne_bytes(buf[20..24].try_into().unwrap());
+    assert_ne!(
+        returned & CMNEXT_CLONEID,
+        0,
+        "no clone ID for {}",
+        path.display()
+    );
+    u64::from_ne_bytes(buf[24..32].try_into().unwrap())
+}
+
+/// Create `dest` from the donor's HEAD the way PwrGit does: Git's own
+/// `worktree add`, copy-on-write when the runtime supports it. Nothing here
+/// touches `target/`; seeding is a separate step.
+fn add_worktree(donor: &Path, dest: &Path, branch: &str) {
+    let (git, native) = worktree_git();
+    let mut args: Vec<&std::ffi::OsStr> = [
+        "-c",
+        "checkout.reflink=true",
+        "worktree",
+        "add",
+        "-q",
+        "-b",
+        branch,
+    ]
+    .into_iter()
+    .map(std::ffi::OsStr::new)
+    .collect();
+    args.extend([dest.as_os_str(), std::ffi::OsStr::new("HEAD")]);
+    git_with(&git, donor, &args);
+    assert!(!dest.join("target").exists());
+    #[cfg(target_os = "macos")]
+    if native {
+        // The runtime shared the source with the donor's main checkout.
+        for file in ["Cargo.toml", "Cargo.lock"] {
+            let (a, b) = (clone_id(&donor.join(file)), clone_id(&dest.join(file)));
+            assert!(a != 0 && a == b, "{file} is not a clone: {a} vs {b}");
+        }
+    }
+    let _ = native;
+}
+
+/// Seed as `pwrgit-share cargo seed` does, into the new worktree's target.
+fn seed(f: &Fixture, donor: &Path, dest: &Path, mode: SeedMode, proven: bool) -> cargo::SeedReport {
+    let locks = cargo::DonorLocks::acquire(&donor.join("target")).unwrap();
+    cargo::seed_locked(
+        &donor.join("target"),
+        &dest.join("target"),
+        &locks,
+        &f.seed_env(proven),
+        mode,
+    )
+    .unwrap()
 }
 
 /// One package in the fixture's local registry.
@@ -366,8 +507,8 @@ fn seeded_registry_values() {
 }
 
 fn commit_all(dir: &Path) {
-    git_s(dir, &["add", "."], 1).unwrap();
-    git_s(dir, &["commit", "-q", "-m", "fixture"], 1).unwrap();
+    git_s(dir, &["add", "."]);
+    git_s(dir, &["commit", "-q", "-m", "fixture"]);
 }
 
 /// (unit, Fresh?) for every Fresh/Compiling line of a verbose build.
@@ -500,6 +641,7 @@ fn registry_gate(toolchain: &str, mode: SeedMode) {
     // Resolves the file:// Git dependency into CARGO_HOME; no network.
     ok(cargo(&donor, &f.home, &["generate-lockfile"]), "lock");
     commit_all(&donor);
+    settle(&donor);
     let cold = ok(
         cargo(
             &donor,
@@ -523,42 +665,21 @@ fn registry_gate(toolchain: &str, mode: SeedMode) {
         snapshot(&donor_flavor),
         snapshot(&donor.join("target/debug/.fingerprint")),
     );
-    let options = |branch: &str, seed: bool| Options {
-        branch: Some(branch.into()),
-        seed_cargo: seed,
-        seed_strict: !bounded,
-        ..Default::default()
-    };
 
     // Production refuses every version the gate has not proven.
     if !proven {
         let unproven = f.path("unproven");
-        let report = worktree::worktree_add_with(
-            &donor,
-            &unproven,
-            "HEAD",
-            &options("unproven", true),
-            &f.seed_env(true),
-        )
-        .unwrap()
-        .cargo
-        .unwrap();
+        add_worktree(&donor, &unproven, "unproven");
+        let report = seed(&f, &donor, &unproven, mode, true);
         assert_eq!(report.reason.as_deref(), Some("fingerprint-unproven"));
         assert_eq!(report.units_seeded, 0);
         assert!(!unproven.join("target").exists());
     }
 
-    // Seed inside worktree add, as the CLI does.
+    // Git creates the worktree; the seed fills its empty target.
     let dest = f.path("recipient");
-    let report = worktree::worktree_add_with(
-        &donor,
-        &dest,
-        "HEAD",
-        &options("recipient", true),
-        &f.seed_env(proven),
-    )
-    .unwrap();
-    let seed = report.cargo.expect("seed report");
+    add_worktree(&donor, &dest, "recipient");
+    let seed = seed(&f, &donor, &dest, mode, proven);
     eprintln!("seed: {}", serde_json::to_string(&seed).unwrap());
     assert_eq!(seed.mode, mode);
     assert!(seed.units_seeded >= 3, "{seed:?}");
@@ -726,14 +847,7 @@ fn registry_gate(toolchain: &str, mode: SeedMode) {
     // An unseeded third checkout compiles everything; the seed must save
     // compilations (mbx's comparison).
     let plain = f.path("plain");
-    worktree::worktree_add_with(
-        &donor,
-        &plain,
-        "HEAD",
-        &options("plain", false),
-        &f.seed_env(proven),
-    )
-    .unwrap();
+    add_worktree(&donor, &plain, "plain");
     let plain_build = ok(
         cargo(
             &plain,
@@ -753,18 +867,18 @@ fn registry_gate(toolchain: &str, mode: SeedMode) {
         compile_count(&build),
         compile_count(&plain_build)
     );
+    // Copy-on-write source stays private: an edit in one worktree never
+    // reaches the donor's bytes.
+    fs::write(plain.join("shared/data.txt"), "plain edit\n").unwrap();
+    assert_eq!(
+        fs::read_to_string(donor.join("shared/data.txt")).unwrap(),
+        DATA
+    );
 
     // Late seed: the donor builds after the recipient's checkout, then seeds
     // it. No workspace unit may come out Fresh.
     let late = f.path("late");
-    worktree::worktree_add_with(
-        &donor,
-        &late,
-        "HEAD",
-        &options("late", false),
-        &f.seed_env(proven),
-    )
-    .unwrap();
+    add_worktree(&donor, &late, "late");
     std::thread::sleep(std::time::Duration::from_millis(1100));
     let lib = donor.join("app/src/lib.rs");
     let text = fs::read_to_string(&lib).unwrap();
@@ -944,6 +1058,7 @@ fn vendored_gate(toolchain: &str) {
         "lock",
     );
     commit_all(&w);
+    settle(&w);
     ok(
         cargo(&w, &f.home, &["build", "--offline"]),
         "vendored donor build",
@@ -964,19 +1079,8 @@ fn vendored_gate(toolchain: &str) {
     );
     let proven = cargo::PROVEN_CARGO.contains(&f.cargo_version(&w).as_str());
     let dest = f.path("recipient");
-    let report = worktree::worktree_add_with(
-        &w,
-        &dest,
-        "HEAD",
-        &Options {
-            branch: Some("recipient".into()),
-            seed_cargo: true,
-            ..Default::default()
-        },
-        &f.seed_env(proven),
-    )
-    .unwrap();
-    let seed = report.cargo.unwrap();
+    add_worktree(&w, &dest, "recipient");
+    let seed = seed(&f, &w, &dest, SeedMode::Bounded, proven);
     assert_eq!(seed.units_seeded, 0, "{seed:?}");
     assert_eq!(
         seed.packages_rejected.get("outside-cargo-home"),

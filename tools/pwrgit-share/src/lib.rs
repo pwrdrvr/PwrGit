@@ -1,11 +1,14 @@
-//! Reflink-only source materialization. Cargo seeding is fail-closed until its
-//! exact Cargo version has passed the donor-independent freshness gate.
+//! Copy-on-write Cargo target seeding for a fresh Git worktree.
+//!
+//! Git creates the worktree (PwrGit's runtime shares its source files with
+//! `checkout.reflink`). `cargo_seed` then clones only third-party Cargo units
+//! from the donor's target into the new worktree's private target, and is
+//! fail-closed until the exact Cargo version has passed the donor-independent
+//! freshness gate (`src/gate.rs`).
 mod cargo;
 mod cow;
-mod worktree;
 pub use cargo::{SeedMode, SeedReport, cargo_seed};
 pub use cow::{Probe, probe};
-pub use worktree::{Options, WorktreeReport, worktree_add};
 
 use serde::Serialize;
 use std::{
@@ -84,45 +87,6 @@ fn output(cmd: &mut Command, code: i32) -> Result<Output> {
     }
     Ok(o)
 }
-fn git_command(root: &Path) -> Command {
-    let mut cmd = Command::new("git");
-    // Git's repository-local environment (rev-parse --local-env-vars), plus
-    // namespaces, must not redirect -C to the caller's repository or index.
-    // Keep ordinary config discovery so filters and hooks still work normally.
-    for key in [
-        "GIT_ALTERNATE_OBJECT_DIRECTORIES",
-        "GIT_CONFIG",
-        "GIT_CONFIG_PARAMETERS",
-        "GIT_CONFIG_COUNT",
-        "GIT_OBJECT_DIRECTORY",
-        "GIT_DIR",
-        "GIT_WORK_TREE",
-        "GIT_IMPLICIT_WORK_TREE",
-        "GIT_GRAFT_FILE",
-        "GIT_INDEX_FILE",
-        "GIT_NO_REPLACE_OBJECTS",
-        "GIT_REPLACE_REF_BASE",
-        "GIT_PREFIX",
-        "GIT_SHALLOW_FILE",
-        "GIT_COMMON_DIR",
-        "GIT_NAMESPACE",
-    ] {
-        cmd.env_remove(key);
-    }
-    cmd.arg("-C").arg(root);
-    cmd
-}
-fn git(root: &Path, args: &[&std::ffi::OsStr], code: i32) -> Result<Output> {
-    output(git_command(root).args(args), code)
-}
-fn git_s(root: &Path, args: &[&str], code: i32) -> Result<Output> {
-    git(
-        root,
-        &args.iter().map(std::ffi::OsStr::new).collect::<Vec<_>>(),
-        code,
-    )
-}
-
 /// Reject symlinks in descendants of a trusted root, including the leaf.
 fn regular(root: &Path, relative: &Path) -> io::Result<fs::Metadata> {
     let mut p = root.to_path_buf();
@@ -210,28 +174,10 @@ pub fn measure(path: &Path) -> Result<Measurement> {
     if !fs::symlink_metadata(path)?.is_dir() {
         return Ok(r);
     }
-    let local = path.join(".pwrgit-share.json");
-    let record = if regular(path, Path::new(".pwrgit-share.json")).is_ok() {
-        Some(local)
-    } else if fs::symlink_metadata(path.join(".git")).is_ok_and(|m| m.is_file()) {
-        let out = git_command(path)
-            .args([
-                "rev-parse",
-                "--path-format=absolute",
-                "--git-path",
-                "pwrgit-share.json",
-            ])
-            .output()?;
-        if out.status.success() {
-            Some(PathBuf::from(
-                String::from_utf8_lossy(&out.stdout).trim_end_matches('\n'),
-            ))
-        } else {
-            None
-        }
-    } else {
-        None
-    };
+    // `cargo seed` records what it cloned in the target it publishes.
+    let record = regular(path, Path::new(".pwrgit-share.json"))
+        .is_ok()
+        .then(|| path.join(".pwrgit-share.json"));
     if let Some(record) = record
         .and_then(|p| fs::read(p).ok())
         .and_then(|s| serde_json::from_slice::<serde_json::Value>(&s).ok())
@@ -239,7 +185,7 @@ pub fn measure(path: &Path) -> Result<Measurement> {
         r.clone_count = record["cloneCount"].as_u64().unwrap_or(0);
         r.copy_count = record["copyCount"].as_u64().unwrap_or(0);
         r.skip_count = record["skipCount"].as_u64().unwrap_or(r.skip_count);
-        r.counts_origin = "recorded initial materialization; subsequent edits not tracked";
+        r.counts_origin = "recorded at seed time; later builds not tracked";
     }
     Ok(r)
 }

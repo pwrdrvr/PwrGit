@@ -5,7 +5,7 @@ edition = "2024"
 rust-version = "1.94"
 license = "MIT"
 authors = ["PwrDrvr LLC"]
-description = "Reflink-only Git worktrees and conservatively gated Cargo artifact seeding"
+description = "Copy-on-write Cargo target seeding for new Git worktrees, conservatively gated"
 publish = false
 
 [dependencies]

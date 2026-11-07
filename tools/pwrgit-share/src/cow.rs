@@ -6,7 +6,7 @@ pub struct Probe {
     pub detail: String,
 }
 /// Probe real bytes on the destination filesystem, never just its type name.
-/// `directory` must already exist; worktree callers pass the destination parent.
+/// `directory` must already exist, e.g. the new worktree a seed will fill.
 pub fn probe(directory: &Path) -> Result<Probe> {
     let parent = fs::canonicalize(directory)?;
     if !parent.is_dir() {
