@@ -386,8 +386,12 @@ source). It stays a sized `<select>` for the native keyboard and screen-reader
 model. A sized select has role **listbox**, not combobox; Playwright specs must
 query listbox.
 
-Tags: `repo:refs` carries only `previewTags` and `tagCount`. Tag browsers page
-through `repo:tags` with `useTagSearch`. **A tag is never a `BranchRef`.** Do
+Tags: `repo:refs` carries only `previewTags`, `tagCount` and the stored
+`tagAttention` count. The Tags tab pages through `repo:tagStatus` with
+`useTagStatus`, which compares local tags with the published remote's stored
+snapshot in main and never reaches the network. Remote-only rows have no
+`TagSummary`: act on `row.local`, and offer only Download where it is null.
+**A tag is never a `BranchRef`.** Do
 not pass it to branch switching, branch pickers or worktree creation without a
 UI that explicitly chooses detached HEAD or a new named branch.
 

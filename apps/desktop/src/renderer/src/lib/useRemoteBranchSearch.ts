@@ -98,7 +98,7 @@ export function useRemoteBranchSearch({
     // Loading starts when the search is enabled, not when the debounce fires:
     // between those two moments there are no rows and no request, and callers
     // read `!loading && rows.length === 0` as "nothing matches". Same fix as
-    // useTagSearch.
+    // useTagStatus.
     //
     // A new query also retires the fetch in flight now, not when the debounce
     // fires: an older query's answer landing in between would otherwise clear

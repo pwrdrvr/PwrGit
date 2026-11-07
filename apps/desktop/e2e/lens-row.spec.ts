@@ -164,22 +164,10 @@ test("the lens chips divide the sidebar's surplus width", async () => {
       .first()
       .evaluate((el) => el.getBoundingClientRect().width);
 
-  // Read the width back off the resizer rather than trusting the write: a
-  // renamed storage key would otherwise leave every measurement below taken at
-  // the default 320, and the floor assertion would be measuring the wrong
-  // sidebar while still passing.
-  const setWidth = async (px: string): Promise<void> => {
-    await window.evaluate((value) => {
-      window.localStorage.setItem("pwrgit.sidebarWidth", value);
-    }, px);
-    await window.reload();
-    await expect(window.locator(".lens-chip").first()).toBeVisible({
-      timeout: 20_000
-    });
-    await expect(
-      window.getByRole("separator", { name: "Resize sidebar" })
-    ).toHaveAttribute("aria-valuenow", px);
-  };
+  // Resize through the keyboard control. Seeding localStorage before reload
+  // raced the current width's debounced save, which could overwrite the seed.
+  const resizer = window.getByRole("separator", { name: "Resize sidebar" });
+  await resizer.focus();
 
   // 240 is useColumnResize's floor. `min-content` is each track's floor, so no
   // chip can be squeezed under the 30px one glyph needs — but the row is free
@@ -187,7 +175,8 @@ test("the lens chips divide the sidebar's surplus width", async () => {
   // asserts the floor and the fit, NOT a pixel count: the exact width here is
   // a function of the container query's padding, the options button and the
   // active count's digits, none of which this test is about.
-  await setWidth("240");
+  for (let i = 0; i < 5; i += 1) await resizer.press("ArrowLeft");
+  await expect(resizer).toHaveAttribute("aria-valuenow", "240");
   const atFloor = await chipWidth();
   expect(atFloor).toBeGreaterThanOrEqual(30);
   expect(await lensRowOverflow(window)).toBeLessThanOrEqual(0);
@@ -197,7 +186,8 @@ test("the lens chips divide the sidebar's surplus width", async () => {
   // at the left of a pill built to hold them; PwrAgnt's `.lens-switch` is the
   // same control as one minmax(min-content, 1fr) grid, and its own CSS asks
   // for the two to be kept in step.
-  await setWidth("420");
+  for (let i = 0; i < 12; i += 1) await resizer.press("ArrowRight");
+  await expect(resizer).toHaveAttribute("aria-valuenow", "432");
   const widened = await chipWidth();
   expect(widened).toBeGreaterThan(atFloor + 10);
   expect(await lensRowOverflow(window)).toBeLessThanOrEqual(0);

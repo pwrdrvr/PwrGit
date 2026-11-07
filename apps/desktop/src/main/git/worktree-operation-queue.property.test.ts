@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import fc from "fast-check";
 import { afterAll, beforeAll, expect, it, vi } from "vitest";
-import { ok } from "@pwrgit/shared";
+import { err, ok } from "@pwrgit/shared";
 import { CommandBus } from "../command-bus";
 import { openDatabase, type DB } from "../persistence/db";
 import { ProfileService } from "../profiles/profile-service";
@@ -115,6 +115,20 @@ vi.mock("./auto-remote-check", () => ({
   checkRemoteTips: vi.fn(async () => new Map()),
   ensureForkParentRemote: vi.fn(async () => ok(undefined))
 }));
+// The tag check after a Fetch or Pull is the same kind of background check:
+// unlocked by design and never awaited. With real Git it would still be
+// running in the fixture when afterAll deletes it, which Windows refuses
+// (EPERM). Every run here answers "nothing to check".
+vi.mock("./tag-sources", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("./tag-sources")>();
+  return {
+    ...actual,
+    tagSourcesFor: () => ({
+      source: async () =>
+        err({ kind: "git", code: "not_modeled", message: "Tag checks are not part of this model." })
+    })
+  };
+});
 vi.mock("../ipc", () => ({ emitEvent: vi.fn() }));
 vi.mock("../logs", () => ({ logMain: vi.fn() }));
 

@@ -1,0 +1,404 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <script src="./support.js"></script>
+  </head>
+  <body>
+    <x-dc>
+      <helmet data-dc-atomics>
+        <meta name="design_doc_mode" content="canvas" />
+        <link href="https://fonts.googleapis.com/css2?family=Geist:wght@400..700&amp;family=Geist+Mono:wght@400..700&amp;display=swap" rel="stylesheet" />
+        <style>
+          :root {
+            --bg-app: #000000; --bg-panel: #0a0a0a; --bg-input: #080808;
+            --bg-elev: #101010; --bg-hover: #14110d; --bg-row-active: #120800;
+            --line: rgba(247, 243, 235, 0.1); --line2: rgba(247, 243, 235, 0.14); --line3: rgba(247, 243, 235, 0.2);
+            --t1: #f7f3eb; --t2: #b8b0a5; --t3: #8c857a;
+            --tsub: rgba(247, 243, 235, 0.54);
+            --acc: #ff8a1f; --accb: #ffb35c; --accon: #160a00;
+            --asoft: rgba(255, 138, 31, 0.12); --abord: rgba(255, 138, 31, 0.42);
+            --ok: #5fa969; --okt: #9ce5b3; --info: #9fc8ff;
+            --warn: #d99a3d; --warnsoft: rgba(217, 154, 61, 0.14); --warnbord: rgba(217, 154, 61, 0.4);
+            --bad: #b94232; --badsoft: rgba(185, 66, 50, 0.24); --badt: #ffb0a1;
+            --sans: "Geist", "SF Pro Text", "Inter", system-ui, sans-serif;
+            --mono: "Geist Mono", "SF Mono", "JetBrains Mono", Consolas, monospace;
+          }
+          *, *::before, *::after { box-sizing: border-box; }
+          html { background: #050505; }
+          body { margin: 0; background: #050505; font-family: var(--sans); }
+          a { color: var(--accb); text-decoration: none; } a:hover { color: var(--acc); }
+
+          /* ---- review chrome (house convention) ---- */
+          .dv-turn { padding: 40px 44px 32px; background: #050505; border-bottom: 1px solid var(--line); }
+          .dv-thd { display: flex; align-items: baseline; gap: 10px; margin: 0 0 6px; }
+          .dv-tid { font: 600 10px var(--mono); padding: 3px 7px; background: var(--t1); color: #050505; border-radius: 4px; }
+          .dv-tname { font: 600 13px/1.2 var(--sans); color: var(--t1); }
+          .dv-sub { margin: 0 0 22px; font: 400 11.5px/1.55 var(--sans); color: var(--t3); max-width: 860px; text-wrap: pretty; }
+          .dv-sub b, .note b { color: var(--t2); font-weight: 600; }
+          .dv-opts { display: flex; flex-wrap: wrap; gap: 28px; align-items: flex-start; }
+          .dv-opt { flex: none; display: flex; flex-direction: column; gap: 9px; scroll-margin-top: 16px; }
+          .dv-oid { font: 600 10.5px var(--mono); padding: 3px 7px; background: rgba(247, 243, 235, 0.08); color: var(--t1); border-radius: 5px; }
+          .dv-opt:target .dv-oid { background: var(--acc); color: var(--accon); }
+          .dv-olabel { display: flex; align-items: baseline; gap: 8px; font: 400 11px/1.3 var(--sans); color: var(--tsub); max-width: 900px; }
+          .dv-next { margin: 22px 0 0; font: 12px/1.5 var(--sans); color: var(--t3); }
+          .note { margin: 0; font: 400 10.5px/1.55 var(--sans); color: var(--t3); text-wrap: pretty; max-width: 900px; }
+          .note code, .dv-sub code { font: 500 10px/1.4 var(--mono); color: var(--t2); }
+          .pin { display: inline-flex; align-items: center; justify-content: center; flex: none; width: 15px; height: 15px; border-radius: 999px; background: var(--bad); color: #fff; font: 700 9px/1 var(--mono); }
+          .pin.ok { background: var(--ok); color: #050505; }
+          .pin.q { background: var(--t3); color: #050505; }
+          .stage-h { display: flex; align-items: center; gap: 8px; font: 600 9.5px/1 var(--sans); letter-spacing: 0.05em; text-transform: uppercase; color: var(--t3); }
+          .stage-h em { font: 500 9.5px/1 var(--mono); font-style: normal; color: var(--tsub); text-transform: none; letter-spacing: 0; }
+
+          /* ---- refs browser, from app.css ---- */
+          .rb { display: flex; flex-direction: column; width: 920px; background: var(--bg-elev); border: 1px solid var(--line2); border-radius: 12px; overflow: hidden; box-shadow: 0 24px 60px rgba(0,0,0,.55); }
+          .rb-head { display: flex; align-items: center; gap: 12px; padding: 14px 16px 12px; border-bottom: 1px solid var(--line); }
+          .rb-eyebrow { font: 700 9px/1 var(--sans); letter-spacing: .08em; text-transform: uppercase; color: var(--t3); }
+          .rb-title { margin-top: 5px; font: 650 15px/1 var(--sans); color: var(--t1); }
+          .rb-path { flex: 1; text-align: right; font: 500 10px/1 var(--mono); color: var(--t3); }
+          .rb-tool { display: flex; align-items: center; gap: 10px; min-height: 55px; padding: 9px 16px; border-bottom: 1px solid var(--line); background: var(--bg-panel); }
+          .tabs { display: flex; gap: 3px; padding: 3px; border: 1px solid var(--line); border-radius: 8px; background: var(--bg-input); }
+          .tab { display: inline-flex; align-items: center; gap: 6px; height: 28px; padding: 0 11px; border-radius: 6px; color: var(--t2); font: 600 11px/1 var(--sans); }
+          .tab span { font: 600 9.5px/1 var(--mono); color: var(--t3); }
+          .tab.on { background: var(--asoft); color: var(--accb); box-shadow: inset 0 0 0 1px var(--abord); }
+          .tab.on span { color: var(--accb); }
+          .search { flex: 1; display: flex; align-items: center; gap: 7px; height: 32px; padding: 0 10px; border: 1px solid var(--line2); border-radius: 7px; background: var(--bg-input); color: var(--t3); font: 500 11px/1 var(--sans); }
+          .btn { display: inline-flex; align-items: center; gap: 6px; height: 30px; padding: 0 11px; border: 1px solid var(--abord); border-radius: 7px; background: var(--asoft); color: var(--accb); font: 600 10.5px/1 var(--sans); white-space: nowrap; }
+          .btn.quiet { border-color: var(--line2); background: transparent; color: var(--t2); }
+          .btn.sm { height: 24px; padding: 0 9px; font-size: 10px; border-radius: 6px; }
+          .btn.icon { width: 30px; padding: 0; justify-content: center; }
+          .btn.solid { background: var(--acc); color: var(--accon); border-color: var(--acc); }
+
+          /* ---- new: published-source strip ---- */
+          .src { display: flex; align-items: center; gap: 10px; min-height: 42px; padding: 7px 16px; border-bottom: 1px solid var(--line); background: var(--bg-input); color: var(--t2); font: 500 11px/1.3 var(--sans); }
+          .src .lbl { color: var(--t3); }
+          .src .sel { display: inline-flex; align-items: center; gap: 6px; height: 26px; padding: 0 8px 0 9px; border: 1px solid var(--line2); border-radius: 6px; background: var(--bg-elev); color: var(--t1); font: 600 10.5px/1 var(--mono); }
+          .src .sel::after { content: ""; width: 0; height: 0; border-left: 3.5px solid transparent; border-right: 3.5px solid transparent; border-top: 4px solid var(--t3); }
+          .src .meta { color: var(--t3); font: 500 10.5px/1.3 var(--sans); }
+          .src .meta b { color: var(--t2); font-weight: 600; }
+          .src .grow { flex: 1; }
+          .src.warn { background: color-mix(in srgb, var(--warn) 7%, var(--bg-input)); }
+          .src.err .meta { color: var(--badt); }
+          .spin { width: 11px; height: 11px; border-radius: 50%; border: 1.5px solid var(--line3); border-top-color: var(--accb); flex: none; }
+          .filters { display: flex; align-items: center; gap: 4px; padding: 8px 16px 0; }
+          .fchip { display: inline-flex; align-items: center; gap: 6px; height: 24px; padding: 0 9px; border: 1px solid var(--line); border-radius: 999px; color: var(--t2); font: 600 10px/1 var(--sans); }
+          .fchip span { font: 600 9.5px/1 var(--mono); color: var(--t3); }
+          .fchip.on { border-color: var(--abord); background: var(--asoft); color: var(--accb); }
+          .fchip.on span { color: var(--accb); }
+          .fchip.attn span { color: var(--warn); }
+
+          /* ---- tag table ---- */
+          .tbl { padding: 6px 8px 10px; }
+          .row { display: grid; grid-template-columns: minmax(185px, 1.4fr) minmax(150px, 0.95fr) minmax(170px, 1.2fr) 252px; gap: 12px; align-items: center; min-height: 52px; padding: 7px 9px; border-radius: 7px; }
+          .row + .row { border-top: 1px solid var(--line); border-radius: 0; }
+          .row.hd { min-height: 30px; padding: 0 9px; color: rgba(247,243,235,.54); font: 700 9px/1 var(--sans); letter-spacing: .07em; text-transform: uppercase; }
+          .row.attn { background: color-mix(in srgb, var(--warn) 5%, transparent); }
+          .ident { display: flex; align-items: flex-start; gap: 8px; min-width: 0; }
+          .ident svg { flex: none; margin-top: 2px; color: var(--acc); }
+          .ident .nm { display: block; color: var(--t1); font: 600 11.5px/1.25 var(--mono); }
+          .ident small { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 4px; color: var(--t3); font: 500 9.5px/1.2 var(--sans); }
+          .st { display: inline-flex; align-items: center; height: 16px; padding: 0 6px; border-radius: 999px; font: 650 9px/1 var(--sans); letter-spacing: .02em; }
+          .st.diff { background: var(--warnsoft); color: #f0c27e; box-shadow: inset 0 0 0 1px var(--warnbord); }
+          .st.remote { background: rgba(159, 200, 255, 0.1); color: var(--info); }
+          .st.local { background: rgba(247, 243, 235, 0.06); color: var(--t2); }
+          .st.kept { background: rgba(247, 243, 235, 0.06); color: var(--t3); }
+          .st.miss { background: transparent; color: var(--t3); box-shadow: inset 0 0 0 1px var(--line2); }
+          .obj { display: flex; flex-direction: column; gap: 4px; min-width: 0; font: 500 10.5px/1.2 var(--mono); color: var(--t2); }
+          .obj .ln { display: flex; align-items: baseline; gap: 6px; white-space: nowrap; }
+          .obj .who { width: 40px; flex: none; color: var(--t3); font: 600 9px/1 var(--sans); letter-spacing: .03em; text-transform: uppercase; }
+          .obj .typ { color: var(--t3); font-size: 9.5px; }
+          .obj .via { color: var(--t3); font-size: 9.5px; }
+          .obj .new { color: var(--t1); }
+          .ann { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+          .ann strong { color: var(--t1); font: 600 10.5px/1.3 var(--sans); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+          .ann small { color: var(--t3); font: 500 9.5px/1.3 var(--sans); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+          .muted { color: var(--t3); font: 500 10px/1.2 var(--mono); }
+          .acts { display: grid; grid-template-columns: 108px 104px 30px; gap: 5px; align-items: center; }
+          .acts .btn { justify-content: center; }
+          .kebab { display: inline-flex; align-items: center; justify-content: center; width: 30px; height: 30px; border-radius: 7px; color: var(--t3); font: 700 13px/1 var(--sans); letter-spacing: 1px; }
+
+          /* ---- dialogs ---- */
+          .dlg { width: 470px; padding: 18px 18px 16px; border: 1px solid var(--line2); border-radius: 12px; background: var(--bg-elev); box-shadow: 0 24px 60px rgba(0,0,0,.6); display: flex; flex-direction: column; gap: 12px; }
+          .dlg h3 { margin: 0; font: 650 14px/1.3 var(--sans); color: var(--t1); }
+          .dlg p { margin: 0; font: 400 11.5px/1.55 var(--sans); color: var(--t2); text-wrap: pretty; }
+          .dlg p code { font: 500 10.5px/1.4 var(--mono); color: var(--t1); }
+          .dlg .foot { display: flex; justify-content: flex-end; gap: 8px; margin-top: 4px; }
+          .cmp { border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
+          .cmp .cr { display: grid; grid-template-columns: 112px 78px minmax(0, 1fr) 92px; gap: 10px; align-items: center; padding: 8px 10px; border-top: 1px solid var(--line); font: 500 10.5px/1.3 var(--mono); color: var(--t2); }
+          .cmp .cr:first-child { border-top: 0; }
+          .cmp .cr.hd { font: 700 8.5px/1 var(--sans); letter-spacing: .07em; text-transform: uppercase; color: var(--tsub); background: rgba(247,243,235,.03); }
+          .cmp .src-n { display: flex; flex-direction: column; gap: 3px; color: var(--t1); font: 600 10.5px/1.2 var(--mono); }
+          .cmp .src-n small { color: var(--t3); font: 500 9px/1.2 var(--sans); }
+          .cmp .tgt { display: flex; flex-direction: column; gap: 3px; }
+          .cmp .tgt small { color: var(--t3); font-size: 9.5px; }
+          .cmp .flag { font: 600 9.5px/1.2 var(--sans); color: var(--t3); }
+          .cmp .flag.ok { color: var(--okt); }
+          .cmp .flag.no { color: #f0c27e; }
+          .sect { font: 700 9px/1 var(--sans); letter-spacing: .07em; text-transform: uppercase; color: var(--tsub); margin-top: 2px; }
+          .bk { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 10px; align-items: center; padding: 8px 10px; border: 1px solid var(--line); border-radius: 8px; }
+          .bk .l1 { color: var(--t1); font: 500 10.5px/1.3 var(--mono); }
+          .bk .l2 { color: var(--t3); font: 500 9.5px/1.4 var(--mono); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+          /* ---- sidebar specimen ---- */
+          .side { width: 300px; padding: 6px; border: 1px solid var(--line); border-radius: 8px; background: #050505; }
+          .shead { display: flex; align-items: center; gap: 7px; height: 28px; padding: 0 6px; }
+          .slabel { font: 600 9px/1 var(--sans); letter-spacing: 0.08em; text-transform: uppercase; color: var(--tsub); }
+          .scount { font: 600 9px/1 var(--mono); color: var(--tsub); }
+          .chev { flex: none; width: 0; height: 0; border-left: 3px solid transparent; border-right: 3px solid transparent; border-top: 4px solid var(--t3); }
+          .trow { display: flex; align-items: center; gap: 7px; height: 27px; padding: 0 6px 0 18px; color: var(--t1); font: 500 11px/1 var(--mono); }
+          .trow svg { color: var(--acc); flex: none; }
+          .trow .n { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+          .trow small { color: var(--t3); font: 600 9px/1 var(--mono); }
+          .slink { display: block; padding: 6px 6px 6px 18px; color: var(--t3); font: 500 10.5px/1.3 var(--sans); }
+          .hint { display: flex; align-items: center; gap: 7px; margin: 3px 4px 2px 14px; padding: 6px 8px; border-radius: 6px; background: var(--warnsoft); color: #f0c27e; font: 600 10.5px/1.25 var(--sans); }
+          .hint .go { margin-left: auto; color: var(--accb); font-weight: 600; }
+          .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--warn); flex: none; }
+
+          /* ---- contract table ---- */
+          .ctbl { width: 900px; border: 1px solid var(--line); border-radius: 9px; background: var(--bg-panel); overflow: hidden; }
+          .ctr { display: grid; grid-template-columns: 230px 170px minmax(0, 1fr); gap: 14px; align-items: start; padding: 9px 12px; border-top: 1px solid var(--line); font: 400 10.5px/1.5 var(--sans); color: var(--t2); }
+          .ctr:first-child { border-top: 0; }
+          .ctr.hd { font: 600 9.5px/1.3 var(--sans); letter-spacing: .04em; text-transform: uppercase; color: var(--t3); background: rgba(247,243,235,.03); }
+          .ctr b { color: var(--t1); font-weight: 600; }
+          .ctr code { font: 500 10px/1.4 var(--mono); color: var(--t2); }
+          .yes { color: var(--okt); font-weight: 600; }
+          .no { color: var(--badt); font-weight: 600; }
+
+          /* ---- model diagram ---- */
+          .model { display: grid; grid-template-columns: 240px 84px 240px 84px 240px; gap: 6px; align-items: center; width: 900px; }
+          .box { display: flex; flex-direction: column; gap: 6px; padding: 12px 13px; border: 1px solid var(--line2); border-radius: 9px; background: var(--bg-panel); }
+          .box h5 { margin: 0; font: 650 11.5px/1.2 var(--sans); color: var(--t1); }
+          .box code { font: 500 10px/1.4 var(--mono); color: var(--accb); }
+          .box p { margin: 0; font: 400 10.5px/1.5 var(--sans); color: var(--t3); }
+          .arrow { text-align: center; font: 500 9.5px/1.3 var(--sans); color: var(--t3); }
+          .arrow i { display: block; font-style: normal; font: 600 16px/1 var(--mono); color: var(--t2); }
+        </style>
+      </helmet>
+
+      <section class="dv-turn" id="t3" data-screen-label="Turn 3 Adopting one tag">
+        <div class="dv-thd"><a class="dv-tid" href="#t3">3</a><span class="dv-tname">Adopting one tag &#8212; explicit, recoverable, and only that tag</span></div>
+        <p class="dv-sub">The two writes PwrGit makes are both per tag and both asked for. <b>Take origin&#8217;s</b> fetches <code>+refs/tags/&lt;name&gt;</code> with <code>--no-tags</code> into a staging ref, checks it is the value the user reviewed, then swaps <code>refs/tags/&lt;name&gt;</code> with a compare-and-swap. The old object is pinned first under <code>refs/pwrgit/replaced-tags/</code>, a real Git ref, so <code>gc</code> keeps it and Restore can put it back. <b>Keep local</b> writes nothing to Git: it records the pair of values, and the row stops asking until either side moves again.</p>
+        <div class="dv-opts">
+
+          <div class="dv-opt" id="3a" data-screen-label="3a Take confirm">
+            <div class="dv-olabel"><a class="dv-oid" href="#3a">3a</a>Take origin&#8217;s &#8212; the confirm names both values and the way back</div>
+            <div class="dlg">
+              <h3>Replace local tag v1.2.3 with origin&#8217;s?</h3>
+              <div class="cmp">
+                <div class="cr hd"><span>Source</span><span>Kind</span><span>Points at</span><span></span></div>
+                <div class="cr"><span class="src-n">Local<small>refs/tags/v1.2.3</small></span><span>annotated</span><span class="tgt">544269d7502f<small>via tag 9a1e03b2</small></span><span class="flag">replaced</span></div>
+                <div class="cr"><span class="src-n">origin<small>checked 4 min ago</small></span><span>annotated</span><span class="tgt">80cf5ffafd71<small>via tag 2c77d9e0</small></span><span class="flag ok">in this repo</span></div>
+              </div>
+              <p>PwrGit fetches only this tag from origin. Your current tag is kept as <code>refs/pwrgit/replaced-tags/&#8230;/v1.2.3</code>, and Restore in the tag&#8217;s details puts it back.</p>
+              <div class="foot"><span class="btn quiet">Cancel</span><span class="btn solid">Take origin&#8217;s</span></div>
+            </div>
+            <p class="note" style="width:470px">If origin moved again since the check, nothing is written: the staging fetch sees a different object and the dialog asks for a refresh. If the local tag changed (a terminal <code>git tag -f</code>), the compare-and-swap refuses.</p>
+          </div>
+
+          <div class="dv-opt" id="3b" data-screen-label="3b Download confirm">
+            <div class="dv-olabel"><a class="dv-oid" href="#3b">3b</a>Download &#8212; only asked when the tag brings history with it</div>
+            <div class="dlg">
+              <h3>Download origin&#8217;s legacy/2019-import?</h3>
+              <p>Its commit <code>c41d0e7f9b22</code> is not in this repository. Downloading fetches this one tag and the history it points at &#8212; nothing else. That history may be large or unrelated to your branches.</p>
+              <div class="foot"><span class="btn quiet">Cancel</span><span class="btn solid">Download tag</span></div>
+            </div>
+            <p class="note" style="width:470px">A remote-only tag whose commit is already here (the usual case after a <code>--no-tags</code> fetch) downloads without a confirm: it adds one ref and transfers at most one tag object. Nothing on this tab ever downloads a tag-only history implicitly.</p>
+          </div>
+
+          <div class="dv-opt" id="3c" data-screen-label="3c Tag details">
+            <div class="dv-olabel"><a class="dv-oid" href="#3c">3c</a>Details &#8212; every source&#8217;s own value, side by side</div>
+            <div class="dlg" style="width:560px">
+              <h3>v1.2.3 across sources</h3>
+              <div class="cmp">
+                <div class="cr hd" style="grid-template-columns:112px 78px minmax(0,1fr) 92px"><span>Source</span><span>Kind</span><span>Points at</span><span>Objects</span></div>
+                <div class="cr"><span class="src-n">Local<small>refs/tags/v1.2.3</small></span><span>annotated</span><span class="tgt">80cf5ffafd71<small>via tag 2c77d9e0</small></span><span class="flag ok">here</span></div>
+                <div class="cr"><span class="src-n">origin &#183; published<small>checked 4 min ago</small></span><span>annotated</span><span class="tgt">80cf5ffafd71<small>via tag 2c77d9e0</small></span><span class="flag ok">here</span></div>
+                <div class="cr"><span class="src-n">upstream<small>checked 2 days ago</small></span><span>lightweight</span><span class="tgt">e0a4c11b5d39</span><span class="flag no">not downloaded</span></div>
+                <div class="cr"><span class="src-n">mirror<small>not checked</small></span><span class="muted">&#8212;</span><span class="muted">&#8212;</span><span><span class="btn quiet sm">Check</span></span></div>
+              </div>
+              <div class="sect">Replaced earlier</div>
+              <div class="bk">
+                <div><div class="l1">544269d7502f &#183; annotated &#183; replaced Nov 4, 14:02</div><div class="l2">refs/pwrgit/replaced-tags/1762264920000/v1.2.3</div></div>
+                <span class="btn quiet sm">Restore</span>
+              </div>
+              <div class="foot"><span class="btn quiet">Close</span></div>
+            </div>
+            <p class="note" style="width:560px">Same name, three different values &#8212; and the model keeps all three, because a fetch from <code>upstream</code> must never be able to decide what <code>v1.2.3</code> means here. Only the published remote drives the tab&#8217;s badges; the others are read on request. Restore pins the current value first, so it is recoverable the same way.</p>
+          </div>
+
+          <div class="dv-opt" id="3d" data-screen-label="3d Sidebar hint">
+            <div class="dv-olabel"><a class="dv-oid" href="#3d">3d</a>Sidebar &#8212; one line, only when a tag needs a decision</div>
+            <div class="side">
+              <div class="shead"><span class="chev"></span><span class="slabel">Tags</span><span class="scount">412</span></div>
+              <div class="trow"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12.586 2.586A2 2 0 0 0 11.172 2H4a2 2 0 0 0-2 2v7.172a2 2 0 0 0 .586 1.414l8.704 8.704a2.426 2.426 0 0 0 3.42 0l6.58-6.58a2.426 2.426 0 0 0 0-3.42z"></path></svg><span class="n">v1.3.0</span><small>a19c2e4</small></div>
+              <div class="trow"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12.586 2.586A2 2 0 0 0 11.172 2H4a2 2 0 0 0-2 2v7.172a2 2 0 0 0 .586 1.414l8.704 8.704a2.426 2.426 0 0 0 3.42 0l6.58-6.58a2.426 2.426 0 0 0 0-3.42z"></path></svg><span class="n">v1.2.3</span><small>544269d</small></div>
+              <div class="hint"><span class="dot"></span>2 tags differ from origin<span class="go">Review&#8230;</span></div>
+              <div class="slink">View all 412 tags&#8230;</div>
+            </div>
+            <p class="note" style="width:300px">Counts come from the last check, stored with it &#8212; the sidebar runs no Git for this. Remote-only tags are not flagged here: they are common and need no decision.</p>
+          </div>
+
+        </div>
+        <p class="dv-next">Try next: &#8220;what does Restore&#8217;s confirm say?&#8221; &#183; &#8220;show <a class="dv-oid" href="#3c">3c</a> for a tag that exists only on upstream&#8221;</p>
+      </section>
+
+      <section class="dv-turn" id="t2" data-screen-label="Turn 2 Tags tab with a published source">
+        <div class="dv-thd"><a class="dv-tid" href="#t2">2</a><span class="dv-tname">Tags tab &#8212; one published source, and a status per tag</span></div>
+        <p class="dv-sub">Recommended: <a class="dv-oid" href="#2a">2a</a>. A strip under the toolbar names the remote whose tags count as published, says when PwrGit last looked, and refreshes on request. Filter chips find the rows that need a decision without re-sorting the list the user already knows. A row that differs shows both values in <b>Points at</b>, and its two decisions take the existing action slots. Assumption, stated because nobody was available to ask: the published source is chosen per repository, origin by default; other remotes are inspected per tag (<a class="dv-oid" href="#3c">3c</a>), not summarised here.</p>
+        <div class="dv-opts">
+
+          <div class="dv-opt" id="2a" data-screen-label="2a Tags tab after">
+            <div class="dv-olabel"><a class="dv-oid" href="#2a">2a</a>After &#8212; source strip, filters, and the four row states</div>
+            <div class="rb">
+              <div class="rb-head"><div><div class="rb-eyebrow">Repository refs</div><div class="rb-title">snapcast</div></div><span class="rb-path">~/src/snapcast</span><span class="btn quiet icon">&#215;</span></div>
+              <div class="rb-tool">
+                <div class="tabs"><span class="tab">Worktrees <span>3</span></span><span class="tab">Branches <span>18</span></span><span class="tab on">Tags <span>415</span></span><span class="tab">Remotes <span>2</span></span></div>
+                <span class="search">Filter tags&#8230;</span>
+                <span class="btn">Create tag&#8230;</span>
+              </div>
+              <div class="src">
+                <span class="lbl">Published tags from</span><span class="sel">origin</span>
+                <span class="meta">checked <b>4 min ago</b> &#183; 409 on origin</span>
+                <span class="grow"></span>
+                <span class="btn quiet sm">Refresh</span>
+              </div>
+              <div class="filters">
+                <span class="fchip on">All <span>415</span></span>
+                <span class="fchip attn">Differ <span>2</span></span>
+                <span class="fchip">Only on origin <span>3</span></span>
+                <span class="fchip">Only local <span>6</span></span>
+              </div>
+              <div class="tbl">
+                <div class="row hd"><span>Tag</span><span>Points at</span><span>Annotation</span><span>Actions</span></div>
+                <div class="row">
+                  <div class="ident"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12.586 2.586A2 2 0 0 0 11.172 2H4a2 2 0 0 0-2 2v7.172a2 2 0 0 0 .586 1.414l8.704 8.704a2.426 2.426 0 0 0 3.42 0l6.58-6.58a2.426 2.426 0 0 0 0-3.42z"></path></svg><div><span class="nm">v1.3.0</span><small>annotated</small></div></div>
+                  <div class="obj"><span class="ln">a19c2e4b7d01 <span class="via">via tag 77e1</span></span></div>
+                  <div class="ann"><strong>Release 1.3.0</strong><small>Rae Okafor &#183; 2 d</small></div>
+                  <div class="acts"><span class="btn">Locate</span><span class="btn quiet">Remote&#8230;</span><span class="kebab">&#8943;</span></div>
+                </div>
+                <div class="row attn">
+                  <div class="ident"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12.586 2.586A2 2 0 0 0 11.172 2H4a2 2 0 0 0-2 2v7.172a2 2 0 0 0 .586 1.414l8.704 8.704a2.426 2.426 0 0 0 3.42 0l6.58-6.58a2.426 2.426 0 0 0 0-3.42z"></path></svg><div><span class="nm">v1.2.3</span><small>annotated <span class="st diff">differs from origin</span></small></div></div>
+                  <div class="obj"><span class="ln"><span class="who">local</span>544269d7502f</span><span class="ln"><span class="who">origin</span><span class="new">80cf5ffafd71</span></span></div>
+                  <div class="ann"><strong>Release 1.2.3</strong><small>Rae Okafor &#183; 3 w</small></div>
+                  <div class="acts"><span class="btn">Take origin&#8217;s</span><span class="btn quiet">Keep local</span><span class="kebab">&#8943;</span></div>
+                </div>
+                <div class="row">
+                  <div class="ident"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12.586 2.586A2 2 0 0 0 11.172 2H4a2 2 0 0 0-2 2v7.172a2 2 0 0 0 .586 1.414l8.704 8.704a2.426 2.426 0 0 0 3.42 0l6.58-6.58a2.426 2.426 0 0 0 0-3.42z"></path></svg><div><span class="nm">nightly</span><small><span class="st kept">kept local</span></small></div></div>
+                  <div class="obj"><span class="ln"><span class="who">local</span>d02b91aa6c3e</span><span class="ln"><span class="who">origin</span>f1e8c07d2a94</span></div>
+                  <div class="ann"><span class="muted">&#8212;</span></div>
+                  <div class="acts"><span class="btn">Locate</span><span class="btn quiet">Remote&#8230;</span><span class="kebab">&#8943;</span></div>
+                </div>
+                <div class="row">
+                  <div class="ident"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12.586 2.586A2 2 0 0 0 11.172 2H4a2 2 0 0 0-2 2v7.172a2 2 0 0 0 .586 1.414l8.704 8.704a2.426 2.426 0 0 0 3.42 0l6.58-6.58a2.426 2.426 0 0 0 0-3.42z"></path></svg><div><span class="nm">wip/rae-bisect</span><small><span class="st local">local only</span></small></div></div>
+                  <div class="obj"><span class="ln">3e7f00c19b2d</span></div>
+                  <div class="ann"><span class="muted">&#8212;</span></div>
+                  <div class="acts"><span class="btn">Locate</span><span class="btn quiet">Remote&#8230;</span><span class="kebab">&#8943;</span></div>
+                </div>
+                <div class="row">
+                  <div class="ident"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" style="color:var(--t3)"><path d="M12.586 2.586A2 2 0 0 0 11.172 2H4a2 2 0 0 0-2 2v7.172a2 2 0 0 0 .586 1.414l8.704 8.704a2.426 2.426 0 0 0 3.42 0l6.58-6.58a2.426 2.426 0 0 0 0-3.42z"></path></svg><div><span class="nm" style="color:var(--t2)">legacy/2019-import</span><small><span class="st remote">only on origin</span><span class="st miss">not downloaded</span></small></div></div>
+                  <div class="obj"><span class="ln"><span class="who">origin</span>c41d0e7f9b22</span></div>
+                  <div class="ann"><small>Not downloaded &#8212; its message is not in this repository yet</small></div>
+                  <div class="acts"><span class="btn">Download&#8230;</span><span></span><span class="kebab">&#8943;</span></div>
+                </div>
+              </div>
+            </div>
+            <p class="note" style="width:920px"><span class="pin ok">1</span> Badges come from the stored snapshot, so scrolling 20,000 rows pages from SQLite, not the network. <span class="pin ok">2</span> &#8220;Kept local&#8221; is quiet: the user decided, so it no longer counts in Differ. <span class="pin ok">3</span> A remote-only row is dimmed and offers only Download; Locate and Remote&#8230; need a local tag. Same-value rows carry no badge &#8212; on a healthy repository the tab looks exactly as it does today.</p>
+          </div>
+
+          <div class="dv-opt" id="2b" data-screen-label="2b Source strip states">
+            <div class="dv-olabel"><a class="dv-oid" href="#2b">2b</a>The strip&#8217;s other states &#8212; every one says what PwrGit will and won&#8217;t do</div>
+            <div style="display:flex;flex-direction:column;gap:10px;width:920px">
+              <div class="stage-h"><span class="pin q">a</span>Checking <em>tracked as a remote activity, cancellable from the toolbar</em></div>
+              <div class="rb" style="box-shadow:none"><div class="src"><span class="lbl">Published tags from</span><span class="sel">origin</span><span class="spin"></span><span class="meta">Checking origin&#8217;s tags&#8230;</span><span class="grow"></span><span class="btn quiet sm" style="opacity:.5">Refresh</span></div></div>
+              <div class="stage-h"><span class="pin q">b</span>No origin <em>nothing is checked until the user picks; the last-fetched remote is never assumed</em></div>
+              <div class="rb" style="box-shadow:none"><div class="src warn"><span class="lbl">Which remote publishes this repository&#8217;s tags?</span><span class="sel">Choose a remote</span><span class="grow"></span><span class="meta">Tags below are local only until you choose.</span></div></div>
+              <div class="stage-h"><span class="pin q">c</span>Opted out <em>remote.origin.tagOpt = --no-tags</em></div>
+              <div class="rb" style="box-shadow:none"><div class="src warn"><span class="lbl">Published tags from</span><span class="sel">origin</span><span class="meta">origin is set to skip tags (<b>tagOpt --no-tags</b>), so PwrGit never checks it on its own.</span><span class="grow"></span><span class="btn quiet sm">Check once</span></div></div>
+              <div class="stage-h"><span class="pin q">d</span>Unreachable <em>the previous snapshot stays, with its real age</em></div>
+              <div class="rb" style="box-shadow:none"><div class="src err"><span class="lbl">Published tags from</span><span class="sel">origin</span><span class="meta">Couldn&#8217;t reach origin. Showing the check from 2 days ago.</span><span class="grow"></span><span class="btn quiet sm">Retry</span></div></div>
+            </div>
+          </div>
+
+          <div class="dv-opt" id="2c" data-screen-label="2c Alternative considered">
+            <div class="dv-olabel"><a class="dv-oid" href="#2c">2c</a>Considered and not recommended &#8212; an &#8220;origin&#8221; column</div>
+            <div class="rb" style="width:920px">
+              <div class="tbl">
+                <div class="row hd" style="grid-template-columns:minmax(150px,1.2fr) 120px 120px minmax(120px,1fr) 252px"><span>Tag</span><span>Local</span><span>origin</span><span>Annotation</span><span>Actions</span></div>
+                <div class="row" style="grid-template-columns:minmax(150px,1.2fr) 120px 120px minmax(120px,1fr) 252px">
+                  <div class="ident"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12.586 2.586A2 2 0 0 0 11.172 2H4a2 2 0 0 0-2 2v7.172a2 2 0 0 0 .586 1.414l8.704 8.704a2.426 2.426 0 0 0 3.42 0l6.58-6.58a2.426 2.426 0 0 0 0-3.42z"></path></svg><div><span class="nm">v1.3.0</span></div></div>
+                  <div class="obj">a19c2e4b7d01</div><div class="obj">a19c2e4b7d01</div>
+                  <div class="ann"><strong>Release 1.3.0</strong></div>
+                  <div class="acts"><span class="btn">Locate</span><span class="btn quiet">Remote&#8230;</span><span class="kebab">&#8943;</span></div>
+                </div>
+              </div>
+            </div>
+            <p class="note" style="width:920px">Every healthy row repeats one id twice &#8212; the exact waste the single &#8220;Points at&#8221; column was introduced to remove &#8212; and the annotation column, the one free-text column, loses a third of its width at the modal&#8217;s 920px. <a class="dv-oid" href="#2a">2a</a> spends the second line only on the rows where the two values differ.</p>
+          </div>
+
+        </div>
+        <p class="dv-next">Try next: &#8220;filter Differ with nothing to review&#8221; &#183; &#8220;the strip at 640px wide&#8221;</p>
+      </section>
+
+      <section class="dv-turn" id="t1" data-screen-label="Turn 1 Where the published value lives">
+        <div class="dv-thd"><a class="dv-tid" href="#t1">1</a><span class="dv-tname">Findings &#8212; a moved tag is invisible today, and forcing every fetch is the wrong fix</span></div>
+        <p class="dv-sub">A maintainer re-cut <code>v1.2.3</code> on origin. Fetch and Pull skip a tag name that already exists, so the local tag kept its old commit, and nothing on screen said so. The first version of <a href="https://github.com/pwrdrvr/PwrGit/pull/549">PR&nbsp;#549</a> added <code>--tags --force</code> to every fetch. That also overrides <code>tagOpt=--no-tags</code>, downloads every tag-only history, and lets whichever remote is fetched last decide what a shared tag name means. This review replaces it with a published source that is read, compared and adopted one tag at a time.</p>
+        <div class="dv-opts">
+
+          <div class="dv-opt" id="1a" data-screen-label="1a Before">
+            <div class="dv-olabel"><a class="dv-oid" href="#1a">1a</a>Before &#8212; the Tags tab after a successful Pull</div>
+            <div class="rb">
+              <div class="rb-tool">
+                <div class="tabs"><span class="tab">Worktrees <span>3</span></span><span class="tab">Branches <span>18</span></span><span class="tab on">Tags <span>412</span></span><span class="tab">Remotes <span>2</span></span></div>
+                <span class="search">Filter tags&#8230;</span>
+                <span class="btn">Create tag&#8230;</span>
+              </div>
+              <div class="tbl">
+                <div class="row hd"><span>Tag</span><span>Points at</span><span>Annotation</span><span>Actions</span></div>
+                <div class="row">
+                  <div class="ident"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12.586 2.586A2 2 0 0 0 11.172 2H4a2 2 0 0 0-2 2v7.172a2 2 0 0 0 .586 1.414l8.704 8.704a2.426 2.426 0 0 0 3.42 0l6.58-6.58a2.426 2.426 0 0 0 0-3.42z"></path></svg><div><span class="nm">v1.2.3</span><small>annotated</small></div></div>
+                  <div class="obj"><span class="ln">544269d7502f <span class="via">via tag 9a1e</span></span></div>
+                  <div class="ann"><strong>Release 1.2.3</strong><small>Rae Okafor &#183; 3 w</small></div>
+                  <div class="acts"><span class="btn">Locate</span><span class="btn quiet">Remote&#8230;</span><span class="kebab">&#8943;</span></div>
+                </div>
+              </div>
+            </div>
+            <p class="note" style="width:920px"><span class="pin">1</span> origin&#8217;s <code>v1.2.3</code> now peels to <code>80cf5ffafd71</code>. This row is wrong and looks right. <span class="pin">2</span> The lineage graph kept the old chip as well: the fetch moved no branch, so no ahead/behind count changed and the cached lanes were reused. (Fixed separately: a successful fetch now always repaints the graph.)</p>
+          </div>
+
+          <div class="dv-opt" id="1b" data-screen-label="1b The model">
+            <div class="dv-olabel"><a class="dv-oid" href="#1b">1b</a>The model &#8212; Git&#8217;s one tag namespace, and PwrGit&#8217;s per-remote record beside it</div>
+            <div class="model">
+              <div class="box"><h5>Local tags</h5><code>refs/tags/*</code><p>What Git, the graph and every terminal see. Fetch adds missing names as Git always has, and never rewrites one.</p></div>
+              <div class="arrow"><i>&#8592;</i>Take / Download<br />one tag, asked</div>
+              <div class="box"><h5>Remote snapshots</h5><code>PwrGit database &#183; per remote</code><p>Name, object and peeled commit from <code>ls-remote --tags</code>. Stored even when the objects are not here &#8212; a Git ref cannot point at a missing object.</p></div>
+              <div class="arrow"><i>&#8594;</i>pinned before<br />any overwrite</div>
+              <div class="box"><h5>Replaced values</h5><code>refs/pwrgit/replaced-tags/*</code><p>Real refs, so <code>gc</code> keeps the old tag and commit. An OID in a database alone would not survive a prune.</p></div>
+            </div>
+          </div>
+
+          <div class="dv-opt" id="1c" data-screen-label="1c Freshness contract">
+            <div class="dv-olabel"><a class="dv-oid" href="#1c">1c</a>Freshness contract &#8212; when PwrGit asks the remote for its tag list</div>
+            <div class="ctbl">
+              <div class="ctr hd"><span>Moment</span><span>Lists origin&#8217;s tags?</span><span>Why</span></div>
+              <div class="ctr"><span><b>Fetch, Pull, Fetch all, Bulk sync</b></span><span class="no">No (every time)</span><span>Git already received the tag advertisement; a second listing on every press duplicates it. Fetch keeps Git&#8217;s own rules: auto-follow, <code>tagOpt</code>, shallow and partial limits, custom refspecs.</span></div>
+              <div class="ctr"><span><b>After a toolbar Fetch or Pull</b></span><span class="yes">If last check &gt; 1 h</span><span>Discovery without a habit: at most one extra listing per repository per hour, and only for repositories the user is actively syncing. Bulk sync is excluded.</span></div>
+              <div class="ctr"><span><b>Opening the Tags tab</b></span><span class="yes">If last check &gt; 10 min</span><span>The user is about to read the badges; the strip shows the age either way.</span></div>
+              <div class="ctr"><span><b>Refresh / Check once</b></span><span class="yes">Always</span><span>Explicit. Also the only route for a remote with <code>tagOpt=--no-tags</code>, and for non-published remotes in Details.</span></div>
+              <div class="ctr"><span><b>Take origin&#8217;s / Download</b></span><span class="no">No full listing</span><span>One <code>+refs/tags/&lt;name&gt;</code> fetch with <code>--no-tags</code>; it re-verifies that one value instead.</span></div>
+            </div>
+            <p class="note">There is no cap on the snapshot: an old tag that moves is caught by the next check, however far down the list it sits. The cost of one check on a 20,000-tag remote is measured in the PR.</p>
+          </div>
+
+        </div>
+        <p class="dv-next">Try next: &#8220;what if origin has two push URLs?&#8221; &#183; &#8220;automatic following of adopted tags&#8221;</p>
+      </section>
+    </x-dc>
+    <script type="text/x-dc" data-dc-script data-props='{}'>
+      class Component extends DCLogic {
+        constructor(props) { super(props); this.state = {}; }
+        renderVals() { return {}; }
+      }
+    </script>
+  </body>
+</html>

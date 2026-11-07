@@ -90,6 +90,46 @@ normalize it. Do not depend on either behavior.
   neither. The remote tag actions also push to the URL. They need no refresh,
   because the default fetch refspec maps no tags.
 
+## Fetch never rewrites a tag; the published remote is compared, not trusted
+
+Git keeps one `refs/tags/*` for every remote, and an ordinary fetch only adds
+missing names. A tag re-cut on origin therefore stays at its old object here.
+`tag-sources.ts` handles that beside Git's namespace, not inside it. Design:
+`design/Published Tags - UX Review.dc.html`.
+
+- **No fetch helper passes `--tags`, `--force` or `--prune-tags`.** They
+  override `remote.<name>.tagOpt=--no-tags`, download every tag-only history,
+  and let the last remote fetched rewrite a shared name. Never edit the
+  user's config to add tag refspecs either.
+- **A remote's tags live in SQLite** (`remote_tags`, 0045), keyed by remote,
+  from one `ls-remote --tags`. A Git ref cannot point at objects that are not
+  here. The publisher is the chosen remote, else origin, else nobody; never
+  the last one fetched.
+- **Listing is a full scan (protocol v2 has no "changed since").** So it never
+  rides on every Fetch: explicit Refresh is a tracked activity; the Tags tab
+  (stale after 10 min) and a toolbar Fetch/Pull (stale after 1 h) run it as a
+  background check (own timeout, no lock, yields to tracked work), never for
+  `--no-tags`. Bulk sync does not trigger it. No cap: a moved old tag is found
+  by the next listing.
+- **Adopting is one tag:** `fetch --no-tags <remote> +refs/tags/<n>:<staging>`,
+  check the staged object is the reviewed one, then one `update-ref --stdin`
+  that pins the previous value under `refs/pwrgit/replaced-tags/<ms>/<n>`,
+  swaps `refs/tags/<n>` with its old value as the lease, and drops the staging
+  ref. An OID kept only in SQLite would not survive `gc`.
+- **Read local tags as name + id only** for comparisons. `objecttype`,
+  `*objectname` or `creatordate` read every object (27 ms -> ~400 ms on 20,000
+  tags). The tab's creator-date order is cached until that listing changes.
+- `tag-sources.test.ts` pins first-run conflicts, primary vs other remotes,
+  tag-only history, `--no-tags`, kind changes, stale reviews and the
+  20,000-tag cost. Its cost line prints with `--reporter=verbose`.
+- The rules themselves are property and model tests, with git as the oracle:
+  `fetch-tags.property.test.ts` (no sync rewrites a tag, follows tag-only
+  history or ignores `--no-tags`), `tag-sources.git.property.test.ts`
+  (statuses, the stored count, Take and Keep through the handlers) and
+  `tag-sources.property.test.ts` (parsing, classification, the sidebar and
+  Tags tab naming one publisher, concurrent and stopped listings). Run them
+  after any change here.
+
 ## Which Git runs: the bundle, set up the way an installed Git would be
 
 Every Git process goes through `gitLaunch` in `dugite.ts`. It returns the
