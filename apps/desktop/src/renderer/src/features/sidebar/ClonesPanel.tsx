@@ -378,9 +378,7 @@ export function ClonesPanel({
           </>
         ) : (
           <>
-            <button className="modal__cancel" onClick={onClose}>
-              Close
-            </button>
+            {summary === null && <button className="modal__cancel" onClick={onClose}>Close</button>}
             <button
               className={summary === null ? "modal__create" : "modal__cancel"}
               disabled={support === null || unavailable || !attachChecked}
@@ -388,6 +386,8 @@ export function ClonesPanel({
             >
               {summary === null ? "Refresh clones" : "Run again"}
             </button>
+            {/* Once the run is over, Close is the primary: last, in the CTA colour. */}
+            {summary !== null && <button className="modal__create" onClick={onClose}>Close</button>}
           </>
         )}
       </div>

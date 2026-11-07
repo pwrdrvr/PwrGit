@@ -431,47 +431,49 @@ export function PruneWorktreesPanel({
           />
         ) : (
           <>
-            {!step && stage.kind === "idle" && <div className="prune__head">
-              <div>
-                <p>Every repository in this window’s profile.</p>
+            {!step && stage.kind === "idle" && <div className="prune__setup">
+              <div className="prune__head">
+                <div>
+                  <p>Every repository in this window’s profile.</p>
+                </div>
               </div>
-            </div>}
 
-            {!step && stage.kind === "idle" && <fieldset className="prune__protection">
-              <legend>Finished worktrees</legend>
-              <div className="prune__fixed"><span className="prune__fixed-mark" aria-hidden="true" /><strong>Finished means merged</strong><p>A merged pull request, or a branch merged into the default branch. Worktrees that share no history with the default branch count after {STALE_AGE_DAYS} days without commits.</p></div>
-              <div className="prune__protection-controls">
-                <label>
-                  <input type="checkbox" checked={protectRecent} disabled={busy}
-                    onChange={(event) => {
-                      setProtectRecent(event.target.checked);
+              <fieldset className="prune__protection">
+                <legend>Finished worktrees</legend>
+                <div className="prune__fixed"><span className="prune__fixed-mark" aria-hidden="true" /><strong>Finished means merged</strong><p>A merged pull request, or a branch merged into the default branch. Worktrees that share no history with the default branch count after {STALE_AGE_DAYS} days without commits.</p></div>
+                <div className="prune__protection-controls">
+                  <label>
+                    <input type="checkbox" checked={protectRecent} disabled={busy}
+                      onChange={(event) => {
+                        setProtectRecent(event.target.checked);
+                        setSelected(new Set());
+                      }} />
+                    Keep worktrees touched in the last
+                  </label>
+                    <select aria-label="Protection window" value={protectionDays}
+                      disabled={busy || !protectRecent}
+                      onChange={(event) => {
+                        setProtectionDays(Number(event.target.value));
+                        setSelected(new Set());
+                      }}>
+                      {BRANCH_CLEANUP_KEEP_DAYS.map((days) => (
+                        <option key={days} value={days}>{daysLabel(days)}</option>
+                      ))}
+                    </select>
+                </div>
+                <div className="prune__protection-controls is-indented">
+                  <span>Count a branch merged into the default branch as finished</span>
+                  <FinishedAfterSelect label="Finished after" value={finishedAfterDays} disabled={busy}
+                    onChange={(days) => {
+                      setFinishedAfterDays(days);
                       setSelected(new Set());
                     }} />
-                  Keep worktrees touched in the last
-                </label>
-                  <select aria-label="Protection window" value={protectionDays}
-                    disabled={busy || !protectRecent}
-                    onChange={(event) => {
-                      setProtectionDays(Number(event.target.value));
-                      setSelected(new Set());
-                    }}>
-                    {BRANCH_CLEANUP_KEEP_DAYS.map((days) => (
-                      <option key={days} value={days}>{daysLabel(days)}</option>
-                    ))}
-                  </select>
-              </div>
-              <div className="prune__protection-controls is-indented">
-                <span>Count a branch merged into the default branch as finished</span>
-                <FinishedAfterSelect label="Finished after" value={finishedAfterDays} disabled={busy}
-                  onChange={(days) => {
-                    setFinishedAfterDays(days);
-                    setSelected(new Set());
-                  }} />
-              </div>
-              <p>Touched is the newest commit or file change, ignored files included.{onFinishedAfterDays === undefined ? "" : " Both rules are saved, and the merged rule also decides the sidebar’s Stale lens."}</p>
-            </fieldset>}
-            {!step && stage.kind === "idle" && <div className="maintenance__never prune__never"><em>Never offered</em><span>Worktrees with uncommitted or untracked changes</span><span>The repository’s main checkout, and worktrees on the default branch</span><span>Worktrees whose activity could not be fully read</span></div>}
-            {!step && stage.kind === "idle" && <p className="prune__intro-note">Removing a worktree deletes its folder. Its branch is kept, and so are the commits.</p>}
+                </div>
+                <p>Touched is the newest commit or file change, ignored files included.{onFinishedAfterDays === undefined ? "" : " Both rules are saved, and the merged rule also decides the sidebar’s Stale lens."}</p>
+              </fieldset>
+              <div className="maintenance__never prune__never"><em>Never offered</em><span>Worktrees with uncommitted or untracked changes</span><span>The repository’s main checkout, and worktrees on the default branch</span><span>Worktrees whose activity could not be fully read</span></div>
+              <p className="prune__intro-note">Removing a worktree deletes its folder. Its branch is kept, and so are the commits.</p>
+            </div>}
 
             {stage.kind === "sweeping" && (
               <div
@@ -609,6 +611,13 @@ export function PruneWorktreesPanel({
                 >
                   {cancelling ? "Stopping…" : "Cancel"}
                 </button>
+              ) : !step && stage.kind === "review" && candidates.length === 0 ? (
+                // Nothing left to remove: the job is done, so Close is the
+                // primary, last and in the CTA colour.
+                <>
+                  <button className="prune__ghost" onClick={() => runSweep(true)}>Re-read all</button>
+                  <button className="modal__create" onClick={onClose}>Close</button>
+                </>
               ) : (
                 <>
                   {!step && <button className="modal__cancel" disabled={busy} onClick={onClose}>

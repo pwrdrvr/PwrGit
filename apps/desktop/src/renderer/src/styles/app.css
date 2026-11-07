@@ -20904,6 +20904,14 @@ button.agent-auth-node:focus-visible,
   min-height: 0;
   overflow: hidden;
 }
+/* The Worktrees setup's rules scroll in the fixed maintenance frame, as
+   every other tab's body does; the footer below never moves. */
+.prune__setup {
+  flex: 0 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  scrollbar-gutter: stable;
+}
 .prune__panel > .modal__actions {
   flex: 0 0 auto;
   margin: 0;
@@ -20911,8 +20919,8 @@ button.agent-auth-node:focus-visible,
   border-top: 1px solid var(--border-subtle);
 }
 
-.prune__panel > .prune__head { padding: 12px 18px; }
-.prune__panel > .prune__head p { margin-top: 0; }
+.prune__setup > .prune__head { padding: 12px 18px; }
+.prune__setup > .prune__head p { margin-top: 0; }
 
 .maintenance__workflow-options {
   margin: 0 0 12px 24px;
@@ -21057,7 +21065,7 @@ button.agent-auth-node:focus-visible,
 .maintenance__receipt-row { display: flex; align-items: baseline; gap: 10px; padding: 5px 0 0 27px; }
 .maintenance__receipt-row strong { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-secondary); font: 500 11px/1.3 var(--font-mono); }
 .maintenance__receipt-row code { color: var(--text-subtle); font: 500 10px/1 var(--font-mono); }
-.prune__panel > .prune__head { padding: 12px 18px 0; border: 0; }
+.prune__setup > .prune__head { padding: 12px 18px 0; border: 0; }
 .prune__protection { margin: 12px 18px 0; }
 .prune__protection legend { padding: 0 4px; color: var(--text-secondary); font: 600 11px var(--font-sans); }
 .prune__fixed { margin-bottom: 12px; }
@@ -21224,14 +21232,13 @@ button.agent-auth-node:focus-visible,
 /* A rule with no checkbox lines its words up with the ones that have one. */
 .maintenance__plan-rule.is-indented { padding-left: 21px; }
 .maintenance__plan-mode { flex-basis: auto; }
-.modal.maintenance { height: auto; max-height: min(790px, 92vh); }
 .maintenance > .bulk-sync__status:not(.is-live) { height: auto; min-height: 54px; }
-/* Standalone task handoffs retain the stable shell; the plan and combined steps size to their content. */
+/* One frame from open to close, as PwrAgnt's Thread maintenance: every tab,
+   plan, review, run and receipt draws at this height, hung from the
+   backdrop's fixed top. Head, tabs, step rail and footer keep their size;
+   the body takes the rest and scrolls. Never size it to a screen's content
+   (`maintenance-steady.spec.ts`). */
 .modal.maintenance { height: min(720px, 82vh); max-height: 82vh; }
-.modal.maintenance:has(.maintenance__plan),
-.modal.maintenance:has(.maintenance__steps),
-.modal.maintenance:has(.maintenance__receipt-steps),
-.modal.maintenance:has(.prune__panel) { height: auto; max-height: min(790px, 92vh); }
 /* Repository setup (design cards 3c and 4d). */
 .repository-setup {
   width: min(780px, 94vw);

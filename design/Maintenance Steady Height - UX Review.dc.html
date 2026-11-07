@@ -1,0 +1,222 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Maintenance Steady Height - UX Review</title>
+    <script src="./support.js"></script>
+  </head>
+  <body>
+    <x-dc>
+      <helmet data-dc-atomics>
+        <link href="https://fonts.googleapis.com/css2?family=Geist:wght@400..700&amp;family=Geist+Mono:wght@400..700&amp;display=swap" rel="stylesheet" />
+        <style>
+          :root {
+            --rv-bg: #050505; --rv-line: rgba(247, 243, 235, 0.1);
+            --rv-t1: #f7f3eb; --rv-t2: #b8b0a5; --rv-t3: #8c857a; --rv-tsub: rgba(247, 243, 235, 0.6);
+            --rv-acc: #ff8a1f; --rv-accb: #ffb35c; --rv-bad: #e0705f; --rv-ok: #5fa969;
+            --font-sans: "Geist", "SF Pro Text", system-ui, sans-serif;
+            --font-mono: "Geist Mono", "SF Mono", "JetBrains Mono", Consolas, monospace;
+          }
+          *, *::before, *::after { box-sizing: border-box; }
+          html { background: var(--rv-bg); }
+          body { margin: 0; background: var(--rv-bg); font-family: var(--font-sans); }
+          .dv-turn { padding: 40px 44px 32px; background: var(--rv-bg); border-bottom: 1px solid var(--rv-line); }
+          .dv-thd { display: flex; align-items: baseline; gap: 10px; margin: 0 0 6px; }
+          .dv-tid { font: 600 10px var(--font-mono); padding: 3px 7px; background: var(--rv-t1); color: var(--rv-bg); border-radius: 4px; }
+          .dv-tname { margin: 0; font: 600 13px/1.2 var(--font-sans); color: var(--rv-t1); }
+          .dv-sub { margin: 0 0 22px; font: 400 11.5px/1.5 var(--font-sans); color: var(--rv-t3); max-width: 900px; text-wrap: pretty; }
+          .dv-sub b { color: var(--rv-t2); font-weight: 600; }
+          .dv-sub code, .note code, .tbl code { font: 500 10.5px var(--font-mono); color: var(--rv-accb); }
+          .dv-opts { display: flex; flex-wrap: wrap; gap: 22px; align-items: flex-start; }
+          .dv-opt { flex: 0 1 auto; min-width: 0; display: flex; flex-direction: column; gap: 9px; }
+          .dv-oid { font: 600 10.5px var(--font-mono); padding: 3px 7px; background: rgba(247, 243, 235, 0.08); color: var(--rv-t1); border-radius: 5px; }
+          .dv-olabel { display: flex; align-items: baseline; gap: 8px; font: 400 11px/1.3 var(--font-sans); color: var(--rv-tsub); max-width: 760px; }
+          .dv-olabel b { color: var(--rv-accb); font-weight: 600; }
+          .dv-olabel em { font-style: normal; color: var(--rv-bad); font-weight: 600; }
+          .note { margin: 0; font: 400 10.5px/1.5 var(--font-sans); color: var(--rv-t3); text-wrap: pretty; max-width: 700px; }
+          .note b { color: var(--rv-t2); font-weight: 600; }
+          .tbl { border-collapse: collapse; max-width: 1000px; font: 400 11px/1.45 var(--font-sans); color: var(--rv-t2); }
+          .tbl th { text-align: left; padding: 7px 10px; color: var(--rv-t1); font-weight: 650; border-bottom: 1px solid var(--rv-line); }
+          .tbl td { padding: 7px 10px; vertical-align: top; border-bottom: 1px solid var(--rv-line); }
+          .tbl td.bad { color: var(--rv-bad); }
+          .tbl td.ok { color: var(--rv-ok); }
+
+          .th-light {
+            --bg-stage: #efe9df; --bg-panel: #fdfcfa; --bg-menu: #ffffff; --bg-input: #ffffff;
+            --border-faint: rgba(0, 0, 0, 0.05); --border-subtle: rgba(0, 0, 0, 0.08); --border-default: rgba(0, 0, 0, 0.12); --border-strong: rgba(0, 0, 0, 0.18);
+            --text-primary: #1a1612; --text-secondary: #524a40; --text-muted: #6b645c;
+            --accent: #b74c00; --accent-on: #ffffff;
+            --accent-tint: color-mix(in srgb, var(--accent) 8%, transparent); --accent-border: color-mix(in srgb, var(--accent) 42%, transparent);
+            --danger-soft: rgba(138, 31, 18, 0.12); --danger-border: rgba(138, 31, 18, 0.28); --danger-text: #8a1f12;
+            --success-soft: rgba(46, 110, 64, 0.14); --success-text: #1a5c2e;
+            --shadow-overlay: 0 18px 40px rgba(40, 28, 12, 0.16);
+          }
+          .stage { position: relative; padding: 18px; border-radius: 10px; background: var(--bg-stage); }
+          /* The window's top edge, and the line every frame's bottom shares. */
+          .stage.ruled::after { content: ""; position: absolute; left: 0; right: 0; top: var(--rule, 0); border-top: 1px dashed var(--rv-acc); }
+          .row { display: flex; gap: 14px; align-items: flex-start; }
+
+          /* A dialog frame at about 45% of true size. */
+          .bs { width: 330px; display: flex; flex-direction: column; overflow: hidden; background: var(--bg-menu); border: 1px solid var(--border-strong); border-radius: 10px; box-shadow: var(--shadow-overlay); }
+          .bs.fixed { height: 330px; }
+          .bs-head { flex: none; padding: 9px 11px 7px; border-bottom: 1px solid var(--border-subtle); }
+          .bs-head h2 { margin: 0; color: var(--text-primary); font: 650 10px/1.2 var(--font-sans); }
+          .bs-head p { margin: 2px 0 0; color: var(--text-muted); font: 400 7.5px/1.3 var(--font-sans); }
+          .mt-tabs { flex: none; display: flex; flex-wrap: wrap; gap: 4px; padding: 7px 11px 0; }
+          .mt-tab { padding: 3px 5px; border: 1px solid var(--border-subtle); border-radius: 4px; background: var(--bg-panel); color: var(--text-secondary); font: 600 7px/1 var(--font-sans); }
+          .mt-tab.on { border-color: var(--accent-border); background: var(--accent-tint); color: var(--text-primary); }
+          .bs-body { flex: 1; min-height: 0; overflow: hidden; position: relative; display: flex; flex-direction: column; gap: 5px; padding: 7px 11px; }
+          .bs.fixed .bs-body::after { content: ""; position: absolute; right: 2px; top: 8px; width: 3px; height: 40%; border-radius: 2px; background: rgba(0, 0, 0, 0.22); }
+          .bs.fixed .bs-body.short::after { display: none; }
+          .bs-foot { flex: none; display: flex; justify-content: flex-end; align-items: center; gap: 5px; padding: 7px 11px; border-top: 1px solid var(--border-subtle); }
+          .bs-foot .lead { margin-right: auto; color: var(--text-muted); font: 500 6.5px/1.2 var(--font-sans); }
+          .btn { height: 17px; padding: 0 7px; display: inline-flex; align-items: center; border: 1px solid var(--border-default); border-radius: 4px; background: var(--bg-panel); color: var(--text-primary); font: 600 7.5px/1 var(--font-sans); white-space: nowrap; }
+          .btn.cta { border-color: var(--accent); background: var(--accent); color: var(--accent-on); }
+          .btn.off { opacity: 0.5; }
+          .card { flex: none; border: 1px solid var(--border-subtle); border-radius: 5px; background: var(--bg-panel); padding: 5px 7px; }
+          .card.dash { border-style: dashed; background: transparent; }
+          .card.acc { border-color: var(--accent-border); }
+          .card.bad { border-color: var(--danger-border); }
+          .ln { display: block; height: 4px; margin: 3px 0; border-radius: 2px; background: rgba(0, 0, 0, 0.1); }
+          .ln.t { height: 5px; width: 45%; background: rgba(0, 0, 0, 0.32); }
+          .ln.s { width: 70%; } .ln.xs { width: 40%; }
+          .rail { flex: none; display: grid; grid-template-columns: repeat(3, 1fr); gap: 4px; padding: 7px 11px 0; }
+          .rail span { height: 18px; border: 1px solid var(--border-subtle); border-radius: 4px; background: var(--bg-panel); }
+          .rail span.on { border-color: var(--accent-border); background: var(--accent-tint); box-shadow: inset 0 -2px var(--accent); }
+          .tag { color: var(--text-muted); font: 500 7px/1.2 var(--font-sans); }
+
+          /* True-size footers for turn 2. */
+          .ft { width: 760px; display: flex; justify-content: flex-end; align-items: center; gap: 8px; padding: 12px 18px; border: 1px solid var(--border-strong); border-radius: 0 0 12px 12px; border-top-color: var(--border-subtle); background: var(--bg-menu); }
+          .ft .lead { margin-right: auto; color: var(--text-muted); font: 500 10.5px/1.3 var(--font-sans); }
+          .fb { height: 32px; padding: 0 14px; display: inline-flex; align-items: center; border: 1px solid var(--border-default); border-radius: 7px; background: var(--bg-panel); color: var(--text-primary); font: 600 12px/1 var(--font-sans); }
+          .fb.cta { border-color: var(--accent); background: var(--accent); color: var(--accent-on); }
+          .fb.ghost { border-color: transparent; background: transparent; color: var(--text-secondary); }
+          .fb.off { opacity: 0.45; }
+          .fl { width: 760px; display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+          .fl > div { display: flex; flex-direction: column; gap: 6px; }
+          .fl .tag { color: var(--rv-tsub); font: 600 10px/1.2 var(--font-sans); }
+          .fl .tag.bad { color: var(--rv-bad); } .fl .tag.ok { color: var(--rv-ok); }
+          .fl .ft { width: 100%; padding: 10px 12px; border-radius: 8px; }
+        </style>
+      </helmet>
+
+      <section class="dv-turn" data-screen-label="Turn 1 — one frame">
+        <div class="dv-thd"><span class="dv-tid">TURN 1</span><h1 class="dv-tname">One frame from open to close</h1></div>
+        <p class="dv-sub">
+          The user: <b>"the height of the dialog keeps changing as it goes through the different screens… very distracting."</b>
+          <code>.modal.maintenance</code> already had a fixed <code>height: min(720px, 82vh)</code>, but four later rules
+          set it back to <code>height: auto</code> whenever the dialog held the plan, the Combined step rail, the results receipt
+          or the Worktrees panel. The top edge stays put (the backdrop hangs the dialog 12vh down), so the bottom edge and the footer
+          moved instead. Measured in the harness at 1000×650: <b>569 → 507 → 560 → 507 → 569px</b> as you step through the tabs and back.
+          At 1100×900: 790 → 712 → 560 → 712 → 790. Proposal, as in PwrAgnt's Thread maintenance (#3456): every screen draws at the same height.
+          The head, tabs, step rail and footer keep their size, and only the body scrolls.
+        </p>
+        <div class="dv-opts">
+          <div class="dv-opt">
+            <div class="dv-olabel"><span class="dv-oid">1a</span><em>As built</em> · each screen sizes to its content, so the footer moves</div>
+            <div class="stage th-light"><div class="row">
+              <div class="bs"><div class="bs-head"><h2>Repository maintenance</h2><p>Clean up finished worktrees, leftover branches and Git storage.</p></div>
+                <div class="mt-tabs"><span class="mt-tab on">Combined</span><span class="mt-tab">Repair links</span><span class="mt-tab">Worktrees</span><span class="mt-tab">Clones</span></div>
+                <div class="bs-body"><div class="card"><i class="ln t"></i><i class="ln"></i></div><div class="card acc"><i class="ln t"></i><i class="ln"></i><i class="ln s"></i></div><div class="card acc"><i class="ln t"></i><i class="ln"></i></div><div class="card"><i class="ln t"></i><i class="ln xs"></i></div></div>
+                <div class="bs-foot"><span class="lead">1 repository · stops once</span><span class="btn">Close</span><span class="btn cta">Start</span></div></div>
+              <div class="bs"><div class="bs-head"><h2>Repository maintenance</h2><p>Clean up finished worktrees, leftover branches and Git storage.</p></div>
+                <div class="mt-tabs"><span class="mt-tab">Combined</span><span class="mt-tab">Repair links</span><span class="mt-tab on">Worktrees</span><span class="mt-tab">Clones</span></div>
+                <div class="bs-body"><div class="card"><i class="ln t"></i><i class="ln"></i><i class="ln s"></i></div><div class="card"><i class="ln xs"></i></div></div>
+                <div class="bs-foot"><span class="btn">Close</span><span class="btn cta">Find finished worktrees</span></div></div>
+              <div class="bs"><div class="bs-head"><h2>Repository maintenance</h2><p>Clean up finished worktrees, leftover branches and Git storage.</p></div>
+                <div class="mt-tabs"><span class="mt-tab">Combined</span><span class="mt-tab">Repair links</span><span class="mt-tab">Worktrees</span><span class="mt-tab on">GC</span></div>
+                <div class="bs-body"><div class="card"><i class="ln t"></i><i class="ln"></i></div><div class="card"><i class="ln t"></i><i class="ln"></i></div><div class="card"><i class="ln t"></i><i class="ln"></i></div><div class="card dash"><i class="ln xs"></i></div><div class="card dash"><i class="ln xs"></i></div><div class="card dash"><i class="ln xs"></i></div></div>
+                <div class="bs-foot"><span class="btn">Close</span><span class="btn cta">Run garbage collection</span></div></div>
+            </div></div>
+            <p class="note">Three tabs, three heights. With the window at 1000×650, Start, Find finished worktrees and Run garbage collection sit at three different heights, so the pointer chases them.</p>
+          </div>
+        </div>
+        <div class="dv-opts" style="margin-top: 26px">
+          <div class="dv-opt">
+            <div class="dv-olabel"><span class="dv-oid">1b</span><b>Proposed</b> · one frame for plan, setup, review, results; the body scrolls</div>
+            <div class="stage th-light"><div class="row">
+              <div class="bs fixed"><div class="bs-head"><h2>Repository maintenance</h2><p>Clean up finished worktrees, leftover branches and Git storage.</p></div>
+                <div class="mt-tabs"><span class="mt-tab on">Combined</span><span class="mt-tab">Repair links</span><span class="mt-tab">Worktrees</span><span class="mt-tab">Clones</span></div>
+                <div class="bs-body"><span class="tag">Plan</span><div class="card"><i class="ln t"></i><i class="ln"></i></div><div class="card acc"><i class="ln t"></i><i class="ln"></i><i class="ln s"></i></div><div class="card acc"><i class="ln t"></i><i class="ln"></i></div><div class="card"><i class="ln t"></i><i class="ln xs"></i></div></div>
+                <div class="bs-foot"><span class="lead">1 repository · stops once</span><span class="btn">Close</span><span class="btn cta">Start</span></div></div>
+              <div class="bs fixed"><div class="bs-head"><h2>Repository maintenance</h2><p>Clean up finished worktrees, leftover branches and Git storage.</p></div>
+                <div class="mt-tabs"><span class="mt-tab">Combined</span><span class="mt-tab">Repair links</span><span class="mt-tab on">Worktrees</span><span class="mt-tab">Clones</span></div>
+                <div class="bs-body short"><span class="tag">Worktrees setup</span><div class="card"><i class="ln t"></i><i class="ln"></i><i class="ln s"></i></div><div class="card"><i class="ln xs"></i></div></div>
+                <div class="bs-foot"><span class="btn">Close</span><span class="btn cta">Find finished worktrees</span></div></div>
+              <div class="bs fixed"><div class="bs-head"><h2>Repository maintenance</h2><p>Clean up finished worktrees, leftover branches and Git storage.</p></div>
+                <div class="mt-tabs"><span class="mt-tab on">Combined</span><span class="mt-tab">Repair links</span><span class="mt-tab">Worktrees</span><span class="mt-tab">Clones</span></div>
+                <div class="rail"><span></span><span class="on"></span><span></span></div>
+                <div class="bs-body"><span class="tag">Step 2 review · rail stays, rows scroll</span><div class="card"><i class="ln t"></i><i class="ln"></i><i class="ln"></i><i class="ln"></i><i class="ln s"></i></div><div class="card"><i class="ln t"></i><i class="ln"></i><i class="ln"></i><i class="ln s"></i></div></div>
+                <div class="bs-foot"><span class="lead">27 selected · then GC</span><span class="btn">Skip branches</span><span class="btn cta">Delete 27 and continue</span></div></div>
+              <div class="bs fixed"><div class="bs-head"><h2>Repository maintenance</h2><p>Clean up finished worktrees, leftover branches and Git storage.</p></div>
+                <div class="mt-tabs"><span class="mt-tab on">Combined</span><span class="mt-tab">Repair links</span><span class="mt-tab">Worktrees</span><span class="mt-tab">Clones</span></div>
+                <div class="bs-body"><span class="tag">Results</span><div class="card bad"><i class="ln t"></i><i class="ln s"></i></div><div class="card bad"><i class="ln t"></i><i class="ln"></i></div><div class="card dash"><i class="ln xs"></i></div><div class="card"><i class="ln t"></i><i class="ln"></i><i class="ln"></i></div></div>
+                <div class="bs-foot"><span class="btn">New plan</span><span class="btn cta">Close</span></div></div>
+            </div></div>
+            <p class="note">
+              <b>Same box on every screen</b>, to the pixel (the harness test compares bounding boxes). A short screen leaves blank space
+              above the footer instead of pulling the footer up. A long one scrolls inside the body, with the footer and, in Combined,
+              the step rail held in place. The Worktrees setup had no body of its own: its rules were children of the panel and were
+              cut off at the bottom once the frame stopped growing. They now sit in one scrolling block above the footer.
+            </p>
+          </div>
+        </div>
+      </section>
+
+      <section class="dv-turn" data-screen-label="Turn 2 — footers">
+        <div class="dv-thd"><span class="dv-tid">TURN 2</span><h1 class="dv-tname">The primary action is last and orange, and at the end it is Close</h1></div>
+        <p class="dv-sub">
+          The user: <b>"at the end the Close is not the rightmost button and is not a CTA color. Seems kinda odd and hard to find."</b>
+          Rule for every footer: the screen's primary action is the <b>last</b> button and uses the CTA style (<code>modal__create</code>).
+          Secondary actions go to its left, and none follows a primary. When the job is done, the primary action is Close.
+          Running it again becomes a secondary action and keeps its label.
+        </p>
+        <div class="dv-opts">
+          <div class="dv-opt th-light">
+            <div class="fl">
+              <div><span class="tag bad">2a · Combined results · as built</span><div class="ft"><span class="fb">Close</span><span class="fb">New plan</span></div></div>
+              <div><span class="tag ok">2a · proposed</span><div class="ft"><span class="fb">New plan</span><span class="fb cta">Close</span></div></div>
+              <div><span class="tag bad">2b · Garbage collection finished · as built</span><div class="ft"><span class="fb">Close</span><span class="fb">Change options</span><span class="fb cta">Run garbage collection</span></div></div>
+              <div><span class="tag ok">2b · proposed</span><div class="ft"><span class="fb">Change options</span><span class="fb">Run garbage collection</span><span class="fb cta">Close</span></div></div>
+              <div><span class="tag bad">2c · Repair links finished · as built</span><div class="ft"><span class="fb">Close</span><span class="fb cta">Repair worktree links</span></div></div>
+              <div><span class="tag ok">2c · proposed</span><div class="ft"><span class="fb">Repair worktree links</span><span class="fb cta">Close</span></div></div>
+              <div><span class="tag bad">2d · Local branches after delete · as built</span><div class="ft"><span class="fb">Close</span><span class="fb">Review again</span></div></div>
+              <div><span class="tag ok">2d · proposed</span><div class="ft"><span class="fb">Review again</span><span class="fb cta">Close</span></div></div>
+              <div><span class="tag bad">2e · Clones finished · as built</span><div class="ft"><span class="fb">Close</span><span class="fb">Run again</span></div></div>
+              <div><span class="tag ok">2e · proposed</span><div class="ft"><span class="fb">Run again</span><span class="fb cta">Close</span></div></div>
+              <div><span class="tag bad">2f · Worktrees, nothing to remove · as built</span><div class="ft"><span class="lead">Nothing selected</span><span class="fb">Close</span><span class="fb ghost">Re-read all</span><span class="fb cta off">Reclaim disk space…</span><span class="fb cta off">Remove worktrees…</span></div></div>
+              <div><span class="tag ok">2f · proposed</span><div class="ft"><span class="fb ghost">Re-read all</span><span class="fb cta">Close</span></div></div>
+              <div><span class="tag bad">2g · Local branches before a scan · as built</span><div class="ft"><span class="fb">Close</span><span class="fb">Review local branches</span></div></div>
+              <div><span class="tag ok">2g · proposed</span><div class="ft"><span class="fb">Close</span><span class="fb cta">Review local branches</span></div></div>
+            </div>
+          </div>
+        </div>
+        <p class="note" style="margin-top: 16px">
+          Already right, unchanged: the plan (<b>Close · Start</b>), each setup (<b>Close · Run…</b>), the Combined reviews
+          (<b>Skip … · Delete … and continue</b>), a Worktrees review (<b>Re-read all · Reclaim… · Remove…</b>, two primaries with the
+          danger one last), and a live run (<b>Cancel</b> alone). Close takes focus when a run ends, so Return closes.
+        </p>
+      </section>
+
+      <section class="dv-turn" data-screen-label="Turn 3 — build notes">
+        <div class="dv-thd"><span class="dv-tid">TURN 3</span><h1 class="dv-tname">Build notes</h1></div>
+        <table class="tbl">
+          <thead><tr><th>Where</th><th>Change</th></tr></thead>
+          <tbody>
+            <tr><td><code>app.css</code></td><td>Delete the <code>height: auto</code> rule and the four <code>:has()</code> overrides; keep <code>.modal.maintenance { height: min(720px, 82vh) }</code>. The <code>.maintenance__body</code> already has <code>flex: 1; min-height: 0; overflow-y: auto</code>.</td></tr>
+            <tr><td><code>PruneWorktreesPanel</code></td><td>Wrap the setup's four blocks in <code>.prune__setup</code> (scrolls). Retarget <code>.prune__panel &gt; .prune__head</code>. With nothing left to remove: <b>Re-read all · Close</b>.</td></tr>
+            <tr><td><code>MaintenanceDialog</code></td><td>Results: <b>New plan · Close</b>. A finished single-step tab: secondary rerun (same label) then <b>Close</b> as the CTA. Review local branches is the CTA before a scan.</td></tr>
+            <tr><td><code>ClonesPanel</code></td><td>Finished: <b>Run again · Close</b>.</td></tr>
+            <tr><td>Test</td><td><code>e2e/maintenance-steady.spec.ts</code> walks 12 screens at 1100×900 and 1000×650 and checks three rules on each: the dialog box equals the first screen's, the footer lies inside it, and no secondary follows a primary, with the last button a primary (Close on an end screen). It fails on the old code at 13 checks per size.</td></tr>
+          </tbody>
+        </table>
+      </section>
+    </x-dc>
+    <script type="text/x-dc" data-dc-script data-props='{}'>
+      class Component extends DCLogic {
+        renderVals() { return {}; }
+      }
+    </script>
+  </body>
+</html>

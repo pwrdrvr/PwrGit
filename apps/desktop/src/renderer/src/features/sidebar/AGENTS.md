@@ -275,6 +275,18 @@ finished one; `maintenance-attach.ts` is the one way to use it.
   the running step reattaches on its own tab. The Worktrees pruner runs
   `prune:*`, not `maintenance:run`, and does not reattach.
 
+## Maintenance keeps one frame, and each footer ends with its primary
+
+`.modal.maintenance` is `height: min(720px, 82vh)` on every screen. Never
+size it to a screen's content (four `:has()` rules once did, and the footer
+jumped between tabs). A screen's content goes in a scrolling body
+(`.maintenance__body`, `.prune__setup`, `.prune__rows`).
+
+The last footer button is the screen's primary (`modal__create`), and no
+secondary follows it. When the job is done that is **Close**; running it again
+is secondary. `e2e/maintenance-steady.spec.ts` checks both on every screen.
+Design: `design/Maintenance Steady Height - UX Review.dc.html`.
+
 ## The sidebar footer holds the profile's AI switch
 
 `.sidebar__footer` sits under `.sidebar__list` and carries `AiFeaturesSwitch`.

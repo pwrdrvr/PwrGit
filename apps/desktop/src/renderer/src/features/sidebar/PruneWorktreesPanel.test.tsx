@@ -407,7 +407,12 @@ describe("PruneWorktreesPanel", () => {
     expect(container.querySelector(".prune__empty")?.textContent).toContain(
       "Nothing is safe to remove"
     );
-    expect(dangerButton()?.disabled).toBe(true);
+    // Nothing to remove ends the job: no dead Remove button, and Close is
+    // the primary, last and in the CTA colour.
+    expect(dangerButton()).toBeNull();
+    const footer = [...container.querySelectorAll<HTMLButtonElement>(".modal__actions button")];
+    expect(footer.map((button) => button.textContent?.trim())).toEqual(["Re-read all", "Close"]);
+    expect(footer.at(-1)?.classList.contains("modal__create")).toBe(true);
   });
 
   it("surfaces a failed sweep and the repos it could not read", async () => {
