@@ -49,7 +49,9 @@ describe("the Clones estimate, for any set of dry runs", () => {
         const estimate = foldClonesEstimate(runs);
         const verdict = clonesScanVerdict(estimate);
         const learned = runs.some((run) => run.kind !== "failed");
-        expect(verdict.kind === "retry").toBe(!learned);
+        if (!learned) expect(verdict.kind).toBe("retry");
+        // A failed dry run never lets a "no" be written down for good.
+        if (estimate.failed > 0) expect(verdict.kind).not.toBe("no_offer");
         if (verdict.kind !== "offer") {
           if (learned) {
             expect(estimate.bytes < CLONES_OFFER_MIN_BYTES || estimate.measured === 0).toBe(true);

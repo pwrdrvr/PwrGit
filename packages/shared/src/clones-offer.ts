@@ -91,8 +91,9 @@ export type ClonesOffer =
 export type ClonesScanVerdict =
   | { kind: "offer"; offer: ClonesOffer }
   | { kind: "no_offer" }
-  /** Nothing was learned: no worktree, or every dry run failed. Scan again
-   *  on a later launch rather than record a verdict. */
+  /** Not enough was learned: no worktree, or dry runs failed and what the
+   *  rest found is no reason to offer. Scan again on a later launch rather
+   *  than record a verdict the failed worktrees could overturn. */
   | { kind: "retry" };
 
 export function clonesScanVerdict(estimate: ClonesEstimate): ClonesScanVerdict {
@@ -108,7 +109,7 @@ export function clonesScanVerdict(estimate: ClonesEstimate): ClonesScanVerdict {
     };
   if (estimate.unmeasuredFiles >= CLONES_OFFER_MIN_FILES)
     return { kind: "offer", offer: { kind: "files", files: estimate.eligibleFiles } };
-  return { kind: "no_offer" };
+  return estimate.failed > 0 ? { kind: "retry" } : { kind: "no_offer" };
 }
 
 /** What a profile remembers. Any record at all means: never scan again. */

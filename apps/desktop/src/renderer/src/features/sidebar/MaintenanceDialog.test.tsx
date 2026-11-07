@@ -1372,6 +1372,23 @@ describe("Clones as a Combined step", () => {
     }), { numRuns: 4 });
   });
 
+  it("a Clones run with nothing new still counts as a step that ran, and the done line names only planned steps", async () => {
+    await open({ reshare: true });
+    const normal = dispatch.getMockImplementation()!;
+    dispatch.mockImplementation(async (name: string, req: { action?: { kind: string } }) =>
+      name === "maintenance:run" && req.action?.kind === "reshare"
+        ? { ok: true, value: summary([{ ...shared(0), reshare: { ...shared(0).reshare!, worktrees: shared(0).reshare!.worktrees.map((wt) => ({ ...wt, outcome: "already_shared" as const, reshared: 0, alreadyShared: 12, sharedBytes: 0 })) } }]) }
+        : normal(name, req));
+    for (const label of ["Remove finished worktrees", "Delete finished local branches", "Collect garbage"]) await untick(label);
+    await click("Start");
+    const done = container.querySelector(".maintenance__done-status small")!.textContent;
+    expect(done).toBe("1 of 1 steps");
+    const clonesCard = [...container.querySelectorAll(".maintenance__receipt-step")].find((node) => node.querySelector("strong")?.textContent === "Clones")!;
+    expect(clonesCard.className).toContain("is-done");
+    expect(clonesCard.textContent).toContain("Nothing new to share · 1 worktree");
+    expect(container.textContent).not.toContain("Restore recreates a branch");
+  });
+
   it("CLONES_ONLY_PLAN selects exactly one step, Clones; the default selects it too", () => {
     const on = (plan: MaintenancePlan) => STEP_ORDER.filter((key) => plan[key]);
     expect(on(CLONES_ONLY_PLAN)).toEqual(["clones"]);

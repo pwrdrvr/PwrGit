@@ -27,7 +27,8 @@ import { useModal } from "../../lib/useModal";
 import type { RemoveWorktreesOutcome } from "../../state/useRepoTree";
 import { DEFAULT_MAINTENANCE_PLAN, MaintenancePlanForm, MaintenanceSteps, MaintenanceRulesApplied, STEP_ORDER, type ClonesSupport, type MaintenancePlan, type StepKey, type StepResult } from "./MaintenancePlan";
 import { PruneWorktreesPanel } from "./PruneWorktreesPanel";
-import { ClonesPanel, clonesBytes as bytes, repoTotals } from "./ClonesPanel";
+import { ClonesPanel, clonesBytes as bytes, clonesTotals, repoTotals } from "./ClonesPanel";
+import { openGitRuntimeSettings, useReflinkSupport } from "./reflink-support";
 import { BulkSyncStatus, StatusMark } from "./BulkSyncStatus";
 import { countOutcomes } from "./bulk-sync-progress";
 import { attachMaintenanceRun, markMaintenanceSeen, useMaintenanceRunView } from "./maintenance-attach";
@@ -153,8 +154,10 @@ export function MaintenanceDialog({
   const [scopeRepoCount, setScopeRepoCount] = useState<number | null>(null);
   const [plan, setPlan] = useState<MaintenancePlan>(initialPlan ?? DEFAULT_MAINTENANCE_PLAN);
   /** Whether the Git in use can re-share; Clones is planned only once it says. */
-  const [clonesSupport, setClonesSupport] = useState<ClonesSupport>("checking");
-  const [gitVersion, setGitVersion] = useState<string | null>(null);
+  const reflink = useReflinkSupport();
+  // Any answer short of "can re-share", an error included, counts as cannot.
+  const clonesSupport: ClonesSupport = !reflink.answered ? "checking" : reflink.canReshare ? "available" : "unavailable";
+  const gitVersion = reflink.support?.version?.replace(/^git version /, "") ?? null;
   const [updateMain, setUpdateMain] = useState(true);
   /** The plan Combined runs: Clones drops out on a Git that cannot share. */
   const runPlan: MaintenancePlan = { ...plan, clones: plan.clones && clonesSupport === "available" };
@@ -287,22 +290,7 @@ export function MaintenanceDialog({
     return () => { cancelled = true; };
   }, [profileId]);
 
-  useEffect(() => {
-    let cancelled = false;
-    void dispatch("git:reflinkSupport", undefined)
-      .then((answer) => {
-        if (cancelled) return;
-        setClonesSupport(answer.ok && answer.value.support.reshare ? "available" : "unavailable");
-        if (answer.ok) setGitVersion(answer.value.version?.replace(/^git version /, "") ?? null);
-      })
-      .catch(() => { if (!cancelled) setClonesSupport("unavailable"); });
-    return () => { cancelled = true; };
-  }, []);
-  const openGitSettings = (): void => {
-    void dispatch("settings:open", { page: "git", sub: "runtime" }).then((result) => {
-      if (!result.ok) setError(result.error.message);
-    });
-  };
+  const openGitSettings = (): void => openGitRuntimeSettings(setError);
 
   /** Change the rules, remember them, and drop a review they no longer
    *  describe — a list reviewed under a 7-day guard is not a 30-day list. */
@@ -532,12 +520,10 @@ export function MaintenanceDialog({
       if (live.current) setClonesReceipt(result);
       if (stopped(result, "clones", "clones")) return;
       const issues = stepIssues(result!, "clones");
-      const totals = result!.results.map(repoTotals);
-      const measured = totals.filter((row) => row.bytes !== null);
-      const shared = measured.length === 0 ? null : bytes(measured.reduce((sum, row) => sum + row.bytes!, 0));
-      const files = totals.reduce((sum, row) => sum + row.files, 0);
-      const worktrees = totals.reduce((sum, row) => sum + row.worktrees, 0);
-      recordStep("clones", { state: issues.length > 0 ? "partial" : files > 0 ? "done" : "skipped", summary: clonesStepLine(shared, files, worktrees, issues), issues });
+      const totals = clonesTotals(result!.results);
+      // It ran: "Nothing new to share" is a result, not a skipped step.
+      recordStep("clones", { state: issues.length > 0 ? "partial" : "done",
+        summary: clonesStepLine(totals.bytes === null ? null : bytes(totals.bytes), totals.files, totals.worktrees, issues), issues });
     }
     if (runPlan.gc) {
       setWorkflowStep("gc");
@@ -792,7 +778,14 @@ export function MaintenanceDialog({
     .map((row) => ({ row, totals: repoTotals(row) }))
     .filter(({ totals }) => totals.worktrees > 0)
     .sort((a, b) => (b.totals.bytes ?? 0) - (a.totals.bytes ?? 0));
-  const clonesShared = clonesRows.reduce((sum, { totals }) => sum + (totals.bytes ?? 0), 0);
+  const clonesShared = clonesTotals(clonesReceipt?.results ?? []).bytes ?? 0;
+  /** The finished line counts only what the plan ran. */
+  const doneCounts = [
+    runPlan.worktrees ? `${stepResults.worktrees?.items?.length ?? 0} ${stepResults.worktrees?.items?.length === 1 ? "worktree" : "worktrees"}` : null,
+    runPlan.branches ? `${deletedCount} ${deletedCount === 1 ? "branch" : "branches"}` : null,
+    clonesShared > 0 ? `${bytes(clonesShared)} of file data now shared` : null,
+    collectedBefore > collectedAfter ? `${bytes(collectedBefore - collectedAfter)} of object storage` : null
+  ].filter((part): part is string => part !== null);
   /** Each step that left something behind reports with the shared outcome
    *  card, in step order, above the receipt (or under the live status card
    *  while a later step runs). */
@@ -947,7 +940,7 @@ export function MaintenanceDialog({
         ) : (
           <>
         {tab === "combined" && workflowStep === "done" ? <>
-          <div className={`maintenance__done-status${workflowStopped || hasIssues ? " is-stopped" : ""}`}><StatusMark mark={workflowStopped || hasIssues ? "failed" : "ok"} /><div><strong>{workflowStopped ? "Maintenance stopped" : hasIssues ? "Maintenance finished with errors" : "Maintenance finished"}</strong><small>{Object.values(stepResults).filter((result) => result?.state === "done" || result?.state === "partial").length} of {Object.values(runPlan).filter(Boolean).length} steps · {stepResults.worktrees?.items?.length ?? 0} {stepResults.worktrees?.items?.length === 1 ? "worktree" : "worktrees"}, {deletedCount} {deletedCount === 1 ? "branch" : "branches"}{clonesShared > 0 ? `, ${bytes(clonesShared)} of file data now shared` : ""}{collectedBefore > collectedAfter ? `, ${bytes(collectedBefore - collectedAfter)} of object storage` : ""}</small></div><time>took {workflowDurationMs >= 60_000 ? `${Math.floor(workflowDurationMs / 60_000)}m ` : ""}{Math.round(workflowDurationMs % 60_000 / 1000)}s</time></div>
+          <div className={`maintenance__done-status${workflowStopped || hasIssues ? " is-stopped" : ""}`}><StatusMark mark={workflowStopped || hasIssues ? "failed" : "ok"} /><div><strong>{workflowStopped ? "Maintenance stopped" : hasIssues ? "Maintenance finished with errors" : "Maintenance finished"}</strong><small>{Object.values(stepResults).filter((result) => result?.state === "done" || result?.state === "partial").length} of {Object.values(runPlan).filter(Boolean).length} steps{doneCounts.length > 0 ? ` · ${doneCounts.join(", ")}` : ""}</small></div><time>took {workflowDurationMs >= 60_000 ? `${Math.floor(workflowDurationMs / 60_000)}m ` : ""}{Math.round(workflowDurationMs % 60_000 / 1000)}s</time></div>
           <div className="maintenance__body">
             {problems}
             <div className="maintenance__receipt-steps">
@@ -972,7 +965,7 @@ export function MaintenanceDialog({
                 </article>;
               })}
             </div>
-            <p className="maintenance__help">Restore recreates a branch at the tip it had when it was deleted, for as long as Git still holds that commit. Removed worktrees cannot be restored.</p>
+            {(runPlan.branches || runPlan.worktrees) && <p className="maintenance__help">Restore recreates a branch at the tip it had when it was deleted, for as long as Git still holds that commit. Removed worktrees cannot be restored.</p>}
           </div>
           <div className="modal__actions"><button className="modal__cancel" onClick={onClose}>Close</button><button className="modal__cancel" onClick={() => {
             // The offer ran Clones alone; a new plan starts from the usual one.

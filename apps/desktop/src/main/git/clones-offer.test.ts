@@ -101,6 +101,17 @@ describe("maintenance:clonesOffer", () => {
     expect(readClonesOfferRecord(db, "one")).toBe("offered");
   });
 
+  it("records nothing when a failed dry run leaves the answer short of an offer", async () => {
+    // a-1 measures little; a second worktree fails and might hold the rest.
+    addRepo("c", "one", [{ id: "c-main", primary: true }, { id: "c-1" }]);
+    projected.set("/w/a-1", 10 * 1024 * 1024);
+    const normal = git.getMockImplementation()!;
+    git.mockImplementation(async (args, cwd) =>
+      cwd === "/w/c-1" ? ok({ stdout: "", stderr: "fatal: index.lock exists", exitCode: 128 }) : normal(args, cwd));
+    expect(await offer("one")).toEqual({ ok: true, value: null });
+    expect(readClonesOfferRecord(db, "one")).toBeNull();
+  });
+
   it("records nothing when every dry run failed", async () => {
     git.mockImplementation(async () => ok({ stdout: "", stderr: "fatal: boom", exitCode: 128 }));
     expect(await offer("one")).toEqual({ ok: true, value: null });

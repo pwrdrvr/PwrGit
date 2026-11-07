@@ -230,7 +230,8 @@ string: a local build of the same source has none.
   Its `potential-private-reduction` matched a real run's
   `observed-private-reduction` to the byte. Any `profile_notices` row (0045)
   means never scan again. A Git that cannot re-share, no linked worktree, or
-  every dry run failing records nothing, so a later launch scans. The rules
+  a failed dry run with no offer from the rest records nothing, so a later
+  launch scans. The rules
   are `@pwrgit/shared` `clones-offer.ts`, held by its model test.
 
 Design: `design/Refresh Clones - UX Review.dc.html`.
