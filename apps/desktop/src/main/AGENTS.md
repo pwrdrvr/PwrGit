@@ -43,9 +43,20 @@ default). Three things about it are easy to get wrong:
   `LIKE` for it: both fold ASCII only, and a row SQL misjudges is cut by the
   cap before main can rank it. The differential test is
   `RepoSwitcherOverlay.ranking.property.test.ts`.
+- **The cap keeps what the palette leads with.** Before `LIMIT 60` the SQL
+  orders by: exact-name tier; a repository the query begins
+  (`SEARCH_REPO_BEGUN_SQL`); the focused repository's rows, matched by
+  `SEARCH_ROW_REPO_SQL` (a repository's own row has no `repo_name`, so
+  matching on it cut the repository behind its own branches); this profile;
+  bm25; `path`. `rankSearchHits` mirrors it: within a tier, a repository
+  before checkouts before branches.
+- **A repository's exact name is also looked up outside FTS5.** unicode61
+  does not fold `ß` to `ss`, and splits `i̇` (lower-case `İ`) in two, so
+  `STRASSE` never matched `straße`. The lookup runs the exact tier over the
+  profile's `repos` rows.
 - **Widened is not unordered.** With the setting on, other profiles' rows are
   reachable but never ahead of this profile's — `profile_id = ? DESC` sits
-  between the exact-name tier and bm25. Those rows are how two of the three
+  after the name and focus keys, before bm25. Those rows are how two of the three
   routes to another profile's window work: a hit carries its
   `profileId`/`profileName`, the palette badges every row, and picking one
   opens or focuses **that** profile's window rather than acting here

@@ -38,6 +38,7 @@ import {
   rankSearchHits,
   registerSearchSqlFunctions,
   SEARCH_EXACT_TIER_SQL,
+  SEARCH_REPO_BEGUN_SQL,
   searchExactTierParams
 } from "./search-rank";
 import {
@@ -913,12 +914,18 @@ export class RepoIndexer {
     // Exact names come first so the intended row survives the result cap,
     // and an exact repository name leads even exact branch and folder
     // matches, so naming a project cannot lose its row to a busy checkout
-    // collection (SEARCH_EXACT_TIER_SQL). Within each tier, bm25 weights per
-    // column (entity_id, kind, name, path, repo_name, pr): a hit in the
-    // repo/branch name outranks one buried in a path; PR number/title hits
-    // rank just under names.
+    // collection (SEARCH_EXACT_TIER_SQL). Next, a repository whose name the
+    // query begins (SEARCH_REPO_BEGUN_SQL), for the same reason: main ranks it
+    // first in its tier. Then the focused repository's rows, its own row
+    // included: `repo_name` is empty on a repository's row, so matching on it
+    // left the repository behind its 300 branches. Within each tier, bm25
+    // weights per column (entity_id, kind, name, path, repo_name, pr): a hit
+    // in the repo/branch name outranks one buried in a path; PR number/title
+    // hits rank just under names. `path` breaks bm25's ties, so two
+    // same-named repositories always come back in one order.
     const exactTier = searchExactTierParams(query);
     const prLike = exactTier[1];
+    const focusedRepoId = scope.focusedRepoId ?? null;
     // Rows of a hidden repository are dropped before the cap, not after it
     // (src/main/AGENTS.md). Most profiles hide nothing indexed, and then the
     // clause and its per-row lookup are left out entirely.
@@ -936,14 +943,36 @@ export class RepoIndexer {
            AND (? IS NULL OR profile_id = ?)
            ${hidden}
          ORDER BY ${SEARCH_EXACT_TIER_SQL},
-                  repo_name = (SELECT name FROM repos WHERE id = ?) COLLATE NOCASE DESC,
+                  ${SEARCH_REPO_BEGUN_SQL},
+                  CASE WHEN ? IS NULL THEN 0
+                       ELSE (${SEARCH_ROW_REPO_SQL}) = ? END DESC,
                   profile_id = ? DESC,
-                  bm25(search_fts_index, 0.0, 0.0, 10.0, 2.0, 4.0, 8.0, 0.0)
+                  bm25(search_fts_index, 0.0, 0.0, 10.0, 2.0, 4.0, 8.0, 0.0),
+                  path
          LIMIT 60`
       )
       .all(
-        fts, only, only, ...exactTier, scope.focusedRepoId ?? null, mine
+        fts, only, only, ...exactTier, exactTier[0], focusedRepoId, focusedRepoId, mine
       ) as {
+      entity_id: string;
+      kind: RepoSearchHit["kind"];
+    }[];
+    // A repository the query names is looked up outside the index as well.
+    // unicode61 does not fold case maps that change length, so `STRASSE`
+    // never matched `straße` there and the repository was not returned at
+    // all. This is the same test as the exact tier, over the profile's
+    // repositories (hundreds of rows, one JS call each), in the order a tie
+    // between same-named repositories takes everywhere: the one you are in,
+    // then this profile's, then by folder.
+    const namedRepos = this.db
+      .prepare(
+        `SELECT r.id AS entity_id, 'repo' AS kind FROM repos r
+         WHERE (? IS NULL OR r.profile_id = ?)
+           AND ${visibleRepoSql("r")}
+           AND pwrgit_search_exact_tier('repo', r.name, r.path, ?) = -1
+         ORDER BY r.id = ? DESC, r.profile_id = ? DESC, r.path, r.id`
+      )
+      .all(only, only, exactTier[0], focusedRepoId, mine) as {
       entity_id: string;
       kind: RepoSearchHit["kind"];
     }[];
@@ -971,7 +1000,7 @@ export class RepoIndexer {
     // Appended, not interleaved: a change request the query named by number is
     // lifted to the front by `rankSearchHits` anyway (tier 0), and one matched
     // only by its title belongs under the refs that matched by name.
-    const matches = [...refs, ...changeRequestRows];
+    const matches = [...namedRepos, ...refs, ...changeRequestRows];
     if (matches.length === 0) return [];
 
     // One hit per entity: a dirty index (fossil DBs could double-insert via

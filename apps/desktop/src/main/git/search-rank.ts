@@ -1,7 +1,8 @@
 import {
   changeRequestNumberQuery,
   searchNameKey,
-  searchPathLeaf,
+  searchNamesBegin,
+  searchOwnNames,
   type OpenChangeRequest,
   type RepoSearchHit
 } from "@pwrgit/shared";
@@ -44,10 +45,9 @@ export function exactNameTier(
   path: string,
   wanted: string
 ): -1 | 0 | null {
-  const nameKey = searchNameKey(name);
-  if (nameKey === wanted) return kind === "repo" ? -1 : 0;
-  if (kind !== "repo" && kind !== "worktree") return null;
-  return searchNameKey(searchPathLeaf(path)) === wanted ? 0 : null;
+  if (searchNameKey(name) === wanted) return kind === "repo" ? -1 : 0;
+  const [, folder] = searchOwnNames(kind, name, path);
+  return folder !== undefined && searchNameKey(folder) === wanted ? 0 : null;
 }
 
 /** -1 = an exact repo name; 0 = the query names this hit (or its change
@@ -67,24 +67,23 @@ export function searchMatchTier(
   // branch — and the index only knows it as a prefix, so #1060 matched too.
   const number = changeRequestNumberQuery(query);
   if (number !== null && hit.pr?.number === number) return 0;
-  const names =
-    hit.kind === "repo" || hit.kind === "worktree"
-      ? [hit.name, searchPathLeaf(hit.path)]
-      : [hit.name];
-  return names.some((name) => searchNameKey(name).startsWith(wanted)) ? 1 : 2;
+  return searchNamesBegin(hit.kind, hit.name, hit.path, wanted) ? 1 : 2;
 }
 
 /**
- * A checkout on disk (0) outranks a branch that is checked out nowhere (1).
+ * A repository (0) outranks a checkout on disk (1), which outranks a branch
+ * that is checked out nowhere (2).
  *
  * Only consulted between hits that answer to the typed name equally directly
- * — see the tiers above. Among two things the query names, the one you can
- * open, `cd` into and already have work in is the stronger answer; the bare
- * ref is a branch you would have to create a worktree for. Repos and their
- * checkouts share kind rank 0; an exact repo name has its own leading tier.
+ * — see the tiers above. A repository's name is what ⌘K is for: typing its
+ * first letters must not list its own checkouts first, and bm25 scored those
+ * higher, on the branch name and again on the repository's name in their
+ * path. Among the rest, the one you can open, `cd` into and already have work
+ * in is the stronger answer; the bare ref is a branch you would have to
+ * create a worktree for. An exact repo name has its own leading tier.
  */
-const searchKindRank = (hit: RepoSearchHit): 0 | 1 =>
-  hit.kind === "repo" || hit.kind === "worktree" ? 0 : 1;
+const searchKindRank = (hit: RepoSearchHit): 0 | 1 | 2 =>
+  hit.kind === "repo" ? 0 : hit.kind === "worktree" ? 1 : 2;
 
 /** unicode61's view of a string: letter/digit runs, folded. */
 const searchTokens = (value: string): string[] =>
@@ -163,6 +162,16 @@ export const SEARCH_EXACT_TIER_SQL = `MIN(
   pwrgit_search_exact_tier(kind, name, path, ?),
   CASE WHEN pr LIKE ? THEN 0 ELSE 1 END)`;
 
+/**
+ * The search SQL's next key after the exact tiers: 0 for a repository whose
+ * name or folder the query begins, 1 for everything else. Main ranks those
+ * repositories first within their tier (`searchKindRank`), so they must
+ * survive the cap ahead of the many checkouts and branches that begin the
+ * same way. Bind `searchNameKey(query)`.
+ */
+export const SEARCH_REPO_BEGUN_SQL = `CASE WHEN kind = 'repo'
+  AND pwrgit_search_names_begin(kind, name, path, ?) THEN 0 ELSE 1 END`;
+
 export function searchExactTierParams(query: string): [string, string | null] {
   // A bare number names a change request exactly; its `pr` text begins with
   // that number and a space. Without this the index's prefix match lets
@@ -171,7 +180,7 @@ export function searchExactTierParams(query: string): [string, string | null] {
   return [searchNameKey(query), prNumber === null ? null : `${prNumber} %`];
 }
 
-/** Make `SEARCH_EXACT_TIER_SQL`'s function callable on this connection. */
+/** Make the search SQL's functions callable on this connection. */
 export function registerSearchSqlFunctions(db: DB): void {
   const text = (value: unknown): string =>
     typeof value === "string" ? value : "";
@@ -180,5 +189,11 @@ export function registerSearchSqlFunctions(db: DB): void {
     { deterministic: true },
     (kind, name, path, wanted) =>
       exactNameTier(text(kind), text(name), text(path), text(wanted)) ?? 1
+  );
+  db.function(
+    "pwrgit_search_names_begin",
+    { deterministic: true },
+    (kind, name, path, wanted) =>
+      searchNamesBegin(text(kind), text(name), text(path), text(wanted)) ? 1 : 0
   );
 }
