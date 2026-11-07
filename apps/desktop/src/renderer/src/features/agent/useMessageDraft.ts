@@ -177,8 +177,21 @@ export function useMessageDraft({
     },
     request,
     cancel: () => {
-      const requestId = activeRequest.current;
-      if (requestId !== null) void dispatch("agent:cancel", { requestId });
+      if (activeRequest.current === null) return;
+      // Explicit cancel is terminal, as Tidy's is (#541): say so now, and drop
+      // whatever main sends back. A draft main had already sent when the
+      // cancel arrived must not fill the box after the operator said no.
+      cancelActive();
+      setStatus((current) =>
+        current.kind === "drafting"
+          ? {
+              kind: "failed",
+              code: "cancelled",
+              message: "Cancelled. Nothing changed.",
+              afterMs: Date.now() - current.startedAt
+            }
+          : current
+      );
     },
     acceptDraft: () => {
       if (draft === null) return;
