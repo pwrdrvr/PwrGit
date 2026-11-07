@@ -8,6 +8,7 @@ import {
   changeRequestNumberQuery,
   forgeRepoKey,
   searchNameKey,
+  searchNamesBegin,
   type ChangeRequestLocation,
   type Commit,
   type FileSearchHit,
@@ -279,14 +280,21 @@ export function buildPaletteItems(
   // repo, and a bare number also looks like a commit hash prefix and a path —
   // so whatever holds #106 leads, above both.
   const prNumber = changeRequestNumberQuery(query);
-  const focusedBranches: RepoSearchHit[] = [];
   const exactRepos: RepoSearchHit[] = [];
+  const numberedChangeRequests: RepoSearchHit[] = [];
+  const focusedBranches: RepoSearchHit[] = [];
+  const begunRepos: RepoSearchHit[] = [];
   const otherResults: RepoSearchHit[] = [];
   for (const hit of results) {
-    // Typing `main` in a focused repo means that repo's `main`. It leads
-    // everything — `main.rs` files included — so type, Enter, and you are on
-    // it; the same rows in other repos stay where the ranking put them.
-    if (
+    if (hit.kind === "repo" && exactName !== "" && searchNameKey(hit.name) === exactName) {
+      exactRepos.push(hit);
+    } else if (prNumber !== null && hit.pr?.number === prNumber) {
+      numberedChangeRequests.push(hit);
+    } else if (
+      // Typing `main` in a focused repo means that repo's `main`. It leads
+      // everything but a repository of that name — `main.rs` files included —
+      // so type, Enter, and you are on it; the same rows in other repos stay
+      // where the ranking put them.
       focusedRepoId !== null &&
       hit.repoId === focusedRepoId &&
       hit.kind !== "repo" &&
@@ -296,26 +304,35 @@ export function buildPaletteItems(
     ) {
       focusedBranches.push(hit);
     } else if (
-      (hit.kind === "repo" && searchNameKey(hit.name) === exactName) ||
-      (prNumber !== null && hit.pr?.number === prNumber)
+      hit.kind === "repo" &&
+      searchNamesBegin(hit.kind, hit.name, hit.path, exactName)
     ) {
-      exactRepos.push(hit);
+      // The first letters of a repository's name: switching repositories is
+      // what ⌘K is for, so these sit above the file and commit matches.
+      begunRepos.push(hit);
     } else {
       otherResults.push(hit);
     }
   }
 
-  // Files sit above commits: the query that produces them is a literal path
-  // substring, so a hit is a strong signal, and the main process caps the list
-  // short enough that it cannot crowd the other kinds out.
+  // The order main ranked them in stands within each group: among
+  // same-named repositories, the one you are in, then this profile's
+  // (`RepoIndexer.searchAll`). Files sit above commits: the query that
+  // produces them is a literal path substring, so a hit is a strong signal,
+  // and the main process caps the list short enough that it cannot crowd the
+  // other kinds out.
+  const repoItems = (hits: RepoSearchHit[]): PaletteItem[] =>
+    hits.map((hit) => ({ kind: "repo" as const, hit }));
   return [
-    ...focusedBranches.map((hit) => ({ kind: "repo" as const, hit })),
+    ...repoItems(exactRepos),
+    ...repoItems(numberedChangeRequests),
+    ...repoItems(focusedBranches),
     ...showHidden,
-    ...exactRepos.map((hit) => ({ kind: "repo" as const, hit })),
     ...hiddenExact,
+    ...repoItems(begunRepos),
     ...files.map((hit) => ({ kind: "file" as const, hit })),
     ...commits.map((commit) => ({ kind: "commit" as const, commit })),
-    ...otherResults.map((hit) => ({ kind: "repo" as const, hit }))
+    ...repoItems(otherResults)
   ];
 }
 

@@ -61,6 +61,21 @@ describe("buildPaletteItems", () => {
     expect(items[3]).toMatchObject({ hit: { repoId: "other", name: "main" } });
   });
 
+  it("puts an exact repository name above the focused repo's branch of that name", () => {
+    // Operator's decision: an exact repository name always wins, even inside
+    // that repository, whose checkouts on a branch of its name used to lead.
+    const items = buildPaletteItems(
+      [commit],
+      [branch("pwragent", "pwragent", "worktree"), repo("pwragent")],
+      "PwrAgent",
+      [file("pwragent.md")],
+      "pwragent"
+    );
+    expect(items.map((item) => item.kind === "repo" ? item.hit.kind : item.kind)).toEqual([
+      "repo", "worktree", "file", "commit"
+    ]);
+  });
+
   it("does not lift a focused-repo branch the query only prefixes", () => {
     const items = buildPaletteItems(
       [],
@@ -95,7 +110,7 @@ describe("buildPaletteItems", () => {
   });
 
   it("keeps every kind addressable by its own key", () => {
-    const items = buildPaletteItems([commit], [repo("codex-tools")], "codex", [
+    const items = buildPaletteItems([commit], [repo("my-codex-tools")], "codex", [
       file("README.md")
     ]);
     const keys = items.map((item) => paletteItemKey(item));
@@ -121,8 +136,17 @@ describe("buildPaletteItems", () => {
     });
   });
 
-  it("keeps commit-first ordering when no repository name matches exactly", () => {
-    const items = buildPaletteItems([commit], [repo("codex-tools")], "codex");
+  it("puts a repository whose name the query begins above commits and files", () => {
+    // Typing the first letters of a repository is how people switch to it.
+    const items = buildPaletteItems([commit], [repo("codex-tools")], "codex", [
+      file("src/codex.ts")
+    ]);
+
+    expect(items.map((item) => item.kind)).toEqual(["repo", "file", "commit"]);
+  });
+
+  it("keeps commit-first ordering when the query begins no repository name", () => {
+    const items = buildPaletteItems([commit], [repo("my-codex-tools")], "codex");
 
     expect(items.map((item) => item.kind)).toEqual(["commit", "repo"]);
   });

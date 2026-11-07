@@ -259,6 +259,56 @@ test("the uncommitted-changes prompt, on a contrived repository", async () => {
 });
 
 /**
+ * The ⌘K palette's order when a repository's name is typed, inside that
+ * repository, for the palette-ordering PR (#358 put the focused repository's
+ * same-named checkout above it; files, commits and the repository's own
+ * checkouts sat above a name typed in part).
+ *
+ * Invented repositories under a temp dir; nothing came from a real account.
+ */
+test("the ⌘K palette for a repository's name, on contrived repositories", async () => {
+  mkdirSync(OUT, { recursive: true });
+  sandbox = createGitSandbox();
+  const box = sandbox;
+  const repo = box.makeRepo("orbit-console");
+  box.commit(repo.path, "orbit-console-notes.md", "docs: orbit console overview");
+  box.commit(repo.path, "orbit-console-boot.ts", "feat: orbit console boot screen");
+  box.commit(repo.path, "orbit-console-tray.ts", "fix: orbit console tray icon");
+  // A checkout on a branch named like the repository, as agents make them,
+  // and others whose folders carry the repository's name.
+  for (const branch of ["orbit-console", "fix/orbit-console-crash", "feat/telemetry"]) {
+    repo.addWorktree(branch);
+  }
+  box.makeRepo("orbit-docs");
+  box.makeRepo("lunar-api");
+
+  handle = await launchApp({ theme: "dark" });
+  const { app, window } = handle;
+  await app.evaluate(async ({ BrowserWindow }, size) => {
+    BrowserWindow.getAllWindows()[0]?.setBounds({ x: 0, y: 0, ...size });
+  }, WINDOW);
+
+  await addRootAndExpand(window, handle, box, "orbit-console");
+  await branchRow(window, "main").first().click();
+  await window.mouse.move(6, 6);
+
+  for (const [query, shot] of [
+    ["Orbit-Console", "palette-exact-name.png"],
+    ["orbit-c", "palette-name-begun.png"]
+  ] as const) {
+    await window.keyboard.press("Meta+k");
+    const panel = window.locator(".overlay-panel");
+    await panel.waitFor();
+    await window.locator(".overlay-search input").fill(query);
+    // Files are debounced 120ms behind the repository search.
+    await window.waitForTimeout(800);
+    await panel.screenshot({ path: join(OUT, shot) });
+    await window.keyboard.press("Escape");
+    await panel.waitFor({ state: "hidden" });
+  }
+});
+
+/**
  * Fetch ▾ and the minimised run, for `design/Fetch Toast and Scope - UX
  * Review.dc.html` and its PR.
  *

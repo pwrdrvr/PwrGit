@@ -11,6 +11,7 @@ import { ProfileService } from "../../../../main/profiles/profile-service";
 import { RepoIndexer } from "../../../../main/git/repo-indexer";
 import {
   SEARCH_EXACT_TIER_SQL,
+  SEARCH_REPO_BEGUN_SQL,
   searchExactTierParams,
   searchMatchTier
 } from "../../../../main/git/search-rank";
@@ -46,6 +47,10 @@ const NAME_CHARS = [
   ..."-_.",
   ..."ÀÁÂÄÅÇÈÉÊËÍÎÏÑÒÓÔÖØÙÚÛÜÝàáâäåçèéêëíîïñòóôöøùúûüýÿ",
   ..."ŁłŒœŠšŽžĞğŞşĆćČčŘřŮů",
+  // Case maps that change length: `ß` upper-cases to `SS`, `ẞ` lower-cases to
+  // `ß`, `İ` lower-cases to `i` and a combining dot. FTS5's unicode61 folds
+  // none of these the way `searchNameKey` does.
+  ..."ßẞİ",
   ..."ΑΒΓΔΕΣΩαβγδεσςωάέ",
   ..."ДЖЗИЯдежзия",
   ..."日本語中文"
@@ -65,20 +70,22 @@ const repoName = fc
  * The same name as a person might type it: each letter as it is, upper or
  * lower, and whitespace around the whole.
  *
- * Case maps that change a letter's length (`ß` → `SS`) are left out: the
- * index's unicode61 tokenizer does not fold them, so FTS5 never returns the
- * repository at all. That is the tokenizer's limit, not the ranking this
- * property is about. `NAME_CHARS` holds no such letter today; the guard keeps
- * a future addition honest.
+ * `keepLength` leaves out case maps that change a letter's length (`ß` →
+ * `SS`). Only a whole name is looked up outside the index; a prefix still goes
+ * through FTS5, whose unicode61 tokenizer does not fold them, so `STRAS`
+ * never begins `straße` there.
  */
-const typedAs = (name: string): fc.Arbitrary<string> =>
+const typedAs = (
+  name: string,
+  { keepLength = false }: { keepLength?: boolean } = {}
+): fc.Arbitrary<string> =>
   fc
     .tuple(
       fc.tuple(
         ...Array.from(name, (char) =>
           fc.constantFrom(
             ...[char, char.toUpperCase(), char.toLowerCase()].filter(
-              (variant) => Array.from(variant).length === 1
+              (variant) => !keepLength || Array.from(variant).length === 1
             )
           )
         )
@@ -96,6 +103,12 @@ type Fixture = {
   /** Checkouts whose branch is the typed name (as the #337 report had: a
    *  repository and 80 worktrees on a branch of the same name). */
   sameNamedCheckouts: { repoIndex: number; spelling: string }[];
+  /** Local branches of the typed name, checked out nowhere. */
+  sameNamedBranches: { repoIndex: number; spelling: string }[];
+  /** The repository the window is in (`repos` index), if any. Its exact-name
+   *  branches lead the palette (#358), but never ahead of the named
+   *  repository, even when the window is in that very repository. */
+  focus: number | null;
   query: string;
   allProfiles: boolean;
 };
@@ -108,23 +121,29 @@ const fixture: fc.Arbitrary<Fixture> = fc
   })
   .chain((repos) => {
     const typed = repos[0]!;
+    const sameNamed = fc.record({
+      repoIndex: fc.nat({ max: repos.length - 1 }),
+      spelling: typedAs(typed).map((spelled) => spelled.trim())
+    });
     return fc.record({
       repos: fc.constant(repos),
       twinInOtherProfile: fc.boolean(),
-      sameNamedCheckouts: fc.array(
-        fc.record({
-          repoIndex: fc.nat({ max: repos.length - 1 }),
-          spelling: typedAs(typed).map((spelled) => spelled.trim())
-        }),
-        // Up to 80, often past the 60-row cap the SQL ranks before.
-        { maxLength: 80, size: "max" }
-      ),
+      // Up to 80, often past the 60-row cap the SQL ranks before.
+      sameNamedCheckouts: fc.array(sameNamed, { maxLength: 80, size: "max" }),
+      // A repository holds one branch of each exact spelling.
+      sameNamedBranches: fc.uniqueArray(sameNamed, {
+        maxLength: 20,
+        selector: ({ repoIndex, spelling }) => `${repoIndex}:${spelling}`
+      }),
+      focus: fc.option(fc.nat({ max: repos.length - 1 })),
       query: typedAs(typed),
       allProfiles: fc.boolean()
     });
   });
 
-function seed(f: Fixture): string {
+const repoId = (index: number): string => `repo-${index}`;
+
+function seed(f: Omit<Fixture, "focus" | "query" | "allProfiles">): string {
   db.prepare("DELETE FROM repos").run();
   const insertRepo = db.prepare(
     "INSERT INTO repos (id, profile_id, name, path) VALUES (?, ?, ?, ?)"
@@ -132,26 +151,35 @@ function seed(f: Fixture): string {
   const insertWorktree = db.prepare(
     "INSERT INTO worktrees (id, repo_id, branch, path, is_primary) VALUES (?, ?, ?, ?, 0)"
   );
+  const insertBranch = db.prepare(
+    "INSERT INTO local_branches (id, repo_id, name, full_name) VALUES (?, ?, ?, ?)"
+  );
   f.repos.forEach((name, index) => {
-    insertRepo.run(`repo-${index}`, mine, name, `/ours/${index}/${name}`);
+    insertRepo.run(repoId(index), mine, name, `/ours/${index}/${name}`);
   });
   if (f.twinInOtherProfile) {
     insertRepo.run("repo-theirs", theirs, f.repos[0], `/theirs/${f.repos[0]}`);
   }
+  // Checkouts live beside their repository and carry its name in their path,
+  // as agent worktrees do (`PwrAgnt-wt/...`): bm25 scores them on the
+  // repository's name as well as their own.
   f.sameNamedCheckouts.forEach(({ repoIndex, spelling }, index) => {
     insertWorktree.run(
       `wt-${index}`,
-      `repo-${repoIndex}`,
+      repoId(repoIndex),
       spelling,
-      `/worktrees/${index}/${spelling}`
+      `/ours/${repoIndex}/${f.repos[repoIndex]}-wt/${index}/${spelling}`
     );
   });
-  return "repo-0";
+  f.sameNamedBranches.forEach(({ repoIndex, spelling }, index) => {
+    insertBranch.run(`lb-${index}`, repoId(repoIndex), spelling, `refs/heads/${spelling}`);
+  });
+  return repoId(0);
 }
 
 /** A commit and a file that also answered the query. The palette draws both
- *  above ordinary results, so only its own exact-name test keeps the
- *  repository ahead of them. */
+ *  above ordinary results, so only its own name tests keep the repository
+ *  ahead of them. */
 const commit: Commit = {
   hash: "c".repeat(40),
   shortHash: "c".repeat(7),
@@ -164,29 +192,105 @@ const commit: Commit = {
 };
 const file: FileSearchHit = { path: "docs/overview.md", name: "overview.md", dir: "docs" };
 
-const firstRow = (hits: RepoSearchHit[], query: string) =>
-  // focusedRepoId = null: with a repository focused, #358 deliberately puts
-  // that repository's exact-name branches and checkouts ahead of everything,
-  // its own repository row included. Whether that should yield to an
-  // exact-named repository is an open product question, so this property
-  // speaks only for the palette with nothing focused.
-  buildPaletteItems([commit], hits, query, [file], null)[0];
+/** The palette for `query`, as a keystroke builds it: main's search, then the
+ *  renderer's grouping, both told which repository the window is in. */
+function palette(
+  query: string,
+  { focus = null, allProfiles = false }: { focus?: number | null; allProfiles?: boolean } = {}
+) {
+  const focusedRepoId = focus === null ? null : repoId(focus);
+  const hits = indexer.searchAll(query, { profileId: mine, allProfiles, focusedRepoId });
+  return buildPaletteItems([commit], hits, query, [file], focusedRepoId);
+}
+
+const firstRow = (query: string, scope?: { focus?: number | null; allProfiles?: boolean }) =>
+  palette(query, scope)[0];
 
 describe("⌘K exact repository name", () => {
-  it("puts the named repository first, whatever its script, case or spacing", () => {
+  it("puts the named repository first, whatever its script, case, spacing or the repository you are in", () => {
     fc.assert(
       fc.property(fixture, (f) => {
         const wanted = seed(f);
-        const hits = indexer.searchAll(f.query, {
-          profileId: mine,
-          allProfiles: f.allProfiles
-        });
-        const first = firstRow(hits, f.query);
+        const first = firstRow(f.query, f);
         expect(first?.kind).toBe("repo");
         expect(first?.kind === "repo" ? first.hit.kind : null).toBe("repo");
         expect(first?.kind === "repo" ? first.hit.repoId : null).toBe(wanted);
       })
     );
+  });
+
+  it("leads the branches of its own name in the repository you are in", () => {
+    // The operator's report, shrunk: inside a repository, typing its name put
+    // its checkouts on a branch of that name first (#358's group) and the
+    // repository row below them.
+    const wanted = seed({
+      repos: ["PwrAgent"],
+      twinInOtherProfile: false,
+      sameNamedCheckouts: [{ repoIndex: 0, spelling: "pwragent" }],
+      sameNamedBranches: []
+    });
+    expect(firstRow("PwrAgent", { focus: 0 })).toMatchObject({
+      kind: "repo",
+      hit: { kind: "repo", repoId: wanted }
+    });
+  });
+
+  it("finds straße typed as STRASSE, which the index cannot", () => {
+    // unicode61 indexes `straße` as one token and never matches `strasse*`,
+    // so the repository was missing from the answer altogether.
+    const wanted = seed({
+      repos: ["straße"],
+      twinInOtherProfile: false,
+      sameNamedCheckouts: [],
+      sameNamedBranches: []
+    });
+    expect(firstRow("STRASSE")).toMatchObject({
+      kind: "repo",
+      hit: { kind: "repo", repoId: wanted }
+    });
+  });
+
+  it("finds İa typed as i̇a", () => {
+    // Found by the property above. Lower-case İ is `i` and a combining dot,
+    // which FTS5 splits into two tokens; only the lookup outside the index
+    // reads it as the name.
+    const wanted = seed({
+      repos: ["İa", "a"],
+      twinInOtherProfile: false,
+      sameNamedCheckouts: [],
+      sameNamedBranches: []
+    });
+    expect(firstRow("İa".toLowerCase())).toMatchObject({
+      kind: "repo",
+      hit: { kind: "repo", repoId: wanted }
+    });
+  });
+
+  it("puts the same-named repository you are in first, then by folder", () => {
+    // The operator has two repositories named PwrGit.
+    seed({ repos: ["PwrGit"], twinInOtherProfile: false, sameNamedCheckouts: [], sameNamedBranches: [] });
+    db.prepare("INSERT INTO repos (id, profile_id, name, path) VALUES ('repo-1', ?, 'PwrGit', '/a/PwrGit')").run(mine);
+    const order = (focus: number | null) =>
+      palette("pwrgit", { focus }).slice(0, 2).map((item) => (item.kind === "repo" ? item.hit.repoId : item.kind));
+    expect(order(null)).toEqual(["repo-1", "repo-0"]);
+    expect(order(0)).toEqual(["repo-0", "repo-1"]);
+    expect(order(1)).toEqual(["repo-1", "repo-0"]);
+  });
+
+  it("finds ẞ typed as ß", () => {
+    // Found by the property above. `searchNameKey` folded `ẞ` to `ß` and `ß`
+    // to `ss`: one pass of upper-then-lower case did not reach a fixed point.
+    expect(searchNameKey("ẞ")).toBe(searchNameKey("ß"));
+    const wanted = seed({
+      repos: ["ẞ"],
+      twinInOtherProfile: false,
+      sameNamedCheckouts: [],
+      sameNamedBranches: []
+    });
+    expect(firstRow("ß")).toMatchObject({
+      kind: "repo",
+      hit: { kind: "repo", repoId: wanted }
+    });
   });
 
   it("finds Übersicht typed in lower case past 80 same-named checkouts", () => {
@@ -201,12 +305,11 @@ describe("⌘K exact repository name", () => {
         repoIndex: 0,
         spelling: "übersicht"
       })),
-      query: "übersicht",
-      allProfiles: false
+      sameNamedBranches: []
     });
     const hits = indexer.searchAll("übersicht", { profileId: mine, allProfiles: false });
     expect(hits.some((hit) => hit.kind === "repo")).toBe(true);
-    expect(firstRow(hits, "übersicht")).toMatchObject({
+    expect(firstRow("übersicht")).toMatchObject({
       kind: "repo",
       hit: { kind: "repo", repoId: wanted }
     });
@@ -220,12 +323,201 @@ describe("⌘K exact repository name", () => {
       repos: ["ςa", "a"],
       twinInOtherProfile: false,
       sameNamedCheckouts: [{ repoIndex: 0, spelling: "ςa" }],
-      query: "Σa",
-      allProfiles: false
+      sameNamedBranches: []
+    });
+    expect(firstRow("Σa")).toMatchObject({ kind: "repo", hit: { kind: "repo", repoId: wanted } });
+  });
+});
+
+type PrefixFixture = {
+  /** This profile's repositories; the first is the one whose name is begun. */
+  repos: string[];
+  /** The first letters of `repos[0]`, as stored. */
+  prefix: string;
+  /** Checkouts and branches. `named` ones begin with `prefix` too; the rest
+   *  match only through their repository's name, which every row carries. */
+  refs: { kind: "worktree" | "local_branch"; repoIndex: number; name: string }[];
+  focus: number | null;
+  query: string;
+};
+
+const prefixFixture: fc.Arbitrary<PrefixFixture> = fc
+  .uniqueArray(repoName, { minLength: 1, maxLength: 4, selector: searchNameKey })
+  .chain((repos) => {
+    const typed = repos[0]!;
+    return fc
+      .nat({ max: Array.from(typed).length - 1 })
+      .map((cut) => Array.from(typed).slice(0, cut + 1).join(""))
+      // A prefix with no letter or digit browses instead of searching.
+      .filter((prefix) => /[\p{L}\p{N}]/u.test(prefix))
+      .chain((prefix) =>
+        fc.record({
+          repos: fc.constant(repos),
+          prefix: fc.constant(prefix),
+          refs: fc.uniqueArray(
+            fc.record({
+              kind: fc.constantFrom("worktree" as const, "local_branch" as const),
+              repoIndex: fc.nat({ max: repos.length - 1 }),
+              name: fc.oneof(
+                repoName.map((rest) => `${prefix}${rest}`),
+                repoName
+              )
+            }),
+            // Up to 80: the operator's own repository has 65 checkouts and
+            // 300 branches, past the 60-row cap. One branch per name.
+            {
+              maxLength: 80,
+              size: "max",
+              selector: ({ kind, repoIndex, name }) => `${kind}:${repoIndex}:${name}`
+            }
+          ),
+          focus: fc.option(fc.nat({ max: repos.length - 1 })),
+          query: typedAs(prefix, { keepLength: true })
+        })
+      );
+  });
+
+function seedPrefix(f: PrefixFixture): string {
+  seed({ repos: f.repos, twinInOtherProfile: false, sameNamedCheckouts: [], sameNamedBranches: [] });
+  const insertWorktree = db.prepare(
+    "INSERT INTO worktrees (id, repo_id, branch, path, is_primary) VALUES (?, ?, ?, ?, 0)"
+  );
+  const insertBranch = db.prepare(
+    "INSERT INTO local_branches (id, repo_id, name, full_name) VALUES (?, ?, ?, ?)"
+  );
+  f.refs.forEach(({ kind, repoIndex, name }, index) => {
+    if (kind === "worktree") {
+      insertWorktree.run(
+        `wt-${index}`,
+        repoId(repoIndex),
+        name,
+        `/ours/${repoIndex}/${f.repos[repoIndex]}-wt/${index}`
+      );
+    } else {
+      insertBranch.run(`lb-${index}`, repoId(repoIndex), name, `refs/heads/${name}`);
+    }
+  });
+  return repoId(0);
+}
+
+describe("⌘K repository name begun", () => {
+  it("ranks the repository above its own checkouts and branches that match no better, and above files and commits", () => {
+    fc.assert(
+      fc.property(prefixFixture, (f) => {
+        const wanted = seedPrefix(f);
+        const items = palette(f.query, { focus: f.focus });
+        const at = items.findIndex(
+          (item) => item.kind === "repo" && item.hit.kind === "repo" && item.hit.repoId === wanted
+        );
+        // Present at all: inside the repository, its own rows once filled
+        // the 60-row cap ahead of it.
+        expect(at).toBeGreaterThanOrEqual(0);
+        const repoTier = searchMatchTier((items[at] as { hit: RepoSearchHit }).hit, f.query);
+        items.forEach((item, index) => {
+          if (index >= at) return;
+          if (item.kind === "file" || item.kind === "commit") {
+            expect({ above: item.kind, index }).toBeUndefined();
+          }
+          if (item.kind !== "repo" || item.hit.repoId !== wanted) return;
+          // One of its own rows above it must match the query better.
+          expect({
+            name: item.hit.name,
+            tier: searchMatchTier(item.hit, f.query)
+          }).toEqual({ name: item.hit.name, tier: expect.toSatisfy((tier: number) => tier < repoTier) });
+        });
+      })
+    );
+  });
+
+  it("keeps the repository you are in when its own rows fill the result cap", () => {
+    // The operator's data: inside PwrAgnt (65 checkouts, 300 branches),
+    // `pwrag` returned 60 of PwrAgnt's rows and not PwrAgnt. SQL put the
+    // focused repository's rows first by their `repo_name`, which a
+    // repository's own index row leaves empty.
+    const wanted = seedPrefix({
+      repos: ["PwrAgnt"],
+      prefix: "PwrAg",
+      refs: Array.from({ length: 70 }, (_, index) => ({
+        kind: "worktree" as const,
+        repoIndex: 0,
+        name: `detached@${index}`
+      })),
+      focus: 0,
+      query: "pwrag"
     });
     expect(
-      firstRow(indexer.searchAll("Σa", { profileId: mine, allProfiles: false }), "Σa")
-    ).toMatchObject({ kind: "repo", hit: { kind: "repo", repoId: wanted } });
+      indexer.searchAll("pwrag", { profileId: mine, allProfiles: false, focusedRepoId: wanted })[0]
+    ).toMatchObject({ kind: "repo", repoId: wanted });
+    expect(firstRow("pwrag", { focus: 0 })).toMatchObject({
+      kind: "repo",
+      hit: { kind: "repo", repoId: wanted }
+    });
+  });
+
+  it("keeps a long repository name past 80 checkouts that repeat its first letters", () => {
+    // bm25 favours a short row that says the word often: `herd/herd-herd` in
+    // `/herd/…` outscored `herder-tools-for-the-whole-team`, and 60 of them
+    // took the cap. SQL now keeps a repository the query begins ahead of
+    // them, as main ranks it.
+    const wanted = seedPrefix({
+      repos: ["herder-tools-for-the-whole-team", "other"],
+      prefix: "her",
+      refs: [],
+      focus: null,
+      query: "her"
+    });
+    const insertWorktree = db.prepare(
+      "INSERT INTO worktrees (id, repo_id, branch, path, is_primary) VALUES (?, 'repo-1', 'herd/herd-herd', ?, 0)"
+    );
+    for (let index = 0; index < 80; index += 1) {
+      insertWorktree.run(`wt-${index}`, `/herd/herd-${index}/herd`);
+    }
+    expect(firstRow("her")).toMatchObject({ kind: "repo", hit: { kind: "repo", repoId: wanted } });
+  });
+
+  it("keeps the repository you are in when a word inside its name is typed", () => {
+    // `agnt` begins no name of `pwr-agnt`, so only the focused-repository key
+    // keeps the repository row inside the cap, and that key matched rows by
+    // `repo_name`, which a repository's own row leaves empty.
+    const wanted = seedPrefix({
+      repos: ["pwr-agnt"],
+      prefix: "pwr",
+      refs: Array.from({ length: 70 }, (_, index) => ({
+        kind: "worktree" as const,
+        repoIndex: 0,
+        name: `detached@${index}`
+      })),
+      focus: 0,
+      query: "agnt"
+    });
+    expect(
+      indexer
+        .searchAll("agnt", { profileId: mine, allProfiles: false, focusedRepoId: wanted })
+        .some((hit) => hit.kind === "repo" && hit.repoId === wanted)
+    ).toBe(true);
+  });
+
+  it("leads its own checkouts that sit in a folder of its name", () => {
+    // The operator's PwrSuiteLab: `pwrsuitel` listed ten checkouts in
+    // `PwrSuiteLab-…` folders first. Both begin a name, and bm25 scores the
+    // checkouts on two columns.
+    const wanted = seedPrefix({
+      repos: ["PwrSuiteLab"],
+      prefix: "PwrSuiteL",
+      refs: [],
+      focus: null,
+      query: "pwrsuitel"
+    });
+    db.prepare(
+      "INSERT INTO worktrees (id, repo_id, branch, path, is_primary) VALUES ('wt-x', ?, 'main', '/wt/PwrSuiteLab-main', 0)"
+    ).run(wanted);
+    expect(
+      indexer.searchAll("pwrsuitel", { profileId: mine, allProfiles: false })[0]
+    ).toMatchObject({ kind: "repo", repoId: wanted });
+    expect(firstRow("pwrsuitel")).toMatchObject({
+      kind: "repo",
+      hit: { kind: "repo", repoId: wanted }
+    });
   });
 });
 
@@ -300,13 +592,18 @@ function seedNames(n: Names): void {
 
 /** The search SQL's tier for each kind's row, from the rows the triggers wrote. */
 function sqlTiers(query: string): Map<string, number> {
-  const rows = db
+  return new Map(sqlKeys(query).map((row) => [row.kind, row.tier]));
+}
+
+/** Both of the search SQL's keys before the cap, per kind. */
+function sqlKeys(query: string): { kind: string; tier: number; begun: number }[] {
+  const params = searchExactTierParams(query);
+  return db
     .prepare(
-      `SELECT kind, ${SEARCH_EXACT_TIER_SQL} AS tier FROM search_fts
-        WHERE kind <> 'change_request'`
+      `SELECT kind, ${SEARCH_EXACT_TIER_SQL} AS tier, ${SEARCH_REPO_BEGUN_SQL} AS begun
+         FROM search_fts WHERE kind <> 'change_request'`
     )
-    .all(...searchExactTierParams(query)) as { kind: string; tier: number }[];
-  return new Map(rows.map((row) => [row.kind, row.tier]));
+    .all(...params, params[0]) as { kind: string; tier: number; begun: number }[];
 }
 
 describe("⌘K's three tests of an exact name agree", () => {
@@ -328,11 +625,28 @@ describe("⌘K's three tests of an exact name agree", () => {
               tier: Math.min(main, 1)
             });
             if (hit.kind !== "repo") continue;
-            const palette = buildPaletteItems([commit], [hit], query, [file], null);
-            expect({ leads: palette[0]?.kind === "repo", main }).toEqual({
-              leads: main === -1,
+            // SQL keeps ahead of the cap the repositories main ranks first in
+            // their tier.
+            expect({
+              begun: sqlKeys(query).find((row) => row.kind === "repo")?.begun,
               main
-            });
+            }).toEqual({ begun: main <= 1 ? 0 : 1, main });
+            // Named: the repository leads even a checkout of the same name in
+            // the repository you are in (#358's group).
+            const sameNamedHere: RepoSearchHit = {
+              ...hit,
+              kind: "worktree",
+              repoId: "focused",
+              name: query.trim()
+            };
+            const named = buildPaletteItems([], [sameNamedHere, hit], query, [], "focused");
+            // Begun: the repository leads the file and commit groups.
+            const begun = buildPaletteItems([commit], [hit], query, [file], null);
+            expect({
+              leadsNamed: named[0]?.kind === "repo" && named[0].hit === hit,
+              leadsBegun: begun[0]?.kind === "repo",
+              main
+            }).toEqual({ leadsNamed: main === -1, leadsBegun: main <= 1, main });
           }
         }
       )

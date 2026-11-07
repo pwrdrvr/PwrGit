@@ -38,13 +38,34 @@ counting" in `styles/AGENTS.md`.
 `apps/desktop/e2e` find rows with `.overlay-result` plus `hasText`. The sr-only
 kind label is a word that no fixture branch name contains.
 
+## Typing a repository's name puts it first
+
+`buildPaletteItems` groups main's answer; main's order stands inside each
+group. The groups, top down:
+
+1. **A repository the query names** (`searchNameKey`), always, even while
+   you are in it (operator's decision; #358 had put that repository's
+   same-named branches above it). Same-named repositories: the one you are
+   in, then this profile's, then by folder (`RepoIndexer.searchAll`).
+2. The hit holding the PR the query numbers (`106`, `#106`).
+3. The focused repository's rows of exactly that name (#358): `main`, Enter.
+4. Show hidden repositories, then a hidden repository named in full.
+5. **Repositories whose name or folder the query begins**, above files and
+   commits: people switch by typing a name's first letters.
+6. Files, commits, everything else.
+
+Main keeps the same promise before its 60-row cap (`src/main/AGENTS.md`).
+Tests: `RepoSwitcherOverlay.ranking.property.test.ts` runs SQL, main and
+this grouping over a real FTS5 index; `search-rank.property.test.ts` holds
+main's re-rank alone.
+
 ## A PR is found through the ref that holds it
 
 Main resolves a PR hit to the worktree or branch that holds its head
 (`RepoIndexer.searchAll`). The row keeps its own kind and gains `pr`.
 
-- **`buildPaletteItems` lifts the hit whose `pr.number` the query names** into
-  the leading group, beside an exactly-named repo. A bare number also matches
+- **`buildPaletteItems` lifts the hit whose `pr.number` the query names**
+  to just under an exactly named repo. A bare number also matches
   commit-hash prefixes and paths, whose groups otherwise sit above it.
 - **A `change_request` hit has nothing to pin or poll** (`hasNoCheckout`).
   Picking it calls `pr:fetchHead`. `hitForLocation` turns the answer into the

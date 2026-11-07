@@ -17,6 +17,8 @@ describe("searchNameKey", () => {
 
   it("meets ß and SS, and drops İ's dot", () => {
     expect(searchNameKey("STRASSE")).toBe(searchNameKey("straße"));
+    // Capital sharp s lower-cases to ß, which needs a second pass to meet ss.
+    expect(searchNameKey("STRAẞE")).toBe(searchNameKey("straße"));
     expect(searchNameKey("İstanbul")).toBe("istanbul");
   });
 
