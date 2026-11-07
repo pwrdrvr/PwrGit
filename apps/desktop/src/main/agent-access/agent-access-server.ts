@@ -10,8 +10,10 @@ import { McpPolicyStore, PolicyFileAuthorizer, MCP_AGENT_CAPABILITIES } from "@p
 import { createPwrGitMcpServer, type PwrGitMcpServer, type CommandRunner, type AppBackend } from "@pwrgit/mcp-server";
 import { AGENT_ACCESS_PORT } from "@pwrgit/mcp-server/agent-access-protocol";
 import { AgentOAuth, type RequestConsent } from "./agent-oauth";
+import { DesktopMcpRelay } from "./desktop-mcp-relay";
 
 export type AgentAccessServerOptions = {
+  desktopVersion: string;
   appBackend?: AppBackend;
   runner: CommandRunner;
   policyFile: string;
@@ -29,6 +31,7 @@ type Principal = { server: Promise<PwrGitMcpServer>; tail: Promise<void>; pendin
 export class AgentAccessServer {
   private http: HttpServer | undefined;
   private oauth: AgentOAuth | undefined;
+  private relay: DesktopMcpRelay | undefined;
   private boundPort: number;
   private reclamation: Promise<void> = Promise.resolve();
   private readonly principals = new Map<string, Principal>();
@@ -72,6 +75,16 @@ export class AgentAccessServer {
         resource, requestConsent: this.options.requestConsent, onChanged: this.options.onChanged
       });
       this.oauth = oauth;
+      this.relay = new DesktopMcpRelay({
+        http, policyFile: this.options.policyFile, desktopVersion: this.options.desktopVersion,
+        authority: () => `127.0.0.1:${this.boundPort}`, allowedOrigin,
+        createServer: token => createPwrGitMcpServer({
+          serverVersion: this.options.desktopVersion,
+          authorizer: new PolicyFileAuthorizer(this.options.policyFile, token),
+          runner: this.options.runner,
+          ...(this.options.appBackend ? { appBackend: this.options.appBackend } : {})
+        })
+      });
       app.get("/authorize/status", (req, res) => oauth.status(typeof req.query.id === "string" ? req.query.id : "", res));
       app.all("/authorize", (req, res, next) => {
         if (req.method !== "GET") { res.setHeader("Allow", "GET"); res.status(405).end(); return; }
@@ -137,6 +150,7 @@ export class AgentAccessServer {
       if (this.principals.size >= 16) { res.status(429).json({ error: "too_many_clients" }); return; }
       principal = {
         server: createPwrGitMcpServer({
+          serverVersion: this.options.desktopVersion,
           authorizer: new PolicyFileAuthorizer(this.options.policyFile, token!),
           runner: this.options.runner,
           ...(this.options.appBackend ? { appBackend: this.options.appBackend } : {}),
@@ -185,6 +199,8 @@ export class AgentAccessServer {
   }
 
   async stop(): Promise<void> {
+    await this.relay?.close();
+    this.relay = undefined;
     this.oauth?.close();
     this.oauth = undefined;
     const http = this.http;

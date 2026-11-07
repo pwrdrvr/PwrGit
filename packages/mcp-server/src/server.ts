@@ -6,6 +6,7 @@ import {
   type CallToolResult
 } from "@modelcontextprotocol/sdk/types.js";
 import { z } from "zod";
+import { MCP_PACKAGE_VERSION } from "./version.js";
 import type { CommandRunner } from "./command.js";
 import {
   discoverRepositoryRoots,
@@ -29,6 +30,7 @@ import {
 export const CAPABILITY_RESOURCE_URI = "pwrgit://live-status/capabilities/v1";
 
 export type PwrGitMcpServerOptions = {
+  serverVersion?: string;
   appBackend?: AppBackend;
   supportsSubscriptions?: boolean;
   cwd?: string;
@@ -100,10 +102,10 @@ export async function createPwrGitMcpServer(
   await eventServer.start();
 
   const mcp = new McpServer(
-    { name: "PwrGit", version: "0.1.0" },
+    { name: "PwrGit", version: options.serverVersion ?? MCP_PACKAGE_VERSION },
     {
       instructions:
-        "Use pwrgit_app_recent_repositories for recently used repositories and timestamps. Use pwrgit_app_repositories for the full app catalog, selection and cached status. Use pwrgit_app_profiles for profile roots. These app tools are available only in the desktop HTTP server. Filesystem discovery is a fallback, not app history. " +
+        "Use pwrgit_app_recent_repositories for recently used repositories and timestamps. Use pwrgit_app_repositories for the full app catalog, selection and cached status. Use pwrgit_app_profiles for profile roots. App tools are served by the running desktop over HTTP or the stdio relay. Filesystem discovery is a fallback, not app history. " +
         "PwrGit also provides bounded, read-only discovery of local GitHub and GitLab checkouts. " +
         "Remote credentials and changed-file paths are never returned. For live status, call pwrgit_watch_repository and read its versioned resource. " +
         (options.supportsSubscriptions === false
@@ -148,7 +150,7 @@ export async function createPwrGitMcpServer(
     {
       title: "Discover repository roots",
       description:
-        "Directory discovery only: this tool does not rank recent usage. Use pwrgit_app_recent_repositories for recently used repositories in the desktop app. Find bounded folders where this user keeps Git repositories. In the desktop uses PwrGit profile roots and indexed repos; standalone uses PWRGIT_MCP_ROOTS, caller-provided roots, a safe current-workspace parent, and existing conventional folders; never selects a home directory or filesystem root automatically.",
+        "Directory discovery only: this tool does not rank recent usage. Use pwrgit_app_recent_repositories for recently used repositories in the desktop app. Find bounded folders where this user keeps Git repositories. Uses PwrGit profile roots and indexed repositories, or the Session’s assigned roots. Explicit roots are checked against the Session boundary; never selects a home directory or filesystem root automatically.",
       inputSchema: {
         roots: z
           .array(z.string().trim().min(1).max(4_096))
@@ -227,7 +229,7 @@ export async function createPwrGitMcpServer(
           .max(32)
           .optional()
           .describe(
-            "When supplied, search only these roots; otherwise use configured, workspace, and conventional candidates."
+            "When supplied, search only these authorized roots; otherwise use desktop profile/index roots or the Session’s assigned roots."
           ),
         maxDepth: z.number().int().min(0).max(5).optional(),
         maxResults: z.number().int().min(1).max(20).optional()

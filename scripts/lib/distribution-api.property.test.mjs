@@ -24,24 +24,30 @@ function render({ status, protocol, headers, body, pretty }, eol, trailing) {
   return `${head.join(eol)}${eol}${eol}${pretty ? json.replaceAll("\n", eol) : json}${trailing}`;
 }
 
+async function checkResponse(value, eol, trailing) {
+  const stdout = render(value, eol, trailing);
+  const result = await ghRequest("path", { execute: async () => ({ stdout }) });
+  expect(result).toEqual({
+    status: value.status,
+    headers: Object.fromEntries(value.headers.map(({ name, value: v }) => [name.toLowerCase(), v])),
+    // The wire carries serialized JSON: stringify turns -0 into 0, including
+    // inside arrays/objects. Compare to that JSON value, not the JS input.
+    body: JSON.parse(JSON.stringify(value.body)),
+  });
+}
+
 describe("ghRequest (property)", () => {
+  it("reads serialized negative zero as zero (shrunk counterexample)", async () => {
+    await checkResponse({ status: 200, protocol: "HTTP/1.1", headers: [], body: [-0], pretty: false }, "\n", "");
+  });
+
   it("reads the same status, headers and body whatever the line endings and final newline", async () => {
     await fc.assert(
       fc.asyncProperty(
         response,
         fc.constantFrom("\n", "\r\n"),
         fc.constantFrom("", "\n", "\r\n"),
-        async (value, eol, trailing) => {
-          const stdout = render(value, eol, trailing);
-          const result = await ghRequest("path", { execute: async () => ({ stdout }) });
-          expect(result).toEqual({
-            status: value.status,
-            headers: Object.fromEntries(value.headers.map(({ name, value: v }) => [name.toLowerCase(), v])),
-            // JSON serializes -0 as 0, including inside arrays/objects.
-            // The wire representation is the oracle, not the original JS.
-            body: JSON.parse(JSON.stringify(value.body)),
-          });
-        },
+        checkResponse,
       ),
     );
   });
