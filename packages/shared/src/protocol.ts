@@ -2517,6 +2517,7 @@ export interface Commands {
   };
   "localAgents:roleDelete": { req: { id: string }; res: null };
   /** Loopback OAuth MCP listener state. */
+  "agentAccess:bootstrapHttp": { req: void; res: { token: string; expiresAt: string } };
   "agentAccess:read": { req: void; res: AgentAccessSnapshot };
   "agentAccess:setEnabled": { req: { enabled: boolean }; res: AgentAccessSnapshot };
   /** Native approval is bound to the requesting window. */

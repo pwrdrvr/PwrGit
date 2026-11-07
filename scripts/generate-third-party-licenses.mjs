@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { readMcpRustLicenseRecords } from "./check-mcp-rust-licenses.mjs";
 
 import { spawnSync } from "node:child_process";
 import {
@@ -585,6 +586,13 @@ function main() {
   const records = [
     ...Array.from(recordsByKey.values()).sort(compareRecords).map(enrichRecord),
     ...readEmbeddedGitNoticeRecords(),
+    ...readMcpRustLicenseRecords().map(record => ({ ...record, licenseFile: "Cargo package license", licenseTextHash: createHash("sha256").update(record.licenseText).digest("hex") })),
+    ...[normalizeLicenseText(readFileSync(join(repoRoot, "crates/pwrgit-mcp/LICENSE-PwrDisk"), "utf8"))].map(licenseText => ({
+      name: "PwrDisk local IPC transport", version: "2026", declaredLicense: "MIT",
+      source: "https://github.com/pwrdrvr/PwrDisk", bundledBinary: true,
+      licenseFile: "LICENSE-PwrDisk", licenseText,
+      licenseTextHash: createHash("sha256").update(licenseText).digest("hex")
+    })),
   ].sort(compareRecords);
 
   const recordsByLicense = new Map();

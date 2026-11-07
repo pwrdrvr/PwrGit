@@ -159,16 +159,3 @@ export type LiveEventKind =
   | "review.submitted"
   | "review.blocking"
   | "change_request.state";
-
-export type LiveStatusEvent = {
-  protocol: "pwrgit.events/v1";
-  id: string;
-  sequence: number;
-  emittedAt: string;
-  subscriptionId: string;
-  repositoryPath: string;
-  kind: LiveEventKind;
-  snapshot: LiveStatusSnapshot;
-  previous?: LiveStatusSnapshot;
-  review?: ReviewSummary;
-};

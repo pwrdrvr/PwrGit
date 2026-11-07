@@ -1,23 +1,7 @@
-import { once } from "node:events";
 import { resolve } from "node:path";
-import WebSocket from "ws";
-import { afterEach, describe, expect, it, vi } from "vitest";
-import {
-  LIVE_EVENT_PROTOCOL,
-  LIVE_EVENT_SUBPROTOCOL,
-  LiveEventServer,
-  changedEvents
-} from "./live-events.js";
+import { describe, it, expect } from "vitest";
+import { changedEvents } from "./live-events.js";
 import type { LiveStatusSnapshot } from "./types.js";
-import {
-  FixedMcpAuthorizer,
-  McpAccessError,
-  fullAccessAuthorization,
-  type McpAuthorizer
-} from "./access-policy.js";
-
-const servers: LiveEventServer[] = [];
-const sockets: WebSocket[] = [];
 
 function snapshot(overrides: Partial<LiveStatusSnapshot> = {}): LiveStatusSnapshot {
   return {
@@ -69,11 +53,6 @@ function snapshot(overrides: Partial<LiveStatusSnapshot> = {}): LiveStatusSnapsh
   };
 }
 
-afterEach(async () => {
-  for (const socket of sockets.splice(0)) socket.close();
-  for (const server of servers.splice(0)) await server.close();
-});
-
 describe("live event contract", () => {
   it("emits distinct normalized events for requested status changes", () => {
     const previous = snapshot();
@@ -119,105 +98,4 @@ describe("live event contract", () => {
     ]);
   });
 
-  it("serves the optional authenticated loopback WebSocket fallback", async () => {
-    const authorization = fullAccessAuthorization();
-    const server = new LiveEventServer(
-      async () => snapshot(),
-      new FixedMcpAuthorizer(authorization),
-      authorization
-    );
-    servers.push(server);
-    await server.start();
-    const capabilities = server.capabilities();
-    expect(capabilities.mcp).toMatchObject({
-      primary: "subscribable_status_resource",
-      resourceSubscriptions: { supported: true }
-    });
-    expect(capabilities.websocket.authentication).toBe("ephemeral_capability_url");
-
-    const messages: unknown[] = [];
-    const socket = new WebSocket(
-      capabilities.websocket.url,
-      LIVE_EVENT_SUBPROTOCOL
-    );
-    sockets.push(socket);
-    socket.on("message", (raw) => messages.push(JSON.parse(raw.toString()) as unknown));
-    await once(socket, "open");
-    socket.send(
-      JSON.stringify({
-        type: "subscribe",
-        protocol: LIVE_EVENT_PROTOCOL,
-        subscriptionId: "test-subscription",
-        repositories: [resolve("/tmp/pwrgit-live-test")],
-        intervalMs: 5_000
-      })
-    );
-    await vi.waitFor(() => expect(messages.length).toBeGreaterThanOrEqual(3));
-    expect(messages).toContainEqual(
-      expect.objectContaining({ type: "hello", protocol: LIVE_EVENT_PROTOCOL })
-    );
-    expect(messages).toContainEqual(
-      expect.objectContaining({
-        type: "subscribed",
-        subscriptionId: "test-subscription"
-      })
-    );
-    expect(messages).toContainEqual(
-      expect.objectContaining({
-        type: "event",
-        event: expect.objectContaining({
-          protocol: LIVE_EVENT_PROTOCOL,
-          kind: "snapshot",
-          subscriptionId: "test-subscription"
-        })
-      })
-    );
-  });
-
-  it("rechecks RBAC before a WebSocket subscription starts", async () => {
-    const authorization = fullAccessAuthorization();
-    let active = true;
-    let polls = 0;
-    const authorizer: McpAuthorizer = {
-      authorize: async () => {
-        if (!active) throw new McpAccessError("revoked_session", "revoked");
-        return authorization;
-      }
-    };
-    const server = new LiveEventServer(
-      async () => {
-        polls += 1;
-        return snapshot();
-      },
-      authorizer,
-      authorization
-    );
-    servers.push(server);
-    await server.start();
-    const messages: Array<Record<string, unknown>> = [];
-    const socket = new WebSocket(
-      server.capabilities().websocket.url,
-      LIVE_EVENT_SUBPROTOCOL
-    );
-    sockets.push(socket);
-    socket.on("message", (raw) => {
-      messages.push(JSON.parse(raw.toString()) as Record<string, unknown>);
-    });
-    await once(socket, "open");
-    active = false;
-    socket.send(
-      JSON.stringify({
-        type: "subscribe",
-        protocol: LIVE_EVENT_PROTOCOL,
-        repositories: [resolve("/tmp/pwrgit-live-test")]
-      })
-    );
-
-    await vi.waitFor(() =>
-      expect(messages).toContainEqual(
-        expect.objectContaining({ type: "error", code: "revoked_session" })
-      )
-    );
-    expect(polls).toBe(0);
-  });
 });

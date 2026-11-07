@@ -31,10 +31,13 @@
     "package:win": "node ../../scripts/resource-run.mjs node ./scripts/release.mjs --win",
     "release": "node ../../scripts/resource-run.mjs node ./scripts/release.mjs",
     "typecheck": "node ../../scripts/resource-run.mjs node ../../scripts/typecheck.mjs --noEmit -p tsconfig.json",
-    "pretest:e2e": "node ../../scripts/resource-run.mjs electron-vite build",
+    "pretest:e2e": "pnpm build:mcp --host && node ../../scripts/resource-run.mjs electron-vite build",
     "test:e2e": "node ../../scripts/resource-run.mjs playwright test -c playwright.config.ts",
     "pretest:docs-shots": "node ../../scripts/resource-run.mjs electron-vite build",
-    "test:docs-shots": "PWRGIT_DOCS_SHOTS=1 node ../../scripts/resource-run.mjs playwright test -c playwright.config.ts docs-screenshots.spec.ts"
+    "test:docs-shots": "PWRGIT_DOCS_SHOTS=1 node ../../scripts/resource-run.mjs playwright test -c playwright.config.ts docs-screenshots.spec.ts",
+    "build:mcp": "node ../../scripts/resource-run.mjs node ./scripts/build-mcp.mjs",
+    "predev": "pnpm build:mcp --host",
+    "prebuild": "pnpm build:mcp --host"
   },
   "dependencies": {
     "@fontsource/geist-mono": "^5.3.0",
@@ -57,8 +60,7 @@
     "express": "5.3.0",
     "pixelmatch": "^7.2.0",
     "react": "^19.3.1",
-    "react-dom": "^19.3.1",
-    "ws": "^8.22.0"
+    "react-dom": "^19.3.1"
   },
   "devDependencies": {
     "@electron/asar": "^4.3.1",

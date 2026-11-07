@@ -2,11 +2,13 @@ import { runCommand } from "@pwrgit/mcp-server";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { expect, it } from "vitest";
+import { fileURLToPath } from "node:url";
+import { expect, it, vi } from "vitest";
 import { McpPolicyStore } from "@pwrgit/mcp-server/access-policy";
 import { SettingsService } from "../settings/settings-service";
 import { AgentAccessService } from "./agent-access-service";
 
+vi.mock("electron", () => ({ app: {} }));
 it("persists enablement and starts/stops the listener", async () => {
   const dir = mkdtempSync(join(tmpdir(), "pwrgit-access-service-"));
   const settingsFile = join(dir, "settings.json");
@@ -14,7 +16,7 @@ it("persists enablement and starts/stops the listener", async () => {
   const policyFile = join(dir, "policy.json");
   new McpPolicyStore(policyFile).initialize();
   const service = new AgentAccessService({
-    runner: runCommand, policyFile, clientsFile: join(dir, "clients.json"), port: 0,
+    runner: runCommand, policyFile, desktopVersion: "fixture", executable: fileURLToPath(new URL("../../../build/mcp/" + (process.platform === "win32" ? "pwrgit-mcp.exe" : "pwrgit-mcp"), import.meta.url)), endpoint: process.platform === "win32" ? `\\\\.\\pipe\\pg-service-${Date.now()}` : join(dir, "m.sock"),
     saveEnabled: enabled => { settings.update({ localAgentAccessEnabled: enabled }); },
     onChanged: () => undefined,
     requestConsent: async () => ({ decision: "deny", sessionName: "", roleId: "" })

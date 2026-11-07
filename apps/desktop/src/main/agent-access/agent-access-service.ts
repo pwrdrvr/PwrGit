@@ -11,7 +11,7 @@ export class AgentAccessService {
     this.server = new AgentAccessServer(options);
   }
   status(): AgentAccessSnapshot {
-    return { enabled: this.enabled, listening: this.server.listening, mcpUrl: this.server.mcpUrl,
+    return { enabled: this.enabled, listening: this.server.listening, mcpUrl: this.server.mcpUrl, executable: this.server.executable, platform: process.platform,
       ...(this.error ? { error: this.error } : {}) };
   }
   setEnabled(enabled: boolean): Promise<AgentAccessSnapshot> {
@@ -29,6 +29,7 @@ export class AgentAccessService {
     this.tail = operation.catch(() => undefined);
     return operation;
   }
+  bootstrapHttp(signal: AbortSignal) { return this.server.bootstrapHttp(signal); }
   async dispose() {
     await this.tail;
     await this.server.stop();

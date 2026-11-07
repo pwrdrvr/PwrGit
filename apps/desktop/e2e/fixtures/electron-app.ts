@@ -184,7 +184,7 @@ export async function launchApp(
       MAIN
     ],
     env: cleanEnv({
-      ...(opts.agentAccess ? { PWRGIT_E2E_AGENT_ACCESS_PORT: "0" } : {}),
+      ...(opts.agentAccess ? { PWRGIT_E2E_AGENT_ACCESS: "1" } : {}),
       PWRGIT_USER_DATA_DIR: userData,
       PWRGIT_GITCONFIG: gitconfig,
       // Settings › Git checks GitHub for newer builds; here it is offline.
