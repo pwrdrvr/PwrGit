@@ -6,6 +6,12 @@ import type { GitSandbox } from "./git-sandbox";
 export const primaryShortcut = (...keys: string[]): string =>
   [process.platform === "darwin" ? "Meta" : "Control", ...keys].join("+");
 
+/** Resolve a worktree by branch without depending on its current row order. */
+export const worktreeRow = (page: Page, branch: string): Locator =>
+  page.locator(".wt-row").filter({
+    has: page.locator(".wt-row__branch").and(page.getByText(branch, { exact: true }))
+  });
+
 // Every step below is bounded, and the bounds are a budget against
 // playwright.config.ts's 60s per-test timeout: launchApp() and the
 // Add-folders/lens clicks are already charged to it before any of this runs.

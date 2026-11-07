@@ -6,6 +6,17 @@ applies here.
 
 ## Run
 
+Full-app E2E uses **real visible desktop windows**, with or without
+`--headed`. Before running even one spec or a direct Playwright command, read
+[docs/headed-e2e-pwrsuitelab.md](../../../docs/headed-e2e-pwrsuitelab.md).
+Discover PwrSuiteLab Control MCP, check `lab_status`, and submit this clean
+committed worktree to `lab_e2e_run` on the exact `roles.e2e.target`.
+It starts the dedicated VM when needed; no manual start or acquire is needed.
+Respect other reservations and workloads. Report access/capacity failures;
+never run on the physical Mac as a fallback or evade a refusal with SSH/scripts.
+
+Inside the MCP guest job or the existing GitHub Actions runner workflow:
+
 ```bash
 pnpm --filter @pwrgit/desktop test:e2e   # pretest builds out/, then playwright
 ```
@@ -15,12 +26,15 @@ E2E need no rebuild between them. If an artifact is stale, run
 `pnpm --filter @pwrgit/desktop run rebuild:electron-native` (layout: desktop
 `AGENTS.md`).
 
-## Headed E2E in PwrSuiteLab
+## Visible E2E guard
 
-Run headed E2E only on the dedicated lab E2E VM, never on a GHA runner or the
-physical host desktop. Before you submit a job, read
-[docs/headed-e2e-pwrsuitelab.md](../../../docs/headed-e2e-pwrsuitelab.md):
-MCP job shape, ownership and lock rules, and the script fallback.
+`launchApp` refuses before launching Electron unless it is in GitHub Actions
+or the current MCP workload's staged checkout on a macOS VM. This covers both
+package scripts and direct Playwright invocations. Generic `CI=true` is not a
+local escape hatch. Do not spoof runner identity or create lab owner files.
+New full-app specs must use `launchApp`; direct Electron launches are reserved
+for the hidden harness below. Existing CI jobs retain their runner behavior;
+agents must not repurpose a runner for an interactive lab run.
 
 ## Harness pages
 

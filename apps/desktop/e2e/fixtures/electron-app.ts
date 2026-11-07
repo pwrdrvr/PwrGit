@@ -8,6 +8,7 @@ import {
   type Page
 } from "@playwright/test";
 import type { Profile, ProfileList, PwrGitError, Result } from "@pwrgit/shared";
+import { assertVisibleE2EHost } from "../../test-support/visible-e2e-host";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const MAIN = join(HERE, "bootstrap.cjs");
@@ -130,6 +131,7 @@ export async function launchApp(
     trashDir?: string;
   } = {}
 ): Promise<AppHandle> {
+  assertVisibleE2EHost();
   const userData = mkdtempSync(join(tmpdir(), "pwrgit-e2e-ud-"));
   if (
     opts.worktreeRoot !== undefined ||
@@ -182,7 +184,7 @@ export async function launchApp(
       MAIN
     ],
     env: cleanEnv({
-      ...(opts.agentAccess ? { PWRGIT_E2E_AGENT_ACCESS_PORT: "0" } : {}),
+      ...(opts.agentAccess ? { PWRGIT_E2E_AGENT_ACCESS: "1" } : {}),
       PWRGIT_USER_DATA_DIR: userData,
       PWRGIT_GITCONFIG: gitconfig,
       // Settings › Git checks GitHub for newer builds; here it is offline.

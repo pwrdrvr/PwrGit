@@ -16,7 +16,7 @@ import {
   type LiveStatusLoader
 } from "./forge-status.js";
 import { readRepositoryInfo } from "./git-metadata.js";
-import { LiveEventServer } from "./live-events.js";
+import { liveStatusCapabilities } from "./live-events.js";
 import { StatusResourceRegistry } from "./status-resources.js";
 import {
   McpAccessError,
@@ -26,9 +26,13 @@ import {
   type McpAuthorizer
 } from "./access-policy.js";
 
-export const CAPABILITY_RESOURCE_URI = "pwrgit://live-status/capabilities/v1";
+import { MCP_PACKAGE_VERSION } from "./version.js";
+import { limitMcpRequests } from "./request-queue.js";
+
+export const CAPABILITY_RESOURCE_URI = "pwrgit://live-status/capabilities/v2";
 
 export type PwrGitMcpServerOptions = {
+  serverVersion?: string;
   appBackend?: AppBackend;
   supportsSubscriptions?: boolean;
   cwd?: string;
@@ -40,7 +44,6 @@ export type PwrGitMcpServerOptions = {
 
 export type PwrGitMcpServer = {
   mcp: McpServer;
-  eventServer: LiveEventServer;
   statusResources: StatusResourceRegistry;
   close: () => Promise<void>;
 };
@@ -89,28 +92,21 @@ export async function createPwrGitMcpServer(
     return [...new Set([...catalog.profiles.flatMap(profile => profile.roots), ...catalog.repositories.map(repo => repo.path)])].slice(0, 32);
   };
   const authorizer = options.authorizer ?? PolicyFileAuthorizer.fromEnvironment(env);
-  const initialAuthorization = await requireAccess(authorizer);
+  await requireAccess(authorizer);
   const liveStatusLoader =
     options.liveStatusLoader ?? createLiveStatusLoader(options.runner);
-  const eventServer = new LiveEventServer(
-    liveStatusLoader,
-    authorizer,
-    initialAuthorization
-  );
-  await eventServer.start();
 
   const mcp = new McpServer(
-    { name: "PwrGit", version: "0.1.0" },
+    { name: "PwrGit", version: options.serverVersion ?? MCP_PACKAGE_VERSION },
     {
       instructions:
-        "Use pwrgit_app_recent_repositories for recently used repositories and timestamps. Use pwrgit_app_repositories for the full app catalog, selection and cached status. Use pwrgit_app_profiles for profile roots. These app tools are available only in the desktop HTTP server. Filesystem discovery is a fallback, not app history. " +
+        "Use pwrgit_app_recent_repositories for recently used repositories and timestamps. Use pwrgit_app_repositories for the full app catalog, selection and cached status. Use pwrgit_app_profiles for profile roots. The running desktop owns these app tools over stdio or IPC HTTP. Filesystem discovery is a fallback, not app history. " +
         "PwrGit also provides bounded, read-only discovery of local GitHub and GitLab checkouts. " +
         "Remote credentials and changed-file paths are never returned. For live status, call pwrgit_watch_repository and read its versioned resource. " +
-        (options.supportsSubscriptions === false
-          ? "This HTTP transport is stateless: read status resources on demand and use the advertised WebSocket for live updates. Resource subscriptions are unavailable."
-          : "Subscribe with resources/subscribe, then re-read after notifications/resources/updated. Use the WebSocket only when the host cannot surface standard MCP subscriptions.")
+        "Subscribe with resources/subscribe, then re-read after notifications/resources/updated. Hosts without subscriptions must explicitly read resources on demand."
     }
   );
+  limitMcpRequests(mcp.server);
   const statusResources = new StatusResourceRegistry(
     mcp,
     liveStatusLoader,
@@ -119,12 +115,12 @@ export async function createPwrGitMcpServer(
   );
 
   mcp.registerResource(
-    "pwrgit-live-status-capabilities",
+    "pwrgit-live-status-capabilities-v2",
     CAPABILITY_RESOURCE_URI,
     {
-      title: "PwrGit live status capabilities v1",
+      title: "PwrGit live status capabilities v2",
       description:
-        "Capability discovery for standard MCP subscribable status resources and the optional WebSocket fallback.",
+        "Capability discovery for standard MCP subscribable status resources over the approved connection.",
       mimeType: "application/json"
     },
     async (uri) => {
@@ -136,7 +132,7 @@ export async function createPwrGitMcpServer(
           {
             uri: uri.toString(),
             mimeType: "application/json",
-            text: JSON.stringify(eventServer.capabilities(authorization, options.supportsSubscriptions ?? true))
+            text: JSON.stringify(liveStatusCapabilities(authorization, options.supportsSubscriptions ?? true))
           }
         ]
       };
@@ -148,7 +144,7 @@ export async function createPwrGitMcpServer(
     {
       title: "Discover repository roots",
       description:
-        "Directory discovery only: this tool does not rank recent usage. Use pwrgit_app_recent_repositories for recently used repositories in the desktop app. Find bounded folders where this user keeps Git repositories. In the desktop uses PwrGit profile roots and indexed repos; standalone uses PWRGIT_MCP_ROOTS, caller-provided roots, a safe current-workspace parent, and existing conventional folders; never selects a home directory or filesystem root automatically.",
+        "Directory discovery only: this tool does not rank recent usage. Use pwrgit_app_recent_repositories for recently used repositories in the desktop app. Find bounded folders where this user keeps Git repositories. Uses PwrGit profile roots and indexed repos within the approved Session boundary; never selects a home directory or filesystem root automatically.",
       inputSchema: {
         roots: z
           .array(z.string().trim().min(1).max(4_096))
@@ -317,7 +313,7 @@ export async function createPwrGitMcpServer(
       title: "Create a live status resource",
       description:
         "Create and initially read a versioned MCP resource for normalized local, PR/MR, CI, merge-conflict, review, and PR/MR state. " +
-        (options.supportsSubscriptions === false ? "Read resourceUri on demand; use the advertised WebSocket for live updates." : "Subscribe to resourceUri with resources/subscribe and re-read after notifications/resources/updated."),
+        (options.supportsSubscriptions === false ? "Read resourceUri on demand." : "Subscribe to resourceUri with resources/subscribe and re-read after notifications/resources/updated."),
       inputSchema: {
         path: z.string().trim().min(1).max(4_096),
         intervalMs: z
@@ -341,7 +337,7 @@ export async function createPwrGitMcpServer(
           {
             type: "text",
             text: options.supportsSubscriptions === false
-              ? "PwrGit live status resource is ready. Read the attached resource on demand; discover the WebSocket with pwrgit_live_status_capabilities for live updates."
+              ? "PwrGit live status resource is ready. Read the attached resource on demand."
               : "PwrGit live status resource is ready. Read the attached resource, subscribe to its URI, and re-read it after notifications/resources/updated."
           },
           {
@@ -366,7 +362,7 @@ export async function createPwrGitMcpServer(
     {
       title: "Discover live status capabilities",
       description:
-        "Describe the primary standard MCP resource-subscription path, normalized status/event states, and optional versioned WebSocket fallback.",
+        "Describe the primary standard MCP resource-subscription path, normalized status and resource-subscription support.",
       inputSchema: {},
       annotations: readOnlyAnnotations
     },
@@ -375,7 +371,7 @@ export async function createPwrGitMcpServer(
         capabilities: ["forge.status.read", "status.subscribe"]
       });
       return success(
-        eventServer.capabilities(authorization, options.supportsSubscriptions ?? true),
+        liveStatusCapabilities(authorization, options.supportsSubscriptions ?? true),
         `PwrGit live status capabilities are readable at ${CAPABILITY_RESOURCE_URI}.`
       );
     }
@@ -386,13 +382,11 @@ export async function createPwrGitMcpServer(
   let closed = false;
   return {
     mcp,
-    eventServer,
     statusResources,
     close: async () => {
       if (closed) return;
       closed = true;
       statusResources.close();
-      await eventServer.close();
       await mcp.close().catch(() => undefined);
     }
   };

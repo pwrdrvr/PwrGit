@@ -69,7 +69,7 @@ function agentAccessFallback(name: string): Promise<unknown> {
       ok({
         enabled: false,
         listening: false,
-        mcpUrl: "http://127.0.0.1:51731/mcp",
+        mcpUrl: "unix:///tmp/pg/m.sock#/mcp", executable: "/fixture/pwrgit-mcp", platform: "darwin",
         pending: []
       })
     );
@@ -152,7 +152,7 @@ describe("LocalAgentsSettings", () => {
       ? { id: "role_scoped", patch: expected } : expected);
   });
 
-  it("offers OAuth connection commands instead of manual token creation", async () => {
+  it("offers native stdio connection commands instead of manual token creation", async () => {
     await render();
     expect(container.textContent).toContain("Connect an agent");
     expect(container.textContent).not.toContain("Create Session");

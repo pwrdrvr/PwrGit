@@ -80,6 +80,8 @@ import { FIRST_RUN_MINIMIZE_MS } from "./bulk-sync-prefs";
 import { useBulkSyncRun } from "./useBulkSyncRun";
 import { MaintenanceDialog } from "./MaintenanceDialog";
 import { useReopenMaintenanceAfterReload } from "./maintenance-attach";
+import { useClonesOffer } from "./clones-offer";
+import { CLONES_ONLY_PLAN } from "./MaintenancePlan";
 import { HiddenReposButton } from "./HiddenReposButton";
 import { RemoveRepositoryDialog } from "./RemoveRepositoryDialog";
 import { hiddenToast } from "./remove-repo-view";
@@ -342,10 +344,14 @@ export function Sidebar({
    *  repository it reviews, or the Prune worktrees tab it opens on. Prune
    *  has no repository scope; it reviews the whole profile. */
   const [maintenance, setMaintenance] = useState<
-    | { repo?: { id: string; name: string }; worktrees?: true }
+    | { repo?: { id: string; name: string }; worktrees?: true; clonesOnly?: true }
     | null
   >(null);
   useReopenMaintenanceAfterReload(activeProfile?.id, () => setMaintenance((old) => old ?? {}));
+  // The one-time Clones offer. Accepting runs Combined with only Clones; a
+  // dialog already open is left as it is rather than remounted (which would
+  // cancel whatever it is running).
+  useClonesOffer(activeProfile?.id, () => setMaintenance((old) => old ?? { clonesOnly: true }));
   /** The repository the Remove review is open on. */
   const [removing, setRemoving] = useState<Repo | null>(null);
   const changeRequestKey = useChangeRequestSelection().selectedKey;
@@ -1521,7 +1527,9 @@ export function Sidebar({
               ...(options?.force === true ? { force: true } : {})
             })
           }
-          {...(maintenance.worktrees === true
+          {...(maintenance.clonesOnly === true
+            ? { initialTab: "combined" as const, initialPlan: CLONES_ONLY_PLAN, autoStart: true }
+            : maintenance.worktrees === true
             ? { initialTab: "worktrees" as const }
             : maintenance.repo === undefined
             ? {}

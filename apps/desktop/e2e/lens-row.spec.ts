@@ -9,6 +9,7 @@ import {
   expandWorktrees,
   lensChip,
   primaryShortcut,
+  worktreeRow,
   clickAddFolders
 } from "./fixtures/steps";
 
@@ -398,7 +399,7 @@ test("the selected worktree row clears BOTH sticky bars when grouped", async () 
   await expandRepoGroup(window, "grouped");
   await expandWorktrees(window, "grouped");
 
-  const row = window.locator(".wt-row", { hasText: "feature/w-1" }).first();
+  const row = worktreeRow(window, "feature/w-1");
   await expect(row).toBeVisible({ timeout: 15_000 });
   const id = await row.getAttribute("data-wt-id");
   expect(id).not.toBeNull();

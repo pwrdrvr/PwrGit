@@ -229,7 +229,10 @@ function ToastCard({
           type="button"
           aria-label="Dismiss"
           {...hoverTooltip(tip, "Dismiss")}
-          onClick={() => dismissToast(toast.id)}
+          onClick={() => {
+            dismissToast(toast.id);
+            toast.onDismiss?.();
+          }}
         >
           <CloseGlyph size={12} />
         </button>

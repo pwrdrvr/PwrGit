@@ -15,6 +15,7 @@ import type { ContributionIdentity, ContributionSnapshot } from "./contributions
 import type { GhDefaultRepository, HookRun, IgnoreDestination, IgnoreOptions, IgnorePatternChoice, IgnoredSummary, RepositorySetup, SetupIgnoreTest } from "./git-discovery";
 import type { MaintenanceScope, MaintenanceAction, MaintenanceSummary, MaintenanceProgress, MaintenanceCurrent, BranchCleanupKeepDays } from "./maintenance";
 import { DEFAULT_BRANCH_CLEANUP_OPTIONS } from "./maintenance";
+import type { ClonesOffer } from "./clones-offer";
 import type { ManagedGitProgress, ManagedGitStatus, ManagedGitTrack } from "./managed-git";
 import { STALE_AGE_DAYS, type WorktreeFinishedAfterDays } from "./prunable";
 import type {
@@ -1845,6 +1846,22 @@ export interface Commands {
    * pruned the commit — a deleted branch's reflog goes with it, so the
    * receipt's SHA is the one handle left.
    */
+  /**
+   * The one-time Clones offer for this profile: on the first call with no
+   * record, main dry-runs `git worktree reflink -n` on every linked worktree
+   * and stores its verdict. Answers the offer only on the call that made it;
+   * every later call, and any call on a Git that cannot re-share, is null.
+   */
+  "maintenance:clonesOffer": {
+    req: { profileId: string };
+    res: ClonesOffer | null;
+  };
+  /** The offer's toast was answered. Recorded only; it is never shown again
+   *  either way. */
+  "maintenance:clonesOfferAnswer": {
+    req: { profileId: string; answer: "accepted" | "dismissed" };
+    res: null;
+  };
   "maintenance:restoreBranch": {
     req: { repoId: string; branch: string; head: string };
     res: null;
@@ -2517,6 +2534,7 @@ export interface Commands {
   };
   "localAgents:roleDelete": { req: { id: string }; res: null };
   /** Loopback OAuth MCP listener state. */
+  "agentAccess:bootstrapHttp": { req: void; res: { token: string; expiresAt: string } };
   "agentAccess:read": { req: void; res: AgentAccessSnapshot };
   "agentAccess:setEnabled": { req: { enabled: boolean }; res: AgentAccessSnapshot };
   /** Native approval is bound to the requesting window. */

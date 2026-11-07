@@ -35,6 +35,13 @@ change.
    they have asserted the bug as correct.
    [docs/property-model-oracle-testing.md](docs/property-model-oracle-testing.md)
    says what each kind is and how to write one.
+8. **Run visible Electron E2E through PwrSuiteLab Control MCP on its dedicated
+   E2E VM.** Ordinary Playwright Electron tests open desktop windows even
+   without `--headed`. Read [docs/headed-e2e-pwrsuitelab.md](docs/headed-e2e-pwrsuitelab.md)
+   before running them. `lab_e2e_run` starts the VM when needed. Report missing
+   access, capacity or ownership; never silently fall back to the physical
+   desktop. Existing GitHub Actions jobs and genuinely hidden harnesses keep
+   their own execution paths.
 
 ## Set up a checkout or worktree
 
@@ -97,10 +104,10 @@ pnpm lint       # every check CI runs, cheapest-first
   An unused binding in a test is often a missing assertion. Compiler selection
   (TS7 vs TS6) is in [scripts/AGENTS.md](scripts/AGENTS.md).
 
-E2E needs a build (`pnpm build`) and has its own guide:
-[apps/desktop/e2e/AGENTS.md](apps/desktop/e2e/AGENTS.md). For headed E2E in
-the lab VM, read [docs/headed-e2e-pwrsuitelab.md](docs/headed-e2e-pwrsuitelab.md)
-first.
+Full-app E2E builds and runs in the lab VM through MCP; its own guide is
+[apps/desktop/e2e/AGENTS.md](apps/desktop/e2e/AGENTS.md). Read
+[docs/headed-e2e-pwrsuitelab.md](docs/headed-e2e-pwrsuitelab.md) first, including
+for a single spec, screenshot spec, or direct Playwright command.
 
 ## Launch the dev app
 

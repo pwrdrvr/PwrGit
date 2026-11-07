@@ -1454,18 +1454,19 @@ if (!gotSingleInstanceLock) {
     );
     consent.register(bus);
     const agentAccess = new AgentAccessService({
-      ...(!app.isPackaged && process.env["PWRGIT_E2E_AGENT_ACCESS_PORT"] === "0" ? { port: 0 } : {}),
+      desktopVersion: app.getVersion(),
+      ...(!app.isPackaged && process.env["PWRGIT_E2E_AGENT_ACCESS"] === "1" ? {
+        endpoint: process.platform === "win32" ? `\\\\.\\pipe\\pwrgit-e2e-${process.pid}` : join(app.getPath("userData"), "mcp.sock")
+      } : {}),
       appBackend: createAppBackend(db, profiles, indexer, bus),
       runner: createDesktopMcpRunner(execGit),
       policyFile: mcpPolicyFile,
-      clientsFile: join(app.getPath("userData"), "mcp-oauth-clients.json"),
       requestConsent: consent.request,
       saveEnabled: (enabled) => settings.update({ localAgentAccessEnabled: enabled }),
       onChanged: () => {
         emitEvent("agentAccess:changed", agentAccess.status());
         emitEvent("localAgents:changed", mcpPolicy.snapshot());
-      },
-      log: (message, extra) => logMain("info", "agent-access", message, extra)
+      }
     });
     app.on("will-quit", () => void agentAccess.dispose());
     registerAgentAccessHandlers(bus, agentAccess);

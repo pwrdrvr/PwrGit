@@ -45,7 +45,7 @@ export const MCP_AGENT_CAPABILITY_DETAILS: Record<
   },
   "status.subscribe": {
     label: "Subscribe to live status",
-    detail: "Keep MCP resources or the WebSocket fallback active for repository updates.",
+    detail: "Keep MCP status resources and subscriptions active for repository updates.",
     danger: "sensitive"
   }
 };
@@ -68,6 +68,7 @@ export type McpAgentSession = {
   updatedAt: string;
   revokedAt: string | null;
   oauth?: { clientId: string; scopes: McpAgentCapability[] };
+  consent?: { permissions: McpAgentCapability[]; repositoryRoots: string[] | null };
 };
 
 export type McpAgentPolicySnapshot = {
@@ -107,6 +108,8 @@ export type AgentAccessSnapshot = {
   enabled: boolean;
   listening: boolean;
   mcpUrl: string;
+  executable: string;
+  platform: string;
   error?: string;
 };
 

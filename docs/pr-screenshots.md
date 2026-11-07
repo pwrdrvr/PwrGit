@@ -9,10 +9,15 @@ and how to attach them with `gh` so the links actually render.
 None of these routes needs the dev app on screen. "The app wasn't launched"
 is not a reason to ship without screenshots.
 
+The hidden harness can run locally. Routes using the built app open real
+desktop windows even without `--headed`; run those through
+[PwrSuiteLab Control MCP](headed-e2e-pwrsuitelab.md). Keep guest screenshots
+under the staged checkout and collect them as job artifacts.
+
 | Route | Use it for | How |
 |---|---|---|
 | Harness page | One component or layout, at fixed widths | `apps/desktop/e2e/harness/<name>/` mounts real renderer components against a fake preload bridge, in a window that is never shown. Copy `harness/section-headings` and its spec; `PWRGIT_HARNESS_SHOTS=<dir>` writes the PNGs. Build "before" from `origin/main` in a second worktree. See [e2e/AGENTS.md › Harness pages](../apps/desktop/e2e/AGENTS.md#harness-pages). |
-| `design-shots.spec.ts` | Whole windows and dialogs in the built app | Add a case, then from `apps/desktop`: `pnpm build && PWRGIT_DESIGN_SHOTS=1 PWRGIT_DESIGN_SHOTS_DIR=/tmp/shots npx playwright test -c playwright.config.ts design-shots.spec.ts`. Forge CLIs are stubbed, so no real account reaches the image. Without `PWRGIT_DESIGN_SHOTS_DIR` it writes into `design/assets/`. |
+| `design-shots.spec.ts` | Whole windows and dialogs in the built app | Add a case, then inside the MCP guest job, from `apps/desktop`: `pnpm build && PWRGIT_DESIGN_SHOTS=1 PWRGIT_DESIGN_SHOTS_DIR="$PWD/test-results/design-shots" node ../../scripts/resource-run.mjs playwright test -c playwright.config.ts design-shots.spec.ts`. Collect `apps/desktop/test-results`. Forge CLIs are stubbed, so no real account reaches the image. Without `PWRGIT_DESIGN_SHOTS_DIR` it writes into `design/assets/`. |
 | An e2e spec | A state a spec already reaches | `page.screenshot({ path })` from a spec that runs against the built app and the sandbox repos. |
 
 Recent PRs that did this well: #494–#496 and #476–#477 (harness renders),
