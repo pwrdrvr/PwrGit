@@ -278,6 +278,7 @@ export class ForgeHosts {
    */
   list(): ForgeHostEntry[] {
     const entries = new Map<string, ForgeHostEntry>();
+    const mismatched = new Map<string, ResolvedForgeHost>();
     for (const found of this.discovered()) {
       const resolved = this.resolve(found.host);
       // `cli` means THIS row's product's CLI holds an account here, which is
@@ -287,7 +288,10 @@ export class ForgeHosts {
       // row while the GitLab card, probing glab, said signed out. Such a host
       // is a `config` row, with glab's sign-in command. A host two CLIs report
       // keeps the entry whose product it resolves to.
-      if (resolved.kind !== found.kind) continue;
+      if (resolved.kind !== found.kind) {
+        if (resolved.kind !== null) mismatched.set(found.host, resolved);
+        continue;
+      }
       entries.set(found.host, {
         ...resolved,
         origin: "cli",
@@ -295,10 +299,8 @@ export class ForgeHosts {
         ...(found.scopes === undefined ? {} : { scopes: found.scopes })
       });
     }
-    for (const found of this.discovered()) {
-      if (entries.has(found.host)) continue;
-      const resolved = this.resolve(found.host);
-      if (resolved.kind !== null) entries.set(found.host, { ...resolved, origin: "config" });
+    for (const [host, resolved] of mismatched) {
+      if (!entries.has(host)) entries.set(host, { ...resolved, origin: "config" });
     }
     for (const key of this.configs().keys()) {
       if (entries.has(key)) continue;
@@ -327,7 +329,9 @@ export class ForgeHosts {
    * which is exactly when the first window asks.
    *
    * `isEnabled` still decides, so an env allowlist that excludes the SaaS host
-   * keeps it off and unprobed like any other host the user turned off.
+   * keeps it off and unprobed like any other host the user turned off. And a
+   * SaaS host is assumed only for the product it resolves to: config or env
+   * that gives gitlab.com to GitHub leaves GitLab no gitlab.com target.
    */
   statusTargets(): ForgeProbeTarget[] {
     const targets = new Map<string, ForgeProbeTarget>();
