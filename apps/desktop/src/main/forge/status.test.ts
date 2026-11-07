@@ -1,4 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
+import { forgeBlockAt } from "@pwrgit/shared";
+import { ForgeHosts } from "./hosts";
 import {
   ForgeStatusService,
   type ForgeProbe,
@@ -439,5 +441,53 @@ describe("ForgeStatusService", () => {
     for (const call of listener.mock.calls) {
       expect(call[0]).toMatchObject([{ loggedIn: false }]);
     }
+  });
+});
+
+describe("the assumed SaaS host reaches forgeBlockAt", () => {
+  // Shrunk counterexamples from `forge-surfaces.property.test.ts`. The SaaS
+  // host was probed but not reported, so `forgeBlockAt` fell back to the
+  // forge-wide summary for it.
+  it("reports an env-switched-off SaaS host as off, not signed out", async () => {
+    const hosts = new ForgeHosts({
+      readSettings: () => ({ hosts: {} }),
+      discovered: () => [],
+      env: { PWRGIT_GITLAB_HOSTS: "t-c.corp" }
+    });
+    const [gitlab] = await new ForgeStatusService({
+      probes: [hostProbe("gitlab", [])],
+      hosts: () => hosts.statusTargets()
+    }).list();
+
+    expect(forgeBlockAt(gitlab, "gitlab.com")).toBe("host_off");
+  });
+
+  it("does not let an Enterprise sign-in pass for a signed-out github.com", async () => {
+    const [github] = await new ForgeStatusService({
+      probes: [hostProbe("github", ["ghe.acme.example"])],
+      hosts: () => [
+        host("github", "ghe.acme.example"),
+        { kind: "github", host: "github.com", enabled: true, assumed: true }
+      ]
+    }).list();
+
+    expect(github?.loggedIn).toBe(true);
+    expect(github?.hosts.map((entry) => entry.host)).toEqual(["ghe.acme.example"]);
+    expect(forgeBlockAt(github, "github.com")).toBe("signed_out");
+    expect(forgeBlockAt(github, "ghe.acme.example")).toBeNull();
+  });
+
+  it("keeps github.com off when an env allowlist leaves it out, whatever GHE holds", async () => {
+    const hosts = new ForgeHosts({
+      readSettings: () => ({ hosts: {} }),
+      discovered: () => [{ kind: "github", host: "ghe.acme.example", account: "o" }],
+      env: { PWRGIT_GITHUB_HOSTS: "ghe.acme.example" }
+    });
+    const [github] = await new ForgeStatusService({
+      probes: [hostProbe("github", ["ghe.acme.example", ANY_DEFAULT_HOST])],
+      hosts: () => hosts.statusTargets()
+    }).list();
+
+    expect(forgeBlockAt(github, "github.com")).toBe("host_off");
   });
 });

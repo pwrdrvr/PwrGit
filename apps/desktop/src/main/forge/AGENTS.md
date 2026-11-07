@@ -118,7 +118,18 @@ which forge answered. Per-forge detail: `gitlab/AGENTS.md`, `gitcafe/AGENTS.md`.
   forge-wide summary, which answered "signed out" for env-allowlisted hosts.
 - **Canonicalize with `canonicalForgeHostname` (shared), everywhere.** If the
   settings write path and host resolution differ by one byte, a setting
-  persists under a key no lookup matches.
+  persists under a key no lookup matches. Reads canonicalize too: a
+  hand-edited `www.gitlab.com` key once reached `overrides()` but not
+  `kindFor`, and a one-`www.` strip in `classifyForgeHost` missed
+  `www.www.host`.
+- **Every surface gives one answer per host.** Hosts rows, the Forges card,
+  `resolveForgeRepo`, the clone/fork dialogs and the MCP server must agree on
+  `kindFor(host)` and on "signed in at host".
+  `renderer/.../settings/forge-surfaces.property.test.ts` generates hosts,
+  sign-ins, settings and env and checks every one against `ForgeHosts`. A new
+  surface that names a product or a sign-in goes in that test.
+  - A row is `origin: "cli"` only when **its own product's** CLI reported the
+    host. A host `gh` reports that config gives to GitLab is a `config` row.
 
 ### Shared helpers
 
@@ -134,6 +145,15 @@ which forge answered. Per-forge detail: `gitlab/AGENTS.md`, `gitcafe/AGENTS.md`.
     GitHub reports a spent hourly budget as 403 or 429; GitLab uses only 429.
   - Retry *budgets* stay with the caller. So commit association can use fewer
     attempts than the branch query.
+  - `retry.property.test.ts` holds the promises for any response: no wait
+    under 1 s or over the ceiling, never undercut a Retry-After or a spent
+    reset (decline instead), and one answer for both forges but GitHub's 403.
+    It also keeps #225's harness against the pre-#225 policies
+    (`test-support/retry-pre-225.ts`): every divergence needs a named reason.
+    `retry-clients.property.test.ts` runs the same through both real clients,
+    plus #230's kept batches.
+  - `Retry-After` is whole seconds. `0.001` read as a number retried four
+    times in 5 ms.
 
 ### Failures
 
@@ -208,10 +228,12 @@ to another product's CLI.
 
 **`packages/mcp-server` is the one place neither `tsc` nor the lint helps.** It
 bundles standalone and imports nothing from `@pwrgit/shared`. It keeps its own
-`"github" | "gitlab" | "gitcafe"` union, `classifyProvider`, and literal
-`PWRGIT_{GITHUB,GITLAB}_HOSTS` names. The order differs: it tests SaaS
-hostnames before the env allowlist; `ForgeHosts.kindFor` tests env first. Add a
+`"github" | "gitlab" | "gitcafe"` union, `classifyProvider`, a copy of
+`canonicalForgeHostname`, and literal `PWRGIT_*_HOSTS` names. Its order is
+`kindFor`'s: env allowlists in `FORGE_KINDS` order, then SaaS hostnames. Add a
 new product there by hand, or its checkouts report as `other`.
+`forge-surfaces.property.test.ts` holds it to `kindFor` with no settings and no
+enumeration, so a missed product fails there.
 
 ### Why they are all records
 
@@ -291,12 +313,18 @@ change-request status:
     enumeration lands. `statusTargets()` adds each forge's SaaS host when
     nothing names it, gated by `isEnabled`.
   - Do not re-derive the summary in the renderer.
-- **An `assumed` target is probed but not reported.** The backfilled SaaS host
-  has no Hosts row, so `ForgeStatus.hosts` omits it. Reporting it would show a
-  host the user cannot switch, and `every` could never clear to "Off". It is
-  probed **without naming a host**, because `--hostname github.com` overrides
-  `GH_HOST`/`GITLAB_HOST` (see `../github/pr-client.ts`). Its credential counts
-  toward the summary.
+- **An `assumed` target is probed, and reported apart from the rows.** The
+  backfilled SaaS host has no Hosts row, so `ForgeStatus.hosts` omits it.
+  Listing it there would show a host the user cannot switch, and `every` could
+  never clear to "Off". It is `ForgeStatus.assumedHost` instead, which
+  `forgeBlockAt` reads. Without it, an env-switched-off or signed-out
+  github.com fell through to the forge-wide summary and a GHE sign-in let a
+  clone through. It is probed **without naming a host**, because
+  `--hostname github.com` overrides `GH_HOST`/`GITLAB_HOST` (see
+  `../github/pr-client.ts`). Its credential counts toward the summary.
+  - A SaaS host is assumed only for the product it resolves to.
+    `PWRGIT_GITHUB_HOSTS=gitlab.com` gives GitLab no gitlab.com target, or
+    the card says "GitLab: Connected" for a host every route sends to GitHub.
 - **Product-level answers go in the product section, not a host row.** Rows own
   per-host permission and sign-in. The section owns CLI-installed (then there
   are no rows) and `FORGE_PRODUCTS[kind].capabilities`, once at its foot. In

@@ -139,8 +139,37 @@ export class ForgeHosts {
     return this.readSettings().hosts ?? {};
   }
 
+  /** Memoized on the settings object, like `discoveredIndex`. */
+  private configIndex:
+    | { source: ForgeSettings["hosts"]; byHost: Map<string, ForgeHostConfig> }
+    | null = null;
+
+  /**
+   * Looked up by CANONICAL key, never by the stored spelling.
+   *
+   * The settings write path canonicalizes, but settings.json is read
+   * unvalidated, and `overrides()` has always canonicalized every key it
+   * reads. Indexing the raw object here meant a hand-written `www.gitlab.com`
+   * routed `gitlab.com` to the configured product in the dialogs and in
+   * `resolveForgeRepo`, while `kindFor` and the Hosts rows still said the SaaS
+   * product. Two spellings of one host: the later entry wins, as in
+   * `overrides()`.
+   */
+  private configs(): ReadonlyMap<string, ForgeHostConfig> {
+    const source = this.hostSettings();
+    if (this.configIndex?.source !== source) {
+      const byHost = new Map<string, ForgeHostConfig>();
+      for (const [key, config] of Object.entries(source)) {
+        const canonicalKey = canonical(key);
+        if (canonicalKey !== "") byHost.set(canonicalKey, config);
+      }
+      this.configIndex = { source, byHost };
+    }
+    return this.configIndex.byHost;
+  }
+
   private configFor(host: string): ForgeHostConfig | undefined {
-    return this.hostSettings()[canonical(host)];
+    return this.configs().get(canonical(host));
   }
 
   /**
@@ -250,15 +279,28 @@ export class ForgeHosts {
   list(): ForgeHostEntry[] {
     const entries = new Map<string, ForgeHostEntry>();
     for (const found of this.discovered()) {
+      const resolved = this.resolve(found.host);
+      // `cli` means THIS row's product's CLI holds an account here, which is
+      // what the row says ("signed in as …", "reported by glab") and what the
+      // card's probe asks. A host `gh` reports that config or env gives to
+      // GitLab is not one glab can read: claiming it read as signed in on the
+      // row while the GitLab card, probing glab, said signed out. Such a host
+      // is a `config` row, with glab's sign-in command. A host two CLIs report
+      // keeps the entry whose product it resolves to.
+      if (resolved.kind !== found.kind) continue;
       entries.set(found.host, {
-        ...this.resolve(found.host),
+        ...resolved,
         origin: "cli",
         ...(found.account === undefined ? {} : { account: found.account }),
         ...(found.scopes === undefined ? {} : { scopes: found.scopes })
       });
     }
-    for (const host of Object.keys(this.hostSettings())) {
-      const key = canonical(host);
+    for (const found of this.discovered()) {
+      if (entries.has(found.host)) continue;
+      const resolved = this.resolve(found.host);
+      if (resolved.kind !== null) entries.set(found.host, { ...resolved, origin: "config" });
+    }
+    for (const key of this.configs().keys()) {
       if (entries.has(key)) continue;
       const resolved = this.resolve(key);
       // A config entry that only flipped a switch on a host no CLI reports
@@ -315,13 +357,15 @@ export class ForgeHosts {
     }
     for (const kind of FORGE_KINDS) {
       const host = forgeProduct(kind).saasHost;
-      // Keyed by kind AND host. Matching on the hostname alone let a row that
-      // resolves a SaaS hostname to the *other* product — `PWRGIT_GITHUB_HOSTS`
-      // naming gitlab.com, say — suppress that product's own target, leaving it
-      // with no target at all and reported as signed out while its CLI is
-      // signed in.
       const key = `${kind} ${host}`;
       if (targets.has(key)) continue;
+      // Only while the SaaS host is still this product's. An env allowlist or a
+      // hand-added entry can give it to another product
+      // (`PWRGIT_GITHUB_HOSTS=gitlab.com`), and then no remote, dialog or MCP
+      // answer ever routes it here. Probing it anyway painted "GitLab:
+      // Connected" for a product nothing could read through, beside dialogs
+      // that called the same host GitHub.
+      if (this.kindFor(host).kind !== kind) continue;
       // `assumed`: nothing names this host, so it is probed through the CLI's
       // own default host and kept out of the reported list. See
       // `ForgeProbeTarget.assumed`.
@@ -355,11 +399,13 @@ export class ForgeHosts {
     // in the opposite order is how the resolver and the settings pane end up
     // routing the same host to two different providers.
     for (const found of this.discovered()) map[found.host] = found.kind;
-    for (const [host, config] of Object.entries(this.hostSettings())) {
-      const key = canonical(host);
+    // The canonical index `kindFor` reads, not the raw object: two spellings
+    // of one host (`github.com` and `www.github.com`) must merge the same way
+    // here as there, or the map and `kindFor` name different products.
+    for (const [key, config] of this.configs()) {
       // Guarded for the same reason as `kindFor` above: this map is what
       // `resolveForgeRepo` and the renderer's dialogs classify with.
-      if (key !== "" && isForgeKind(config.kind)) map[key] = config.kind;
+      if (isForgeKind(config.kind)) map[key] = config.kind;
     }
     // Walked in REVERSE `FORGE_KINDS` order, so the earliest member overwrites
     // the rest: `kindFor` tests the allowlists in `FORGE_KINDS` order and

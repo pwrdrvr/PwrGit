@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  classifyProvider,
   parseRemoteIdentity,
   parseRepositoryTarget,
   summarizeRemotes,
@@ -117,4 +118,30 @@ it("recognizes GitCafe and its explicit host overrides", () => {
   expect(parseRemoteIdentity("https://cafe.example/sample/demo.git", { PWRGIT_GITCAFE_HOSTS: "cafe.example" })?.provider).toBe("gitcafe");
   expect(parseRemoteIdentity("https://git.cafe/sample/demo/tree/main")).toBeNull();
   expect(parseRepositoryTarget("sample/demo", "gitcafe")?.provider).toBe("gitcafe");
+});
+
+describe("classifyProvider agrees with the app's env-only answer", () => {
+  // Shrunk counterexamples from the desktop app's
+  // `forge-surfaces.property.test.ts`, which holds this classifier to
+  // `ForgeHosts.kindFor` with no settings and no CLI enumeration.
+  it("strips every leading www. from an allowlist entry, as the app does", () => {
+    expect(classifyProvider("a0.example", { PWRGIT_GITLAB_HOSTS: "www.www.a0.example" })).toBe(
+      "gitlab"
+    );
+  });
+
+  it("reads the env allowlist before the SaaS hostnames", () => {
+    expect(classifyProvider("github.com", { PWRGIT_GITLAB_HOSTS: "github.com" })).toBe(
+      "gitlab"
+    );
+  });
+
+  it("gives a host two allowlists name to the first product, in the app's order", () => {
+    expect(
+      classifyProvider("code.acme.example", {
+        PWRGIT_GITCAFE_HOSTS: "code.acme.example",
+        PWRGIT_GITLAB_HOSTS: "code.acme.example"
+      })
+    ).toBe("gitlab");
+  });
 });

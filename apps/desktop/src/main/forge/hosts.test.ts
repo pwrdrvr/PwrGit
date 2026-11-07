@@ -361,19 +361,31 @@ describe("ForgeHosts.statusTargets", () => {
     ]);
   });
 
-  it("keys the backfill by kind as well as host", () => {
-    // A row that resolves a SaaS hostname to the OTHER product must not suppress
-    // that product's own target: matching on the hostname alone left GitLab with
-    // no target at all, reported as signed out while `glab` was signed in.
+  it("probes a SaaS host only for the product it resolves to", () => {
+    // The config says gitlab.com runs GitHub, so every gitlab.com remote,
+    // dialog and MCP answer names GitHub. An assumed GitLab target here used to
+    // paint "GitLab: Connected" for a product nothing could read through.
+    // `forge-surfaces.property.test.ts` found it as
+    // `PWRGIT_GITHUB_HOSTS=gitlab.com` with glab signed in to gitlab.com.
     const hosts = make({ hosts: { "gitlab.com": { kind: "github" } } });
 
     expect(hosts.statusTargets()).toEqual([
       { kind: "gitcafe", host: "git.cafe", enabled: true, assumed: true },
       { kind: "github", host: "github.com", enabled: true, assumed: true },
-      // The row, resolved to GitHub by the config entry …
-      { kind: "github", host: "gitlab.com", enabled: true },
-      // … and GitLab still gets a target of its own.
-      { kind: "gitlab", host: "gitlab.com", enabled: true, assumed: true }
+      { kind: "github", host: "gitlab.com", enabled: true }
+    ]);
+  });
+
+  it("lets two products keep their own SaaS targets when neither is reassigned", () => {
+    // The kind+host keying this replaced still matters: a GitHub row for one
+    // host must not suppress GitLab's SaaS target.
+    const hosts = make({ discovered: [GH("ghe.acme.example")] });
+
+    expect(hosts.statusTargets().map(({ kind, host }) => `${kind} ${host}`)).toEqual([
+      "github ghe.acme.example",
+      "gitcafe git.cafe",
+      "github github.com",
+      "gitlab gitlab.com"
     ]);
   });
 
@@ -572,5 +584,76 @@ describe("a signed-in self-managed GitLab, end to end", () => {
     expect(off.kindFor(HOST).kind).toBe("gitlab");
     expect(off.overrides()[HOST]).toBe("gitlab");
     expect(parseForgeRemote(ORIGIN, off.overrides())?.host).toBe("gitlab");
+  });
+});
+
+/**
+ * Shrunk counterexamples from `forge-surfaces.property.test.ts`, kept as named
+ * regressions. Each failed on main before the fix it names.
+ */
+describe("forge surfaces agree: shrunk counterexamples", () => {
+  it("reads a hand-written settings key under its canonical spelling", () => {
+    // `www.gitlab.com` routed gitlab.com to GitHub in `overrides()` (and so in
+    // the dialogs and `resolveForgeRepo`), while `kindFor` and the Hosts rows
+    // still said GitLab.
+    const hosts = make({ hosts: { "www.gitlab.com": { kind: "github" } } });
+
+    expect(hosts.kindFor("gitlab.com").kind).toBe("github");
+    expect(hosts.overrides()).toEqual({ "gitlab.com": "github" });
+    expect(resolveForgeRepo("https://gitlab.com/team/app.git", hosts.overrides())?.kind).toBe(
+      "github"
+    );
+  });
+
+  it("merges two spellings of one key the same way in kindFor and overrides", () => {
+    // `overrides()` kept the first entry's kind; `kindFor` read the second,
+    // which named none.
+    const hosts = make({
+      hosts: { "github.com": { kind: "gitlab" }, "www.github.com": {} }
+    });
+
+    const kind = hosts.kindFor("github.com").kind;
+    expect(kind).toBe("github");
+    expect(resolveForgeRepo("https://github.com/team/app.git", hosts.overrides())?.kind).toBe(
+      kind
+    );
+  });
+
+  it("does not call a host signed in when another product's CLI reported it", () => {
+    // gh reported the host; config gives it to GitLab. The row read
+    // "signed in as octo-dev" under GitLab while the card, probing glab, said
+    // signed out.
+    const hosts = make({
+      discovered: [GH("github.in-1.com")],
+      hosts: { "github.in-1.com": { kind: "gitlab" } }
+    });
+
+    expect(new ForgeHostsView(hosts, async () => {}).rows()).toEqual([
+      expect.objectContaining({
+        host: "github.in-1.com",
+        kind: "gitlab",
+        origin: "config",
+        cli: "glab"
+      })
+    ]);
+    expect(new ForgeHostsView(hosts, async () => {}).rows()[0]).not.toHaveProperty(
+      "account"
+    );
+  });
+
+  it("keeps the matching CLI's account when two CLIs report one host", () => {
+    const hosts = make({ discovered: [GH("code.acme.example", "octo"), GL("code.acme.example", "o.dev")] });
+
+    expect(new ForgeHostsView(hosts, async () => {}).rows()).toEqual([
+      expect.objectContaining({ kind: "gitlab", origin: "cli", account: "o.dev" })
+    ]);
+  });
+
+  it("does not probe GitLab at gitlab.com once an env allowlist gives it to GitHub", () => {
+    const hosts = make({ env: { PWRGIT_GITHUB_HOSTS: "gitlab.com" } });
+
+    expect(
+      hosts.statusTargets().filter((target) => target.host === "gitlab.com")
+    ).toEqual([{ kind: "github", host: "gitlab.com", enabled: true }]);
   });
 });

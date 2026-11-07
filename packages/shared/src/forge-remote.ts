@@ -46,7 +46,11 @@ function forgeHostStatus(
   hostname: string
 ): ForgeHostStatus | undefined {
   const key = canonicalForgeHostname(hostname) ?? hostname.trim().toLowerCase();
-  return status.hosts.find((host) => host.host === key);
+  return (
+    status.hosts.find((host) => host.host === key) ??
+    // Probed, just not a row. See `ForgeStatus.assumedHost`.
+    (status.assumedHost?.host === key ? status.assumedHost : undefined)
+  );
 }
 
 /**
@@ -215,7 +219,12 @@ export function classifyForgeHost(
   hostname: string,
   overrides: ForgeHostMap = {}
 ): ForgeHost {
-  const normalized = hostname.trim().toLowerCase().replace(/^www\./, "");
+  // The same spelling `overrides` is keyed by. A single `www.` strip here
+  // missed a host the map holds under `canonicalForgeHostname`, which strips
+  // them all, so `www.www.host` resolved in main and not in the dialogs.
+  const normalized =
+    canonicalForgeHostname(hostname) ??
+    hostname.trim().toLowerCase().replace(/^www\./, "");
   // `Object.hasOwn`, not a bare index: `overrides` is a plain object, and a
   // hostname is attacker-adjacent input straight out of a git remote. A single
   // label of `constructor` or `__proto__` — both legal intranet hostnames —

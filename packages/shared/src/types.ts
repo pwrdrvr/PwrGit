@@ -1035,6 +1035,16 @@ export type ForgeStatus = {
    * which reads as "connected, through the CLI's own default host".
    */
   hosts: ForgeHostStatus[];
+  /**
+   * The SaaS host the probe asked about although no row names it (the
+   * `assumed` target in main's `status.ts`). Kept out of `hosts` for the
+   * reasons above, but not dropped: without it `forgeBlockAt` could not find
+   * the host it was asked about and fell back to the forge-wide summary. An
+   * env allowlist that switched github.com off then let a clone through on a
+   * GHE sign-in, and a signed-out github.com read as signed in for the same
+   * reason. Absent when the CLI is missing or nothing was assumed.
+   */
+  assumedHost?: ForgeHostStatus;
 };
 
 /** Lifecycle of a change request, in the vocabulary both forges collapse into. */

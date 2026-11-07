@@ -11,17 +11,24 @@ import { clampRetryDelayMs, RETRY_DELAY_CEILING_MS } from "../util/timing";
  * window, and the shape of the error that arrives. That is all the dialect
  * table and the caller's `header` reader supply; the decision lives here.
  *
- * The order, which is the policy: an explicit `Retry-After` on any status; then
- * a rate-limit window that named its reset and says it is spent; then a 429,
- * any 5xx, or a request that never got a status, on the exponential ladder;
- * everything else is not retried.
+ * The order, which is the policy: an explicit `Retry-After` (whole seconds) on
+ * any status; then a rate-limit window that named its reset and says it is
+ * spent; then a 429, any 5xx, or a request that never got a status, on the
+ * exponential ladder; everything else is not retried.
+ *
+ * The promises, held for every generated response by `retry.property.test.ts`:
+ * no wait under one second, none past the ceiling, never undercut the server's
+ * own number (give up instead), and GitHub and GitLab answer alike except
+ * GitHub's 403 rate limit. That file also keeps #225's differential against
+ * the policies this replaced (`test-support/retry-pre-225.ts`).
  *
  * What it deliberately does NOT do, each pinned by a test so it stays a
  * decision rather than a surprise: read the HTTP-date form of `Retry-After`
  * (RFC 9110 allows it, neither client has ever parsed it); jitter the wait, so
- * concurrent callers do wake together; or wait out a window that cannot refill
- * inside the ceiling — that one declines instead, because retrying into a spent
- * hourly budget is what GitHub warns can get an integration banned.
+ * concurrent callers do wake together; or wait out a `Retry-After` or a window
+ * that cannot be outlasted inside the ceiling — those decline instead, because
+ * retrying into a spent hourly budget is what GitHub warns can get an
+ * integration banned.
  *
  * Retry *budgets* are deliberately not here either. How many attempts a call
  * may spend is the caller's to choose, and GitLab's commit association picks a
@@ -119,6 +126,24 @@ function numericHeader(
 }
 
 /**
+ * A `Retry-After` in delay-seconds, or undefined.
+ *
+ * RFC 9110 spells it as digits only. `Number()` also takes `0.001`, `1e2` and
+ * `-0`, and a proxy that sent `0.001` got four retries inside five
+ * milliseconds — the storm the absent-is-not-zero rule above exists to stop,
+ * reached by another spelling. Anything that is not whole seconds reads as
+ * absent and falls through to the window and the exponential ladder.
+ */
+function retryAfterSeconds(header: ForgeHeaderReader): number | undefined {
+  const raw = header("retry-after");
+  if (raw === null || raw === undefined) return undefined;
+  const text = String(raw).trim();
+  if (!/^\d+$/.test(text)) return undefined;
+  const value = Number(text);
+  return value > 0 ? value : undefined;
+}
+
+/**
  * One second, doubling per attempt, inside the ceiling.
  *
  * `Math.max` holds the 1-based contract on `attempt`: a caller passing its own
@@ -141,9 +166,15 @@ export function forgeRetryDelayMs({
   // An explicit Retry-After (in seconds, from both forges) outranks everything
   // else, on any status: the server has named its own number, and guessing a
   // smaller one only earns another refusal. Both spell this one the same way.
-  const retryAfter = numericHeader(header, "retry-after");
-  if (retryAfter !== undefined && retryAfter > 0) {
-    return clampRetryDelayMs(retryAfter * 1000);
+  //
+  // Never clamped down to the ceiling: a retry inside the time the server
+  // asked for is a guaranteed refusal, the same reasoning that declines a
+  // spent window below. Clamped, `Retry-After: 3600` spent the whole budget
+  // inside the hour.
+  const retryAfter = retryAfterSeconds(header);
+  if (retryAfter !== undefined) {
+    const wait = retryAfter * 1000;
+    return wait > RETRY_DELAY_CEILING_MS ? null : wait;
   }
 
   // An exhausted window says exactly when it refills.

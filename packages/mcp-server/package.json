@@ -20,7 +20,8 @@
     "./access-policy": "./src/access-policy.ts",
     "./agent-access-protocol": "./src/agent-access-protocol.ts",
     "./gh-default": "./src/gh-default.ts",
-    "./nested-worktrees": "./src/nested-worktrees.ts"
+    "./nested-worktrees": "./src/nested-worktrees.ts",
+    "./remote": "./src/remote.ts"
   },
   "scripts": {
     "build": "node ../../scripts/resource-run.mjs node ../../node_modules/typescript/lib/tsc.js -p tsconfig.build.json",

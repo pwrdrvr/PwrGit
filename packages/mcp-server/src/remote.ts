@@ -3,13 +3,35 @@ import type { ForgeProvider, RemoteIdentity, RemoteSummary } from "./types.js";
 const SCP_REMOTE = /^(?:[^@\s]+@)?([^\s:/]+):(.+?)\/?$/;
 const SAFE_SEGMENT = /^[A-Za-z0-9_][A-Za-z0-9_.-]*$/;
 
-const GITHUB_HOSTS_ENV = "PWRGIT_GITHUB_HOSTS";
-const GITLAB_HOSTS_ENV = "PWRGIT_GITLAB_HOSTS";
-const GITCAFE_HOSTS_ENV = "PWRGIT_GITCAFE_HOSTS";
+/**
+ * Each product's SaaS host and env allowlist, in the app's `FORGE_KINDS` order.
+ * The order is load-bearing: a host two allowlists name belongs to the first,
+ * as it does in `ForgeHosts.kindFor`.
+ */
+const PRODUCTS = [
+  { provider: "github", saasHost: "github.com", env: "PWRGIT_GITHUB_HOSTS" },
+  { provider: "gitlab", saasHost: "gitlab.com", env: "PWRGIT_GITLAB_HOSTS" },
+  { provider: "gitcafe", saasHost: "git.cafe", env: "PWRGIT_GITCAFE_HOSTS" }
+] as const;
 
 /**
- * Self-managed hosts named by the environment, the same two variables the
- * desktop app reads (`ForgeHosts`' env layer).
+ * The app's `canonicalForgeHostname` (`packages/shared`), which this package
+ * cannot import. Every leading `www.`, not one: the app strips them all, so a
+ * single strip here read `www.www.host` in an allowlist as a different host
+ * from the one the app resolves. Null for anything that is not a bare hostname.
+ */
+export function canonicalHostname(value: string): string | null {
+  const host = value.trim().toLowerCase().replace(/^(?:www\.)+/, "");
+  if (host === "") return null;
+  if (!/^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)*$/.test(host)) {
+    return null;
+  }
+  return host;
+}
+
+/**
+ * Self-managed hosts named by the environment, the same variables the desktop
+ * app reads (`ForgeHosts`' env layer).
  *
  * This server bundles standalone and has no settings file and no `gh`/`glab`
  * enumeration, so env is the only way a self-managed instance can be *stated*
@@ -19,14 +41,10 @@ const GITCAFE_HOSTS_ENV = "PWRGIT_GITCAFE_HOSTS";
  */
 function envProviders(env: NodeJS.ProcessEnv): ReadonlyMap<string, ForgeProvider> {
   const named = new Map<string, ForgeProvider>();
-  for (const [name, provider] of [
-    [GITHUB_HOSTS_ENV, "github"],
-    [GITLAB_HOSTS_ENV, "gitlab"],
-    [GITCAFE_HOSTS_ENV, "gitcafe"]
-  ] as const) {
+  for (const { env: name, provider } of PRODUCTS) {
     for (const entry of (env[name] ?? "").split(",")) {
-      const host = entry.trim().toLowerCase().replace(/^www\./, "");
-      if (host !== "" && !named.has(host)) named.set(host, provider);
+      const host = canonicalHostname(entry);
+      if (host !== null && !named.has(host)) named.set(host, provider);
     }
   }
   return named;
@@ -47,16 +65,23 @@ function envProviders(env: NodeJS.ProcessEnv): ReadonlyMap<string, ForgeProvider
  * is a host + path question, and `targetMatchesRemote` answers it without a
  * provider. Only the live change-request and CI lookups need to know which CLI
  * to spawn, which is what the env allowlist is for.
+ *
+ * Env first, then the SaaS hostnames — `ForgeHosts.kindFor`'s order. This
+ * server used to test the SaaS names first, so `PWRGIT_GITLAB_HOSTS=github.com`
+ * made the app and an agent name two different products for one host. The
+ * app's answer from env alone is the oracle (`forge-surfaces.property.test.ts`).
  */
 export function classifyProvider(
   host: string,
   env: NodeJS.ProcessEnv = process.env
 ): ForgeProvider {
-  const normalized = host.trim().toLowerCase().replace(/^www\./, "");
-  if (normalized === "github.com") return "github";
-  if (normalized === "gitlab.com") return "gitlab";
-  if (normalized === "git.cafe") return "gitcafe";
-  return envProviders(env).get(normalized) ?? "other";
+  const normalized = canonicalHostname(host);
+  if (normalized === null) return "other";
+  return (
+    envProviders(env).get(normalized) ??
+    PRODUCTS.find((product) => product.saasHost === normalized)?.provider ??
+    "other"
+  );
 }
 
 function normalizeProjectPath(pathname: string): string | null {
@@ -112,7 +137,8 @@ export function parseRemoteIdentity(
   if (host === null || pathname === null || host.includes("\\")) return null;
   const path = normalizeProjectPath(pathname);
   if (path === null) return null;
-  const normalizedHost = host.toLowerCase().replace(/^www\./, "");
+  const normalizedHost =
+    canonicalHostname(host) ?? host.toLowerCase().replace(/^www\./, "");
   const provider = classifyProvider(normalizedHost, env);
   if ((provider === "github" || provider === "gitcafe") && path.split("/").length !== 2) return null;
   return { provider, host: normalizedHost, path };

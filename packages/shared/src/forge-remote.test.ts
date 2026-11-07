@@ -90,6 +90,14 @@ describe("parseForgeRemote", () => {
     ).toBeNull();
   });
 
+  it("finds a mapped host under every leading www., as canonicalForgeHostname keys it", () => {
+    // Shrunk from `forge-surfaces.property.test.ts`: main resolved
+    // `www.www.github.example`, the clone and fork dialogs did not.
+    expect(
+      classifyForgeHost("www.www.github.example", { "github.example": "github" })
+    ).toBe("github");
+  });
+
   it("never reads a prototype member out of the host map", () => {
     // `overrides` is a plain object and a hostname comes straight out of a git
     // remote. A bare index returned the `Object` FUNCTION for a host literally
