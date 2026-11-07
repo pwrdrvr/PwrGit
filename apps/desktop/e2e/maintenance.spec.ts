@@ -32,10 +32,21 @@ test("collects all repositories and reviews stale local branches without touchin
   });
   const { window } = handle;
   await addRootAndExpand(window, handle, sandbox, "atlas-client");
-  await window
-    .getByRole("button", { name: "Repository maintenance…", exact: true })
-    .click();
+  const maintenance = window.getByRole("button", {
+    name: "Repository maintenance…",
+    exact: true
+  });
+  await maintenance.hover();
+  await expect(window.getByRole("tooltip")).toContainText(
+    "collect Git garbage"
+  );
+  await maintenance.click();
+  await expect(window.getByRole("tooltip")).toHaveCount(0);
   const dialog = window.getByRole("dialog", { name: "Repository maintenance" });
+  await dialog.screenshot({
+    animations: "disabled",
+    path: testInfo.outputPath("maintenance-open.png")
+  });
   await dialog.getByRole("button", { name: "Garbage collection", exact: true }).click();
   await expect(dialog.getByRole("radio", { name: /Standard/ })).toBeChecked();
   await dialog.screenshot({
@@ -109,6 +120,13 @@ test("collects all repositories and reviews stale local branches without touchin
     ""
   );
   expect(sandbox.git(repo.path, "status", "--porcelain")).toBe(dirty);
+  await dialog.getByRole("button", { name: "Close", exact: true }).click();
+  await expect(dialog).toHaveCount(0);
+  await window.screenshot({
+    animations: "disabled",
+    path: testInfo.outputPath("maintenance-closed.png")
+  });
+  await expect(window.getByRole("tooltip")).toHaveCount(0);
 });
 
 for (const [width, height] of [

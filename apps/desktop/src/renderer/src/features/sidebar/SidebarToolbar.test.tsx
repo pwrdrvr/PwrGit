@@ -2,6 +2,7 @@
 
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
+import fc from "fast-check";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { BulkSyncSummary } from "@pwrgit/shared";
 import { SidebarToolbar, addMenuReasons, lastRunHint, syncFace } from "./SidebarToolbar";
@@ -119,6 +120,37 @@ describe("SidebarToolbar", () => {
     act(() => button("Repository maintenance…").click());
     expect(h.onSync).toHaveBeenCalledTimes(1);
     expect(h.onMaintenance).toHaveBeenCalledTimes(1);
+  });
+
+  // Lifecycle property: every maintenance activation consumes the toolbar's
+  // hover surface. The dialog it opens can later complete, close, or rerender
+  // without reviving a tooltip from the button that launched it.
+  it("never leaves a maintenance hover tooltip after activation", async () => {
+    const h = render({ hasProfile: true, rootCount: 1, repoCount: 3 });
+    const maintenance = button("Repository maintenance…");
+    await fc.assert(
+      fc.asyncProperty(fc.integer({ min: 1, max: 4 }), async (activations) => {
+        h.onMaintenance.mockClear();
+        for (let activation = 0; activation < activations; activation++) {
+          await act(async () => {
+            maintenance.dispatchEvent(new MouseEvent("mouseover", { bubbles: true }));
+          });
+          expect(document.querySelector('[role="tooltip"]')?.textContent).toContain(
+            "Repository maintenance…"
+          );
+
+          await act(async () => maintenance.click());
+          // The modal takes focus, then restores it to its trigger on close.
+          // That restoration must not replay this activation's hover card.
+          await act(async () => {
+            maintenance.blur();
+            maintenance.focus();
+          });
+          expect(document.querySelector('[role="tooltip"]')).toBeNull();
+        }
+        expect(h.onMaintenance).toHaveBeenCalledTimes(activations);
+      })
+    );
   });
 
   it("disables the sync button while there is no repository", () => {
