@@ -1,4 +1,4 @@
-import { Menu, type MenuItemConstructorOptions } from "electron";
+import { BrowserWindow, Menu, type MenuItemConstructorOptions } from "electron";
 import { PWRGIT_LINKS, type Profile } from "@pwrgit/shared";
 
 /**
@@ -21,15 +21,15 @@ export type AppMenuOptions = {
   openProfileIds: string[];
   onOpenProfile: (profileId: string) => void;
   onNewProfile: () => void;
-  onManageProfiles: () => void;
-  onAbout: () => void;
+  onManageProfiles: (opener: BrowserWindow | null) => void;
+  onAbout: (opener: BrowserWindow | null) => void;
   onCheckForUpdates: () => void;
-  onOpenSettings: () => void;
-  onOpenLogs: () => void;
-  onOpenChangelog: () => void;
-  onOpenLicense: () => void;
-  onOpenThirdPartyNotices: () => void;
-  onCopyDiagnostics: () => void;
+  onOpenSettings: (opener: BrowserWindow | null) => void;
+  onOpenLogs: (opener: BrowserWindow | null) => void;
+  onOpenChangelog: (opener: BrowserWindow | null) => void;
+  onOpenLicense: (opener: BrowserWindow | null) => void;
+  onOpenThirdPartyNotices: (opener: BrowserWindow | null) => void;
+  onCopyDiagnostics: (opener: BrowserWindow | null) => void;
   onOpenExternalLink: (label: string, url: string) => void;
   onReplayOnboarding: () => void;
   /** Settings → Troubleshooting → Developer Mode: expose Force Reload and Toggle
@@ -65,6 +65,19 @@ function profileLabels(profiles: Profile[]): Map<string, string> {
   );
 }
 
+/** Inspector evaluation can invoke a menu click inside a synchronous SQLite
+ * call (including better-sqlite3's internal JS row builder). Dispatch from
+ * a fresh task so an action's database reads cannot re-enter that connection.
+ * A promise/microtask can still run before the native call has unwound. */
+function dispatchMenuAction(action: (opener: BrowserWindow | null) => void): () => void {
+  return () => {
+    // Preserve the gesture's sender before focus can move (or disappear)
+    // between the native menu dispatch and the action's fresh task.
+    const opener = BrowserWindow.getFocusedWindow();
+    setImmediate(() => action(opener));
+  };
+}
+
 export function buildAppMenuTemplate(
   opts: AppMenuOptions,
   platform: NodeJS.Platform
@@ -76,15 +89,15 @@ export function buildAppMenuTemplate(
   const settingsItem: MenuItemConstructorOptions = {
     label: "Settings…",
     accelerator: "CmdOrCtrl+,",
-    click: () => opts.onOpenSettings()
+    click: dispatchMenuAction(opener => opts.onOpenSettings(opener))
   };
   const aboutItem: MenuItemConstructorOptions = {
     label: "About PwrGit",
-    click: () => opts.onAbout()
+    click: dispatchMenuAction(opener => opts.onAbout(opener))
   };
   const checkForUpdatesItem: MenuItemConstructorOptions = {
     label: "Check for Updates…",
-    click: () => opts.onCheckForUpdates()
+    click: dispatchMenuAction(() => opts.onCheckForUpdates())
   };
   const link = (
     label: string,
@@ -92,7 +105,7 @@ export function buildAppMenuTemplate(
     reportedAs: string = label
   ): MenuItemConstructorOptions => ({
     label,
-    click: () => opts.onOpenExternalLink(reportedAs, url)
+    click: dispatchMenuAction(() => opts.onOpenExternalLink(reportedAs, url))
   });
 
   const appMenu: MenuItemConstructorOptions = {
@@ -161,12 +174,18 @@ export function buildAppMenuTemplate(
           type: "checkbox",
           checked: p.id === opts.currentProfileId,
           ...(i < 9 ? { accelerator: `CmdOrCtrl+${i + 1}` } : {}),
-          click: () => opts.onOpenProfile(p.id)
+          click: dispatchMenuAction(() => opts.onOpenProfile(p.id))
         })
       ),
       ...(menuProfiles.length > 0 ? [separator] : []),
-      { label: "New Profile…", click: () => opts.onNewProfile() },
-      { label: "Manage Profiles…", click: () => opts.onManageProfiles() }
+      {
+        label: "New Profile…",
+        click: dispatchMenuAction(() => opts.onNewProfile())
+      },
+      {
+        label: "Manage Profiles…",
+        click: dispatchMenuAction(opener => opts.onManageProfiles(opener))
+      }
     ]
   };
 
@@ -180,7 +199,7 @@ export function buildAppMenuTemplate(
       label: labels.get(id) ?? id,
       type: "checkbox",
       checked: id === opts.currentProfileId,
-      click: () => opts.onOpenProfile(id)
+      click: dispatchMenuAction(() => opts.onOpenProfile(id))
     }));
   const windowMenu: MenuItemConstructorOptions = isMac
     ? { role: "windowMenu" }
@@ -200,10 +219,13 @@ export function buildAppMenuTemplate(
     submenu: [
       // Learn
       link("PwrGit Documentation", PWRGIT_LINKS.documentation),
-      { label: "Changelog", click: () => opts.onOpenChangelog() },
+      {
+        label: "Changelog",
+        click: dispatchMenuAction(opener => opts.onOpenChangelog(opener))
+      },
       {
         label: "Replay Onboarding…",
-        click: () => opts.onReplayOnboarding()
+        click: dispatchMenuAction(() => opts.onReplayOnboarding())
       },
       separator,
       // Get help. Logs is the escape hatch when something fails without
@@ -217,19 +239,19 @@ export function buildAppMenuTemplate(
       ),
       {
         label: "Copy Diagnostics Info",
-        click: () => opts.onCopyDiagnostics()
+        click: dispatchMenuAction(opener => opts.onCopyDiagnostics(opener))
       },
-      { label: "Logs", click: () => opts.onOpenLogs() },
+      { label: "Logs", click: dispatchMenuAction(opener => opts.onOpenLogs(opener)) },
       separator,
       // Project
       link("PwrGit Website", PWRGIT_LINKS.website),
       link("View Source", PWRGIT_LINKS.source, "PwrGit Source"),
       separator,
       // Legal
-      { label: "View License", click: () => opts.onOpenLicense() },
+      { label: "View License", click: dispatchMenuAction(opener => opts.onOpenLicense(opener)) },
       {
         label: "Third-Party Notices",
-        click: () => opts.onOpenThirdPartyNotices()
+        click: dispatchMenuAction(opener => opts.onOpenThirdPartyNotices(opener))
       },
       ...(isMac ? [] : [separator, checkForUpdatesItem, aboutItem])
     ]

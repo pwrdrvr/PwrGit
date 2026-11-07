@@ -37,10 +37,20 @@ describe("ghRequest (property)", () => {
           expect(result).toEqual({
             status: value.status,
             headers: Object.fromEntries(value.headers.map(({ name, value: v }) => [name.toLowerCase(), v])),
-            body: value.body,
+            // JSON serializes -0 as 0, including inside arrays/objects.
+            // The wire representation is the oracle, not the original JS.
+            body: JSON.parse(JSON.stringify(value.body)),
           });
         },
       ),
     );
+  });
+
+  it("reads negative zero as the zero transmitted by JSON", async () => {
+    const value = { status: 200, protocol: "HTTP/1.1", headers: [], body: { "": -0 }, pretty: false };
+    const result = await ghRequest("path", {
+      execute: async () => ({ stdout: render(value, "\n", "") }),
+    });
+    expect(result.body).toEqual({ "": 0 });
   });
 });

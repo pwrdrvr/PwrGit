@@ -1,0 +1,141 @@
+import Database from "better-sqlite3";
+import fc from "fast-check";
+import type { BrowserWindow, MenuItemConstructorOptions } from "electron";
+import { expect, test, vi } from "vitest";
+
+const electronMock = vi.hoisted(() => ({ getFocusedWindow: vi.fn() }));
+vi.mock("electron", () => ({ Menu: {}, BrowserWindow: electronMock }));
+
+const { buildAppMenuTemplate } = await import("./menu");
+
+const labels = [
+  "Settings…",
+  "About PwrGit",
+  "Check for Updates…",
+  "Personal",
+  "New Profile…",
+  "Manage Profiles…",
+  "Changelog",
+  "Replay Onboarding…",
+  "Copy Diagnostics Info",
+  "Logs",
+  "View License",
+  "Third-Party Notices",
+  "PwrGit Documentation"
+] as const;
+type Label = (typeof labels)[number];
+type Click = { label: Label; interrupt: boolean; focused: boolean };
+const borrowsPalette = new Set<Label>([
+  "Settings…", "About PwrGit", "Manage Profiles…", "Changelog",
+  "Copy Diagnostics Info", "Logs", "View License", "Third-Party Notices"
+]);
+
+// Model: menu gestures enter a FIFO queue. Each action runs exactly once,
+// after the interrupted statement has returned, whether the gesture arrived
+// normally or through inspector evaluation in the middle of a SQLite call.
+async function checkDispatch(
+  clicks: Click[],
+  platform: NodeJS.Platform
+): Promise<void> {
+  const db = new Database(":memory:");
+  const actual: string[] = [];
+  const actualOpeners: Array<{ label: Label; id: number | null }> = [];
+  const errors: unknown[] = [];
+  const action = (label: Label) => () => {
+    try {
+      expect(db.prepare("SELECT 42 AS value").get()).toEqual({ value: 42 });
+      actual.push(label);
+    } catch (error) {
+      errors.push(error);
+    }
+  };
+  const borrow = (label: Label) => (opener?: BrowserWindow | null) => {
+    actualOpeners.push({ label, id: opener?.id ?? null });
+    action(label)();
+  };
+  const template = buildAppMenuTemplate({
+    profiles: [{
+      id: "personal",
+      name: "Personal",
+      email: "me@example.com",
+      mono: "P",
+      roots: [],
+      onboardingCompleted: true,
+      showInMenu: true
+    }],
+    currentProfileId: "personal",
+    openProfileIds: ["personal"],
+    developerMode: false,
+    onOpenSettings: borrow("Settings…"),
+    onAbout: borrow("About PwrGit"),
+    onCheckForUpdates: action("Check for Updates…"),
+    onOpenProfile: action("Personal"),
+    onNewProfile: action("New Profile…"),
+    onManageProfiles: borrow("Manage Profiles…"),
+    onOpenChangelog: borrow("Changelog"),
+    onReplayOnboarding: action("Replay Onboarding…"),
+    onCopyDiagnostics: borrow("Copy Diagnostics Info"),
+    onOpenLogs: borrow("Logs"),
+    onOpenLicense: borrow("View License"),
+    onOpenThirdPartyNotices: borrow("Third-Party Notices"),
+    onOpenExternalLink: action("PwrGit Documentation")
+  }, platform);
+  const items = template.flatMap(menu =>
+    (menu.submenu as MenuItemConstructorOptions[] | undefined) ?? []
+  );
+  const click = (label: Label) => {
+    const item = items.find(item => item.label === label);
+    expect(item?.click).toBeTypeOf("function");
+    if (item?.click === undefined) throw new Error(`Missing menu action: ${label}`);
+    (item.click as () => void)();
+  };
+  // A real SQLite callback supplies the same busy-connection boundary as
+  // inspector evaluation, deterministically, without debugger timing/load.
+  db.function("interrupt", (index: number) => {
+    click(clicks[index]!.label);
+    return index;
+  });
+  try {
+    clicks.forEach(({ label, interrupt, focused }, index) => {
+      electronMock.getFocusedWindow.mockReturnValue(focused ? { id: index } : null);
+      if (interrupt) {
+        expect(db.prepare("SELECT interrupt(?) AS value").get(index)).toEqual({
+          value: index
+        });
+      } else {
+        click(label);
+      }
+    });
+    // Focus can move or disappear before queued actions run. The menu must
+    // retain the window that sent each gesture, as a native click does.
+    electronMock.getFocusedWindow.mockReturnValue({ id: clicks.length });
+    await new Promise<void>(resolve => setImmediate(resolve));
+    expect(errors).toEqual([]);
+    expect(actual).toEqual(clicks.map(click => click.label));
+    expect(actualOpeners).toEqual(clicks.flatMap(({ label, focused }, index) =>
+      borrowsPalette.has(label) ? [{ label, id: focused ? index : null }] : []
+    ));
+  } finally {
+    db.close();
+  }
+}
+
+test("menu actions follow the dispatch model across SQLite interruptions", async () => {
+  await fc.assert(fc.asyncProperty(
+    fc.array(
+      fc.record({
+        label: fc.constantFrom(...labels),
+        interrupt: fc.boolean(),
+        focused: fc.boolean()
+      }),
+      { minLength: 1, maxLength: 30 }
+    ),
+    fc.constantFrom("darwin", "linux", "win32"),
+    checkDispatch
+  ));
+});
+
+test("Settings clicked inside a query waits until the query returns", async () => {
+  await checkDispatch([{ label: "Settings…", interrupt: true, focused: true }], "darwin");
+  await checkDispatch([{ label: "Settings…", interrupt: true, focused: false }], "darwin");
+});
