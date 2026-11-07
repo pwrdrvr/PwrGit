@@ -45,8 +45,8 @@ export function exactNameTier(
   path: string,
   wanted: string
 ): -1 | 0 | null {
-  const [own, folder] = searchOwnNames(kind, name, path);
-  if (searchNameKey(own ?? "") === wanted) return kind === "repo" ? -1 : 0;
+  if (searchNameKey(name) === wanted) return kind === "repo" ? -1 : 0;
+  const [, folder] = searchOwnNames(kind, name, path);
   return folder !== undefined && searchNameKey(folder) === wanted ? 0 : null;
 }
 

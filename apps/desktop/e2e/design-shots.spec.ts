@@ -300,8 +300,12 @@ test("the ⌘K palette for a repository's name, on contrived repositories", asyn
     const panel = window.locator(".overlay-panel");
     await panel.waitFor();
     await window.locator(".overlay-search input").fill(query);
-    // Files are debounced 120ms behind the repository search.
-    await window.waitForTimeout(800);
+    // Files are debounced 120ms behind the repository search; wait for the
+    // last group to land, then for the status chips to settle.
+    await window
+      .locator(".overlay-result", { hasText: "orbit-console-notes.md" })
+      .waitFor();
+    await window.waitForTimeout(300);
     await panel.screenshot({ path: join(OUT, shot) });
     await window.keyboard.press("Escape");
     await panel.waitFor({ state: "hidden" });
