@@ -80,9 +80,10 @@ const flatten = (items: MenuItemConstructorOptions[]): string[] =>
     item.type === "separator" ? "---" : (item.label ?? `role:${item.role}`)
   );
 
-const click = (item: MenuItemConstructorOptions | undefined): void => {
+const click = async (item: MenuItemConstructorOptions | undefined): Promise<void> => {
   expect(item).toBeDefined();
   (item?.click as (() => void) | undefined)?.();
+  await new Promise<void>(resolve => setImmediate(resolve));
 };
 
 const find = (
@@ -179,7 +180,7 @@ describe("application menu — PwrSuite menu standard", () => {
     }
   });
 
-  it("routes About, updates, changelog, diagnostics and onboarding to their actions", () => {
+  it("routes About, updates, changelog, diagnostics and onboarding to their actions", async () => {
     for (const platform of ["darwin", "linux"] as const) {
       const opts = options();
       const help = submenuOf(platform, "role:help", opts);
@@ -187,14 +188,14 @@ describe("application menu — PwrSuite menu standard", () => {
         platform === "darwin"
           ? submenuOf(platform, "role:appMenu", opts)
           : help;
-      click(find(about, "About PwrGit"));
-      click(find(about, "Check for Updates…"));
-      click(find(help, "Changelog"));
-      click(find(help, "Copy Diagnostics Info"));
-      click(find(help, "Replay Onboarding…"));
-      click(find(help, "Logs"));
-      click(find(help, "View License"));
-      click(find(help, "Third-Party Notices"));
+      await click(find(about, "About PwrGit"));
+      await click(find(about, "Check for Updates…"));
+      await click(find(help, "Changelog"));
+      await click(find(help, "Copy Diagnostics Info"));
+      await click(find(help, "Replay Onboarding…"));
+      await click(find(help, "Logs"));
+      await click(find(help, "View License"));
+      await click(find(help, "Third-Party Notices"));
       expect(opts.onAbout).toHaveBeenCalledOnce();
       expect(opts.onCheckForUpdates).toHaveBeenCalledOnce();
       expect(opts.onOpenChangelog).toHaveBeenCalledOnce();
@@ -206,7 +207,7 @@ describe("application menu — PwrSuite menu standard", () => {
     }
   });
 
-  it("opens canonical product and reporting links from Help", () => {
+  it("opens canonical product and reporting links from Help", async () => {
     const opts = options();
     const help = submenuOf("darwin", "role:help", opts);
     const expected = [
@@ -220,7 +221,7 @@ describe("application menu — PwrSuite menu standard", () => {
       ["PwrGit Website", "PwrGit Website", PWRGIT_LINKS.website],
       ["View Source", "PwrGit Source", PWRGIT_LINKS.source]
     ] as const;
-    for (const [menuLabel] of expected) click(find(help, menuLabel));
+    for (const [menuLabel] of expected) await click(find(help, menuLabel));
     expect(vi.mocked(opts.onOpenExternalLink).mock.calls).toEqual(
       expected.map(([, reportedAs, url]) => [reportedAs, url])
     );
@@ -267,7 +268,7 @@ describe("Profiles menu", () => {
     profile("scratch-2", "Scratch 2", { showInMenu: false })
   ];
 
-  it("lists only shown profiles, numbering shortcuts over the ones it shows", () => {
+  it("lists only shown profiles, numbering shortcuts over the ones it shows", async () => {
     const opts = options({ profiles, currentProfileId: "work-a" });
     const menu = submenuOf("darwin", "Profiles", opts);
     expect(flatten(menu)).toEqual([
@@ -288,7 +289,7 @@ describe("Profiles menu", () => {
       true,
       false
     ]);
-    click(find(menu, "Work (b@example.com)"));
+    await click(find(menu, "Work (b@example.com)"));
     expect(opts.onOpenProfile).toHaveBeenCalledWith("work-b");
   });
 
@@ -304,20 +305,20 @@ describe("Profiles menu", () => {
     ]);
   });
 
-  it("keeps New and Manage when every profile is hidden", () => {
+  it("keeps New and Manage when every profile is hidden", async () => {
     const hidden = profiles.map((p) => ({ ...p, showInMenu: false }));
     const opts = options({ profiles: hidden });
     const menu = submenuOf("linux", "Profiles", opts);
     expect(flatten(menu)).toEqual(["New Profile…", "Manage Profiles…"]);
-    click(find(menu, "New Profile…"));
-    click(find(menu, "Manage Profiles…"));
+    await click(find(menu, "New Profile…"));
+    await click(find(menu, "Manage Profiles…"));
     expect(opts.onNewProfile).toHaveBeenCalledOnce();
     expect(opts.onManageProfiles).toHaveBeenCalledOnce();
   });
 });
 
 describe("Window menu off macOS", () => {
-  it("lists open profile windows, hidden profiles included, checking the focused one", () => {
+  it("lists open profile windows, hidden profiles included, checking the focused one", async () => {
     const opts = options({
       profiles: [
         profile("personal", "Personal"),
@@ -334,7 +335,7 @@ describe("Window menu off macOS", () => {
       "Scratch"
     ]);
     expect(find(menu, "Scratch")?.checked).toBe(true);
-    click(find(menu, "Personal"));
+    await click(find(menu, "Personal"));
     expect(opts.onOpenProfile).toHaveBeenCalledWith("personal");
   });
 

@@ -65,6 +65,16 @@ function profileLabels(profiles: Profile[]): Map<string, string> {
   );
 }
 
+/** Inspector evaluation can invoke a menu click inside a synchronous SQLite
+ * call (including better-sqlite3's internal JS row builder). Dispatch from
+ * a fresh task so an action's database reads cannot re-enter that connection.
+ * A promise/microtask can still run before the native call has unwound. */
+function dispatchMenuAction(action: () => void): () => void {
+  return () => {
+    setImmediate(action);
+  };
+}
+
 export function buildAppMenuTemplate(
   opts: AppMenuOptions,
   platform: NodeJS.Platform
@@ -76,15 +86,15 @@ export function buildAppMenuTemplate(
   const settingsItem: MenuItemConstructorOptions = {
     label: "Settings…",
     accelerator: "CmdOrCtrl+,",
-    click: () => opts.onOpenSettings()
+    click: dispatchMenuAction(() => opts.onOpenSettings())
   };
   const aboutItem: MenuItemConstructorOptions = {
     label: "About PwrGit",
-    click: () => opts.onAbout()
+    click: dispatchMenuAction(() => opts.onAbout())
   };
   const checkForUpdatesItem: MenuItemConstructorOptions = {
     label: "Check for Updates…",
-    click: () => opts.onCheckForUpdates()
+    click: dispatchMenuAction(() => opts.onCheckForUpdates())
   };
   const link = (
     label: string,
@@ -92,7 +102,7 @@ export function buildAppMenuTemplate(
     reportedAs: string = label
   ): MenuItemConstructorOptions => ({
     label,
-    click: () => opts.onOpenExternalLink(reportedAs, url)
+    click: dispatchMenuAction(() => opts.onOpenExternalLink(reportedAs, url))
   });
 
   const appMenu: MenuItemConstructorOptions = {
@@ -161,12 +171,18 @@ export function buildAppMenuTemplate(
           type: "checkbox",
           checked: p.id === opts.currentProfileId,
           ...(i < 9 ? { accelerator: `CmdOrCtrl+${i + 1}` } : {}),
-          click: () => opts.onOpenProfile(p.id)
+          click: dispatchMenuAction(() => opts.onOpenProfile(p.id))
         })
       ),
       ...(menuProfiles.length > 0 ? [separator] : []),
-      { label: "New Profile…", click: () => opts.onNewProfile() },
-      { label: "Manage Profiles…", click: () => opts.onManageProfiles() }
+      {
+        label: "New Profile…",
+        click: dispatchMenuAction(() => opts.onNewProfile())
+      },
+      {
+        label: "Manage Profiles…",
+        click: dispatchMenuAction(() => opts.onManageProfiles())
+      }
     ]
   };
 
@@ -180,7 +196,7 @@ export function buildAppMenuTemplate(
       label: labels.get(id) ?? id,
       type: "checkbox",
       checked: id === opts.currentProfileId,
-      click: () => opts.onOpenProfile(id)
+      click: dispatchMenuAction(() => opts.onOpenProfile(id))
     }));
   const windowMenu: MenuItemConstructorOptions = isMac
     ? { role: "windowMenu" }
@@ -200,10 +216,13 @@ export function buildAppMenuTemplate(
     submenu: [
       // Learn
       link("PwrGit Documentation", PWRGIT_LINKS.documentation),
-      { label: "Changelog", click: () => opts.onOpenChangelog() },
+      {
+        label: "Changelog",
+        click: dispatchMenuAction(() => opts.onOpenChangelog())
+      },
       {
         label: "Replay Onboarding…",
-        click: () => opts.onReplayOnboarding()
+        click: dispatchMenuAction(() => opts.onReplayOnboarding())
       },
       separator,
       // Get help. Logs is the escape hatch when something fails without
@@ -217,19 +236,19 @@ export function buildAppMenuTemplate(
       ),
       {
         label: "Copy Diagnostics Info",
-        click: () => opts.onCopyDiagnostics()
+        click: dispatchMenuAction(() => opts.onCopyDiagnostics())
       },
-      { label: "Logs", click: () => opts.onOpenLogs() },
+      { label: "Logs", click: dispatchMenuAction(() => opts.onOpenLogs()) },
       separator,
       // Project
       link("PwrGit Website", PWRGIT_LINKS.website),
       link("View Source", PWRGIT_LINKS.source, "PwrGit Source"),
       separator,
       // Legal
-      { label: "View License", click: () => opts.onOpenLicense() },
+      { label: "View License", click: dispatchMenuAction(() => opts.onOpenLicense()) },
       {
         label: "Third-Party Notices",
-        click: () => opts.onOpenThirdPartyNotices()
+        click: dispatchMenuAction(() => opts.onOpenThirdPartyNotices())
       },
       ...(isMac ? [] : [separator, checkForUpdatesItem, aboutItem])
     ]
