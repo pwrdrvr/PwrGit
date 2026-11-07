@@ -275,6 +275,23 @@ finished one; `maintenance-attach.ts` is the one way to use it.
   the running step reattaches on its own tab. The Worktrees pruner runs
   `prune:*`, not `maintenance:run`, and does not reattach.
 
+## Clones is Combined's step 4, and the offer runs it alone
+
+Combined runs Repair → Worktrees → Local branches → Clones → Garbage
+collection (`STEP_ORDER`). Clones comes after the cleanup steps, so no time
+goes into a worktree about to be removed, and before GC, which packs what
+its main-checkout fetch brought in.
+
+- **The step follows the Git in use** (`git:reflinkSupport`). Unable to
+  re-share, it is unchecked and disabled, never hidden, and `runPlan` drops
+  it. Start waits for the answer while Clones is planned.
+- **The offer toast is raised once per profile** (`useClonesOffer`, 2 min
+  after the window opens; main decides, see `main/git/AGENTS.md`). Share files
+  opens the dialog with `CLONES_ONLY_PLAN` and `autoStart`; a dialog already
+  open is left alone, because remounting it cancels its run.
+
+Design: `design/Clones in Maintenance - UX Review.dc.html`.
+
 ## The sidebar footer holds the profile's AI switch
 
 `.sidebar__footer` sits under `.sidebar__list` and carries `AiFeaturesSwitch`.

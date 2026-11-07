@@ -1,0 +1,459 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <script src="./support.js"></script>
+  </head>
+  <body>
+    <x-dc>
+      <helmet data-dc-atomics>
+        <meta name="design_doc_mode" content="canvas" />
+        <link href="https://fonts.googleapis.com/css2?family=Geist:wght@400..700&amp;family=Geist+Mono:wght@400..700&amp;display=swap" rel="stylesheet" />
+        <style>
+          :root {
+            --rv-bg: #050505; --rv-line: rgba(247, 243, 235, 0.1);
+            --rv-t1: #f7f3eb; --rv-t2: #b8b0a5; --rv-t3: #8c857a; --rv-tsub: rgba(247, 243, 235, 0.54);
+            --rv-acc: #ff8a1f; --rv-accb: #ffb35c; --rv-accon: #160a00;
+            --rv-bad: #b94232; --rv-ok: #5fa969;
+            --font-sans: "Geist", "SF Pro Text", "Inter", system-ui, sans-serif;
+            --font-mono: "Geist Mono", "SF Mono", "JetBrains Mono", Consolas, monospace;
+          }
+          *, *::before, *::after { box-sizing: border-box; }
+          html { background: var(--rv-bg); }
+          body { margin: 0; background: var(--rv-bg); font-family: var(--font-sans); }
+          a { color: var(--rv-accb); text-decoration: none; } a:hover { color: var(--rv-acc); }
+
+          /* ---- review chrome (house convention) ---- */
+          .dv-turn { padding: 40px 44px 32px; background: var(--rv-bg); border-bottom: 1px solid var(--rv-line); }
+          .dv-thd { display: flex; align-items: baseline; gap: 10px; margin: 0 0 6px; }
+          .dv-tid { font: 600 10px var(--font-mono); padding: 3px 7px; background: var(--rv-t1); color: var(--rv-bg); border-radius: 4px; text-decoration: none; }
+          .dv-tname { font: 600 13px/1.2 var(--font-sans); color: var(--rv-t1); }
+          .dv-sub { margin: 0 0 22px; font: 400 11.5px/1.5 var(--font-sans); color: var(--rv-t3); max-width: 860px; text-wrap: pretty; }
+          .dv-sub b { color: var(--rv-t2); font-weight: 600; }
+          .dv-sub code, .note code, .fitem code, .tr code { font: 500 10px/1.4 var(--font-mono); color: var(--rv-t2); }
+          .dv-opts { display: flex; flex-wrap: wrap; gap: 28px; align-items: flex-start; }
+          .dv-opt { flex: none; display: flex; flex-direction: column; gap: 9px; scroll-margin-top: 16px; }
+          .dv-oid { font: 600 10.5px var(--font-mono); padding: 3px 7px; background: rgba(247, 243, 235, 0.08); color: var(--rv-t1); border-radius: 5px; text-decoration: none; }
+          .dv-opt:target .dv-oid { background: var(--rv-acc); color: var(--rv-accon); }
+          .dv-olabel { display: flex; align-items: baseline; gap: 8px; font: 400 11px/1.3 var(--font-sans); color: var(--rv-tsub); max-width: 860px; }
+          .dv-olabel b { color: var(--rv-accb); font-weight: 600; }
+          .note { margin: 0; font: 400 10.5px/1.5 var(--font-sans); color: var(--rv-t3); text-wrap: pretty; max-width: 860px; }
+          .note b { color: var(--rv-t2); font-weight: 600; }
+
+          /* ---- pins + findings ---- */
+          .pin { display: inline-flex; align-items: center; justify-content: center; flex: none; width: 15px; height: 15px; border-radius: 999px; background: var(--rv-bad); color: #fff; font: 700 9px/1 var(--font-mono); }
+          .find { width: 560px; display: flex; flex-direction: column; gap: 14px; padding: 16px; border: 1px solid var(--rv-line); border-radius: 9px; background: #0a0a0a; }
+          .fitem { display: grid; grid-template-columns: 15px minmax(0, 1fr); gap: 9px; align-items: start; }
+          .fitem h4 { margin: 0 0 3px; font: 650 11.5px/1.3 var(--font-sans); color: var(--rv-t1); }
+          .fitem p { margin: 0; font: 400 10.5px/1.5 var(--font-sans); color: var(--rv-t3); text-wrap: pretty; }
+          .fitem b { color: var(--rv-t2); font-weight: 600; }
+
+          /* ---- tables ---- */
+          .tbl { border: 1px solid var(--rv-line); border-radius: 9px; background: #0a0a0a; overflow: hidden; }
+          .tr { display: grid; grid-template-columns: 150px minmax(0, 1fr) 200px; gap: 12px; align-items: start; padding: 8px 12px; border-bottom: 1px solid var(--rv-line); font: 500 10.5px/1.45 var(--font-sans); color: var(--rv-t2); }
+          .tr.five { grid-template-columns: 120px repeat(4, minmax(0, 1fr)); }
+          .tr.build { grid-template-columns: 210px minmax(0, 1fr); }
+          .tr:last-child { border-bottom: 0; }
+          .tr.head { font: 600 9.5px/1.3 var(--font-sans); letter-spacing: 0.04em; text-transform: uppercase; color: var(--rv-t3); background: rgba(247, 243, 235, 0.03); }
+          .tr b { color: var(--rv-t1); font-weight: 600; }
+          .tr .bad { color: #ffb0a1; }
+
+          /* ---- theme scope: the app's own light tokens (tokens.css) ---- */
+          .th-light {
+            --bg-stage: #efe9df; --bg-panel: #fdfcfa; --bg-menu: #ffffff; --bg-panel-elevated: #ffffff; --bg-input: #ffffff;
+            --bg-panel-hover: #f4f0e8; --bg-row-active: #fff5e9;
+            --border-faint: rgba(0, 0, 0, 0.05); --border-subtle: rgba(0, 0, 0, 0.08); --border-default: rgba(0, 0, 0, 0.12); --border-strong: rgba(0, 0, 0, 0.18);
+            --text-primary: #1a1612; --text-secondary: #524a40; --text-muted: #736c64; --text-subtle: rgba(26, 22, 18, 0.68);
+            --accent: #b74c00; --accent-bright: #994c00; --accent-on: #ffffff;
+            --success-text: #1a5c2e; --success-soft: rgba(46, 110, 64, 0.14);
+            --danger-text: #8a1f12; --danger-base: #8a1f12; --danger-soft: rgba(138, 31, 18, 0.12); --danger-border: rgba(138, 31, 18, 0.28);
+            --status-ok: #2e7d3c; --status-warning: #805200;
+            --shadow-overlay: 0 24px 60px rgba(40, 28, 12, 0.18);
+            --accent-soft: color-mix(in srgb, var(--accent) 12%, transparent);
+            --accent-tint: color-mix(in srgb, var(--accent) 8%, transparent);
+            --accent-border: color-mix(in srgb, var(--accent) 42%, transparent);
+          }
+          .stage { position: relative; padding: 22px; border-radius: 10px; background: var(--bg-stage); }
+
+          /* ============================================================
+             Maintenance dialog, true size from app.css
+             ============================================================ */
+          .bs { width: 820px; display: flex; flex-direction: column; overflow: hidden; background: var(--bg-menu); border: 1px solid var(--border-strong); border-radius: 14px; box-shadow: var(--shadow-overlay); }
+          .bs-head { display: flex; align-items: flex-start; gap: 18px; padding: 18px; border-bottom: 1px solid var(--border-subtle); }
+          .bs-head > div { flex: 1; min-width: 0; }
+          .bs-head h2 { margin: 0; color: var(--text-primary); font: 700 14px/1.2 var(--font-sans); }
+          .bs-head p { margin: 7px 0 0; color: var(--text-muted); font: 500 11px/1.45 var(--font-sans); }
+          .bs-count { flex: 0 0 auto; padding: 5px 8px; border: 1px solid var(--border-subtle); border-radius: 999px; background: var(--bg-panel-elevated); color: var(--text-secondary); font: 600 10px/1 var(--font-mono); }
+          .mt-tabs { display: flex; gap: 8px; padding: 12px 18px 0; }
+          .mt-tab { padding: 7px 10px; border: 1px solid var(--border-subtle); border-radius: 6px; background: var(--bg-panel); color: var(--text-secondary); font: 600 12px/1 var(--font-sans); }
+          .mt-tab.on { border-color: var(--accent-border); background: var(--accent-tint); color: var(--text-primary); }
+          .mt-tab.dis { opacity: .45; }
+          .mt-body { display: flex; flex-direction: column; gap: 12px; padding: 12px 18px; color: var(--text-primary); font: 400 12px/1.5 var(--font-sans); overflow: hidden; }
+          .mt-help { margin: 0; color: var(--text-muted); font: 400 11px/1.5 var(--font-sans); text-wrap: pretty; }
+          .mt-help b { color: var(--text-secondary); font-weight: 600; }
+          .mt-opts { display: flex; flex-direction: column; gap: 12px; margin: 0; padding: 12px; border: 1px solid var(--border-subtle); border-radius: 8px; }
+          .mt-opts legend { padding: 0 4px; color: var(--text-secondary); font: 600 11px/1 var(--font-sans); }
+          .mt-opt { display: flex; align-items: flex-start; gap: 9px; }
+          .mt-opt > div { flex: 1; min-width: 0; }
+          .mt-opt strong { display: block; color: var(--text-primary); font: 600 12px/1.35 var(--font-sans); }
+          .mt-opt small { display: block; margin-top: 2px; color: var(--text-muted); font: 400 11px/1.45 var(--font-sans); text-wrap: pretty; }
+          .mt-inline { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+          .box { position: relative; flex: none; width: 14px; height: 14px; margin-top: 2px; border: 1px solid var(--border-strong); border-radius: 3px; background: var(--bg-input); }
+          .box.on { border-color: var(--accent); background: var(--accent); }
+          .box.on::after { content: ""; position: absolute; left: 4px; top: 1px; width: 3px; height: 7px; border: solid var(--accent-on); border-width: 0 2px 2px 0; transform: rotate(45deg); }
+          .box.mid { border-color: var(--accent); background: var(--accent); }
+          .box.mid::after { content: ""; position: absolute; left: 3px; top: 5.5px; width: 6px; height: 2px; background: var(--accent-on); }
+          .sel { display: inline-flex; align-items: center; height: 26px; padding: 0 26px 0 9px; border: 1px solid var(--border-default); border-radius: 6px; background: var(--bg-input); color: var(--text-primary); font: 600 11.5px/1 var(--font-sans); background-image: linear-gradient(45deg, transparent 50%, var(--text-muted) 50%), linear-gradient(135deg, var(--text-muted) 50%, transparent 50%); background-position: calc(100% - 13px) 11px, calc(100% - 9px) 11px; background-size: 4px 4px; background-repeat: no-repeat; white-space: nowrap; }
+          .radio { position: relative; flex: none; width: 14px; height: 14px; margin-top: 2px; border: 1px solid var(--border-strong); border-radius: 50%; background: var(--bg-input); }
+          .radio.on { border-color: var(--accent); }
+          .radio.on::after { content: ""; position: absolute; inset: 3px; border-radius: 50%; background: var(--accent); }
+          .fixed { display: flex; flex-direction: column; gap: 6px; padding: 10px 12px; border-radius: 8px; background: var(--bg-panel); border: 1px solid var(--border-faint); }
+          .fixed > span { display: flex; align-items: baseline; gap: 8px; color: var(--text-secondary); font: 500 11px/1.45 var(--font-sans); }
+          .fixed > span::before { content: ""; flex: none; width: 5px; height: 5px; border-radius: 50%; background: var(--danger-base); transform: translateY(-1px); }
+          .fixed > em { font: 700 9px/1 var(--font-sans); font-style: normal; letter-spacing: .07em; text-transform: uppercase; color: var(--text-subtle); }
+          .fixed > span > i { flex: none; width: 74px; font-style: normal; font: 600 10px/1.45 var(--font-mono); color: var(--text-subtle); }
+          .bs-repo { flex: none; padding: 10px 12px; border: 1px solid var(--border-subtle); border-radius: 8px; background: var(--bg-panel); }
+          .bs-repo.is-success { border-color: color-mix(in srgb, var(--success-text) 32%, transparent); }
+          .bs-repo.is-running { border-color: var(--accent-border); background: var(--accent-tint); }
+          .bs-rh { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+          .bs-rh > div { flex: 1; min-width: 0; }
+          .bs-rh strong, .bs-rh small { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+          .bs-rh strong { color: var(--text-primary); font: 650 12px/1.2 var(--font-sans); }
+          .bs-rh small { margin-top: 3px; color: var(--text-subtle); font: 500 9px/1.2 var(--font-mono); }
+          .bs-st { flex: 0 0 auto; display: inline-flex; align-items: center; gap: 5px; padding: 4px 7px; border: 1px solid var(--border-subtle); border-radius: 999px; background: var(--bg-panel-elevated); color: var(--success-text); font: 600 9.5px/1 var(--font-mono); }
+          .bs-st::before { width: 5px; height: 5px; border-radius: 50%; background: currentColor; content: ""; }
+          .bs-st.run { color: var(--accent-bright); }
+          .bs-repo > p { margin: 5px 0 0; color: var(--text-muted); font: 500 10.5px/1.35 var(--font-sans); }
+          .grp { display: flex; align-items: center; gap: 8px; margin: 10px 0 2px; padding-top: 8px; border-top: 1px solid var(--border-faint); font: 700 9px/1 var(--font-sans); letter-spacing: .07em; text-transform: uppercase; color: var(--text-subtle); }
+          .grp.first { margin-top: 0; padding-top: 0; border-top: 0; }
+          .grp b { color: var(--text-secondary); font-family: var(--font-mono); }
+          .grp .lnk { margin-left: auto; font: 600 10px/1 var(--font-sans); letter-spacing: 0; text-transform: none; color: var(--accent); }
+          .brow { display: flex; align-items: flex-start; gap: 9px; padding: 5px 0; }
+          .brow > div { flex: 1; min-width: 0; }
+          .brow strong { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-primary); font: 600 11px/1.3 var(--font-mono); }
+          .brow strong .rn { font-family: var(--font-sans); font-weight: 650; color: var(--text-secondary); }
+          .brow small { display: block; margin-top: 2px; color: var(--text-muted); font: 500 10.5px/1.35 var(--font-sans); }
+          .brow small i { font-style: normal; color: var(--success-text); }
+          .brow small i.warn { color: var(--status-warning); }
+          .brow small.path { font: 500 9px/1.3 var(--font-mono); color: var(--text-subtle); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+          .brow .sz { flex: none; padding-top: 1px; font: 600 10.5px/1.3 var(--font-mono); color: var(--text-secondary); }
+          .kchips { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 6px; }
+          .kchip { display: inline-flex; align-items: baseline; gap: 4px; padding: 4px 7px; border: 1px solid var(--border-subtle); border-radius: 999px; color: var(--text-muted); font: 500 10px/1 var(--font-sans); white-space: nowrap; }
+          .kchip b { color: var(--text-secondary); font: 700 10px/1 var(--font-mono); }
+          .selall { display: flex; align-items: center; gap: 9px; color: var(--text-primary); font: 400 12px/1.4 var(--font-sans); }
+          .selall .box { margin-top: 0; }
+          .quiet-line { display: flex; align-items: center; gap: 8px; padding: 8px 12px; border: 1px dashed var(--border-default); border-radius: 8px; color: var(--text-muted); font: 500 10.5px/1.35 var(--font-sans); }
+          .quiet-line b { color: var(--text-secondary); font: 700 10.5px/1 var(--font-mono); }
+          .quiet-line .lnk { margin-left: auto; color: var(--accent); font-weight: 600; }
+
+          /* status card (BulkSyncStatus), finished and live */
+          .rstatus { display: flex; flex-direction: column; gap: 9px; margin: 12px 18px 0; padding: 11px 12px 10px; border: 1px solid var(--border-subtle); border-radius: 8px; background: var(--bg-panel); }
+          .rstatus.live { border-color: var(--accent-border); }
+          .rtop { display: flex; align-items: center; gap: 11px; }
+          .rtop > div { flex: 1; min-width: 0; }
+          .rtop strong { display: block; color: var(--text-primary); font: 650 11.5px/1.25 var(--font-sans); }
+          .rtop span { display: block; margin-top: 3px; color: var(--text-secondary); font: 500 10.5px/1.35 var(--font-sans); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+          .rtop span.pth { color: var(--text-muted); font: 500 9.5px/1.2 var(--font-mono); }
+          .rtime { flex: none; color: var(--text-muted); font: 500 10px/1.2 var(--font-mono); }
+          .mark { flex: none; width: 16px; height: 16px; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center; background: var(--success-soft); color: var(--success-text); font: 700 10px/1 var(--font-sans); }
+          .spin { flex: none; width: 15px; height: 15px; border: 2px solid var(--accent-soft); border-top-color: var(--accent); border-radius: 50%; }
+          .pbar { display: flex; height: 6px; border-radius: 999px; overflow: hidden; background: var(--border-subtle); }
+          .pbar .ok { background: var(--status-ok); }
+          .pbar .fly { background: repeating-linear-gradient(135deg, var(--accent) 0 4px, color-mix(in srgb, var(--accent) 45%, transparent) 4px 8px); }
+          .plegend { display: flex; align-items: center; gap: 14px; color: var(--text-secondary); font: 500 10.5px/1 var(--font-sans); }
+          .plegend b { color: var(--text-primary); font-weight: 650; }
+          .plegend .dot { display: inline-block; width: 7px; height: 7px; margin-right: 5px; border-radius: 2px; background: var(--status-ok); }
+          .plegend .r { margin-left: auto; color: var(--text-muted); }
+          .plegend .r b { color: var(--accent-bright); }
+
+          /* ============================================================
+             Proposed: the step rail
+             ============================================================ */
+          .steps { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; margin: 12px 18px 0; }
+          .step { position: relative; display: flex; align-items: center; gap: 9px; min-width: 0; padding: 8px 10px; border: 1px solid var(--border-subtle); border-radius: 8px; background: var(--bg-panel); }
+          .step > div { min-width: 0; }
+          .step strong { display: block; color: var(--text-secondary); font: 650 11.5px/1.2 var(--font-sans); }
+          .step small { display: block; margin-top: 3px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-muted); font: 500 10px/1.2 var(--font-mono); }
+          .num { flex: none; width: 20px; height: 20px; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center; border: 1px solid var(--border-default); background: var(--bg-input); color: var(--text-muted); font: 700 10px/1 var(--font-mono); }
+          .step.on { border-color: var(--accent-border); background: var(--accent-tint); box-shadow: inset 0 -2px 0 0 var(--accent); }
+          .step.on strong { color: var(--text-primary); }
+          .step.on small { color: var(--accent-bright); }
+          .step.on .num { border-color: var(--accent); background: var(--accent); color: var(--accent-on); }
+          .step.done .num { border-color: transparent; background: var(--success-soft); color: var(--success-text); }
+          .step.done strong { color: var(--text-primary); }
+          .step.done small { color: var(--success-text); }
+          .step.off { border-style: dashed; background: transparent; }
+          .step.off strong, .step.off small { color: var(--text-subtle); }
+          .step.off .num { background: transparent; border-style: dashed; }
+          .step.stop { border-color: var(--danger-border); }
+          .step.stop .num { border-color: transparent; background: var(--danger-soft); color: var(--danger-text); }
+          .step.stop small { color: var(--danger-text); }
+
+          /* Proposed: the plan as numbered step cards */
+          .plan { display: flex; flex-direction: column; gap: 8px; }
+          .pstep { display: grid; grid-template-columns: 14px 20px minmax(0, 1fr); gap: 10px; align-items: start; padding: 12px; border: 1px solid var(--border-subtle); border-radius: 8px; background: var(--bg-panel); }
+          .pstep .num { margin-top: -1px; }
+          .pstep.in .num { border-color: var(--accent); background: var(--accent); color: var(--accent-on); }
+          .pstep.out { background: transparent; border-style: dashed; }
+          .pstep.out h3, .pstep.out p { color: var(--text-subtle); }
+          .phd { display: flex; align-items: baseline; gap: 8px; }
+          .pstep h3 { margin: 0; color: var(--text-primary); font: 650 12.5px/1.3 var(--font-sans); }
+          .pstep p { margin: 2px 0 0; color: var(--text-muted); font: 400 11px/1.45 var(--font-sans); text-wrap: pretty; }
+          .ptag { margin-left: auto; flex: none; padding: 3px 7px; border: 1px solid var(--border-subtle); border-radius: 999px; color: var(--text-muted); font: 600 9.5px/1.2 var(--font-sans); white-space: nowrap; }
+          .ptag.pause { border-color: var(--accent-border); color: var(--accent-bright); background: var(--accent-tint); }
+          .ptag.auto { border-color: color-mix(in srgb, var(--status-warning) 44%, transparent); color: var(--status-warning); }
+          .prules { display: flex; flex-direction: column; gap: 8px; margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--border-faint); }
+          .prule { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; color: var(--text-secondary); font: 500 11.5px/1.3 var(--font-sans); }
+          .prule .box { margin-top: 0; }
+          .prule .hint { color: var(--text-subtle); font: 400 10.5px/1.3 var(--font-sans); }
+
+          /* Proposed: the rules in force, restated above every review */
+          .applied { display: flex; flex-direction: column; gap: 5px; padding: 8px 12px; border: 1px solid var(--border-subtle); border-radius: 8px; background: var(--bg-panel); }
+          .applied > div { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; color: var(--text-secondary); font: 500 10.5px/1.4 var(--font-sans); }
+          .applied em { flex: none; width: 56px; font: 700 9px/1.4 var(--font-sans); font-style: normal; letter-spacing: .07em; text-transform: uppercase; color: var(--text-subtle); }
+          .applied b { color: var(--text-primary); font-weight: 600; }
+          .applied .sep { color: var(--text-subtle); }
+          .applied .never b { color: var(--danger-text); }
+          .applied .lnk { margin-left: auto; color: var(--accent); font: 600 10.5px/1 var(--font-sans); }
+          .bs-rh .cnt { flex: none; color: var(--text-secondary); font: 600 10.5px/1 var(--font-mono); padding-top: 2px; }
+
+          /* Proposed: the finished receipt, one card per step */
+          .rc { display: flex; flex-direction: column; gap: 8px; }
+          .rcs { padding: 10px 12px; border: 1px solid var(--border-subtle); border-radius: 8px; background: var(--bg-panel); }
+          .rch { display: flex; align-items: center; gap: 9px; }
+          .rch .num { width: 18px; height: 18px; font-size: 9.5px; border-color: transparent; background: var(--success-soft); color: var(--success-text); }
+          .rch strong { color: var(--text-primary); font: 650 12px/1.2 var(--font-sans); }
+          .rch > span:not(.num):not(.lnk) { margin-left: auto; color: var(--text-secondary); font: 600 10.5px/1 var(--font-mono); }
+          .rch .lnk { margin-left: 10px; color: var(--accent); font: 600 10.5px/1 var(--font-sans); }
+          .rcs.skip { border-style: dashed; background: transparent; }
+          .rcs.skip .num { background: transparent; border: 1px dashed var(--border-default); color: var(--text-subtle); }
+          .rcs.skip strong, .rcs.skip span:not(.num) { color: var(--text-subtle); }
+          .rcpt { display: flex; align-items: center; gap: 10px; padding: 5px 0 0 27px; }
+          .rcpt strong { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-secondary); font: 500 11px/1.3 var(--font-mono); }
+          .rcpt strong .rn { font-family: var(--font-sans); color: var(--text-muted); }
+          .rcpt code { color: var(--text-subtle); font: 500 10px/1 var(--font-mono); }
+          .rcpt a { font: 600 10.5px/1 var(--font-sans); color: var(--accent); }
+
+          .bs-actions { display: flex; justify-content: flex-end; align-items: center; gap: 8px; padding: 12px 18px 16px; border-top: 1px solid var(--border-subtle); }
+          .bs-actions .lead { margin-right: auto; color: var(--text-muted); font: 500 10.5px/1.3 var(--font-sans); }
+          .bs-actions .lead b { color: var(--text-secondary); font-weight: 600; }
+          .bs-btn { height: 28px; padding: 0 14px; border: 1px solid var(--border-strong); border-radius: 7px; background: var(--bg-panel-elevated); color: var(--text-primary); font: 600 11.5px/1 var(--font-sans); white-space: nowrap; }
+          .bs-btn.primary { border-color: transparent; background: var(--accent); color: var(--accent-on); }
+          .bs-btn.danger { border-color: transparent; background: var(--danger-base); color: #ffffff; }
+          .bs-btn.ghost { border-color: var(--border-default); background: transparent; color: var(--text-secondary); }
+          .bs-btn:disabled { opacity: .5; }
+          /* ---- this board: the offer toast (app-toast at true size) ---- */
+          .ptag.need { border-color: var(--border-default); color: var(--text-muted); }
+          .pstep.na { background: transparent; border-style: dashed; }
+          .pstep.na h3, .pstep.na p { color: var(--text-subtle); }
+          .pstep .lnk { color: var(--accent); font: 600 11px/1 var(--font-sans); }
+          .tstage { position: relative; width: 520px; padding: 22px; border-radius: 10px; background: var(--bg-stage); display: flex; justify-content: flex-end; }
+          .toast { display: grid; grid-template-columns: minmax(0, 1fr); gap: 10px; width: 420px; padding: 12px 14px; border: 1px solid var(--border-default); border-radius: 10px; background: var(--bg-panel-elevated, #fff); box-shadow: 0 10px 30px rgba(40, 28, 12, 0.16); }
+          .toast .eyebrow { margin: 0 0 4px; font: 700 10.5px/1.2 var(--font-sans); letter-spacing: .04em; text-transform: uppercase; color: var(--accent); }
+          .toast .msg { margin: 0; font: 500 12.5px/1.35 var(--font-sans); color: var(--text-primary); text-wrap: pretty; }
+          .toast .msg + .msg { margin-top: 6px; color: var(--text-secondary); font-weight: 400; font-size: 11.5px; }
+          .tacts { display: flex; gap: 6px; flex-wrap: wrap; }
+          .tbtn { display: inline-flex; align-items: center; justify-content: center; height: 26px; padding: 0 9px; border: 1px solid var(--border-subtle); border-radius: 5px; background: transparent; color: var(--text-secondary); font: 600 11px/1 var(--font-sans); }
+          .tbtn.primary { border-color: var(--accent-border); background: var(--accent-soft); color: var(--accent-bright); }
+          .grid4 { display: grid; grid-template-columns: 180px 1fr 1fr; max-width: 980px; border: 1px solid var(--rv-line); border-radius: 8px; overflow: hidden; }
+          .grid4 > * { padding: 8px 10px; border-bottom: 1px solid var(--rv-line); font: 400 10.5px/1.45 var(--font-sans); color: var(--rv-t3); }
+          .grid4 > b { color: var(--rv-t1); font-weight: 600; }
+          .grid4 > .h { color: var(--rv-t2); font-weight: 650; background: rgba(247, 243, 235, 0.04); }
+          .grid4 code { font: 500 10px/1.4 var(--font-mono); color: var(--rv-accb); }
+          .qs { max-width: 860px; margin: 0; padding-left: 18px; font: 400 11.5px/1.6 var(--font-sans); color: var(--rv-t3); }
+          .qs b { color: var(--rv-t2); }
+        </style>
+      </helmet>
+
+      <!-- ============================ ROUND ============================ -->
+      <section class="dv-turn" id="t0" data-screen-label="Round brief">
+        <div class="dv-thd">
+          <a class="dv-tid" href="#t0">0</a>
+          <span class="dv-tname">The ask, the gap, and what to check</span>
+        </div>
+        <p class="dv-sub">Operator: <b>“This dialog doesn’t have Clones as a step that users can check (and it should be on by default). AND we should be doing a quick background scan once and giving the user a toast that they can run this sweep, it’s fully compatible with other git consumers and tools, and it will save X projected GB of disk for them (if possible to tell from the sweep). If they click ok we should run the maintenance tool with ONLY clones selected.”</b></p>
+        <p class="dv-sub"><b>The gap.</b> Clones (<code>git worktree reflink</code>, <i>Refresh Clones</i> turn 2) exists only as its own tab. Combined, the tab people use, runs Repair → Worktrees → Local branches → Garbage collection and never shares files. Nothing tells a user the sweep exists or what it would get them. Rooted in <i>Maintenance Combined</i> turn 3 (step cards, pause tags, rail, per-step receipt) and the house toast (<code>app-toast</code>, PwrAgnt’s AppNoticeToast).</p>
+        <p class="dv-sub"><b>Can the number be honest? Yes.</b> PwrGit’s Git has <code>git worktree reflink -n</code>, a dry run whose porcelain summary carries <code>potential-private-reduction</code>. On a scratch repository (20 × 1 MB files, one edited) the dry run projected <b>19,070,976 bytes</b>; the real run then reported <code>observed-private-reduction</code> <b>19,070,976</b>. The edited file was left out of both. A dry run took 0.05–0.15 s per worktree across 40 real worktrees, so the scan is cheap.</p>
+        <ol class="qs">
+          <li><b>Order:</b> Repair → Worktrees → Local branches → <b>Clones</b> → Garbage collection. Worktree removal goes first, so no time is spent sharing files in a checkout about to be deleted. Branch deletion touches no working files, so it doesn’t matter whether it comes before or after. Clones runs before GC because its “Update main checkouts first” fetches, and GC then packs what the fetch brought. GC never touches working-tree files, so it can’t undo the sharing.</li>
+          <li><b>Tag:</b> “No pause”. Clones never stops for review.</li>
+          <li><b>The rule “Update main checkouts first” comes with it, on by default</b>, as on the Clones tab.</li>
+          <li><b>Once per profile.</b> The scan runs once the profile has a linked worktree and the Git in use can re-share. Its outcome is stored. If a toast was shown, it never comes back, whether it was accepted, dismissed, or still open when the app quit.</li>
+          <li><b>A number only when Git measured one.</b> If some worktrees couldn’t be measured, the toast says “at least”. If none could be, it gives no number.</li>
+        </ol>
+        <p class="dv-next" style="margin-top:14px"><b>Open questions.</b> (a) Threshold for “meaningful”: 512 MiB projected. Higher? (b) Units follow the Clones receipt (GiB). Switch both to GB? (c) The operator asked for “save X GB”. The house rule says never “freed” (Time Machine keeps blocks). The toast says “could save about X”, labels it projected, and the receipt keeps “now shared”. OK?</p>
+      </section>
+
+      <!-- ============================ TURN 1 ============================ -->
+      <section class="dv-turn" id="t1" data-screen-label="Turn 1 Combined with Clones">
+        <div class="dv-thd">
+          <a class="dv-tid" href="#t1">1</a>
+          <span class="dv-tname">Combined plan: Clones becomes step 4, on by default</span>
+        </div>
+        <p class="dv-sub">One card in the existing anatomy: checkbox, number, title, a <b>No pause</b> tag in the style of Repair and GC, one sentence, and its one rule. GC moves to 5 and keeps “Runs last, no pause”. The footer lead counts pauses the same way. Clones never pauses, so it adds none.</p>
+        <div class="dv-opts">
+          <div class="dv-opt" id="1a" data-screen-label="1a Plan with Clones">
+            <div class="dv-olabel"><a class="dv-oid" href="#1a">1a</a><b>Setup</b>, PwrGit’s Git in use</div>
+            <div class="stage th-light">
+              <section class="bs">
+                <div class="bs-head"><div><h2>Repository maintenance</h2><p>Clean up finished worktrees, leftover local branches and Git storage across your repositories.</p></div></div>
+                <div class="mt-tabs"><span class="mt-tab on">Combined</span><span class="mt-tab">Repair links</span><span class="mt-tab">Worktrees</span><span class="mt-tab">Clones</span><span class="mt-tab">Local branches</span><span class="mt-tab">Garbage collection</span></div>
+                <div class="mt-body">
+                  <p class="mt-help">Runs top to bottom in this window’s profile. Each step works on what the step before it left.</p>
+                  <div class="plan">
+                    <div class="pstep out"><span class="box"></span><span class="num">1</span><div><div class="phd"><h3>Repair broken worktree links</h3><span class="ptag">Runs first, no pause</span></div><p>Reconnect known worktrees after their repository moves.</p></div></div>
+                    <div class="pstep in"><span class="box on"></span><span class="num">2</span><div><div class="phd"><h3>Remove finished worktrees</h3><span class="ptag pause">Pauses for review</span></div><p>Clean worktrees whose pull request merged, or whose branch is merged into the default branch and has had no commits for 14 days.</p></div></div>
+                    <div class="pstep in"><span class="box on"></span><span class="num">3</span><div><div class="phd"><h3>Delete finished local branches</h3><span class="ptag pause">Pauses for review</span></div><p>Branches whose upstream is gone and whose commits are proven to exist elsewhere.</p></div></div>
+                    <div class="pstep in"><span class="box on"></span><span class="num">4</span><div><div class="phd"><h3>Share unchanged files with clones</h3><span class="ptag">No pause</span></div><p>Turn files a worktree holds unchanged back into copy-on-write clones of its main checkout. Edited, untracked and ignored files stay exactly as they are; every Git client and tool sees ordinary files.</p>
+                      <div class="prules"><div class="prule"><span class="box on"></span>Update main checkouts first<span class="hint">fetch, then fast-forward a clean main checkout on its default branch</span></div></div></div></div>
+                    <div class="pstep in"><span class="box on"></span><span class="num">5</span><div><div class="phd"><h3>Collect garbage</h3><span class="ptag">Runs last, no pause</span></div><p>Repacks objects and expires unreachable ones. Runs last, after worktree and branch cleanup.</p><div class="prules"><div class="prule">Mode <span class="sel">Standard (recommended)</span></div></div></div></div>
+                  </div>
+                </div>
+                <div class="bs-actions"><span class="lead">82 repositories · stops twice for you</span><button class="bs-btn">Close</button><button class="bs-btn primary">Start</button></div>
+              </section>
+            </div>
+            <p class="note">Rule details (prules) on the other steps are folded here to keep the picture short; in the app they show as today. The checkbox is named <b>Share unchanged files with clones</b> for E2E and screen readers.</p>
+          </div>
+          <div class="dv-opt" id="1b" data-screen-label="1b Git cannot re-share">
+            <div class="dv-olabel"><a class="dv-oid" href="#1b">1b</a><b>A Git that can’t re-share</b> (an installed Git, Windows’ bundle)</div>
+            <div class="stage th-light">
+              <section class="bs" style="width:620px">
+                <div class="mt-body">
+                  <div class="plan">
+                    <div class="pstep na"><span class="box" style="opacity:.5"></span><span class="num">4</span><div><div class="phd"><h3>Share unchanged files with clones</h3><span class="ptag need">Needs PwrGit’s Git</span></div><p>The Git in use (2.47.1) has no <code>git worktree reflink</code>. Choose PwrGit’s Git in Settings › Git.</p><p style="margin-top:6px"><a class="lnk" href="#1b">Open Git settings</a></p></div></div>
+                  </div>
+                </div>
+              </section>
+            </div>
+            <p class="note">Unchecked and disabled, never hidden: the step is still there to find. It’s left out of the plan the run uses, and the rail doesn’t draw it.</p>
+          </div>
+        </div>
+      </section>
+
+      <!-- ============================ TURN 2 ============================ -->
+      <section class="dv-turn" id="t2" data-screen-label="Turn 2 The offer toast">
+        <div class="dv-thd">
+          <a class="dv-tid" href="#t2">2</a>
+          <span class="dv-tname">The one-time offer: the house toast, sticky, one action</span>
+        </div>
+        <p class="dv-sub">An info toast (orange eyebrow, never danger) in the stacked layout, so the explanation keeps the card’s width and the actions sit under it. <b>Sticky</b>: it waits for an answer, with no countdown. <b>Share files</b> opens Repository maintenance on Combined with only step 4 ticked, already running. <b>×</b> dismisses it. Either way it never returns for this profile.</p>
+        <div class="dv-opts">
+          <div class="dv-opt" id="2a" data-screen-label="2a Measured">
+            <div class="dv-olabel"><a class="dv-oid" href="#2a">2a</a><b>Measured</b>: every worktree reported a figure</div>
+            <div class="tstage th-light"><aside class="toast">
+              <div><p class="eyebrow">Save disk space</p>
+              <p class="msg">Your worktrees could save about 6.32 GiB (projected) by sharing unchanged files with their main checkouts.</p>
+              <p class="msg">Fully compatible with Git and every other tool: files stay ordinary files, and edited or untracked ones aren’t touched. Runs once, in Repository maintenance.</p></div>
+              <div class="tacts"><button class="tbtn primary">Share files</button><button class="tbtn" aria-label="Dismiss">×</button></div>
+            </aside></div>
+          </div>
+          <div class="dv-opt" id="2b" data-screen-label="2b Partly measured">
+            <div class="dv-olabel"><a class="dv-oid" href="#2b">2b</a><b>Partly measured</b>: some worktrees on a volume Git can’t measure</div>
+            <div class="tstage th-light"><aside class="toast">
+              <div><p class="eyebrow">Save disk space</p>
+              <p class="msg">Your worktrees could save at least 2.10 GiB (projected) by sharing unchanged files with their main checkouts.</p>
+              <p class="msg">Fully compatible with Git and every other tool: files stay ordinary files, and edited or untracked ones aren’t touched. Runs once, in Repository maintenance.</p></div>
+              <div class="tacts"><button class="tbtn primary">Share files</button><button class="tbtn" aria-label="Dismiss">×</button></div>
+            </aside></div>
+          </div>
+          <div class="dv-opt" id="2c" data-screen-label="2c Not measured">
+            <div class="dv-olabel"><a class="dv-oid" href="#2c">2c</a><b>Not measured</b>: Git found files to share but couldn’t size any of them</div>
+            <div class="tstage th-light"><aside class="toast">
+              <div><p class="eyebrow">Save disk space</p>
+              <p class="msg">3,412 unchanged files in your worktrees could share disk space with their main checkouts.</p>
+              <p class="msg">Fully compatible with Git and every other tool: files stay ordinary files, and edited or untracked ones aren’t touched. Runs once, in Repository maintenance.</p></div>
+              <div class="tacts"><button class="tbtn primary">Share files</button><button class="tbtn" aria-label="Dismiss">×</button></div>
+            </aside></div>
+          </div>
+        </div>
+        <div class="dv-opts" style="margin-top:26px">
+          <div class="dv-opt" id="2d" data-screen-label="2d When">
+            <div class="dv-olabel"><a class="dv-oid" href="#2d">2d</a>What the one scan decides, and what is stored</div>
+            <div class="grid4">
+              <span class="h">Scan outcome</span><span class="h">Toast</span><span class="h">Stored for the profile</span>
+              <b>Git in use can’t re-share</b><span>none</span><span>nothing: the scan runs again once PwrGit’s Git is in use</span>
+              <b>No linked worktree yet</b><span>none</span><span>nothing: a profile with no worktrees hasn’t been scanned</span>
+              <b>Scan failed or was cut short</b><span>none</span><span>nothing: tried again next launch</span>
+              <b>Measured ≥ 512 MiB</b><span>2a, or 2b if some weren’t measured</span><span><code>offered</code>: never shown again</span>
+              <b>Nothing measured, ≥ 500 files to share</b><span>2c</span><span><code>offered</code></span>
+              <b>Anything less</b><span>none</span><span><code>no_offer</code>: never scanned again</span>
+              <b>Accepted / dismissed</b><span>—</span><span><code>accepted</code> / <code>dismissed</code>: recorded, but neither shows the toast again</span>
+            </div>
+            <p class="note">The scan starts 2 minutes after the window opens, runs two worktrees at a time, and only on the repositories this profile shows. A worktree that is missing or locked in Git is skipped. Each dry run takes that worktree’s lock, as the real run does.</p>
+          </div>
+        </div>
+      </section>
+
+      <!-- ============================ TURN 3 ============================ -->
+      <section class="dv-turn" id="t3" data-screen-label="Turn 3 Clones-only run">
+        <div class="dv-thd">
+          <a class="dv-tid" href="#t3">3</a>
+          <span class="dv-tname">Accepted: Combined runs with only Clones selected</span>
+        </div>
+        <p class="dv-sub">The dialog opens straight on the run. Showing the plan with only step 4 ticked would just ask the reader to say yes twice. The rail draws every step, so it’s plain that the others are <b>Skipped</b>, and the receipt has one card per step, as today. <b>New plan</b> returns to the full setup with the usual defaults.</p>
+        <div class="dv-opts">
+          <div class="dv-opt" id="3a" data-screen-label="3a Running">
+            <div class="dv-olabel"><a class="dv-oid" href="#3a">3a</a><b>Running</b></div>
+            <div class="stage th-light">
+              <section class="bs">
+                <div class="bs-head"><div><h2>Repository maintenance</h2><p>Clean up finished worktrees, leftover local branches and Git storage across your repositories.</p></div><span class="bs-count">7 / 23</span></div>
+                <div class="steps" style="grid-template-columns:repeat(4,minmax(0,1fr))">
+                  <div class="step off"><span class="num">1</span><div><strong>Worktrees</strong><small>Skipped</small></div></div>
+                  <div class="step off"><span class="num">2</span><div><strong>Local branches</strong><small>Skipped</small></div></div>
+                  <div class="step on"><span class="num">3</span><div><strong>Clones</strong><small>sharing 7 of 23</small></div></div>
+                  <div class="step off"><span class="num">4</span><div><strong>Garbage collection</strong><small>Skipped</small></div></div>
+                </div>
+                <div class="rstatus live"><div class="rtop"><span class="spin"></span><div><strong>Refreshing clones in 2 repositories</strong><span class="pth">PwrAgnt · diskhound</span></div><span class="rtime">0:41</span></div>
+                  <div class="pbar"><span class="ok" style="width:30%"></span><span class="fly" style="width:9%"></span></div></div>
+                <div class="bs-actions"><button class="bs-btn">Cancel</button></div>
+              </section>
+            </div>
+          </div>
+          <div class="dv-opt" id="3b" data-screen-label="3b Receipt">
+            <div class="dv-olabel"><a class="dv-oid" href="#3b">3b</a><b>Receipt</b></div>
+            <div class="stage th-light">
+              <section class="bs">
+                <div class="done" style="margin:12px 18px 0;display:flex;align-items:center;gap:11px;padding:11px 12px;border:1px solid var(--border-subtle);border-radius:8px;background:var(--bg-panel)"><span class="mark">✓</span><div><strong style="color:var(--text-primary);font:650 11.5px/1.25 var(--font-sans);display:block">Maintenance finished</strong><small style="color:var(--text-secondary);font:400 10.5px/1.3 var(--font-sans)">1 of 1 steps · 6.18 GiB of file data now shared</small></div><time style="margin-left:auto;color:var(--text-secondary);font:600 10.5px/1 var(--font-mono)">took 2m 4s</time></div>
+                <div class="mt-body"><div class="rc">
+                  <div class="rcs skip"><div class="rch"><span class="num">1</span><strong>Worktrees</strong><span>Skipped</span></div></div>
+                  <div class="rcs skip"><div class="rch"><span class="num">2</span><strong>Local branches</strong><span>Skipped</span></div></div>
+                  <div class="rcs"><div class="rch"><span class="num">3</span><strong>Clones</strong><span>6.18 GiB now shared · 41 worktrees · 18,240 files</span><span class="lnk">Show</span></div>
+                    <div class="rcpt"><strong>PwrAgnt <span class="rn">· 14 worktrees</span></strong><code>3.02 GiB</code></div>
+                    <div class="rcpt"><strong>diskhound <span class="rn">· 6 worktrees</span></strong><code>1.11 GiB</code></div></div>
+                  <div class="rcs skip"><div class="rch"><span class="num">4</span><strong>Garbage collection</strong><span>Skipped</span></div></div>
+                </div>
+                <p class="mt-help">Git counts file data that stopped being private. Free space can differ: a local Time Machine snapshot keeps old blocks until it expires.</p></div>
+                <div class="bs-actions"><button class="bs-btn">New plan</button><button class="bs-btn">Close</button></div>
+              </section>
+            </div>
+            <p class="note">Footer order and the dialog’s height belong to the sibling “fixed-height frame” change; this board doesn’t move them.</p>
+          </div>
+        </div>
+      </section>
+
+      <!-- ============================ TURN 4 ============================ -->
+      <section class="dv-turn" id="t4" data-screen-label="Turn 4 Build">
+        <div class="dv-thd">
+          <a class="dv-tid" href="#t4">4</a>
+          <span class="dv-tname">Build notes</span>
+        </div>
+        <ol class="qs">
+          <li><b>Plan:</b> <code>MaintenancePlan</code> gains <code>clones</code> (default true). Combined runs <code>{ kind: "reshare", updateMain }</code> between branches and GC. The receipt’s line comes from <code>clonesHeadline</code>, the Clones tab’s own, worded “now shared”.</li>
+          <li><b>Estimate:</b> <code>maintenance:estimateClones</code> in main runs <code>git worktree reflink -n --porcelain -z</code> per linked worktree. It sums <code>potential-private-reduction</code> where the worktree reported allocation, and counts <code>eligible</code> files. A pure fold (<code>clonesEstimate</code>), property-tested.</li>
+          <li><b>Once:</b> a per-profile record in SQLite (<code>profile_notices</code>). The pure decision (<code>clonesOfferStep</code>) is held by a model test: at most one toast per profile, across any sequence of launches, scan outcomes and answers.</li>
+          <li><b>Accept:</b> the Sidebar opens the dialog with <code>initialPlan</code> = only Clones and <code>autoStart</code>. A test asserts the plan holds exactly <code>clones</code>.</li>
+        </ol>
+      </section>
+    </x-dc>
+    <script
+      type="text/x-dc"
+      data-dc-script
+      data-props='{}'
+    >
+      class Component extends DCLogic {
+        renderVals() { return {}; }
+      }
+    </script>
+  </body>
+</html>

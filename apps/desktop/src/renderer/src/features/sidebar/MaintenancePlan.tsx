@@ -11,7 +11,14 @@ import { StatusGlyph } from "./BulkSyncStatus";
 import type { StepIssue } from "./maintenance-issues";
 import { StepLine } from "./MaintenanceProblem";
 
-export type MaintenancePlan = { repair: boolean; worktrees: boolean; branches: boolean; gc: boolean };
+export type MaintenancePlan = { repair: boolean; worktrees: boolean; branches: boolean; clones: boolean; gc: boolean };
+/** Combined's plan on open: everything but Repair, which is for a repository
+ *  that moved. */
+export const DEFAULT_MAINTENANCE_PLAN: MaintenancePlan = { repair: false, worktrees: true, branches: true, clones: true, gc: true };
+/** The Clones offer's plan: share files, nothing else. */
+export const CLONES_ONLY_PLAN: MaintenancePlan = { repair: false, worktrees: false, branches: false, clones: true, gc: false };
+/** Whether the Git in use can re-share (`git worktree reflink`). */
+export type ClonesSupport = "checking" | "available" | "unavailable";
 export type StepKey = keyof MaintenancePlan;
 export type StepResult = {
   state: "done" | "partial" | "skipped" | "failed";
@@ -27,8 +34,14 @@ const steps: { key: StepKey; title: string }[] = [
   { key: "repair", title: "Repair links" },
   { key: "worktrees", title: "Worktrees" },
   { key: "branches", title: "Local branches" },
+  { key: "clones", title: "Clones" },
   { key: "gc", title: "Garbage collection" }
 ];
+/** The order Combined runs in, which the receipt follows. Clones comes after
+ *  the cleanup steps, so no time goes into sharing files in a worktree about
+ *  to be removed, and before garbage collection, which packs what Clones'
+ *  main-checkout fetch brought in and never touches working files. */
+export const STEP_ORDER: StepKey[] = steps.map((step) => step.key);
 export const daysLabel = (days: number) => `${days} ${days === 1 ? "day" : "days"}`;
 const finishedAfterLabel = (days: number) => days === 0 ? "right away" : `after ${daysLabel(days)}`;
 
@@ -52,15 +65,18 @@ export function FinishedAfterSelect({ value, onChange, disabled = false, label }
   </select>;
 }
 
-export function MaintenanceSteps({ plan, current, results, branchMode, gcMode, progress }: {
+export function MaintenanceSteps({ plan, current, results, branchMode, gcMode, progress, clonesAvailable = true }: {
   plan: MaintenancePlan;
   current: StepKey | "done";
   results: Partial<Record<StepKey, StepResult>>;
   branchMode: "review" | "auto";
   gcMode: GarbageCollectionMode;
   progress?: string;
+  /** False on a Git that cannot re-share: the step is not drawn at all. */
+  clonesAvailable?: boolean;
 }) {
-  const visibleSteps = steps.filter((step) => step.key !== "repair" || plan.repair);
+  const visibleSteps = steps.filter((step) =>
+    step.key === "repair" ? plan.repair : step.key === "clones" ? clonesAvailable || plan.clones : true);
   const currentIndex = visibleSteps.findIndex((step) => step.key === current);
   return <div className="maintenance__steps" aria-label="Maintenance steps" style={{ gridTemplateColumns: `repeat(${visibleSteps.length}, minmax(0, 1fr))` }}>
     {visibleSteps.map((step, index) => {
@@ -74,7 +90,7 @@ export function MaintenanceSteps({ plan, current, results, branchMode, gcMode, p
       const detail = state === "on" ? progress ?? "Running" : result?.summary !== undefined ? <StepLine line={result.summary} /> : (state === "off" ? current === "done" && plan[step.key] ? "Not started" : "Skipped" :
         step.key === "repair" ? "first · reconnects worktrees" : step.key === "worktrees" ? "next · pauses for review" :
           step.key === "branches" ? `next · ${branchMode === "review" ? "pauses for review" : "deletes without asking"}` :
-            `last · ${gcMode}`);
+            step.key === "clones" ? "next · no pause" : `last · ${gcMode}`);
       return <div key={step.key} className={`maintenance__step is-${state}`}>
         <span className="maintenance__step-num">{state === "done" ? <StatusGlyph mark="ok" /> : state === "stop" ? <StatusGlyph mark="failed" /> : index + 1}</span>
         <div><strong>{step.title}</strong><small>{detail}</small></div>
@@ -112,7 +128,8 @@ export function MaintenanceRulesApplied({ kind, branchOptions, protectRecent, pr
 export function MaintenancePlanForm({
   plan, onChange, branchMode, onBranchMode, options, onOptions, gcMode, onGcMode,
   protectRecent, protectionDays, onProtectRecent, onProtectionDays, lastKeepDays,
-  finishedAfterDays, onFinishedAfterDays
+  finishedAfterDays, onFinishedAfterDays,
+  clonesSupport, gitVersion, updateMain, onUpdateMain, onOpenGitSettings
 }: {
   plan: MaintenancePlan;
   onChange: (plan: MaintenancePlan) => void;
@@ -130,7 +147,14 @@ export function MaintenancePlanForm({
   lastKeepDays: BranchCleanupKeepDays;
   finishedAfterDays: number;
   onFinishedAfterDays: (days: WorktreeFinishedAfterDays) => void;
+  clonesSupport: ClonesSupport;
+  /** The Git in use, for the "needs PwrGit's Git" line. */
+  gitVersion: string | null;
+  updateMain: boolean;
+  onUpdateMain: (updateMain: boolean) => void;
+  onOpenGitSettings: () => void;
 }) {
+  const clonesUnavailable = clonesSupport === "unavailable";
   return <div className="maintenance__body">
     <p className="maintenance__help">Runs top to bottom in this window’s profile. Each step works on what the step before it left.</p>
     <div className="maintenance__plan">
@@ -174,9 +198,24 @@ export function MaintenancePlanForm({
           </div>}
         </div>
       </article>
+      <article className={`maintenance__plan-step${plan.clones && !clonesUnavailable ? "" : " is-off"}`}>
+        <input aria-label="Share unchanged files with clones" type="checkbox" checked={plan.clones && !clonesUnavailable}
+          disabled={clonesUnavailable} onChange={(event) => onChange({ ...plan, clones: event.target.checked })} />
+        <span className="maintenance__step-num">4</span><div>
+          <div className="maintenance__plan-head"><h3>Share unchanged files with clones</h3><span className="maintenance__pause is-last">{clonesUnavailable ? "Needs PwrGit’s Git" : "No pause"}</span></div>
+          {clonesUnavailable ? <>
+            <p>The Git in use{gitVersion === null ? "" : ` (${gitVersion})`} has no <code>git worktree reflink</code>. Choose PwrGit’s Git in Settings › Git.</p>
+            <button type="button" className="maintenance__clones-link" onClick={onOpenGitSettings}>Open Git settings</button>
+          </> : <p>Turn files a worktree holds unchanged back into copy-on-write clones of its main checkout. Edited, untracked and ignored files stay exactly as they are; every Git client and tool still sees ordinary files.</p>}
+          {plan.clones && !clonesUnavailable && <div className="maintenance__plan-rules"><div className="maintenance__plan-rule">
+            <label><input type="checkbox" checked={updateMain} onChange={(event) => onUpdateMain(event.target.checked)} />Update main checkouts first</label>
+            <small>fetch, then fast-forward a clean main checkout on its default branch</small>
+          </div></div>}
+        </div>
+      </article>
       <article className={`maintenance__plan-step${plan.gc ? "" : " is-off"}`}>
         <input aria-label="Collect garbage" type="checkbox" checked={plan.gc} onChange={(event) => onChange({ ...plan, gc: event.target.checked })} />
-        <span className="maintenance__step-num">4</span><div>
+        <span className="maintenance__step-num">5</span><div>
           <div className="maintenance__plan-head"><h3>Collect garbage</h3><span className="maintenance__pause is-last">Runs last, no pause</span></div>
           <p>Repacks objects and expires unreachable ones. Runs last, after worktree and branch cleanup.</p>
           {plan.gc && <div className="maintenance__plan-rules"><label>Mode <select aria-label="Combined Git collection mode" value={gcMode} onChange={(event) => onGcMode(event.target.value as GarbageCollectionMode)}>

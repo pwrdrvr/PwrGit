@@ -25,15 +25,18 @@ import { dispatch, subscribe } from "../../lib/pwrgit";
 import { displayPath } from "../../lib/platform";
 import { useModal } from "../../lib/useModal";
 import type { RemoveWorktreesOutcome } from "../../state/useRepoTree";
-import { MaintenancePlanForm, MaintenanceSteps, MaintenanceRulesApplied, type MaintenancePlan, type StepKey, type StepResult } from "./MaintenancePlan";
+import { DEFAULT_MAINTENANCE_PLAN, MaintenancePlanForm, MaintenanceSteps, MaintenanceRulesApplied, STEP_ORDER, type ClonesSupport, type MaintenancePlan, type StepKey, type StepResult } from "./MaintenancePlan";
 import { PruneWorktreesPanel } from "./PruneWorktreesPanel";
-import { ClonesPanel, clonesBytes as bytes } from "./ClonesPanel";
+import { ClonesPanel, clonesBytes as bytes, clonesTotals, repoTotals } from "./ClonesPanel";
+import { openGitRuntimeSettings, useReflinkSupport } from "./reflink-support";
 import { BulkSyncStatus, StatusMark } from "./BulkSyncStatus";
 import { countOutcomes } from "./bulk-sync-progress";
 import { attachMaintenanceRun, markMaintenanceSeen, useMaintenanceRunView } from "./maintenance-attach";
 import {
   branchCardCopy,
   branchStepLine,
+  clonesCardCopy,
+  clonesStepLine,
   deletedLead,
   gcCardCopy,
   gcStepLine,
@@ -117,6 +120,8 @@ export function MaintenanceDialog({
   initialTab = "combined",
   repoScope: scopeProp,
   autoReview = false,
+  initialPlan,
+  autoStart = false,
   now = Date.now
 }: {
   profileId: string;
@@ -133,6 +138,11 @@ export function MaintenanceDialog({
   /** Start the branch review on open, with the saved options. Set only by
    *  that same hand-off: the reader already asked for exactly this. */
   autoReview?: boolean;
+  /** Combined's plan on open, instead of the defaults. */
+  initialPlan?: MaintenancePlan;
+  /** Start Combined on open, once the saved rules are in. Set only by the
+   *  Clones offer's toast, whose Share files already asked. */
+  autoStart?: boolean;
   now?: () => number;
 }) {
   const [tab, setTab] = useState<"combined" | "gc" | "branches" | "worktrees" | "clones" | "repair">(initialTab);
@@ -142,7 +152,15 @@ export function MaintenanceDialog({
   const worktreesBusy = prunerBusy || clonesBusy;
   const [worktreeCandidateCount, setWorktreeCandidateCount] = useState<number | null>(null);
   const [scopeRepoCount, setScopeRepoCount] = useState<number | null>(null);
-  const [plan, setPlan] = useState<MaintenancePlan>({ repair: false, worktrees: true, branches: true, gc: true });
+  const [plan, setPlan] = useState<MaintenancePlan>(initialPlan ?? DEFAULT_MAINTENANCE_PLAN);
+  /** Whether the Git in use can re-share; Clones is planned only once it says. */
+  const reflink = useReflinkSupport();
+  // Any answer short of "can re-share", an error included, counts as cannot.
+  const clonesSupport: ClonesSupport = !reflink.answered ? "checking" : reflink.canReshare ? "available" : "unavailable";
+  const gitVersion = reflink.support?.version?.replace(/^git version /, "") ?? null;
+  const [updateMain, setUpdateMain] = useState(true);
+  /** The plan Combined runs: Clones drops out on a Git that cannot share. */
+  const runPlan: MaintenancePlan = { ...plan, clones: plan.clones && clonesSupport === "available" };
   const [branchMode, setBranchMode] = useState<"review" | "auto">("review");
   const [workflowStep, setWorkflowStep] = useState<"setup" | StepKey | "done">("setup");
   const [workflowStopped, setWorkflowStopped] = useState(false);
@@ -150,6 +168,7 @@ export function MaintenanceDialog({
   const [receiptExpanded, setReceiptExpanded] = useState<Set<StepKey>>(new Set(["branches"]));
   const [branchReceipt, setBranchReceipt] = useState<MaintenanceSummary | null>(null);
   const [gcReceipt, setGcReceipt] = useState<MaintenanceSummary | null>(null);
+  const [clonesReceipt, setClonesReceipt] = useState<MaintenanceSummary | null>(null);
   const [protectRecent, setProtectRecent] = useState(true);
   const [protectionDays, setProtectionDays] = useState(7);
   const [finishedAfterDays, setFinishedAfterDays] =
@@ -270,6 +289,8 @@ export function MaintenanceDialog({
     }).catch(() => undefined);
     return () => { cancelled = true; };
   }, [profileId]);
+
+  const openGitSettings = (): void => openGitRuntimeSettings(setError);
 
   /** Change the rules, remember them, and drop a review they no longer
    *  describe — a list reviewed under a 7-day guard is not a 30-day list. */
@@ -493,7 +514,18 @@ export function MaintenanceDialog({
   };
   const finishWorkflow = async (): Promise<void> => {
     if (!live.current || active.current !== null) return;
-    if (plan.gc) {
+    if (runPlan.clones) {
+      setWorkflowStep("clones");
+      const result = await run({ kind: "reshare", updateMain });
+      if (live.current) setClonesReceipt(result);
+      if (stopped(result, "clones", "clones")) return;
+      const issues = stepIssues(result!, "clones");
+      const totals = clonesTotals(result!.results);
+      // It ran: "Nothing new to share" is a result, not a skipped step.
+      recordStep("clones", { state: issues.length > 0 ? "partial" : "done",
+        summary: clonesStepLine(totals.bytes === null ? null : bytes(totals.bytes), totals.files, totals.worktrees, issues), issues });
+    }
+    if (runPlan.gc) {
       setWorkflowStep("gc");
       const result = await run({ kind: "gc", mode });
       setGcReceipt(result);
@@ -542,8 +574,10 @@ export function MaintenanceDialog({
       await removeBranchesAndContinue(branches);
     } else await finishWorkflow();
   };
+  /** Something to run, and nothing still unknown about it. */
+  const canStart = Object.values(runPlan).some(Boolean) && !(plan.clones && clonesSupport === "checking");
   const analyze = (): void => {
-    if (workflowStarted.current || !optionsLoaded || !Object.values(plan).some(Boolean)) return;
+    if (workflowStarted.current || !optionsLoaded || !canStart) return;
     workflowStarted.current = true;
     workflowStartedAt.current = Date.now();
     reset();
@@ -552,6 +586,7 @@ export function MaintenanceDialog({
     scanIssues.current = [];
     setWorkflowStopped(false);
     setBranchReceipt(null);
+    setClonesReceipt(null);
     // The whole combined run stays in the profile named above, regardless of
     // what scope an individual task tab was last used with.
     void (async () => {
@@ -587,6 +622,7 @@ export function MaintenanceDialog({
     setWorkflowStopped(false);
     setBranchReceipt(null);
     setGcReceipt(null);
+    setClonesReceipt(null);
     reset();
   };
 
@@ -614,6 +650,14 @@ export function MaintenanceDialog({
     // Only ever the first review: `action` is set from here on.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [autoReview, optionsLoaded, attachChecked]);
+
+  useEffect(() => {
+    // The Clones offer's hand-off: run the plan it opened with, once.
+    if (!autoStart || !optionsLoaded || !attachChecked || clonesSupport === "checking" || tab !== "combined" || action !== null || running) return;
+    analyze();
+    // Only ever the first start: `workflowStarted` holds it from here on.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [autoStart, optionsLoaded, attachChecked, clonesSupport]);
 
   const candidates =
     action?.kind === "scan-branches" && summary !== null
@@ -684,6 +728,7 @@ export function MaintenanceDialog({
   const scanComplete = complete && action?.kind === "scan-branches";
   const branchScan = action?.kind === "scan-branches";
   const collecting = action?.kind === "gc";
+  const sharing = action?.kind === "reshare";
   const saved = (id: string): number => {
     const row = results.get(id);
     return row?.beforeBytes === undefined || row.afterBytes === undefined
@@ -693,16 +738,25 @@ export function MaintenanceDialog({
   /** A branch review and a collection show a card only for a repository
    *  that is running, failed, or has something to show; the rest fold into
    *  one quiet line. Deletion shows every repository it touched. */
-  const weight = (id: string): number =>
-    branchScan ? results.get(id)?.candidates?.length ?? 0 : saved(id);
-  const proposingRepos = branchScan || collecting ? [...repos].filter((repo) => current.has(repo.id) ||
+  const weight = (id: string): number => {
+    if (branchScan) return results.get(id)?.candidates?.length ?? 0;
+    if (sharing) {
+      const row = results.get(id);
+      if (row === undefined) return 0;
+      const totals = repoTotals(row);
+      // Shared but not measurable (another filesystem) still earns a card.
+      return totals.bytes ?? (totals.files > 0 ? GC_QUIET_BYTES : 0);
+    }
+    return saved(id);
+  };
+  const proposingRepos = branchScan || collecting || sharing ? [...repos].filter((repo) => current.has(repo.id) ||
     ["failed", "partial", "cancelled"].includes(results.get(repo.id)?.outcome ?? "") ||
     // A run that ended (cancelled or failed) without reaching a repository
     // still shows it, as incomplete, rather than dropping it from both lists.
     (!running && !results.has(repo.id)) ||
     (branchScan ? weight(repo.id) > 0 : weight(repo.id) >= GC_QUIET_BYTES)).sort((a, b) =>
       weight(b.id) - weight(a.id)) : repos;
-  const quietRepos = branchScan || collecting ? repos.filter((repo) => !proposingRepos.some((shown) => shown.id === repo.id) && results.has(repo.id)) : [];
+  const quietRepos = branchScan || collecting || sharing ? repos.filter((repo) => !proposingRepos.some((shown) => shown.id === repo.id) && results.has(repo.id)) : [];
   const quietWithKept = quietRepos.filter((repo) => (results.get(repo.id)?.kept?.length ?? 0) > 0).length;
   const deletedCount = branchReceipt?.results.flatMap((row) => row.branches ?? []).filter((branch) => branch.deleted).length ?? 0;
   const collectedBefore = gcReceipt?.results.reduce((sum, row) => sum + (row.beforeBytes ?? 0), 0) ?? 0;
@@ -712,11 +766,26 @@ export function MaintenanceDialog({
   const repairIssues = stepResults.repair?.issues ?? [];
   const branchIssues = stepResults.branches?.issues ?? [];
   const gcIssues = stepResults.gc?.issues ?? [];
-  const hasIssues = repairIssues.length > 0 || branchIssues.length > 0 || gcIssues.length > 0;
+  const clonesIssues = stepResults.clones?.issues ?? [];
+  const hasIssues = repairIssues.length > 0 || branchIssues.length > 0 || clonesIssues.length > 0 || gcIssues.length > 0;
   const gcAfter: GcAfter = workflowStep === "gc" ? "running"
     : stepResults.gc !== undefined && stepResults.gc.state !== "failed" ? "ran" : "none";
   const branchCard = branchCardCopy(branchIssues, deletedCount, gcAfter, gcIssues.length > 0);
   const gcCard = gcCardCopy(gcIssues, gcReceipt?.results.filter((row) => row.outcome === "success").length ?? 0);
+  const clonesCard = clonesCardCopy(clonesIssues);
+  /** Each repository the Clones step shared something in, largest first. */
+  const clonesRows = (clonesReceipt?.results ?? [])
+    .map((row) => ({ row, totals: repoTotals(row) }))
+    .filter(({ totals }) => totals.worktrees > 0)
+    .sort((a, b) => (b.totals.bytes ?? 0) - (a.totals.bytes ?? 0));
+  const clonesShared = clonesTotals(clonesReceipt?.results ?? []).bytes ?? 0;
+  /** The finished line counts only what the plan ran. */
+  const doneCounts = [
+    runPlan.worktrees ? `${stepResults.worktrees?.items?.length ?? 0} ${stepResults.worktrees?.items?.length === 1 ? "worktree" : "worktrees"}` : null,
+    runPlan.branches ? `${deletedCount} ${deletedCount === 1 ? "branch" : "branches"}` : null,
+    clonesShared > 0 ? `${bytes(clonesShared)} of file data now shared` : null,
+    collectedBefore > collectedAfter ? `${bytes(collectedBefore - collectedAfter)} of object storage` : null
+  ].filter((part): part is string => part !== null);
   /** Each step that left something behind reports with the shared outcome
    *  card, in step order, above the receipt (or under the live status card
    *  while a later step runs). */
@@ -727,12 +796,15 @@ export function MaintenanceDialog({
     {branchIssues.length > 0 && <ProblemCard headline={branchCard.headline} sub={branchCard.sub} listLabel={branchCard.listLabel}>
       {branchIssues.map((issue, index) => <IssueRow key={`${issue.path ?? issue.repo}:${issue.branch ?? ""}:${index}`} issue={issue} />)}
     </ProblemCard>}
+    {clonesIssues.length > 0 && <ProblemCard headline={clonesCard.headline} sub={clonesCard.sub} listLabel={clonesCard.listLabel}>
+      {clonesIssues.map((issue, index) => <IssueRow key={`${issue.path ?? issue.repo}:${index}`} issue={issue} />)}
+    </ProblemCard>}
     {gcIssues.length > 0 && <ProblemCard headline={gcCard.headline} sub={gcCard.sub} listLabel={gcCard.listLabel}>
       {gcIssues.map((issue, index) => <IssueRow key={`${issue.path ?? issue.repo}:${index}`} issue={issue} />)}
     </ProblemCard>}
   </div>;
   const receiptRows = (key: StepKey): number =>
-    key === "repair" ? stepResults.repair?.items?.length ?? 0 : key === "branches" ? deletedCount : key === "gc" ? gcReceipt?.results.length ?? 0 : 0;
+    key === "repair" ? stepResults.repair?.items?.length ?? 0 : key === "branches" ? deletedCount : key === "gc" ? gcReceipt?.results.length ?? 0 : key === "clones" ? clonesRows.length : 0;
   /** A receipt step lists its first FINISHED_SLICE rows until "Show all":
    *  382 deleted branches must not bury the garbage-collection card. */
   const sliceReceipt = <T,>(key: StepKey, rows: T[]): T[] =>
@@ -746,7 +818,7 @@ export function MaintenanceDialog({
         ? "scanning"
         : `review · ${worktreeCandidateCount} finished`
       : running
-        ? `${repairing ? "repairing" : deleting ? "deleting" : collecting ? "collecting" : "reviewing"} ${results.size} of ${repos.length}`
+        ? `${repairing ? "repairing" : deleting ? "deleting" : collecting ? "collecting" : sharing ? "sharing" : "reviewing"} ${results.size} of ${repos.length}`
         : workflowStep === "branches" && scanComplete
           ? `review · ${candidates.length} in ${proposingCount} repos`
           : "running";
@@ -827,8 +899,8 @@ export function MaintenanceDialog({
             onClick={() => { setTab("gc"); reset(); }}>Garbage collection</button>
         </div>
         {tab === "combined" && workflowStep !== "setup" && workflowStep !== "done" &&
-          <MaintenanceSteps plan={plan} current={workflowStep} results={stepResults} branchMode={branchMode}
-            gcMode={mode} progress={railProgress} />}
+          <MaintenanceSteps plan={runPlan} current={workflowStep} results={stepResults} branchMode={branchMode}
+            gcMode={mode} progress={railProgress} clonesAvailable={clonesSupport === "available"} />}
         {!attachChecked ? (
           <div className="maintenance__body" aria-busy="true" />
         ) : tab === "combined" && workflowStep === "setup" ? (
@@ -836,13 +908,15 @@ export function MaintenanceDialog({
             <MaintenancePlanForm plan={plan} onChange={setPlan}
               branchMode={branchMode} onBranchMode={changeBranchMode}
               options={combinedOptions()} onOptions={changeOptions}
-              gcMode={mode} onGcMode={setMode} {...worktreeRules} lastKeepDays={lastKeepDays} />
+              gcMode={mode} onGcMode={setMode} {...worktreeRules} lastKeepDays={lastKeepDays}
+              clonesSupport={clonesSupport} gitVersion={gitVersion} updateMain={updateMain} onUpdateMain={setUpdateMain}
+              onOpenGitSettings={openGitSettings} />
             {error !== null && <div className="modal__error">{error}</div>}
             <div className="modal__actions">
               <span className="maintenance__footer-lead">{scopeRepoCount === null ? "This profile" : `${scopeRepoCount} ${scopeRepoCount === 1 ? "repository" : "repositories"}`} · {plan.worktrees && plan.branches && branchMode === "review" ? "stops twice for you" : plan.worktrees || plan.branches && branchMode === "review" ? "stops once for you" : "runs without stopping"}</span>
               <button className="modal__cancel" onClick={onClose}>Close</button>
               <button className="modal__create"
-                disabled={!optionsLoaded || !Object.values(plan).some(Boolean)}
+                disabled={!optionsLoaded || !canStart}
                 onClick={analyze}>Start</button>
             </div>
           </>
@@ -866,14 +940,14 @@ export function MaintenanceDialog({
         ) : (
           <>
         {tab === "combined" && workflowStep === "done" ? <>
-          <div className={`maintenance__done-status${workflowStopped || hasIssues ? " is-stopped" : ""}`}><StatusMark mark={workflowStopped || hasIssues ? "failed" : "ok"} /><div><strong>{workflowStopped ? "Maintenance stopped" : hasIssues ? "Maintenance finished with errors" : "Maintenance finished"}</strong><small>{Object.values(stepResults).filter((result) => result?.state === "done" || result?.state === "partial").length} of {Object.values(plan).filter(Boolean).length} steps · {stepResults.worktrees?.items?.length ?? 0} {stepResults.worktrees?.items?.length === 1 ? "worktree" : "worktrees"}, {deletedCount} {deletedCount === 1 ? "branch" : "branches"}{collectedBefore > collectedAfter ? `, ${bytes(collectedBefore - collectedAfter)} of object storage` : ""}</small></div><time>took {workflowDurationMs >= 60_000 ? `${Math.floor(workflowDurationMs / 60_000)}m ` : ""}{Math.round(workflowDurationMs % 60_000 / 1000)}s</time></div>
+          <div className={`maintenance__done-status${workflowStopped || hasIssues ? " is-stopped" : ""}`}><StatusMark mark={workflowStopped || hasIssues ? "failed" : "ok"} /><div><strong>{workflowStopped ? "Maintenance stopped" : hasIssues ? "Maintenance finished with errors" : "Maintenance finished"}</strong><small>{Object.values(stepResults).filter((result) => result?.state === "done" || result?.state === "partial").length} of {Object.values(runPlan).filter(Boolean).length} steps{doneCounts.length > 0 ? ` · ${doneCounts.join(", ")}` : ""}</small></div><time>took {workflowDurationMs >= 60_000 ? `${Math.floor(workflowDurationMs / 60_000)}m ` : ""}{Math.round(workflowDurationMs % 60_000 / 1000)}s</time></div>
           <div className="maintenance__body">
             {problems}
             <div className="maintenance__receipt-steps">
-              {(["repair", "worktrees", "branches", "gc"] as StepKey[]).filter((key) => key !== "repair" || plan.repair).map((key, index) => {
+              {STEP_ORDER.filter((key) => key === "repair" ? runPlan.repair : key === "clones" ? runPlan.clones || clonesSupport === "available" : true).map((key, index) => {
                 const result = stepResults[key];
-                const state = result?.state ?? (plan[key] ? "not-started" : "skipped");
-                const title = key === "repair" ? "Repair links" : key === "gc" ? "Garbage collection" : key === "branches" ? "Local branches" : "Worktrees";
+                const state = result?.state ?? (runPlan[key] ? "not-started" : "skipped");
+                const title = key === "repair" ? "Repair links" : key === "gc" ? "Garbage collection" : key === "branches" ? "Local branches" : key === "clones" ? "Clones" : "Worktrees";
                 const expandedNow = receiptExpanded.has(key);
                 const listed = key === "worktrees" || key === "repair" ? result?.items?.length ?? 0 : receiptRows(key);
                 return <article key={key} className={`maintenance__receipt-step is-${state}${(result?.issues?.length ?? 0) > 0 ? " has-issues" : ""}`}>
@@ -884,15 +958,20 @@ export function MaintenanceDialog({
                     const state = restores.get(`${row.repo.id}:${branch.branch}`);
                     return <div className="maintenance__receipt-row" key={`${row.repo.id}:${branch.branch}`}><strong>{row.repo.name} · {branch.branch}</strong><code>{branch.head.slice(0, 8)}</code><button className="maintenance__restore" disabled={state === "restored" || state === "restoring"} onClick={() => void restore(row.repo.id, branch)}>{state === "restored" ? "Restored" : state === "restoring" ? "Restoring…" : state ?? "Restore"}</button></div>;
                   })}
+                  {expandedNow && key === "clones" && sliceReceipt(key, clonesRows).map(({ row, totals }) => <div className="maintenance__receipt-row" key={row.repo.id}><strong>{row.repo.name} · {totals.worktrees} {totals.worktrees === 1 ? "worktree" : "worktrees"}</strong><span>{totals.bytes === null ? row.message : bytes(totals.bytes)}</span></div>)}
                   {expandedNow && key === "gc" && sliceReceipt(key, [...(gcReceipt?.results ?? [])].sort((a, b) => ((b.beforeBytes ?? 0) - (b.afterBytes ?? 0)) - ((a.beforeBytes ?? 0) - (a.afterBytes ?? 0)))).map((row) => <div className="maintenance__receipt-row" key={row.repo.id}><strong>{row.repo.name}</strong><span>{row.beforeBytes !== undefined && row.afterBytes !== undefined ? `${bytes(row.beforeBytes)} → ${bytes(row.afterBytes)}` : row.message}</span></div>)}
                   {expandedNow && (key === "worktrees" || key === "repair") && (key === "repair" ? sliceReceipt(key, result?.items ?? []) : result?.items ?? []).map((item) => <div className="maintenance__receipt-row" key={item.detail}><strong>{item.label}</strong><code className="selectable">{displayPath(item.detail, platform)}</code></div>)}
                   {expandedNow && receiptRows(key) > FINISHED_SLICE && <div className="maintenance__receipt-more"><button onClick={() => setReceiptAll((old) => { const next = new Set(old); if (next.has(key)) next.delete(key); else next.add(key); return next; })}>{receiptAll.has(key) ? "Show fewer" : `Show all ${receiptRows(key)}`}</button></div>}
                 </article>;
               })}
             </div>
-            <p className="maintenance__help">Restore recreates a branch at the tip it had when it was deleted, for as long as Git still holds that commit. Removed worktrees cannot be restored.</p>
+            {(runPlan.branches || runPlan.worktrees) && <p className="maintenance__help">Restore recreates a branch at the tip it had when it was deleted, for as long as Git still holds that commit. Removed worktrees cannot be restored.</p>}
           </div>
-          <div className="modal__actions"><button className="modal__cancel" onClick={onClose}>Close</button><button className="modal__cancel" onClick={restartWorkflow}>New plan</button></div>
+          <div className="modal__actions"><button className="modal__cancel" onClick={onClose}>Close</button><button className="modal__cancel" onClick={() => {
+            // The offer ran Clones alone; a new plan starts from the usual one.
+            if (initialPlan !== undefined) setPlan(DEFAULT_MAINTENANCE_PLAN);
+            restartWorkflow();
+          }}>New plan</button></div>
         </> : <>
         {(running || complete) && (
           <BulkSyncStatus
@@ -912,9 +991,9 @@ export function MaintenanceDialog({
                 ? cancelling
                   ? "Stopping after active repository operations…"
                   : current.size > 1
-                    ? `${repairing ? "Repairing worktree links in" : collecting ? "Collecting" : deleting ? "Deleting branches in" : "Reviewing"} ${current.size} repositories`
+                    ? `${repairing ? "Repairing worktree links in" : collecting ? "Collecting" : deleting ? "Deleting branches in" : sharing ? "Refreshing clones in" : "Reviewing"} ${current.size} repositories`
                     : currentRepo
-                      ? `${repairing ? "Repairing worktree links in" : collecting ? "Collecting" : branchScan ? "Reviewing" : "Deleting branches in"} ${currentRepo.name}`
+                      ? `${repairing ? "Repairing worktree links in" : collecting ? "Collecting" : branchScan ? "Reviewing" : sharing ? "Refreshing clones in" : "Deleting branches in"} ${currentRepo.name}`
                       : "Waiting for the next repository…"
                 : summary?.cancelled
                   ? "Cancelled"
@@ -1349,7 +1428,7 @@ export function MaintenanceDialog({
                 </article>
               );
             })}
-            {quietRepos.length > 0 && <div className="maintenance__quiet"><strong>{quietRepos.length}</strong> {quietRepos.length === 1 ? "repository" : "repositories"} {collecting ? "with less than 1 MiB to reclaim" : <>with nothing to delete · <strong>{quietWithKept}</strong> of them keep branches</>} <button onClick={() => setShowQuietRepos((old) => !old)}>{showQuietRepos ? "Hide" : "Show"}</button></div>}
+            {quietRepos.length > 0 && <div className="maintenance__quiet"><strong>{quietRepos.length}</strong> {quietRepos.length === 1 ? "repository" : "repositories"} {collecting ? "with less than 1 MiB to reclaim" : sharing ? "with less than 1 MiB newly shared" : <>with nothing to delete · <strong>{quietWithKept}</strong> of them keep branches</>} <button onClick={() => setShowQuietRepos((old) => !old)}>{showQuietRepos ? "Hide" : "Show"}</button></div>}
           </div>
         </div>
         <div className="modal__actions">
@@ -1365,7 +1444,7 @@ export function MaintenanceDialog({
             </button>
           ) : tab === "combined" ? (
             <>
-              {workflowStep === "branches" && scanComplete && <span className="maintenance__footer-lead">{selected.size} selected · {plan.gc ? "then garbage collection" : "last step"}</span>}
+              {workflowStep === "branches" && scanComplete && <span className="maintenance__footer-lead">{selected.size} selected · {runPlan.clones ? "then clones" : runPlan.gc ? "then garbage collection" : "last step"}</span>}
               {!scanComplete && <button ref={footerFocus} className="modal__cancel" onClick={onClose}>Close</button>}
               {workflowStep === "branches" && scanComplete ? (
                 <>

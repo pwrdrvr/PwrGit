@@ -3,7 +3,6 @@ import {
   EMPTY_MAINTENANCE_RUN_VIEW,
   foldMaintenanceProgress,
   maintenanceViewFromSummary,
-  type GitReflinkStatus,
   type MaintenanceRepo,
   type MaintenanceRepoResult,
   type MaintenanceSummary
@@ -14,6 +13,7 @@ import { displayPath } from "../../lib/platform";
 import { formatElapsed } from "../remote/remote-activity";
 import { BulkSyncStatus, StatusMark } from "./BulkSyncStatus";
 import { countOutcomes } from "./bulk-sync-progress";
+import { openGitRuntimeSettings, useReflinkSupport } from "./reflink-support";
 
 /** File data in binary units, for every maintenance receipt. */
 export function clonesBytes(value: number): string {
@@ -41,9 +41,15 @@ export function repoTotals(result: MaintenanceRepoResult): {
   };
 }
 
-/** The receipt's headline: Git's own count, never "freed". */
-export function clonesHeadline(results: MaintenanceRepoResult[]): { title: string; detail: string } {
-  let bytes = 0;
+/** A whole run's totals. `bytes` is null only when Git measured nothing. */
+export function clonesTotals(results: MaintenanceRepoResult[]): {
+  bytes: number | null;
+  files: number;
+  left: number;
+  worktrees: number;
+  failed: number;
+} {
+  let bytes: number | null = null;
   let files = 0;
   let left = 0;
   let worktrees = 0;
@@ -51,11 +57,19 @@ export function clonesHeadline(results: MaintenanceRepoResult[]): { title: strin
   for (const result of results) {
     failed += (result.reshare?.worktrees ?? []).filter((worktree) => worktree.outcome === "failed").length;
     const totals = repoTotals(result);
-    bytes += totals.bytes ?? 0;
+    if (totals.bytes !== null) bytes = (bytes ?? 0) + totals.bytes;
     files += totals.files;
     left += totals.left;
     worktrees += totals.worktrees;
   }
+  return { bytes, files, left, worktrees, failed };
+}
+
+/** The receipt's headline: Git's own count, never "freed". */
+export function clonesHeadline(results: MaintenanceRepoResult[]): { title: string; detail: string } {
+  const totals = clonesTotals(results);
+  const { files, left, worktrees, failed } = totals;
+  const bytes = totals.bytes ?? 0;
   const n = (value: number): string => value.toLocaleString("en-US");
   return {
     title:
@@ -85,8 +99,7 @@ export function ClonesPanel({
   onClose: () => void;
   onBusyChange: (busy: boolean) => void;
 }) {
-  const [support, setSupport] = useState<GitReflinkStatus | null>(null);
-  const [supportError, setSupportError] = useState<string | null>(null);
+  const { support, error: supportError } = useReflinkSupport();
   const [updateMain, setUpdateMain] = useState(true);
   const [allProfiles, setAllProfiles] = useState(false);
   const [running, setRunning] = useState(false);
@@ -109,15 +122,6 @@ export function ClonesPanel({
 
   useEffect(() => {
     live.current = true;
-    void dispatch("git:reflinkSupport", undefined)
-      .then((answer) => {
-        if (!live.current) return;
-        if (answer.ok) setSupport(answer.value);
-        else setSupportError(answer.error.message);
-      })
-      .catch((cause: unknown) => {
-        if (live.current) setSupportError(cause instanceof Error ? cause.message : String(cause));
-      });
     return () => {
       live.current = false;
       // Closing the dialog mid-run stops the queue; running worktrees finish.
@@ -218,11 +222,7 @@ export function ClonesPanel({
     void dispatch("maintenance:cancel", { operationId: operation.current });
   };
 
-  const openSettings = (): void => {
-    void dispatch("settings:open", { page: "git", sub: "runtime" }).then((result) => {
-      if (!result.ok) setError(result.error.message);
-    });
-  };
+  const openSettings = (): void => openGitRuntimeSettings(setError);
 
   const counts = countOutcomes([...results.values()].map((result) => result.outcome));
   const unavailable = support !== null && !support.support.reshare;
