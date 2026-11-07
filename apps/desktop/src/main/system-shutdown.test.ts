@@ -78,6 +78,27 @@ describe("system shutdown", () => {
     expect(electron.app.exit).toHaveBeenCalledExactlyOnceWith(0);
   });
 
+  it("runs beforeQuit listeners before quitting, and quits even if one throws", () => {
+    const shutdown = watchSystemShutdown("linux");
+    const order: string[] = [];
+    shutdown.beforeQuit(() => {
+      order.push("hurry");
+      throw new Error("listener failed");
+    });
+    shutdown.beforeQuit(() => order.push("second"));
+    electron.app.quit.mockImplementation(() => order.push("quit"));
+
+    electron.shutdown?.({ preventDefault: vi.fn() });
+
+    expect(order).toEqual(["hurry", "second", "quit"]);
+    expect(logMain).toHaveBeenCalledWith(
+      "warn",
+      "app",
+      "system shutdown: listener failed:",
+      expect.any(Error)
+    );
+  });
+
   it("does not register the Linux/macOS notification on Windows", () => {
     watchSystemShutdown("win32");
     expect(electron.powerMonitor.on).not.toHaveBeenCalled();

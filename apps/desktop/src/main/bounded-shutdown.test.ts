@@ -106,6 +106,40 @@ describe("quit diagnostics barrier", () => {
     expect(s.event.preventDefault).toHaveBeenCalledTimes(2);
   });
 
+  it("hurry() shortens a running flush to the given time from now", async () => {
+    const s = setup();
+    s.drain.beforeQuit(s.event);
+    await vi.advanceTimersByTimeAsync(4_000);
+    s.drain.hurry(2_000);
+    expect(vi.getTimerCount()).toBe(1);
+    await vi.advanceTimersByTimeAsync(1_999);
+    expect(s.resumeQuit).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(1);
+    await afterResumeHop();
+    expect(s.resumeQuit).toHaveBeenCalledOnce();
+    expect(s.warn).toHaveBeenCalledWith(expect.stringContaining("6000 ms"), undefined);
+  });
+
+  it("hurry() before any quit caps the deadline the flush starts with", async () => {
+    const s = setup();
+    s.drain.hurry(2_000);
+    s.drain.beforeQuit(s.event);
+    await vi.advanceTimersByTimeAsync(2_000);
+    await afterResumeHop();
+    expect(s.resumeQuit).toHaveBeenCalledOnce();
+  });
+
+  it("hurry() never extends the deadline", async () => {
+    const s = setup();
+    s.drain.beforeQuit(s.event);
+    await vi.advanceTimersByTimeAsync(9_000);
+    s.drain.hurry(2_000);
+    await vi.advanceTimersByTimeAsync(1_000);
+    await afterResumeHop();
+    expect(s.resumeQuit).toHaveBeenCalledOnce();
+    expect(s.warn).toHaveBeenCalledWith(expect.stringContaining("10000 ms"), undefined);
+  });
+
   it.each(["resolve", "reject"] as const)("ignores late %s after timeout", async (settle) => {
     const s = setup();
     s.drain.beforeQuit(s.event);

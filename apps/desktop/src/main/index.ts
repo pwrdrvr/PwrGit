@@ -136,7 +136,7 @@ import {
 } from "./renderer-errors";
 import { watchEventLoopStalls } from "./event-loop-stalls";
 import { watchProcessIds } from "./process-ids";
-import { watchSystemShutdown } from "./system-shutdown";
+import { SYSTEM_SHUTDOWN_FLUSH_MS, watchSystemShutdown } from "./system-shutdown";
 import { ensureMacKeychainAccess } from "./mac-keychain-access";
 import { openDatabase } from "./persistence/db";
 import { readSeedIdentity } from "./profiles/git-identity";
@@ -439,7 +439,7 @@ if (!gotSingleInstanceLock) {
   });
 
   app.whenReady().then(async () => {
-    watchSystemShutdown();
+    const systemShutdown = watchSystemShutdown();
     wireAppMenuBridge();
     wireWindowControlsBridge();
     // App log: ring buffer + file, streamed to the Logs window (Help › Logs).
@@ -1506,6 +1506,9 @@ if (!gotSingleInstanceLock) {
     });
     // Flush while renderer windows (and their inspector targets) still exist.
     app.on("before-quit", (event) => quitDrain.beforeQuit(event));
+    // An OS shutdown exits within seconds; finish the flush inside that, so
+    // the quit still reaches will-quit and quit instead of the exit.
+    systemShutdown.beforeQuit(() => quitDrain.hurry(SYSTEM_SHUTDOWN_FLUSH_MS));
     registerAppUpdateHandlers(bus);
     settings.onWrite(() => {
       handleUpdateSelectionChange();

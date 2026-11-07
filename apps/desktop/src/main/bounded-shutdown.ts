@@ -24,6 +24,9 @@ export async function drainBeforeQuit(
   }
 }
 
+/** How long a deferred quit waits for `stop` before it continues anyway. */
+export const QUIT_FLUSH_DEADLINE_MS = 10_000;
+
 /** One diagnostics deadline shared by normal quit and explicit update installs. */
 export function createQuitDrain(options: {
   stop: () => void | Promise<void>;
@@ -42,10 +45,26 @@ export function createQuitDrain(options: {
   let resumingQuit = false;
   let updaterOwnsQuit = false;
   let pending: Promise<void> | undefined;
+  /** The flush's whole allowance, from its start to giving up. */
+  let budgetMs = QUIT_FLUSH_DEADLINE_MS;
+  /** When the flush started, as a Date.now() time. */
+  let startedAt: number | undefined;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  let finish: ((warning?: string, error?: unknown) => void) | undefined;
+
+  const armDeadline = (ms: number): void => {
+    clearTimeout(timer);
+    // Referenced so shutdown still resumes with no windows/other handles.
+    // This bounds async hangs; a blocked JS event loop cannot run the timer.
+    timer = setTimeout(
+      () => finish?.(`diagnostics shutdown exceeded ${budgetMs} ms; continuing quit`),
+      ms
+    );
+  };
 
   const flush = (): Promise<void> => {
     pending ??= new Promise<void>((resolve) => {
-      const finish = (warning?: string, error?: unknown): void => {
+      finish = (warning?: string, error?: unknown): void => {
         if (complete) return;
         complete = true;
         clearTimeout(timer);
@@ -56,21 +75,35 @@ export function createQuitDrain(options: {
         }
         resolve();
       };
-      // Referenced so shutdown still resumes with no windows/other handles.
-      // This bounds async hangs; a blocked JS event loop cannot run the timer.
-      const timer = setTimeout(
-        () => finish("diagnostics shutdown exceeded 10000 ms; continuing quit"),
-        10_000
-      );
+      startedAt = Date.now();
+      armDeadline(budgetMs);
       void Promise.resolve().then(options.stop).then(
-        () => finish(),
-        (error: unknown) => finish("diagnostics shutdown failed; continuing quit", error)
+        () => finish?.(),
+        (error: unknown) => finish?.("diagnostics shutdown failed; continuing quit", error)
       );
     });
     return pending;
   };
 
   return {
+    /**
+     * Give the flush at most `ms` from now, started or not. The OS shutdown
+     * path calls this: logind and macOS allow seconds, not the full deadline,
+     * and system-shutdown.ts exits before they run out. A flush still running
+     * then would end the process by app.exit(), which skips will-quit and
+     * quit. Cut short here, the quit resumes and finishes normally first.
+     */
+    hurry(ms: number): void {
+      if (complete) return;
+      if (startedAt === undefined) {
+        budgetMs = Math.min(budgetMs, ms);
+        return;
+      }
+      const elapsed = Date.now() - startedAt;
+      if (elapsed + ms >= budgetMs) return;
+      budgetMs = elapsed + ms;
+      armDeadline(ms);
+    },
     flushForUpdate(): Promise<void> {
       // An install can take over an already pending normal quit. Never issue
       // app.quit (or its exit fail-safe) ahead of the updater's transition.
