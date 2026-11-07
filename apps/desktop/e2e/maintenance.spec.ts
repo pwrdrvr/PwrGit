@@ -79,9 +79,11 @@ test("collects all repositories and reviews stale local branches without touchin
   // keeps it and says so rather than offering it.
   await dialog.locator(".maintenance__quiet").getByRole("button", { name: "Show" }).click();
   await expect(dialog).toContainText("1 touched in the last 7 days");
-  await expect(
-    dialog.getByRole("button", { name: "Delete 0 selected local branches" })
-  ).toBeDisabled();
+  // A review that found nothing is over: no dead Delete button, and Close
+  // is the primary, last (design: Maintenance Steady Height, turn 2).
+  await expect(dialog.getByRole("button", { name: /^Delete \d+ selected/ })).toHaveCount(0);
+  await expect(dialog.locator(".modal__actions button").last()).toHaveText("Close");
+  await expect(dialog.locator(".modal__actions button").last()).toHaveClass(/modal__create/);
   await dialog.getByRole("button", { name: "Change", exact: true }).click();
   await dialog
     .getByRole("checkbox", { name: "Keep branches touched in the last" })
