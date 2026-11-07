@@ -58,12 +58,21 @@ function sourceText(file) {
   if (file?.encoding !== "base64" || typeof file.content !== "string") {
     throw new Error("Audit blocked: missing authoritative source content");
   }
-  return Buffer.from(file.content, "base64").toString("utf8").replaceAll("\r\n", "\n");
+  return Buffer.from(file.content, "base64").toString("utf8");
+}
+
+// The readers below match the established layout line by line, so they read
+// LF text without a byte-order mark. A cask or manifest saved on Windows must
+// read the same: the layout check exists to catch a changed layout, not a
+// changed line ending.
+function lfText(text) {
+  return text.replace(/^\uFEFF/, "").replace(/\r\n?/g, "\n");
 }
 
 // Deliberately recognize the established manifest/cask layout; a changed layout
 // requires inspection rather than an invented architecture or checksum.
-export function readWingetInstaller(text, version) {
+export function readWingetInstaller(source, version) {
+  const text = lfText(source);
   if (!new RegExp(`^PackageIdentifier: ${distribution.wingetId.replaceAll(".", "\\.")}$`, "m").test(text) ||
       text.match(/^PackageVersion: (\d+\.\d+\.\d+)$/m)?.[1] !== version) throw new Error("Audit blocked: Winget identity/version changed");
   const architectures = [...text.matchAll(/^\s*-?\s*Architecture:\s*(\S+)/gm)].map((m) => m[1]);
@@ -75,7 +84,8 @@ export function readWingetInstaller(text, version) {
   return [{ architecture: "x64", url: urls[0], digest: `sha256:${hashes[0]}` }];
 }
 
-export function readCask(text) {
+export function readCask(source) {
+  const text = lfText(source);
   const version = text.match(/^  version "(\d+\.\d+\.\d+)"$/m)?.[1];
   const url = text.match(/^  url "([^"\n]+)"$/m)?.[1];
   const arm = text.match(/^  sha256 arm: +"([a-f0-9]{64})",$/m)?.[1];

@@ -70,6 +70,16 @@ export function* walkPackageJsonFiles(dir) {
   }
 }
 
+/**
+ * A policy file as LF text without a byte-order mark. Git may check text
+ * files out with CRLF on Windows, and editors there may add a BOM (which
+ * `JSON.parse` rejects but npm and pnpm accept). The policy is about content,
+ * not the host's line endings.
+ */
+function readText(path) {
+  return readFileSync(path, "utf8").replace(/^\uFEFF/, "").replace(/\r\n?/g, "\n");
+}
+
 export function checkPackageLicensePolicy(root = repoRoot) {
   const failures = [];
   const seen = new Set();
@@ -78,7 +88,7 @@ export function checkPackageLicensePolicy(root = repoRoot) {
     // Canonicalize to forward slashes so policy paths work on Windows too.
     const packageRelativePath = relative(root, packagePath).split(sep).join("/");
     seen.add(packageRelativePath);
-    const packageJson = JSON.parse(readFileSync(packagePath, "utf8"));
+    const packageJson = JSON.parse(readText(packagePath));
     const expected = EXPECTED_PACKAGE_POLICIES.get(packageRelativePath);
 
     if (expected === undefined) {
@@ -114,9 +124,7 @@ export function checkPackageLicensePolicy(root = repoRoot) {
   if (!existsSync(licensePath)) {
     failures.push("LICENSE is missing");
   } else {
-    // Git may check text files out with CRLF on Windows. Validate canonical
-    // content without making the policy depend on the host line endings.
-    const license = readFileSync(licensePath, "utf8").replace(/\r\n?/g, "\n");
+    const license = readText(licensePath);
     if (!license.startsWith("MIT License\n")) {
       failures.push("LICENSE must contain the MIT License");
     }
@@ -129,7 +137,7 @@ export function checkPackageLicensePolicy(root = repoRoot) {
   if (!existsSync(electronBuilderPath)) {
     failures.push("apps/desktop/electron-builder.yml is missing");
   } else {
-    const electronBuilder = readFileSync(electronBuilderPath, "utf8");
+    const electronBuilder = readText(electronBuilderPath);
     for (const expectedAttribution of [
       `copyright: "${FIRST_PARTY_COPYRIGHT}."`,
       `NSHumanReadableCopyright: "${FIRST_PARTY_COPYRIGHT}."`,

@@ -60,24 +60,38 @@ export function windowsInstallerArtifacts(distDir) {
   return artifacts;
 }
 
-export function writeWindowsChecksums(distDir) {
-  const lines = windowsInstallerArtifacts(distDir)
-    .map(({ name, path }) => `${sha256(readFileSync(path))}${CHECKSUM_SEPARATOR}${name}`)
-    .join("\n");
-  const checksumPath = join(distDir, "SHA256SUMS");
-  writeFileSync(checksumPath, `${lines}\n`);
-  return checksumPath;
+/** The manifest text for `[{ name, sha256 }]`, one `<hash>  <name>` line each. */
+export function formatWindowsChecksums(entries) {
+  return entries.map(({ name, sha256: digest }) => `${digest}${CHECKSUM_SEPARATOR}${name}\n`).join("");
 }
 
-function readChecksums(dist) {
+/**
+ * Installer name → hash. Reads LF or CRLF, with or without a final newline
+ * or a leading byte-order mark: the manifest crosses a Windows runner, and a
+ * tool there that rewrites it must not turn it into "malformed".
+ */
+export function parseWindowsChecksums(text) {
   const entries = new Map();
-  for (const line of readFileSync(join(dist, "SHA256SUMS"), "utf8").split(/\r?\n/)) {
+  for (const line of text.replace(/^\uFEFF/, "").split(/\r?\n/)) {
     if (line.trim() === "") continue;
     const match = CHECKSUM_LINE.exec(line);
     if (match === null) throw new Error(`Malformed SHA256SUMS line: ${line}`);
     entries.set(match[2], match[1]);
   }
   return entries;
+}
+
+export function writeWindowsChecksums(distDir) {
+  const text = formatWindowsChecksums(
+    windowsInstallerArtifacts(distDir).map(({ name, path }) => ({ name, sha256: sha256(readFileSync(path)) })),
+  );
+  const checksumPath = join(distDir, "SHA256SUMS");
+  writeFileSync(checksumPath, text);
+  return checksumPath;
+}
+
+function readChecksums(dist) {
+  return parseWindowsChecksums(readFileSync(join(dist, "SHA256SUMS"), "utf8"));
 }
 
 /**
