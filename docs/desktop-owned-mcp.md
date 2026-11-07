@@ -73,6 +73,15 @@ slot. Admission reclaims revoked Sessions and awaits handler/watch cleanup befor
 reusing their slots. Stream overflow, failed output, native listener loss,
 disablement and app shutdown tear down Sessions and revoke their native grants.
 
+Each Session admits at most eight application request handlers at once, with a
+FIFO backlog bounded to 128 requests and 4 MiB of request payloads. Excess work
+receives an MCP error and can be retried after earlier requests finish. This
+limit applies to the desktop factory over both stdio and IPC HTTP. Cancellation
+notifications and replies to server requests bypass application admission.
+Canceling queued work removes it; canceling active work retains its slot until
+the handler settles, even when that handler ignores abort or the SDK suppresses
+its response. Handler failures also release their slots.
+
 ## Migration
 
 Existing TCP HTTP/OAuth clients must replace their URL with the native stdio

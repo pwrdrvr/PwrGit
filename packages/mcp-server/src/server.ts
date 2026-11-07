@@ -27,6 +27,7 @@ import {
 } from "./access-policy.js";
 
 import { MCP_PACKAGE_VERSION } from "./version.js";
+import { limitMcpRequests } from "./request-queue.js";
 
 export const CAPABILITY_RESOURCE_URI = "pwrgit://live-status/capabilities/v2";
 
@@ -105,6 +106,7 @@ export async function createPwrGitMcpServer(
         "Subscribe with resources/subscribe, then re-read after notifications/resources/updated. Hosts without subscriptions must explicitly read resources on demand."
     }
   );
+  limitMcpRequests(mcp.server);
   const statusResources = new StatusResourceRegistry(
     mcp,
     liveStatusLoader,
