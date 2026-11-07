@@ -113,7 +113,8 @@ async function waitForRelease(tag, gh, delay) {
  * a body edited in its web form with CRLF, and the notes file is LF.
  */
 export function releaseNotesMatch(body, notes) {
-  const text = (value) => value.replace(/^\uFEFF/, "").replace(/\r\n?/g, "\n").trim();
+  // GitHub returns `body: null` for a release saved without notes.
+  const text = (value) => (value ?? "").replace(/^\uFEFF/, "").replace(/\r\n?/g, "\n").trim();
   return text(body) === text(notes);
 }
 

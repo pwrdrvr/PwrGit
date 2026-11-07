@@ -38,4 +38,9 @@ describe("release notes comparison (shrunk counterexample)", () => {
     const text = "- a\n\n- b\n";
     expect(releaseNotesMatch(toCrlf(text), text)).toBe(true);
   });
+
+  test("reports a release saved with no notes (body: null) as differing, not a crash", () => {
+    expect(releaseNotesMatch(null, "- a\n")).toBe(false);
+    expect(releaseNotesMatch(null, "")).toBe(true);
+  });
 });

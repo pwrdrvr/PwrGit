@@ -47,6 +47,8 @@ export function createQuitDrain(options: {
   let pending: Promise<void> | undefined;
   /** The flush's whole allowance, from its start to giving up. */
   let budgetMs = QUIT_FLUSH_DEADLINE_MS;
+  /** Set when an OS shutdown cut the deadline short; the warning says so. */
+  let hurried = false;
   /** When the flush started, as a Date.now() time. */
   let startedAt: number | undefined;
   let timer: ReturnType<typeof setTimeout> | undefined;
@@ -57,7 +59,12 @@ export function createQuitDrain(options: {
     // Referenced so shutdown still resumes with no windows/other handles.
     // This bounds async hangs; a blocked JS event loop cannot run the timer.
     timer = setTimeout(
-      () => finish?.(`diagnostics shutdown exceeded ${budgetMs} ms; continuing quit`),
+      () =>
+        finish?.(
+          hurried
+            ? `diagnostics shutdown cut short after ${budgetMs} ms for system shutdown; continuing quit`
+            : `diagnostics shutdown exceeded ${budgetMs} ms; continuing quit`
+        ),
       ms
     );
   };
@@ -96,12 +103,16 @@ export function createQuitDrain(options: {
     hurry(ms: number): void {
       if (complete) return;
       if (startedAt === undefined) {
-        budgetMs = Math.min(budgetMs, ms);
+        if (ms < budgetMs) {
+          budgetMs = ms;
+          hurried = true;
+        }
         return;
       }
       const elapsed = Date.now() - startedAt;
       if (elapsed + ms >= budgetMs) return;
       budgetMs = elapsed + ms;
+      hurried = true;
       armDeadline(ms);
     },
     flushForUpdate(): Promise<void> {

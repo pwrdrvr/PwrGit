@@ -117,7 +117,10 @@ describe("quit diagnostics barrier", () => {
     await vi.advanceTimersByTimeAsync(1);
     await afterResumeHop();
     expect(s.resumeQuit).toHaveBeenCalledOnce();
-    expect(s.warn).toHaveBeenCalledWith(expect.stringContaining("6000 ms"), undefined);
+    expect(s.warn).toHaveBeenCalledWith(
+      "diagnostics shutdown cut short after 6000 ms for system shutdown; continuing quit",
+      undefined
+    );
   });
 
   it("hurry() before any quit caps the deadline the flush starts with", async () => {
