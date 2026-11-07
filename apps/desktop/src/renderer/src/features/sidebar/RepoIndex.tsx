@@ -15,6 +15,7 @@ import {
 } from "../../lib/useViewportTooltip";
 import {
   clampRepoIndexWidth,
+  repoIndexItemClass,
   readRepoIndexWidth,
   sameSpy,
   spyRepos,
@@ -28,7 +29,8 @@ import type { ListReorder, ReorderTarget } from "./useListReorder";
 export type RepoIndexEntry = {
   id: string;
   name: string;
-  /** Holds the selected worktree: drawn in the accent, like its tree row. */
+  /** Holds what is on screen (`selectionHolder`: the selected worktree, or
+   *  the change request shown): drawn in the accent, like its tree row. */
   containsSelection: boolean;
 };
 
@@ -364,11 +366,12 @@ export function RepoIndex({
                   <button
                     type="button"
                     {...reorder?.rowProps(entry.id)}
-                    className={`repo-index__item${current ? " is-current" : ""}${
-                      !current && inView.has(entry.id) ? " is-in-view" : ""
-                    }${entry.containsSelection ? " is-selected" : ""}${
-                      reorder?.dragId === entry.id ? " is-dragging" : ""
-                    }`}
+                    className={repoIndexItemClass({
+                      current,
+                      inView: inView.has(entry.id),
+                      containsSelection: entry.containsSelection,
+                      dragging: reorder?.dragId === entry.id
+                    })}
                     data-index-id={entry.id}
                     tabIndex={entry.id === tabStop ? 0 : -1}
                     aria-controls={treeId}

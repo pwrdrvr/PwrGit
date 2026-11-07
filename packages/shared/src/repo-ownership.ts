@@ -9,7 +9,8 @@ import type { Repo } from "./types";
  * visibly, two "selected" worktrees at once.
  *
  * The repo whose own path IS the worktree's path (its true primary) wins;
- * otherwise the first repo in list order keeps it.
+ * otherwise the first repo in list order keeps it. Within that repo the first
+ * row is kept, so one id is one row.
  */
 export function claimWorktreeOwnership(repos: Repo[]): Repo[] {
   const owner = new Map<string, string>(); // worktree id → repo id
@@ -21,7 +22,12 @@ export function claimWorktreeOwnership(repos: Repo[]): Repo[] {
   }
   let changed = false;
   const out = repos.map((repo) => {
-    const kept = repo.worktrees.filter((w) => owner.get(w.id) === repo.id);
+    const seen = new Set<string>();
+    const kept = repo.worktrees.filter((w) => {
+      if (owner.get(w.id) !== repo.id || seen.has(w.id)) return false;
+      seen.add(w.id);
+      return true;
+    });
     if (kept.length === repo.worktrees.length) return repo;
     changed = true;
     return { ...repo, worktrees: kept };

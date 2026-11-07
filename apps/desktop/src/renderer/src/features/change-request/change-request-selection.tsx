@@ -24,6 +24,12 @@ export function changeRequestPickKey(repoId: string, entry: ChangeRequestEntry):
   return `${repoId}\n${entry.forgeRepo}#${entry.pr.number}`;
 }
 
+/** The repository a `changeRequestPickKey` belongs to. */
+export function changeRequestKeyRepoId(key: string): string {
+  const end = key.indexOf("\n");
+  return end === -1 ? key : key.slice(0, end);
+}
+
 export type ChangeRequestSelection = {
   /** `changeRequestPickKey` of the change request on screen, if one is. */
   selectedKey: string | null;
