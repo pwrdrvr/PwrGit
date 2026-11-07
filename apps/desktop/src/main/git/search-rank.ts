@@ -1,8 +1,12 @@
 import {
   changeRequestNumberQuery,
+  searchNameKey,
+  searchNamesBegin,
+  searchOwnNames,
   type OpenChangeRequest,
   type RepoSearchHit
 } from "@pwrgit/shared";
+import type { DB } from "../persistence/db";
 
 /**
  * Final ordering for ⌘F results, applied over the bm25 order the index
@@ -17,33 +21,34 @@ import {
  * same word, including branches that exist nowhere on disk.
  */
 
-/** Case- and diacritic-insensitive, for literal name comparison. */
-const normalizeSearchName = (value: string): string =>
-  value
-    .trim()
-    .normalize("NFKD")
-    .replace(/\p{M}/gu, "")
-    .toLowerCase();
-
-/** Final segment of a path, with either platform's separators. */
-const pathLeaf = (path: string): string =>
-  path.replace(/\\/g, "/").split("/").filter(Boolean).pop() ?? "";
-
 /**
- * The names a hit answers to.
+ * Whether a row's own names ARE the query: -1 for a repository the query
+ * names, 0 for anything else it names, null otherwise. `wanted` is the
+ * query's `searchNameKey`.
+ *
+ * Main's `searchMatchTier` and the search SQL (`pwrgit_search_exact_tier`, in
+ * `SEARCH_EXACT_TIER_SQL`) both call this, so the row SQL keeps inside the cap
+ * is the row main would lead with.
  *
  * A checkout answers to its directory as well as its branch: the directory is
  * named once, at creation, and a later branch rename leaves it as the only
  * name that still matches what the user's shell and editor show them.
  *
  * Branch hits get no such treatment even though they carry a `path` — theirs
- * is their REPO's directory, not their own. Counting it would make every
- * worktree-less branch in a repo an exact match for that repo's folder name.
+ * is their REPO's directory (or, in the index, their ref), not their own.
+ * Counting it would make every worktree-less branch in a repo an exact match
+ * for that repo's folder name.
  */
-const answersTo = (hit: RepoSearchHit): string[] =>
-  hit.kind === "repo" || hit.kind === "worktree"
-    ? [hit.name, pathLeaf(hit.path)]
-    : [hit.name];
+export function exactNameTier(
+  kind: string,
+  name: string,
+  path: string,
+  wanted: string
+): -1 | 0 | null {
+  if (searchNameKey(name) === wanted) return kind === "repo" ? -1 : 0;
+  const [, folder] = searchOwnNames(kind, name, path);
+  return folder !== undefined && searchNameKey(folder) === wanted ? 0 : null;
+}
 
 /** -1 = an exact repo name; 0 = the query names this hit (or its change
  *  request's number), 1 = it begins one of its names, 2 = somewhere else
@@ -54,37 +59,35 @@ export function searchMatchTier(
   hit: RepoSearchHit,
   query: string
 ): SearchMatchTier {
-  const wanted = normalizeSearchName(query);
+  const wanted = searchNameKey(query);
   if (wanted === "") return 2;
-  if (hit.kind === "repo" && normalizeSearchName(hit.name) === wanted) return -1;
+  const exact = exactNameTier(hit.kind, hit.name, hit.path, wanted);
+  if (exact !== null) return exact;
   // `106` names change request #106 as surely as a branch's name names the
   // branch — and the index only knows it as a prefix, so #1060 matched too.
   const number = changeRequestNumberQuery(query);
   if (number !== null && hit.pr?.number === number) return 0;
-  let tier: SearchMatchTier = 2;
-  for (const name of answersTo(hit)) {
-    const candidate = normalizeSearchName(name);
-    if (candidate === wanted) return 0;
-    if (candidate.startsWith(wanted)) tier = 1;
-  }
-  return tier;
+  return searchNamesBegin(hit.kind, hit.name, hit.path, wanted) ? 1 : 2;
 }
 
 /**
- * A checkout on disk (0) outranks a branch that is checked out nowhere (1).
+ * A repository (0) outranks a checkout on disk (1), which outranks a branch
+ * that is checked out nowhere (2).
  *
  * Only consulted between hits that answer to the typed name equally directly
- * — see the tiers above. Among two things the query names, the one you can
- * open, `cd` into and already have work in is the stronger answer; the bare
- * ref is a branch you would have to create a worktree for. Repos and their
- * checkouts share kind rank 0; an exact repo name has its own leading tier.
+ * — see the tiers above. A repository's name is what ⌘K is for: typing its
+ * first letters must not list its own checkouts first, and bm25 scored those
+ * higher, on the branch name and again on the repository's name in their
+ * path. Among the rest, the one you can open, `cd` into and already have work
+ * in is the stronger answer; the bare ref is a branch you would have to
+ * create a worktree for. An exact repo name has its own leading tier.
  */
-const searchKindRank = (hit: RepoSearchHit): 0 | 1 =>
-  hit.kind === "repo" || hit.kind === "worktree" ? 0 : 1;
+const searchKindRank = (hit: RepoSearchHit): 0 | 1 | 2 =>
+  hit.kind === "repo" ? 0 : hit.kind === "worktree" ? 1 : 2;
 
 /** unicode61's view of a string: letter/digit runs, folded. */
 const searchTokens = (value: string): string[] =>
-  normalizeSearchName(value)
+  searchNameKey(value)
     .split(/[^\p{L}\p{N}]+/u)
     .filter((token) => token.length > 0);
 
@@ -140,19 +143,57 @@ export function rankSearchHits(
   });
 }
 
-// `\` escapes itself and the two wildcards; the SQL below pairs these with
-// ESCAPE '\'. Without it a branch named `wip_1` would match `wip1` — `_` is
-// LIKE's single-character wildcard and is entirely ordinary in a branch name.
-const likeLiteral = (value: string): string =>
-  value.replace(/[\\%_]/g, (char) => `\\${char}`);
+/**
+ * The search SQL's exact tiers, decided before the result cap: -1 for a
+ * repository the query names, 0 for anything else it names (by name, by a
+ * checkout's folder, or by change-request number), 1 for the rest, which
+ * bm25 orders.
+ *
+ * The names are judged by `exactNameTier`, the function `searchMatchTier`
+ * uses, registered on the connection by `registerSearchSqlFunctions`. SQLite's
+ * `COLLATE NOCASE` folds only ASCII: a repository named `Übersicht` was no
+ * exact match for `übersicht` there, and 60 checkouts on a branch of that
+ * name took every slot before main could rank it first.
+ *
+ * Reads `kind`, `name`, `path` and `pr` of a `search_fts` row; bind
+ * `searchExactTierParams(query)` in order. One call into JS per row.
+ */
+export const SEARCH_EXACT_TIER_SQL = `MIN(
+  pwrgit_search_exact_tier(kind, name, path, ?),
+  CASE WHEN pr LIKE ? THEN 0 ELSE 1 END)`;
 
 /**
- * LIKE patterns for "a path whose final segment is exactly this query", in
- * POSIX and Windows form. The index cannot express it — FTS5 tokenizes a path
- * into words, so it cannot tell the leaf from any other segment — and this is
- * what keeps a folder the user named verbatim inside the query's row cap.
+ * The search SQL's next key after the exact tiers: 0 for a repository whose
+ * name or folder the query begins, 1 for everything else. Main ranks those
+ * repositories first within their tier (`searchKindRank`), so they must
+ * survive the cap ahead of the many checkouts and branches that begin the
+ * same way. Bind `searchNameKey(query)`.
  */
-export function pathLeafLikePatterns(query: string): [string, string] {
-  const leaf = likeLiteral(query.trim());
-  return [`%/${leaf}`, `%\\\\${leaf}`];
+export const SEARCH_REPO_BEGUN_SQL = `CASE WHEN kind = 'repo'
+  AND pwrgit_search_names_begin(kind, name, path, ?) THEN 0 ELSE 1 END`;
+
+export function searchExactTierParams(query: string): [string, string | null] {
+  // A bare number names a change request exactly; its `pr` text begins with
+  // that number and a space. Without this the index's prefix match lets
+  // #1060 and every branch spelled `issue-10604` crowd #106 past the cap.
+  const prNumber = changeRequestNumberQuery(query);
+  return [searchNameKey(query), prNumber === null ? null : `${prNumber} %`];
+}
+
+/** Make the search SQL's functions callable on this connection. */
+export function registerSearchSqlFunctions(db: DB): void {
+  const text = (value: unknown): string =>
+    typeof value === "string" ? value : "";
+  db.function(
+    "pwrgit_search_exact_tier",
+    { deterministic: true },
+    (kind, name, path, wanted) =>
+      exactNameTier(text(kind), text(name), text(path), text(wanted)) ?? 1
+  );
+  db.function(
+    "pwrgit_search_names_begin",
+    { deterministic: true },
+    (kind, name, path, wanted) =>
+      searchNamesBegin(text(kind), text(name), text(path), text(wanted)) ? 1 : 0
+  );
 }

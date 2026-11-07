@@ -32,6 +32,55 @@ function cacheInputs(step) {
     .map((line) => line.trim()) ?? [];
 }
 
+// Dependency setup must stay strict. Test attempts may continue only when a
+// later, mandatory step checks their original outcome and the retry evidence.
+function assertStrictConsumer(body, consumer) {
+  expect(body).not.toMatch(/run:.*pnpm (?:i|install|rebuild)\b|--ignore-scripts/);
+  const parts = body.split(/^      - /m);
+  expect(parts[0]).not.toMatch(/^\s*continue-on-error:/m);
+  const steps = parts.slice(1);
+  const unit = ["linux-test", "windows-test"].includes(consumer);
+  const e2e = ["desktop-e2e", "macos-e2e", "windows-e2e"].includes(consumer);
+  const allowed = unit ? new Set(["unit-tests"]) : e2e ? new Set(["e2e-tests", "e2e-retry"]) : new Set();
+  const tolerated = new Set();
+  for (const step of steps) {
+    const occurrences = [...step.matchAll(/^\s*continue-on-error:/gm)];
+    if (!occurrences.length) continue;
+    const id = step.match(/^        id: (.+)$/m)?.[1];
+    expect(occurrences).toHaveLength(1);
+    expect(allowed.has(id), `${consumer}: unguarded continue-on-error in ${step.split("\n")[0]}`).toBe(true);
+    expect(tolerated.has(id)).toBe(false);
+    expect(step).toMatch(/^        continue-on-error: true$/m);
+    if (id === "unit-tests") expect(step).toMatch(/^name: Test$/m);
+    if (id === "e2e-tests") expect(step).toMatch(/^name: Run desktop Electron E2E specs(?: \(.*\))?$/m);
+    if (id === "e2e-retry") expect(step).toMatch(/^name: Retry failed E2E tests$/m);
+    tolerated.add(id);
+  }
+  expect(tolerated).toEqual(allowed);
+  const named = (name) => {
+    const found = steps.filter((step) => step.startsWith(`name: ${name}\n`));
+    expect(found, `${consumer}: ${name}`).toHaveLength(1);
+    return found[0];
+  };
+  if (unit) {
+    expect(named("Verify unit completion")).toContain("if: steps.unit-tests.outcome == 'success'");
+    expect(named("Verify unit completion")).toContain("run: node scripts/ci/run-retry-failures.mjs unit-verify");
+    expect(named("Retry failed unit tests")).toContain("if: steps.unit-tests.outcome == 'failure'");
+    expect(named("Retry failed unit tests")).toContain("run: pnpm exec node scripts/ci/run-retry-failures.mjs unit");
+  }
+  if (e2e) {
+    expect(named("Verify E2E completion")).toContain("if: steps.e2e-tests.outcome == 'success'");
+    expect(named("Verify E2E completion")).toContain("run: node scripts/ci/run-retry-failures.mjs e2e-first-verify");
+    expect(named("Select failed E2E tests")).toContain("if: steps.e2e-tests.outcome == 'failure'");
+    expect(named("Select failed E2E tests")).toContain("run: node scripts/ci/run-retry-failures.mjs e2e-prepare");
+    for (const name of ["Retry failed E2E tests", "Verify E2E retry"]) {
+      expect(named(name)).toContain("if: steps.e2e-tests.outcome == 'failure' && steps.e2e-selection.outcome == 'success'");
+    }
+    expect(named("Verify E2E retry")).toContain("PWRGIT_RETRY_OUTCOME: ${{ steps.e2e-retry.outcome }}");
+    expect(named("Verify E2E retry")).toContain("run: node scripts/ci/run-retry-failures.mjs e2e-verify");
+  }
+}
+
 test("every dependency setup uses the reviewed immutable action revision", () => {
   for (const [, source] of workflows) {
     for (const reference of source.matchAll(/uses: (pwrdrvr\/configure-nodejs@\S+)/g)) {
@@ -63,7 +112,7 @@ test.each([
     // The MCP prepare output lives outside node_modules and must be rebuilt
     // from this checkout, including on a cache hit after MCP-only source edits.
     expect(consumerJob).toMatch(/run: pnpm (?:--filter @pwrgit\/mcp-server build|run build)/);
-    expect(consumerJob).not.toMatch(/run:.*pnpm (?:i|install|rebuild)\b|--ignore-scripts|continue-on-error/);
+    assertStrictConsumer(consumerJob, consumer);
   }
   expect(input(producerSetup, "dependency-cache")).toBe("node-modules");
   expect(input(producerSetup, "cache-key-suffix")).toContain(action.split("@")[1]);
@@ -133,4 +182,30 @@ test.each([
       linuxResult === "success" && windowsResult === "success" ? 0 : 1,
     );
   }
+});
+
+// Exercise the invariant against every current non-attempt step, including the
+// cache restore itself: no newly tolerated failure may bypass the gates.
+test.each(["typecheck", "linux-test", "desktop-e2e", "windows", "windows-test", "windows-e2e", "macos-e2e"])(
+  "%s rejects continue-on-error on every non-attempt step", (consumer) => {
+    const body = job(consumer);
+    const steps = body.split(/^      - /m).slice(1);
+    expect(() => assertStrictConsumer(`    continue-on-error: true\n${body}`, consumer)).toThrow();
+    for (const step of steps) {
+      if (/^        continue-on-error:/m.test(step)) continue;
+      const mutated = body.replace(`      - ${step}`, `      - ${step.replace("\n", "\n        continue-on-error: true\n")}`);
+      expect(() => assertStrictConsumer(mutated, consumer), step.split("\n")[0]).toThrow();
+    }
+  },
+);
+
+test.each([
+  ["linux-test", "run: node scripts/ci/run-retry-failures.mjs unit-verify"],
+  ["windows-test", "if: steps.unit-tests.outcome == 'failure'"],
+  ["desktop-e2e", "run: node scripts/ci/run-retry-failures.mjs e2e-prepare"],
+  ["macos-e2e", "PWRGIT_RETRY_OUTCOME: ${{ steps.e2e-retry.outcome }}"],
+  ["windows-e2e", "run: node scripts/ci/run-retry-failures.mjs e2e-verify"],
+])("%s rejects a missing retry gate", (consumer, gate) => {
+  expect(job(consumer)).toContain(gate);
+  expect(() => assertStrictConsumer(job(consumer).replace(gate, "# removed gate"), consumer)).toThrow();
 });

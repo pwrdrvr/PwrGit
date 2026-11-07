@@ -3,18 +3,22 @@ import { availableParallelism, tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
+  EMPTY_MAINTENANCE_RUN_VIEW,
   err,
+  foldMaintenanceProgress,
   ok,
   type MaintenanceAction,
+  type MaintenanceProgress,
   type MaintenanceSummary,
   type Result
 } from "@pwrgit/shared";
 import { CommandBus } from "../command-bus";
 import { emitEvent } from "../ipc";
 import { openDatabase, type DB } from "../persistence/db";
-import type { GitExec } from "./dugite";
+import { activeGitPath, noteGitReflinkSupport, type GitExec } from "./dugite";
 import type { RepoIndexer } from "./repo-indexer";
 import * as maintenance from "./repository-maintenance";
+import { refreshActiveGitReflink } from "./runtime-status";
 import {
   branchPrEvidence,
   maintenanceRepos,
@@ -28,6 +32,8 @@ vi.mock("node:os", async (importOriginal) => ({
 }));
 vi.mock("../ipc", () => ({ emitEvent: vi.fn() }));
 vi.mock("../logs", () => ({ logMain: vi.fn() }));
+// The real probe runs Git; a test that needs one supplies its answer.
+vi.mock("./runtime-status", () => ({ refreshActiveGitReflink: vi.fn(async () => undefined) }));
 
 let root: string;
 let db: DB;
@@ -84,6 +90,18 @@ afterEach(() => {
   rmSync(root, { recursive: true, force: true });
   vi.restoreAllMocks();
   vi.clearAllMocks();
+});
+
+it("repairs worktree links only in the requested profile without pruning or indexing", async () => {
+  const result = await bus.dispatch("maintenance:run", {
+    operationId: "repair", profileId: "one",
+    action: { kind: "repair-worktrees" }
+  });
+  expect(result.ok, JSON.stringify(result)).toBe(true);
+  const repairs = git.mock.calls.filter(([args]) => args[0] === "worktree" && args[1] === "repair");
+  expect(repairs.map(([, cwd]) => cwd).sort()).toEqual([join(root, "a"), join(root, "b")]);
+  expect(git.mock.calls.some(([args]) => args.includes("prune"))).toBe(false);
+  expect(refreshRepoWorktrees).not.toHaveBeenCalled();
 });
 
 function value(result: Result<MaintenanceSummary>): MaintenanceSummary {
@@ -746,5 +764,233 @@ describe("finished-branch review", () => {
       ).ok
     ).toBe(false);
     expect(restore).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("maintenance › clones", () => {
+  const reshare: MaintenanceAction = { kind: "reshare", updateMain: false };
+  const porcelain = [
+    "reflink 1", "backend clone-replace", "",
+    "path f.bin", "status reshared", "reason fully-shared", "",
+    "summary", "reshared 1", "already-shared 0", "skipped 0", "failed 0", "observed-private-reduction 4096", "", ""
+  ].join("\0");
+
+  beforeEach(() => {
+    for (const [repo, id, primary] of [
+      ["a", "a-main", 1],
+      ["a", "a-wt", 0],
+      ["c", "c-main", 1],
+      ["c", "c-wt", 0]
+    ] as const) {
+      db.prepare(
+        "INSERT INTO worktrees (id, repo_id, branch, path, is_primary) VALUES (?, ?, ?, ?, ?)"
+      ).run(id, repo, id, join(root, id), primary);
+    }
+  });
+
+  it("refuses before touching a repository when the Git in use cannot re-share", async () => {
+    noteGitReflinkSupport(activeGitPath(), "git version 2.56.0", { checkout: false, reshare: false });
+    const result = await bus.dispatch("maintenance:run", { profileId: "one", operationId: "no", action: reshare });
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.error.code).toBe("reflink_unavailable");
+    expect(git).not.toHaveBeenCalled();
+  });
+
+  it("re-shares this profile's linked worktrees only", async () => {
+    noteGitReflinkSupport(activeGitPath(), "git version 2.56.0-dev-pwrgit.2", { checkout: true, reshare: true });
+    git.mockImplementation(async (args, cwd) => {
+      if (args[0] === "rev-parse") return output(join(cwd, ".git"));
+      if (args[0] === "worktree" && args[1] === "reflink") return output(porcelain);
+      return output();
+    });
+    const summary = value(
+      await bus.dispatch("maintenance:run", { profileId: "one", operationId: "yes", action: reshare })
+    );
+    const [a, ...rest] = summary.results;
+    expect(a).toMatchObject({ outcome: "success", reshare: { main: { outcome: "not_requested" } } });
+    expect(a?.reshare?.worktrees).toEqual([
+      expect.objectContaining({ worktreeId: "a-wt", outcome: "reshared", reshared: 1, sharedBytes: 4096 })
+    ]);
+    // `b` has no linked worktree: listed apart, never run or counted as skipped.
+    expect(rest).toEqual([]);
+    expect(summary.noWorktrees?.map((repo) => repo.id)).toEqual(["b"]);
+    const reflinkCwds = git.mock.calls.filter(([args]) => args[1] === "reflink").map(([, cwd]) => cwd);
+    expect(reflinkCwds).toEqual([join(root, "a-wt")]);
+  });
+
+  it("starts one run when two Starts both wait for the copy-on-write probe", async () => {
+    // The Git in use has not answered yet, so each Start probes it first.
+    noteGitReflinkSupport("/not/the/git/in/use", null, { checkout: true, reshare: true });
+    let release!: () => void;
+    const probed = new Promise<void>((resolve) => (release = resolve)).then(() =>
+      noteGitReflinkSupport(activeGitPath(), "git version 2.56.0-dev-pwrgit.2", { checkout: true, reshare: true })
+    );
+    vi.mocked(refreshActiveGitReflink).mockReturnValue(probed);
+    try {
+      const first = bus.dispatch("maintenance:run", { profileId: "one", operationId: "first", action: reshare }, { webContentsId: 1 });
+      const second = bus.dispatch("maintenance:run", { profileId: "two", operationId: "second", action: reshare }, { webContentsId: 2 });
+      release();
+      const answers = await Promise.all([first, second]);
+      // One run at a time is what lets a reloaded window find "the" run.
+      expect(answers.map((answer) => answer.ok)).toEqual([true, false]);
+      const refused = answers[1]!;
+      if (!refused.ok) expect(refused.error.code).toBe("maintenance_running");
+    } finally {
+      vi.mocked(refreshActiveGitReflink).mockImplementation(async () => undefined);
+    }
+  });
+
+  it("rejects a reshare request without updateMain", async () => {
+    const result = await bus.dispatch("maintenance:run", {
+      profileId: "one",
+      operationId: "bad",
+      action: { kind: "reshare" } as unknown as MaintenanceAction
+    });
+    expect(result.ok).toBe(false);
+  });
+});
+
+describe("maintenance › reattach after a reload", () => {
+  /** Hold every `git gc` until released, so a run can be asked about
+   *  mid-flight, as a reloaded window asks. */
+  function holdCollection(): { began: Promise<void>; release: () => void } {
+    let release!: () => void;
+    let started!: () => void;
+    const began = new Promise<void>((resolve) => { started = resolve; });
+    const gate = new Promise<void>((resolve) => { release = resolve; });
+    const original = git.getMockImplementation()!;
+    git.mockImplementation(async (args, cwd, opts) => {
+      if (args.includes("gc")) {
+        started();
+        await gate;
+      }
+      return original(args, cwd, opts);
+    });
+    return { began, release };
+  }
+  const emitted = (operationId: string): MaintenanceProgress[] =>
+    vi.mocked(emitEvent).mock.calls
+      .filter(([channel]) => channel === "maintenance:progress")
+      .map(([, payload]) => payload as MaintenanceProgress)
+      .filter((event) => event.operationId === operationId);
+
+  it("hands a reloaded window the live run as the events drew it, then its receipt", async () => {
+    const held = holdCollection();
+    const pending = bus.dispatch(
+      "maintenance:run",
+      { profileId: "one", operationId: "run", action: gc },
+      { webContentsId: 7 }
+    );
+    await held.began;
+    const live = await bus.dispatch("maintenance:current", { profileId: "one" }, { webContentsId: 7 });
+    if (!live.ok || live.value?.state !== "running") throw new Error("expected a running run");
+    // Oracle: the events every window was sent. The snapshot is exactly
+    // their fold, so a window that missed them draws the same run.
+    const sent = emitted("run");
+    expect(live.value.view).toEqual(sent.reduce(foldMaintenanceProgress, EMPTY_MAINTENANCE_RUN_VIEW));
+    expect(live.value.view.seq).toBe(sent.length);
+    expect(sent.map((event) => event.seq)).toEqual(sent.map((_, index) => index + 1));
+    expect(live.value.view.running).toHaveLength(1);
+    expect(live.value.run).toMatchObject({
+      operationId: "run",
+      profileId: "one",
+      allProfiles: false,
+      action: gc,
+      ownWindow: true
+    });
+    // Another window of the same profile sees the run but does not own it.
+    const elsewhere = await bus.dispatch("maintenance:current", { profileId: "one" }, { webContentsId: 8 });
+    expect(elsewhere.ok && elsewhere.value?.run.ownWindow).toBe(false);
+
+    held.release();
+    const summary = value(await pending);
+    const last = emitted("run").at(-1);
+    expect(last).toMatchObject({ phase: "finished", summary });
+    const after = await bus.dispatch("maintenance:current", { profileId: "one" }, { webContentsId: 7 });
+    expect(after).toEqual(ok({
+      state: "finished",
+      run: expect.objectContaining({ operationId: "run", ownWindow: true }),
+      summary,
+      seen: false
+    }));
+    // A stale acknowledgement does not hide the receipt; the right one does.
+    await bus.dispatch("maintenance:seen", { profileId: "one", operationId: "older" });
+    const unseen = await bus.dispatch("maintenance:current", { profileId: "one" });
+    expect(unseen.ok && unseen.value?.state === "finished" && unseen.value.seen).toBe(false);
+    await bus.dispatch("maintenance:seen", { profileId: "one", operationId: "run" });
+    const seen = await bus.dispatch("maintenance:current", { profileId: "one" });
+    expect(seen.ok && seen.value?.state === "finished" && seen.value.seen).toBe(true);
+  });
+
+  it("answers each profile's window with its own run only", async () => {
+    const held = holdCollection();
+    // An all-profiles run started in profile one reaches profile two's
+    // repository, but it is still profile one's run.
+    const pending = bus.dispatch(
+      "maintenance:run",
+      { profileId: "one", allProfiles: true, operationId: "wide", action: gc },
+      { webContentsId: 1 }
+    );
+    await held.began;
+    expect(await bus.dispatch("maintenance:current", { profileId: "two" }, { webContentsId: 2 })).toEqual(ok(null));
+    const one = await bus.dispatch("maintenance:current", { profileId: "one" }, { webContentsId: 1 });
+    expect(one.ok && one.value?.state).toBe("running");
+    held.release();
+    value(await pending);
+    expect(await bus.dispatch("maintenance:current", { profileId: "two" }, { webContentsId: 2 })).toEqual(ok(null));
+
+    // Profile two's own run is kept beside profile one's, not over it.
+    git.mockImplementation(async (args, cwd) => {
+      if (args[0] === "rev-parse") return output(join(cwd, ".git"));
+      return output();
+    });
+    value(await bus.dispatch("maintenance:run", { profileId: "two", operationId: "mine", action: gc }, { webContentsId: 2 }));
+    // Profile one's acknowledgement cannot mark profile two's receipt seen.
+    await bus.dispatch("maintenance:seen", { profileId: "one", operationId: "mine" });
+    const two = await bus.dispatch("maintenance:current", { profileId: "two" }, { webContentsId: 2 });
+    expect(two.ok && two.value?.state === "finished" && [two.value.summary.operationId, two.value.seen])
+      .toEqual(["mine", false]);
+    expect(two.ok && two.value?.state === "finished" && two.value.summary.results.map((row) => row.repo.id))
+      .toEqual(["c"]);
+    const stillOne = await bus.dispatch("maintenance:current", { profileId: "one" }, { webContentsId: 1 });
+    expect(stillOne.ok && stillOne.value?.state === "finished" && stillOne.value.summary.operationId).toBe("wide");
+  });
+
+  it("lets the reloaded window cancel, since a reload keeps its webContents id", async () => {
+    const held = holdCollection();
+    const pending = bus.dispatch(
+      "maintenance:run",
+      { profileId: "one", operationId: "run", action: gc },
+      { webContentsId: 3 }
+    );
+    await held.began;
+    const attached = await bus.dispatch("maintenance:current", { profileId: "one" }, { webContentsId: 3 });
+    if (!attached.ok || attached.value?.state !== "running") throw new Error("expected a live run");
+    expect(attached.value.cancelling).toBe(false);
+    expect(
+      await bus.dispatch("maintenance:cancel", { operationId: attached.value.run.operationId }, { webContentsId: 3 })
+    ).toEqual(ok({ cancelled: true }));
+    // Reloaded again while it stops: drawn as stopping, not as live.
+    const stopping = await bus.dispatch("maintenance:current", { profileId: "one" }, { webContentsId: 3 });
+    expect(stopping.ok && stopping.value?.state === "running" && stopping.value.cancelling).toBe(true);
+    held.release();
+    expect(value(await pending).cancelled).toBe(true);
+  });
+
+  it("tells a reattached window when a run stops on an error", async () => {
+    // An earlier run's receipt is not the latest once a new run starts.
+    value(await bus.dispatch("maintenance:run", { profileId: "one", operationId: "earlier", action: gc }));
+    vi.mocked(emitEvent).mockImplementation((channel, payload) => {
+      if (channel === "maintenance:progress" && (payload as MaintenanceProgress).phase === "starting")
+        throw new Error("renderer gone");
+    });
+    const result = await bus.dispatch("maintenance:run", { profileId: "one", operationId: "boom", action: gc });
+    vi.mocked(emitEvent).mockImplementation(() => undefined);
+    expect(result.ok).toBe(false);
+    expect(emitted("boom").at(-1)).toMatchObject({ phase: "finished" });
+    expect(emitted("boom").at(-1)?.summary).toBeUndefined();
+    // Nothing finished, so there is no receipt to show, not even the
+    // earlier run's.
+    expect(await bus.dispatch("maintenance:current", { profileId: "one" })).toEqual(ok(null));
   });
 });

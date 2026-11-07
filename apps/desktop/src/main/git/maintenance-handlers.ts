@@ -1,13 +1,17 @@
 import { availableParallelism } from "node:os";
 import {
   DEFAULT_BRANCH_CLEANUP_OPTIONS,
+  EMPTY_MAINTENANCE_RUN_VIEW,
   err,
+  foldMaintenanceProgress,
   isBranchCleanupKeepDays,
   ok,
   type BranchCleanupOptions,
   type DeletedBranchResult,
   type MaintenanceRepo,
   type MaintenanceRepoResult,
+  type MaintenanceRunRecord,
+  type MaintenanceRunView,
   type MaintenanceScope,
   type MaintenanceSummary,
   type MaintenanceProgress
@@ -17,7 +21,7 @@ import { emitEvent } from "../ipc";
 import { logMain } from "../logs";
 import { mapLimit } from "../util/map-limit";
 import type { DB } from "../persistence/db";
-import { sanitizeGitLogDetail, type GitExec } from "./dugite";
+import { requireExit0, sanitizeGitLogDetail, type GitExec } from "./dugite";
 import type { RepoIndexer } from "./repo-indexer";
 import type { WorktreeOperationQueue } from "./worktree-operation-queue";
 import type { PrService } from "../github/pr-service";
@@ -31,6 +35,34 @@ import {
   type BranchPrEvidence
 } from "./repository-maintenance";
 import { visibleRepoSql } from "./hidden-repos";
+import { activeGitReflinkProbe } from "./dugite";
+import { refreshActiveGitReflink } from "./runtime-status";
+import { refreshRepositoryClones, softPullMainCheckout, type ReshareWorktreeRow } from "./worktree-reshare";
+
+/** Linked (non-primary) worktrees per repository, for Clones' scope. */
+/** Heaviest first, ties in the order given: the longest job starts first,
+ *  so it is not the one left running alone at the end. */
+export function largestFirst<T extends { id: string }>(items: readonly T[], weight: ReadonlyMap<string, number>): T[] {
+  return [...items].sort((a, b) => (weight.get(b.id) ?? 0) - (weight.get(a.id) ?? 0));
+}
+
+/** Clones runs only where there is something to share. A repository with
+ *  no linked worktree is reported apart, not counted as a skip. Both keep
+ *  the order given. */
+export function splitByLinkedWorktrees<T extends { id: string }>(
+  repos: readonly T[],
+  linked: ReadonlyMap<string, number>
+): { withWorktrees: T[]; noWorktrees: T[] } {
+  const has = (repo: T): boolean => (linked.get(repo.id) ?? 0) > 0;
+  return { withWorktrees: repos.filter(has), noWorktrees: repos.filter((repo) => !has(repo)) };
+}
+
+function linkedWorktreeCounts(db: DB, repos: readonly MaintenanceRepo[]): Map<string, number> {
+  const counts = new Map<string, number>();
+  const statement = db.prepare("SELECT COUNT(*) AS n FROM worktrees WHERE repo_id = ? AND is_primary = 0");
+  for (const repo of repos) counts.set(repo.id, (statement.get(repo.id) as { n: number }).n);
+  return counts;
+}
 
 export function maintenanceRepos(
   db: DB,
@@ -127,19 +159,67 @@ export function registerMaintenanceHandlers(
   operations: WorktreeOperationQueue,
   indexer: Pick<RepoIndexer, "refreshRepoWorktrees">,
   prs?: Pick<PrService, "refreshRepo">,
-  now: () => number = Date.now
+  now: () => number = Date.now,
+  /** The repository's default branch name, for Clones' main-checkout
+   *  update. Null leaves every main checkout as it is. */
+  defaultBranch: (repoId: string, repoPath: string) => Promise<string | null> = async () => null
 ): { releaseWebContents: (id: number) => void } {
   // One sweep across all windows, regardless of operation ids or profiles.
   // Renderer bugs cannot create an unbounded GC process/queue per click.
+  // A reload keeps the webContents (and its id), so the run outlives the
+  // dialog that started it. `run` and `view` are what the reloaded dialog
+  // needs to draw it again; `view` is folded from the same events the
+  // renderer is sent, in `progress()`.
+  type RunRecord = Omit<MaintenanceRunRecord, "ownWindow">;
   let active:
-    | { id: string; owner: number | undefined; controller: AbortController }
+    | {
+        id: string;
+        owner: number | undefined;
+        controller: AbortController;
+        run: RunRecord;
+        view: MaintenanceRunView;
+      }
     | undefined;
+  /** Each profile's last finished run, for its receipt. Memory only. */
+  const finished = new Map<
+    string,
+    { owner: number | undefined; run: RunRecord; summary: MaintenanceSummary; seen: boolean }
+  >();
 
   bus.register("maintenance:cancel", (req, ctx) => {
     if (active?.id !== req.operationId || active.owner !== ctx.webContentsId)
       return ok({ cancelled: false });
     active.controller.abort();
     return ok({ cancelled: true });
+  });
+
+  // Scoped by the profile the renderer names (src/main/AGENTS.md): one
+  // profile's window never reattaches to another's run, even an
+  // all-profiles run whose repositories include its own.
+  bus.register("maintenance:current", (req, ctx) => {
+    const profileId = typeof req?.profileId === "string" ? req.profileId : null;
+    if (profileId === null) return ok(null);
+    if (active !== undefined && active.run.profileId === profileId)
+      return ok({
+        state: "running",
+        run: { ...active.run, ownWindow: active.owner === ctx.webContentsId },
+        view: active.view,
+        cancelling: active.controller.signal.aborted
+      });
+    const last = finished.get(profileId);
+    if (last === undefined) return ok(null);
+    return ok({
+      state: "finished",
+      run: { ...last.run, ownWindow: last.owner === ctx.webContentsId },
+      summary: last.summary,
+      seen: last.seen
+    });
+  });
+
+  bus.register("maintenance:seen", (req) => {
+    const last = finished.get(req?.profileId);
+    if (last !== undefined && last.summary.operationId === req.operationId) last.seen = true;
+    return ok(null);
   });
 
   bus.register("maintenance:restoreBranch", async (req) => {
@@ -174,7 +254,8 @@ export function registerMaintenanceHandlers(
   bus.register("maintenance:run", async (req, ctx) => {
     if (
       !req.operationId?.trim() ||
-      !["gc", "scan-branches", "delete-branches"].includes(req.action?.kind) ||
+      !["gc", "scan-branches", "delete-branches", "reshare", "repair-worktrees"].includes(req.action?.kind) ||
+      (req.action.kind === "reshare" && typeof req.action.updateMain !== "boolean") ||
       (req.action.kind === "gc" &&
         !["standard", "keep-largest", "aggressive"].includes(req.action.mode))
     ) {
@@ -191,6 +272,28 @@ export function registerMaintenanceHandlers(
         message:
           "Repository maintenance is already running in another dialog. Wait for it to finish."
       });
+    if (req.action.kind === "reshare") {
+      // Ask the Git in use, not the renderer: Settings can switch it between
+      // the tab opening and Start.
+      if (activeGitReflinkProbe() === null) await refreshActiveGitReflink();
+      if (activeGitReflinkProbe()?.support.reshare !== true)
+        return err({
+          kind: "git",
+          code: "reflink_unavailable",
+          message:
+            "Refreshing clones needs PwrGit’s Git with git worktree reflink. Choose it in Settings › Git."
+        });
+      // Another Start may have taken the slot while this one waited for the
+      // probe. From here to `active = current` nothing awaits, so this check
+      // holds: one run at a time is what a reloaded window reattaches to.
+      if (active !== undefined)
+        return err({
+          kind: "repo",
+          code: "maintenance_running",
+          message:
+            "Repository maintenance is already running in another dialog. Wait for it to finish."
+        });
+    }
     const knownRepos = maintenanceRepos(db, req);
     if (knownRepos === null)
       return err({
@@ -209,18 +312,42 @@ export function registerMaintenanceHandlers(
           "A selected branch is outside the reviewed repository scope. Review branches again."
       });
     }
+    const linkedCounts =
+      action.kind === "reshare" ? linkedWorktreeCounts(db, knownRepos) : null;
+    const clones = linkedCounts === null ? null : splitByLinkedWorktrees(knownRepos, linkedCounts);
+    const noWorktrees = clones?.noWorktrees ?? [];
     const repos =
       action.kind === "delete-branches"
         ? knownRepos.filter((repo) =>
             selected.some((branch) => branch.repoId === repo.id)
           )
-        : knownRepos;
+        : clones?.withWorktrees ?? knownRepos;
     const controller = new AbortController();
     const abort = (): void => controller.abort();
     if (ctx.signal?.aborted === true) abort();
     else ctx.signal?.addEventListener("abort", abort, { once: true });
-    active = { id: req.operationId, owner: ctx.webContentsId, controller };
     const startedAt = new Date().toISOString();
+    const run: RunRecord = {
+      operationId: req.operationId,
+      profileId: req.profileId,
+      allProfiles: req.allProfiles === true,
+      ...(req.repoIds === undefined ? {} : { repoIds: req.repoIds }),
+      action,
+      startedAt
+    };
+    const current = {
+      id: req.operationId,
+      owner: ctx.webContentsId,
+      controller,
+      run,
+      view: EMPTY_MAINTENANCE_RUN_VIEW
+    };
+    active = current;
+    // This run supersedes the profile's last receipt. If it ends on an
+    // error there is no newer one, and the older one is not the latest.
+    finished.delete(req.profileId);
+    let seq = 0;
+    let ended = false;
     const results = new Map<string, MaintenanceRepoResult>();
     const commonDirectories = new Set<string>();
     const storeTurns = new Map<string, Promise<unknown>>();
@@ -239,17 +366,23 @@ export function registerMaintenanceHandlers(
       );
       return turn;
     };
+    /** The one place a run reports: the event every window hears, and the
+     *  snapshot a reloaded window reattaches to. */
     const progress = (
-      event: Omit<MaintenanceProgress, "operationId" | "profileId">
-    ): void =>
-      emitEvent("maintenance:progress", {
+      event: Omit<MaintenanceProgress, "operationId" | "profileId" | "seq">
+    ): void => {
+      const full: MaintenanceProgress = {
         ...event,
         operationId: req.operationId,
-        profileId: req.profileId
-      });
+        profileId: req.profileId,
+        seq: ++seq
+      };
+      current.view = foldMaintenanceProgress(current.view, full);
+      emitEvent("maintenance:progress", full);
+    };
 
     try {
-      progress({ phase: "starting", repos });
+      progress({ phase: "starting", repos, ...(linkedCounts === null ? {} : { noWorktrees }) });
       // GC and review claim each common directory before work; deletion
       // takes turns per directory instead (`inStoreTurn`).
       const concurrency = Math.max(
@@ -264,12 +397,14 @@ export function registerMaintenanceHandlers(
         );
       // The longest deletion starts first, so it is not the one left running
       // alone at the end. The rows keep their reviewed order on screen.
+      // Clones does the same with worktree counts: a 400-worktree repository
+      // started last would run alone for minutes.
       const order =
         action.kind === "delete-branches"
-          ? [...repos].sort(
-              (a, b) => (selectedCount.get(b.id) ?? 0) - (selectedCount.get(a.id) ?? 0)
-            )
-          : repos;
+          ? largestFirst(repos, selectedCount)
+          : linkedCounts !== null
+            ? largestFirst(repos, linkedCounts)
+            : repos;
       await mapLimit(order, concurrency, async (repo) => {
         const report = (detail: string): void =>
           progress({ phase: "repo_progress", repo, detail });
@@ -317,6 +452,23 @@ export function registerMaintenanceHandlers(
                   };
                 }
                 commonDirectories.add(directory.value);
+                if (action.kind === "repair-worktrees") {
+                  report("Checking and repairing worktree links…");
+                  // Git uses its surviving registrations to reconnect known
+                  // checkouts after a primary repo moves. No path search,
+                  // pruning, branch changes, or checkout/index writes.
+                  const args = ["worktree", "repair"];
+                  const raw = await git(args, repo.path);
+                  const repaired = raw.ok ? requireExit0(raw.value, args) : raw;
+                  emitEvent("repo:changed", { profileId: repo.profileId, repoIds: [repo.id] });
+                  return {
+                    repo,
+                    outcome: repaired.ok ? "success" : "failed",
+                    message: repaired.ok
+                      ? "Worktree links checked and repaired. Missing folders remain registered."
+                      : `Worktree link repair did not complete; some links may have been repaired. ${sanitizeGitLogDetail(repaired.error.message)}`
+                  };
+                }
                 /** The review, with the evidence the action asked for. */
                 const review = async (options: BranchCleanupOptions) =>
                   reviewStaleBranches(git, repo.path, repo.id, {
@@ -324,6 +476,46 @@ export function registerMaintenanceHandlers(
                     prs: branchPrEvidence(db, repo.id),
                     now: now()
                   });
+                if (action.kind === "reshare") {
+                  const rows = db
+                    .prepare(
+                      `SELECT id, path, branch, is_primary AS isPrimary, missing, locked
+                       FROM worktrees WHERE repo_id = ? ORDER BY is_primary DESC, path`
+                    )
+                    .all(repo.id) as Array<{
+                    id: string;
+                    path: string;
+                    branch: string;
+                    isPrimary: number;
+                    missing: number;
+                    locked: number;
+                  }>;
+                  const worktrees: ReshareWorktreeRow[] = rows.map((row) => ({
+                    id: row.id,
+                    path: row.path,
+                    branch: row.branch,
+                    isPrimary: row.isPrimary === 1,
+                    missing: row.missing === 1,
+                    locked: row.locked === 1
+                  }));
+                  return refreshRepositoryClones({
+                    git,
+                    repo,
+                    worktrees,
+                    updateMain: action.updateMain,
+                    signal: controller.signal,
+                    report,
+                    defaultBranch: () => defaultBranch(repo.id, repo.path),
+                    softPull: (primary) =>
+                      softPullMainCheckout(git, repo, primary, {
+                        operationId: `${req.operationId}:${repo.id}`,
+                        signal: controller.signal,
+                        runWorktree: (worktreeId, operation) => operations.run(worktreeId, operation),
+                        report
+                      }),
+                    runWorktree: (worktreeId, operation) => operations.run(worktreeId, operation)
+                  });
+                }
                 if (action.kind === "gc") {
                   report("Measuring object storage before collection…");
                   const beforeBytes = await objectStorageBytes(git, repo.path);
@@ -488,6 +680,16 @@ export function registerMaintenanceHandlers(
                 });
               }
             );
+            if (action.kind === "reshare" && result.reshare?.main.outcome === "updated") {
+              // The main checkout moved; let the sidebar and graph catch up.
+              try {
+                await indexer.refreshRepoWorktrees(repo.id);
+              } catch {
+                // Best effort: the re-share already finished.
+              }
+              emitEvent("graph:changed", { repoId: repo.id });
+              emitEvent("repo:changed", { profileId: repo.profileId, repoIds: [repo.id] });
+            }
             if (action.kind === "delete-branches") {
               // A failed metadata cleanup can follow a successful ref change,
               // so refresh even when the deletion result was not successful.
@@ -531,12 +733,21 @@ export function registerMaintenanceHandlers(
         startedAt,
         finishedAt: new Date().toISOString(),
         cancelled: controller.signal.aborted,
-        results: repos.map((repo) => results.get(repo.id)!)
+        results: repos.map((repo) => results.get(repo.id)!),
+        ...(linkedCounts === null ? {} : { noWorktrees })
       };
+      // Recorded before the run lets go, so a window asking in between
+      // finds it either running or finished, never neither.
+      finished.set(req.profileId, { owner: ctx.webContentsId, run, summary, seen: false });
+      active = undefined;
+      ended = true;
+      progress({ phase: "finished", summary });
       return ok(summary);
     } finally {
       active = undefined;
       ctx.signal?.removeEventListener("abort", abort);
+      // A reattached window awaits no answer; tell it the run is over.
+      if (!ended) progress({ phase: "finished" });
     }
   });
   return {

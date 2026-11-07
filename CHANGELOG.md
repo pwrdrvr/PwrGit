@@ -1,5 +1,21 @@
 # Changelog
 
+## v0.54.0 - 2026-11-05
+
+- Git settings - Added a dedicated Settings > Git page to inspect the Git in use and, on macOS and Linux, check for, download, verify, and choose newer PwrGit Git builds between app releases. Downloading does not switch Git; an explicitly chosen custom path stays selected, and downloaded builds can be switched back to the bundled runtime.
+- Git build tracks - Added Latest and Prerelease choices for Git runtime updates. Latest is the default and offers promoted builds only; Prerelease includes testing builds. Changing tracks only changes what is offered, not which Git runs, and older promoted builds are not offered as updates over a newer build in use.
+- Bundled Git - Updated macOS and Linux to PwrDrvr Git development build 2.56.0-dev-pwrgit.4, improving APFS copy-on-write mode and timestamp repair and handling of the kernel-managed provenance attribute. Windows retains its existing Git runtime; explicit runtime choices remain unchanged.
+- GitHub CLI - Added a warning when gh's repository choice is ambiguous or disagrees with a fork-only Pull preference. Repository setup shows the target and candidates and offers an explicit default-setting action; the fork-only prompt can set that default too. Repository-info MCP responses now expose gh's target and guidance so agents can check before opening a pull request.
+
+## v0.53.0 - 2026-11-04
+
+- Copy-on-write checkout - Added a Git runtime setting that lets supported checkout, switch, reset, and worktree-add operations share unchanged file data on compatible filesystems. macOS and Linux now bundle the pinned PwrDrvr Git development build 2.56.0-dev-pwrgit.3; Windows retains its existing Git runtime. The setting is disabled when the selected Git lacks support.
+- Maintenance - Added a Clones tab to re-share eligible files in existing linked worktrees. It first fast-forwards eligible clean main checkouts on their default branch, then processes linked worktrees while leaving modified, untracked, ignored, missing, and locked work untouched. Results report file data now shared, not guaranteed disk space freed; Cancel stops queued work and lets an active re-sharing operation finish.
+- Reload recovery - Running Maintenance steps and unseen results can reattach after a window reload, with progress and owner-window cancellation preserved. Results are kept in memory, not across app restarts. A Combined plan does not resume its later steps after reload, and the separate Worktrees pruner does not reattach.
+- Quick navigation - Fixed exact repository names with accented or non-ASCII case variants falling behind same-named checkouts. The palette now keeps the chosen highlight when a branch resolves to its holding worktree, so Enter opens the intended row.
+- Commit graph - Fixed other branches' merges of older trunk history pushing the trunk or checked-out branch into side lanes. Their main lines keep the intended layout as the graph is drawn.
+- Worktree safety - Fixed multi-worktree removal running outside a checkout's operation queue, where Pull, switching, or another removal could race deletion.
+
 ## v0.52.0 - 2026-11-03
 
 - Performance - Improved status refreshes, commit graph loads, and bulk Pull by overlapping independent Git work. Bulk Pull can process up to four checkouts per repository at once while retaining repository and checkout locks, final safety checks, cancellation, and live progress. Shared process limits keep overlapping requests bounded.

@@ -33,12 +33,11 @@
  *     decodes it to a temp file and re-exports `APPLE_API_KEY` for
  *     electron-builder before invoking it.
  *
- * dugite: the embedded git distribution is downloaded per-arch at install
- * time, so the staged copy matches the runner's arch only. The beforePack
- * hook (scripts/beforepack-dugite-arch.mjs, wired in electron-builder.yml)
- * re-downloads the right slice for each macOS arch pass; @electron/universal
- * then lipo-merges the Mach-O git binaries. The lipo verification below
- * fails the build loudly if that ever regresses.
+ * Git: beforePack stages the checksum-pinned custom POSIX runtime. Both
+ * macOS architecture passes receive the same final signed universal payload,
+ * so universal merging skips its executables. The post-package verifier
+ * checks its complete sealed inventory and signatures. Windows retains the
+ * Dugite distribution installed with dependencies.
  *
  * better-sqlite3: v13 ships platform/arch Node-API prebuilds and does not let
  * electron-rebuild populate build/Release. The beforePack hook copies the
@@ -503,6 +502,7 @@ if (!signStageOnly) {
     join(desktopRoot, "electron-builder.yml"),
     join(stageDir, "electron-builder.yml"),
   );
+  copyFileSync(join(desktopRoot, "custom-git-runtime.json"), join(stageDir, "custom-git-runtime.json"));
   for (const file of ["LICENSE", "THIRD_PARTY_LICENSES", "CHANGELOG.md"]) {
     copyFileSync(join(repoRoot, file), join(stageDir, file));
   }
@@ -636,12 +636,6 @@ for (const arch of MAC_ARCHITECTURES) {
       "Release",
       "better_sqlite3.node",
     ),
-    // dugite's embedded git must be universal or Intel Macs get an arm64 git
-    // (or vice versa). Produced by the beforePack per-arch download + the
-    // @electron/universal lipo merge, shipped via extraResources (see
-    // electron-builder.yml).
-    join(builtApp, "Contents", "Resources", "git", "bin", "git"),
-    join(builtApp, "Contents", "Resources", "git", "libexec", "git-core", "git-lfs"),
   ];
   for (const binary of requiredMachO) {
     const actual = runQuiet("lipo", [binary, "-archs"]).trim().split(/\s+/).sort();

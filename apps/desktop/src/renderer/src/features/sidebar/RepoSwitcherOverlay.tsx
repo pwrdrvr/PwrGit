@@ -7,6 +7,8 @@ import {
   changeRequestNoun,
   changeRequestNumberQuery,
   forgeRepoKey,
+  searchNameKey,
+  searchNamesBegin,
   type ChangeRequestLocation,
   type Commit,
   type FileSearchHit,
@@ -61,7 +63,23 @@ const hitKey = (hit: RepoSearchHit): string =>
       : hit.name)
   }`;
 
-function resolvePaletteHits(
+/**
+ * The highlighted row after a branch row resolved to the checkout that holds
+ * it. `resolvePaletteHits` swaps the row in place, under the checkout's key,
+ * so a highlight on the branch must follow it there — or the old key matches
+ * nothing, the highlight falls back to the first row, and Enter opens
+ * something the reader never pointed at.
+ */
+export function selectionAfterResolve(
+  selectedKey: string | null,
+  branch: RepoSearchHit,
+  resolved: RepoSearchHit | null
+): string | null {
+  if (resolved === null || selectedKey !== hitKey(branch)) return selectedKey;
+  return hitKey(resolved);
+}
+
+export function resolvePaletteHits(
   hits: RepoSearchHit[],
   resolved: ReadonlyMap<string, RepoSearchHit | null>
 ): RepoSearchHit[] {
@@ -240,16 +258,18 @@ export function buildPaletteItems(
   focusedRepoId: string | null = null,
   hidden: { entries: HiddenRepo[]; profileName: string } = { entries: [], profileName: "" }
 ): PaletteItem[] {
-  const exactName = query.trim().normalize("NFC").toLowerCase();
-  // Only the full name, any case: typing part of a name you hid should not
-  // bring it back into view, but naming it is asking for it.
+  // `searchNameKey` is main's and the search SQL's test too: a row main
+  // ranked as exactly named must lead here as well, in any script.
+  const exactName = searchNameKey(query);
+  // Only the full name, in any case or accent: typing part of a name you hid
+  // should not bring it back into view, but naming it is asking for it.
   const hiddenExact: PaletteItem[] =
     exactName === ""
       ? []
       : hidden.entries
           .filter(
             (entry) =>
-              !entry.missing && entry.name.normalize("NFC").toLowerCase() === exactName
+              !entry.missing && searchNameKey(entry.name) === exactName
           )
           .map((entry) => ({ kind: "hidden" as const, entry }));
   const showHidden: PaletteItem[] =
@@ -260,44 +280,59 @@ export function buildPaletteItems(
   // repo, and a bare number also looks like a commit hash prefix and a path —
   // so whatever holds #106 leads, above both.
   const prNumber = changeRequestNumberQuery(query);
-  const focusedBranches: RepoSearchHit[] = [];
   const exactRepos: RepoSearchHit[] = [];
+  const numberedChangeRequests: RepoSearchHit[] = [];
+  const focusedBranches: RepoSearchHit[] = [];
+  const begunRepos: RepoSearchHit[] = [];
   const otherResults: RepoSearchHit[] = [];
   for (const hit of results) {
-    // Typing `main` in a focused repo means that repo's `main`. It leads
-    // everything — `main.rs` files included — so type, Enter, and you are on
-    // it; the same rows in other repos stay where the ranking put them.
-    if (
+    if (hit.kind === "repo" && exactName !== "" && searchNameKey(hit.name) === exactName) {
+      exactRepos.push(hit);
+    } else if (prNumber !== null && hit.pr?.number === prNumber) {
+      numberedChangeRequests.push(hit);
+    } else if (
+      // Typing `main` in a focused repo means that repo's `main`. It leads
+      // everything but a repository of that name — `main.rs` files included —
+      // so type, Enter, and you are on it; the same rows in other repos stay
+      // where the ranking put them.
       focusedRepoId !== null &&
       hit.repoId === focusedRepoId &&
       hit.kind !== "repo" &&
       hit.kind !== "change_request" &&
       exactName !== "" &&
-      hit.name.normalize("NFC").toLowerCase() === exactName
+      searchNameKey(hit.name) === exactName
     ) {
       focusedBranches.push(hit);
     } else if (
-      (hit.kind === "repo" &&
-        hit.name.normalize("NFC").toLowerCase() === exactName) ||
-      (prNumber !== null && hit.pr?.number === prNumber)
+      hit.kind === "repo" &&
+      searchNamesBegin(hit.kind, hit.name, hit.path, exactName)
     ) {
-      exactRepos.push(hit);
+      // The first letters of a repository's name: switching repositories is
+      // what ⌘K is for, so these sit above the file and commit matches.
+      begunRepos.push(hit);
     } else {
       otherResults.push(hit);
     }
   }
 
-  // Files sit above commits: the query that produces them is a literal path
-  // substring, so a hit is a strong signal, and the main process caps the list
-  // short enough that it cannot crowd the other kinds out.
+  // The order main ranked them in stands within each group: among
+  // same-named repositories, the one you are in, then this profile's
+  // (`RepoIndexer.searchAll`). Files sit above commits: the query that
+  // produces them is a literal path substring, so a hit is a strong signal,
+  // and the main process caps the list short enough that it cannot crowd the
+  // other kinds out.
+  const repoItems = (hits: RepoSearchHit[]): PaletteItem[] =>
+    hits.map((hit) => ({ kind: "repo" as const, hit }));
   return [
-    ...focusedBranches.map((hit) => ({ kind: "repo" as const, hit })),
+    ...repoItems(exactRepos),
+    ...repoItems(numberedChangeRequests),
+    ...repoItems(focusedBranches),
     ...showHidden,
-    ...exactRepos.map((hit) => ({ kind: "repo" as const, hit })),
     ...hiddenExact,
+    ...repoItems(begunRepos),
     ...files.map((hit) => ({ kind: "file" as const, hit })),
     ...commits.map((commit) => ({ kind: "commit" as const, commit })),
-    ...otherResults.map((hit) => ({ kind: "repo" as const, hit }))
+    ...repoItems(otherResults)
   ];
 }
 
@@ -484,12 +519,7 @@ export function RepoSwitcherOverlay({
       const key = hitKey(hit);
       resolvedBranches.current.set(key, resolved);
       setResults((prev) => resolvePaletteHits(prev, resolvedBranches.current));
-      if (resolved !== null) {
-        const replacement = `repo:${hitKey(resolved)}`;
-        setSelectedItemKey((prev) =>
-          prev === `repo:${key}` ? replacement : prev
-        );
-      }
+      setSelectedItemKey((prev) => selectionAfterResolve(prev, hit, resolved));
     }
     return ok(resolved);
   }, []);

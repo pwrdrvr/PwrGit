@@ -98,12 +98,19 @@ export type KeptBranch = {
 };
 
 export type MaintenanceAction =
+  | { kind: "repair-worktrees" }
   | {
       kind: "gc";
       mode: GarbageCollectionMode;
       /** Count finished branches after collecting, with these rules, so the
        *  receipt can offer the clean-up. Absent: no count. */
       branchOptions?: BranchCleanupOptions;
+    }
+  | {
+      /** Maintenance › Clones: `git worktree reflink` on every linked
+       *  worktree, after optionally fast-forwarding each main checkout. */
+      kind: "reshare";
+      updateMain: boolean;
     }
   | { kind: "scan-branches"; options?: BranchCleanupOptions }
   | {
@@ -120,6 +127,46 @@ export type DeletedBranchResult = {
   message: string;
 };
 
+/** What happened to the main checkout (the clone source) before sharing. */
+export type ReshareMainCheckout = {
+  outcome:
+    /** Fast-forwarded to its upstream. */
+    | "updated"
+    | "up_to_date"
+    /** Deliberately not touched: off the default branch, dirty, diverged… */
+    | "left"
+    | "failed"
+    /** The reader unticked "Update main checkouts first". */
+    | "not_requested";
+  /** The branch the main checkout is on; absent when detached. */
+  branch?: string;
+  defaultBranch?: string;
+  message: string;
+};
+
+/** One linked worktree's `git worktree reflink --porcelain` answer. */
+export type ReshareWorktreeResult = {
+  worktreeId: string;
+  path: string;
+  branch: string;
+  outcome: "reshared" | "already_shared" | "skipped" | "failed";
+  message: string;
+  /** Files Git turned back into clones. */
+  reshared: number;
+  alreadyShared: number;
+  /** Files left as they are: edited, no matching donor, unsupported. */
+  skipped: number;
+  failed: number;
+  /** Git's `observed-private-reduction`: file data that stopped being
+   *  private. Null when Git could not measure allocation. Not free space. */
+  sharedBytes: number | null;
+};
+
+export type ReshareRepoReport = {
+  main: ReshareMainCheckout;
+  worktrees: ReshareWorktreeResult[];
+};
+
 export type MaintenanceRepoResult = {
   repo: MaintenanceRepo;
   outcome: "success" | "partial" | "skipped" | "failed" | "cancelled";
@@ -130,6 +177,7 @@ export type MaintenanceRepoResult = {
   /** Gone branches the review did not offer, each with its reason. */
   kept?: KeptBranch[];
   branches?: DeletedBranchResult[];
+  reshare?: ReshareRepoReport;
 };
 export type MaintenanceSummary = {
   operationId: string;
@@ -137,13 +185,135 @@ export type MaintenanceSummary = {
   finishedAt: string;
   cancelled: boolean;
   results: MaintenanceRepoResult[];
+  /** Clones only: repositories in scope with no linked worktree, so nothing
+   *  to share. Listed apart from the run rather than counted as skipped. */
+  noWorktrees?: MaintenanceRepo[];
 };
 export type MaintenanceProgress = {
   operationId: string;
   profileId: string;
-  phase: "starting" | "repo_started" | "repo_progress" | "repo_completed";
+  phase:
+    | "starting"
+    | "repo_started"
+    | "repo_progress"
+    | "repo_completed"
+    /** The run is over. Carries the summary `maintenance:run` returns, for a
+     *  window that reattached and so is not awaiting that answer. No summary:
+     *  the run stopped on an error. */
+    | "finished";
+  /** Counts up from 1 within a run. A reattaching window skips any event at
+   *  or below its snapshot's `seq`: the snapshot already holds it. */
+  seq?: number;
   repos?: MaintenanceRepo[];
+  /** With `starting`, Clones only: see `MaintenanceSummary.noWorktrees`. */
+  noWorktrees?: MaintenanceRepo[];
   repo?: MaintenanceRepo;
   detail?: string;
   result?: MaintenanceRepoResult;
+  summary?: MaintenanceSummary;
 };
+
+/**
+ * A run as its progress events have drawn it so far. Main keeps one for the
+ * live run so a window that reloads mid-run can draw what it missed; the
+ * dialog folds the same events into the same shape. Plain arrays and
+ * records, so it crosses IPC as is.
+ */
+export type MaintenanceRunView = {
+  repos: MaintenanceRepo[];
+  noWorktrees?: MaintenanceRepo[];
+  /** Repositories running now, in the order they started. */
+  running: string[];
+  /** Each repository's latest progress line, by repository id. */
+  details: Record<string, string>;
+  /** Finished repositories, in the order they finished. */
+  results: MaintenanceRepoResult[];
+  /** `seq` of the last event folded in; 0 before any. */
+  seq: number;
+};
+
+export const EMPTY_MAINTENANCE_RUN_VIEW: MaintenanceRunView = {
+  repos: [],
+  running: [],
+  details: {},
+  results: [],
+  seq: 0
+};
+
+/** Fold one progress event into a run's view. An event the view already
+ *  holds (`seq` at or below the view's) changes nothing. */
+export function foldMaintenanceProgress(
+  view: MaintenanceRunView,
+  event: MaintenanceProgress
+): MaintenanceRunView {
+  if (event.seq !== undefined && event.seq <= view.seq) return view;
+  let next: MaintenanceRunView = { ...view, seq: event.seq ?? view.seq };
+  if (event.repos !== undefined) next.repos = event.repos;
+  if (event.noWorktrees !== undefined) next.noWorktrees = event.noWorktrees;
+  const repo = event.repo;
+  if (event.phase === "repo_started" && repo !== undefined && !next.running.includes(repo.id))
+    next.running = [...next.running, repo.id];
+  if (repo !== undefined && event.detail !== undefined)
+    next.details = { ...next.details, [repo.id]: event.detail };
+  const result = event.result;
+  if (result !== undefined) {
+    next = {
+      ...next,
+      results: [...next.results.filter((row) => row.repo.id !== result.repo.id), result],
+      running: next.running.filter((id) => id !== result.repo.id)
+    };
+  }
+  return next;
+}
+
+/** A finished run's view: its summary's rows, nothing running. Keeps the
+ *  progress lines already drawn. */
+export function maintenanceViewFromSummary(
+  summary: MaintenanceSummary,
+  prior: MaintenanceRunView = EMPTY_MAINTENANCE_RUN_VIEW
+): MaintenanceRunView {
+  return {
+    repos: summary.results.map((result) => result.repo),
+    ...(summary.noWorktrees === undefined ? {} : { noWorktrees: summary.noWorktrees }),
+    running: [],
+    details: prior.details,
+    results: summary.results,
+    seq: prior.seq
+  };
+}
+
+/** What `maintenance:current` knows about a run besides its progress. */
+export type MaintenanceRunRecord = {
+  operationId: string;
+  profileId: string;
+  allProfiles: boolean;
+  repoIds?: string[];
+  action: MaintenanceAction;
+  startedAt: string;
+  /** Started by the window asking. Only that window can cancel it, and it
+   *  reopens the dialog by itself after a reload. */
+  ownWindow: boolean;
+};
+
+/**
+ * The run a Maintenance dialog should reattach to, for one profile's window.
+ * `finished` is the profile's last run, kept in memory; `seen` turns true
+ * once a dialog has drawn its receipt, so a run that ended while no dialog
+ * was attached is shown once.
+ */
+export type MaintenanceCurrent =
+  | {
+      state: "running";
+      run: MaintenanceRunRecord;
+      view: MaintenanceRunView;
+      /** Cancel was accepted and the run is stopping after the work that
+       *  is already running. A reloaded window draws it as stopping. */
+      cancelling: boolean;
+    }
+  | {
+      state: "finished";
+      run: MaintenanceRunRecord;
+      summary: MaintenanceSummary;
+      seen: boolean;
+    }
+  | null;

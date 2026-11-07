@@ -12,9 +12,10 @@
 
 import type { ForgeHostMap } from "./forge-remote";
 import type { ContributionIdentity, ContributionSnapshot } from "./contributions";
-import type { HookRun, IgnoreDestination, IgnoreOptions, IgnorePatternChoice, IgnoredSummary, RepositorySetup, SetupIgnoreTest } from "./git-discovery";
-import type { MaintenanceScope, MaintenanceAction, MaintenanceSummary, MaintenanceProgress, BranchCleanupKeepDays } from "./maintenance";
+import type { GhDefaultRepository, HookRun, IgnoreDestination, IgnoreOptions, IgnorePatternChoice, IgnoredSummary, RepositorySetup, SetupIgnoreTest } from "./git-discovery";
+import type { MaintenanceScope, MaintenanceAction, MaintenanceSummary, MaintenanceProgress, MaintenanceCurrent, BranchCleanupKeepDays } from "./maintenance";
 import { DEFAULT_BRANCH_CLEANUP_OPTIONS } from "./maintenance";
+import type { ManagedGitProgress, ManagedGitStatus, ManagedGitTrack } from "./managed-git";
 import { STALE_AGE_DAYS, type WorktreeFinishedAfterDays } from "./prunable";
 import type {
   AgentChoice,
@@ -116,6 +117,7 @@ import type {
   SearchHitStatus,
   SubmoduleSnapshot,
   SshRemoteRecovery,
+  GitReflinkStatus,
   GitRuntimeStatus,
   StashDetails,
   StashEntry,
@@ -734,6 +736,15 @@ export type GeneralSettings = {
    */
   gitIdentityReminder: boolean;
   /**
+   * Settings › Git: Git runs with `checkout.reflink` on,
+   * so checkouts clone files the main checkout holds unchanged. Applies only
+   * while the Git in use supports it; with any other Git the switch is shown
+   * disabled. Set in PwrGit's generated system config for the bundle (where
+   * the user's own config still wins) and as `-c` for an installed Git;
+   * nothing is written to the user's Git config.
+   */
+  gitReflinkCheckout: boolean;
+  /**
    * Settings › Profiles › By folder: PwrGit keeps an `includeIf` per profile
    * root in the global Git config. Set only by `identity:setFolderSync`,
    * which writes the config, never by `settings:update`.
@@ -831,7 +842,8 @@ export const GENERAL_DEFAULTS: GeneralSettings = {
   worktreeCleanupKeepDays: 7,
   worktreeFinishedAfterDays: STALE_AGE_DAYS,
   gitIdentityReminder: true,
-  gitIdentityByFolder: false
+  gitIdentityByFolder: false,
+  gitReflinkCheckout: true
 };
 
 export const EXPERIMENTAL_DEFAULTS: ExperimentalSettings = {
@@ -1312,6 +1324,9 @@ export interface Commands {
     res: GitLfsReport;
   };
   "repo:setup": { req: { repoId: string }; res: RepositorySetup };
+  /** Make `remote`'s repository gh's default, as `gh repo set-default`
+   *  would. Only on an explicit user action: it writes shared .git/config. */
+  "repo:setGhDefault": { req: { repoId: string; remote: string }; res: GhDefaultRepository };
   "repo:testIgnorePath": { req: { repoId: string; path: string }; res: SetupIgnoreTest };
   "repo:saveExclude": {
     req: { repoId: string; previous: string; content: string };
@@ -1881,6 +1896,21 @@ export interface Commands {
   "maintenance:cancel": {
     req: { operationId: string };
     res: { cancelled: boolean };
+  };
+  /**
+   * The run this profile's Maintenance dialog should show: the live one, or
+   * the last finished one. A window reload keeps main's run going but loses
+   * the dialog; this is how the reloaded window gets it back.
+   */
+  "maintenance:current": {
+    req: { profileId: string };
+    res: MaintenanceCurrent;
+  };
+  /** A dialog drew this run's receipt (or its own `maintenance:run`
+   *  answered), so it is not shown again on the next open. */
+  "maintenance:seen": {
+    req: { profileId: string; operationId: string };
+    res: null;
   };
   /**
    * Recreate a branch the finished-branch clean-up deleted, at the tip it had.
@@ -2516,7 +2546,32 @@ export interface Commands {
    * Main probes the path first and refuses one that cannot run Git and Git
    * LFS, so a typo is never written as the runtime.
    */
-  "git:selectRuntime": { req: { path: string | null }; res: GitRuntimeStatus };
+  "git:selectRuntime": {
+    /** `managed` picks a verified downloaded build by id (and clears an
+     *  installed Git); otherwise `path` is an installed Git, or null for the
+     *  bundle. */
+    req: { path: string | null; managed?: string };
+    res: GitRuntimeStatus;
+  };
+  /** Settings › Git › PwrGit's Git, from what main already knows. No network. */
+  "gitManaged:status": { req: void; res: ManagedGitStatus };
+  /** Ask GitHub for newer builds. `force` skips the cooldown (Check now);
+   *  without it a recent answer is reused. A failed check keeps the last
+   *  good answer and reports `checkError`. */
+  "gitManaged:check": { req: { force: boolean }; res: ManagedGitStatus };
+  /** Download, verify and install one build. Never changes which Git runs:
+   *  that is `git:selectRuntime` with `managed`. Progress arrives as
+   *  `gitManaged:progress`; the result is the status after it. */
+  "gitManaged:install": { req: { version: string }; res: ManagedGitStatus };
+  /** Stop the running install, if any. Nothing partial is kept. */
+  "gitManaged:cancel": { req: void; res: null };
+  /** Follow the Latest or Prerelease track. Answers from the last check (no
+   *  network), and never changes which Git runs. */
+  "gitManaged:setTrack": { req: { track: ManagedGitTrack }; res: ManagedGitStatus };
+  /** What the Git in use can do with copy-on-write clones. Answered from the
+   *  probe main keeps for the running Git (refreshed when Settings changes
+   *  it), so Maintenance can ask on open without spawning a Git. */
+  "git:reflinkSupport": { req: void; res: GitReflinkStatus };
 
   // App settings (Settings window)
   "settings:read": { req: void; res: AppSettingsSnapshot };
@@ -2683,6 +2738,8 @@ export interface Events {
   /** Per-repository progress for profile-wide fetch / conservative pull. */
   "remote:bulkSyncProgress": BulkSyncProgress;
   "maintenance:progress": MaintenanceProgress;
+  /** A PwrGit's Git install moved to a new phase, or its byte meter moved. */
+  "gitManaged:progress": ManagedGitProgress;
   /** A worktree finished being removed (streamed during a batch remove). */
   "worktree:removed": { worktreeId: string };
   /**

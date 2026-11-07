@@ -731,8 +731,9 @@ export type SshRemoteRecovery = {
 };
 
 /** Where Settings found a Git. `custom` is a path somebody chose that
- *  discovery would not have found on its own. */
-export type GitRuntimeSource = "bundled" | "path" | "homebrew" | "user" | "xcode" | "custom";
+ *  discovery would not have found on its own; `managed` is a build of
+ *  PwrGit's Git downloaded and verified in Settings › Git. */
+export type GitRuntimeSource = "bundled" | "managed" | "path" | "homebrew" | "user" | "xcode" | "custom";
 
 /** Why a Git cannot be chosen, or why the chosen one cannot run. */
 export type GitRuntimeProblem =
@@ -741,24 +742,62 @@ export type GitRuntimeProblem =
   /** It ran, but did not answer `git --version`. */
   | "no_version"
   /** Git runs, `git lfs` does not: LFS repositories would check out pointers. */
-  | "lfs_missing";
+  | "lfs_missing"
+  /** A downloaded build of PwrGit's Git that failed its check on disk. */
+  | "failed_check";
+
+/**
+ * What a Git can do with copy-on-write clones, read from `git worktree -h`.
+ * Only PwrGit's own Git (the huntharo/git runtime) answers either today.
+ */
+export type GitReflinkSupport = {
+  /** `checkout.reflink`: checkout, reset and `worktree add` clone files the
+   *  main checkout holds unchanged. Runtime `2.56.0-dev-pwrgit.1` and newer. */
+  checkout: boolean;
+  /** `git worktree reflink`: re-share an existing worktree's files.
+   *  Runtime `.2` and newer. */
+  reshare: boolean;
+};
 
 export type GitRuntimeCandidate = {
   /** The executable, absolute. */
   path: string;
   source: GitRuntimeSource;
+  /** Absent when it was not asked (a Git that did not run). */
+  reflink?: GitReflinkSupport;
   /** What `git --version` and `git lfs version` printed; null when it did
    *  not answer. The renderer parses the version out (`describeVersion`). */
   git: string | null;
   lfs: string | null;
   /** Null when this Git can be chosen. */
   problem: GitRuntimeProblem | null;
+  /** `managed` only: the build's id, which `git:selectRuntime` takes. */
+  managedId?: string;
+  /** What PwrGit itself verified about this Git: a signed PwrDrvr build
+   *  (macOS) or one matching its release's checksums (Linux). Absent for a
+   *  Git PwrGit did not check. */
+  trust?: "signed" | "checksum";
+};
+
+/** The Git in use, as copy-on-write cloning sees it. */
+export type GitReflinkStatus = {
+  /** The executable every repository command runs. */
+  path: string;
+  /** What `git --version` printed, or null before the probe answered. */
+  version: string | null;
+  support: GitReflinkSupport;
+  /** Settings › Git › In use › Copy-on-write checkout. */
+  enabled: boolean;
+  /** True when PwrGit turns `checkout.reflink` on right now: the switch is
+   *  on and this Git supports it. */
+  active: boolean;
 };
 
 /** Which Git PwrGit runs, and every one it could run instead. */
 export type GitRuntimeStatus = {
-  /** `installed` once a Git other than the bundle was chosen in Settings. */
-  active: "bundled" | "installed";
+  /** `installed` once a Git other than the bundle was chosen in Settings;
+   *  `managed` while a downloaded build of PwrGit's Git runs. */
+  active: "bundled" | "managed" | "installed";
   /** The executable every repository command runs. Always one candidate's
    *  `path`, even when that Git is broken — PwrGit never silently falls back. */
   path: string;

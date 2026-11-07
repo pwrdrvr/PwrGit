@@ -3,6 +3,7 @@ import { expect, test, type JSHandle } from "@playwright/test";
 import type { BrowserWindow } from "electron";
 import { launchApp, type AppHandle } from "./fixtures/electron-app";
 import { createGitSandbox, type GitSandbox } from "./fixtures/git-sandbox";
+import { clickSettingsMenu } from "./fixtures/settings-menu";
 import {
   branchRow,
   expandRepoGroup,
@@ -29,17 +30,7 @@ test.afterEach(async () => {
 });
 
 async function openSettingsFromMenu(app: AppHandle["app"]): Promise<void> {
-  await app.evaluate(({ Menu }) => {
-    for (const top of Menu.getApplicationMenu()?.items ?? []) {
-      for (const item of top.submenu?.items ?? []) {
-        if (item.label === "Settings…") {
-          item.click();
-          return;
-        }
-      }
-    }
-    throw new Error("Settings… menu item not found");
-  });
+  await app.evaluate(clickSettingsMenu);
 }
 
 test("creating a profile opens its own window with repos from all roots", async () => {

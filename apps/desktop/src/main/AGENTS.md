@@ -31,14 +31,32 @@ a query is capped, scope it in SQL.
 `RepoIndexer.searchAll` (⌘K) takes a `SearchScope` — which profile's window
 asked, and whether it wants the others too (General → Search all profiles, or
 the palette's This profile / All profiles control, which writes it; off by
-default). Two things about it are easy to get wrong:
+default). Three things about it are easy to get wrong:
 
 - **The filter is a WHERE clause, not a pass over the answer.** `search_fts`
   carries a `profile_id` column for exactly this (0033), because both of its
   queries are capped.
+- **"The query is this name" has one test: `searchNameKey`** (`@pwrgit/shared`).
+  The SQL's exact tier (`SEARCH_EXACT_TIER_SQL`) and main's `searchMatchTier`
+  share `exactNameTier` (registered on the connection for SQL), and the
+  palette's leading group calls the key directly. Never `COLLATE NOCASE` or
+  `LIKE` for it: both fold ASCII only, and a row SQL misjudges is cut by the
+  cap before main can rank it. The differential test is
+  `RepoSwitcherOverlay.ranking.property.test.ts`.
+- **The cap keeps what the palette leads with.** Before `LIMIT 60` the SQL
+  orders by: exact-name tier; a repository the query begins
+  (`SEARCH_REPO_BEGUN_SQL`); the focused repository's rows, matched by
+  `SEARCH_ROW_REPO_SQL` (a repository's own row has no `repo_name`, so
+  matching on it cut the repository behind its own branches); this profile;
+  bm25; `path`. `rankSearchHits` mirrors it: within a tier, a repository
+  before checkouts before branches.
+- **A repository's exact name is also looked up outside FTS5.** unicode61
+  does not fold `ß` to `ss`, and splits `i̇` (lower-case `İ`) in two, so
+  `STRASSE` never matched `straße`. The lookup runs the exact tier over the
+  profile's `repos` rows.
 - **Widened is not unordered.** With the setting on, other profiles' rows are
   reachable but never ahead of this profile's — `profile_id = ? DESC` sits
-  between the exact-name tier and bm25. Those rows are how two of the three
+  after the name and focus keys, before bm25. Those rows are how two of the three
   routes to another profile's window work: a hit carries its
   `profileId`/`profileName`, the palette badges every row, and picking one
   opens or focuses **that** profile's window rather than acting here
@@ -82,9 +100,16 @@ exit fail-safe ends the process. `quitDrain` (`bounded-shutdown.ts`) is the
 one listener that defers today, and only while it has something to flush (a
 profiler recording, an agent request or backend open).
 
+An OS shutdown exits after `SYSTEM_SHUTDOWN_EXIT_MS` (3 s), so it calls
+`quitDrain.hurry()` first: a flush still running at the exit would skip
+`will-quit` and `quit`. Any new quit path with its own exit deadline needs
+the same.
+
 Playwright quits from JavaScript, which never nests, so E2E cannot catch a
 regression. `quit-reentry.test.ts` drives the drain through a model of
-Electron's quit state machine (`test-support/electron-quit-model.ts`), and two
+Electron's quit state machine (`test-support/electron-quit-model.ts`), and
+`quit-drain.property.test.ts` runs random quit sessions (⌘Q, Dock, SIGTERM,
+OS shutdown, update install, any flush timing) through the same model. Two
 probes check the real thing without drawing anything on screen:
 `pnpm --filter @pwrgit/desktop probe:quit-reentry` (re-run on an Electron
 major bump; it fails if Electron stops matching the model) and, after a

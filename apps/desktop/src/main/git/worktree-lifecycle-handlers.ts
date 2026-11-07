@@ -14,6 +14,7 @@ import {
 } from "./git-service";
 import type { RepoIndexer } from "./repo-indexer";
 import { worktreePathFor } from "./worktree-paths";
+import type { WorktreeOperationQueue } from "./worktree-operation-queue";
 import type { WorktreeStateService } from "./worktree-state";
 
 export function registerWorktreeLifecycleHandlers(
@@ -21,7 +22,8 @@ export function registerWorktreeLifecycleHandlers(
   db: DB,
   indexer: RepoIndexer,
   settings: SettingsService,
-  state: WorktreeStateService
+  state: WorktreeStateService,
+  operations: WorktreeOperationQueue
 ): void {
   const repoRow = (
     repoId: string
@@ -143,21 +145,27 @@ export function registerWorktreeLifecycleHandlers(
         releases.push(await state.lockForRemoval(id));
         const began = Date.now();
         let itemsDeleted = 0;
-        if (!listings.has(wt.repo_path)) {
-          const listed = await listWorktrees(execGit, wt.repo_path);
-          listings.set(wt.repo_path, listed.ok ? listed.value : undefined);
-        }
-        const listed = listings.get(wt.repo_path);
-        const res = await worktreeRemove(execGit, wt.repo_path, wt.path, {
-          force: req.force ?? false,
-          ...(listed === undefined ? {} : { listed }),
-          onProgress: (progress) => {
-            itemsDeleted = progress.itemsDeleted;
-            emitEvent("worktree:removeProgress", {
-              worktreeId: id,
-              itemsDeleted: progress.itemsDeleted
-            });
+        // In the worktree's queue, after the probes are drained: a Pull,
+        // switch or second removal of this checkout must not run Git in it
+        // while its folder is deleted. The listing is read inside it too, so
+        // it is no older than the wait.
+        const res = await operations.run(id, async () => {
+          if (!listings.has(wt.repo_path)) {
+            const listed = await listWorktrees(execGit, wt.repo_path);
+            listings.set(wt.repo_path, listed.ok ? listed.value : undefined);
           }
+          const listed = listings.get(wt.repo_path);
+          return worktreeRemove(execGit, wt.repo_path, wt.path, {
+            force: req.force ?? false,
+            ...(listed === undefined ? {} : { listed }),
+            onProgress: (progress) => {
+              itemsDeleted = progress.itemsDeleted;
+              emitEvent("worktree:removeProgress", {
+                worktreeId: id,
+                itemsDeleted: progress.itemsDeleted
+              });
+            }
+          });
         });
         if (res.ok) {
           logMain(

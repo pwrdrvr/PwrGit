@@ -16,6 +16,7 @@ import {
   GENERAL_DEFAULTS,
   err,
   isAppearanceTheme,
+  MANAGED_GIT_TRACK_DEFAULT,
   ok,
   resolveProfileAppearance,
   resolveUpdateSelection,
@@ -51,8 +52,10 @@ import {
   type DiagnosticsCopyDeps
 } from "./diagnostics-copy";
 import { registerDialogHandlers } from "./dialog-handlers";
-import { registerGitRuntimeHandlers } from "./git/runtime-status";
-import { configureBundledGit, configureBundledGitConfig, execGit, useInstalledGit } from "./git/dugite";
+import { configureManagedGitRuntime, refreshActiveGitReflink, registerGitRuntimeHandlers } from "./git/runtime-status";
+import { ManagedGitService } from "./git/managed/managed-git-service";
+import customGitPin from "../../custom-git-runtime.json";
+import { activeGitReflinkProbe, configureBundledGit, configureBundledGitConfig, execGit, gitReady, holdGitUntil, installedGitSelection, useInstalledGit, useManagedGit, useReflinkCheckout } from "./git/dugite";
 import { openExternalUrlFromMenu } from "./external-links";
 import { registerBranchHandlers } from "./git/branch-handlers";
 import { registerBulkSyncHandlers } from "./git/bulk-sync-handlers";
@@ -133,7 +136,7 @@ import {
 } from "./renderer-errors";
 import { watchEventLoopStalls } from "./event-loop-stalls";
 import { watchProcessIds } from "./process-ids";
-import { watchSystemShutdown } from "./system-shutdown";
+import { SYSTEM_SHUTDOWN_FLUSH_MS, watchSystemShutdown } from "./system-shutdown";
 import { ensureMacKeychainAccess } from "./mac-keychain-access";
 import { openDatabase } from "./persistence/db";
 import { readSeedIdentity } from "./profiles/git-identity";
@@ -257,6 +260,60 @@ const settings = new SettingsService(
 configureBundledGitConfig(join(app.getPath("userData"), "git"));
 const storedGitPath = settings.get().gitPath;
 useInstalledGit(typeof storedGitPath === "string" && storedGitPath.trim() !== "" ? storedGitPath : null);
+// Settings › Git › PwrGit's Git: newer verified builds of the bundled
+// runtime. An installed Git above outranks a chosen build. A chosen build is
+// verified before any Git command runs (they wait on the gate), and one that
+// fails its check makes every command fail naming it, as a broken installed
+// Git does. Pruning runs only here, before anything could be running a build.
+const managedGit = new ManagedGitService({
+  root: join(app.getPath("userData"), "git-runtimes"),
+  platform: process.platform,
+  arch: process.arch,
+  bundled: { version: customGitPin.version, consumerSha256: customGitPin.consumer_sha256 },
+  selection: () => settings.get().managedGit ?? {},
+  track: () => settings.get().managedGitTrack ?? MANAGED_GIT_TRACK_DEFAULT,
+  installedOverride: () => installedGitSelection() !== null,
+  onProgress: (progress) => emitEvent("gitManaged:progress", progress),
+  log: (level, message) => logMain(level, "git", message),
+  // PWRGIT_E2E_MANAGED_GIT_OFFLINE (e2e seam): no E2E may contact GitHub
+  // (e2e/AGENTS.md), so the release check fails as a network outage would.
+  ...(!app.isPackaged && process.env["PWRGIT_E2E_MANAGED_GIT_OFFLINE"] === "1"
+    ? {
+        fetch: async () => {
+          throw new TypeError("fetch failed: offline (e2e)");
+        }
+      }
+    : {})
+});
+// Configured on every platform: where PwrGit offers no build (Windows), the
+// service answers "not offered" rather than Settings' reads going unanswered.
+configureManagedGitRuntime(
+  managedGit,
+  app.isPackaged && managedGit.key !== null ? (managedGit.key === "darwin-universal" ? "signed" : "checksum") : undefined
+);
+holdGitUntil(
+  (async () => {
+    await managedGit.prune().catch((cause: unknown) =>
+      logMain("warn", "git", `managed Git prune failed: ${cause instanceof Error ? cause.message : String(cause)}`)
+    );
+    const directory = await managedGit.activateStored();
+    useManagedGit(directory);
+    if (directory !== null) logMain("info", "git", `repository commands use PwrGit’s Git at ${directory}`);
+  })()
+);
+// Copy-on-write checkout: the switch is read now and on every settings write;
+// the Git's support arrives with `refreshActiveGitReflink` below.
+const applyReflinkCheckout = (): void =>
+  useReflinkCheckout(settings.get().general?.gitReflinkCheckout ?? GENERAL_DEFAULTS.gitReflinkCheckout);
+applyReflinkCheckout();
+settings.onWrite(applyReflinkCheckout);
+const probeReflink = (): void => {
+  // After the launch check of a chosen build: nothing probes an unchecked one.
+  void gitReady().then(() => refreshActiveGitReflink()).catch((cause: unknown) =>
+    logMain("warn", "git", `copy-on-write probe failed: ${cause instanceof Error ? cause.message : String(cause)}`)
+  );
+};
+probeReflink();
 const storedTheme = settings.get().general?.theme;
 // Assigned once the window registries exist (below). A window with a palette
 // of its own — a profile window, or an auxiliary window that borrowed a
@@ -382,7 +439,7 @@ if (!gotSingleInstanceLock) {
   });
 
   app.whenReady().then(async () => {
-    watchSystemShutdown();
+    const systemShutdown = watchSystemShutdown();
     wireAppMenuBridge();
     wireWindowControlsBridge();
     // App log: ring buffer + file, streamed to the Logs window (Help › Logs).
@@ -464,6 +521,10 @@ if (!gotSingleInstanceLock) {
       app.quit();
       return;
     }
+    // macOS's keychain prompt holds the main thread until it is answered, and
+    // the launch probe's Git runs time out behind it. Ask again once it's
+    // done, if that probe got no answer.
+    if (activeGitReflinkProbe() === null) probeReflink();
 
     const db = openDatabase(join(app.getPath("userData"), "pwrgit.db"));
     const diagnosticsOutputRoot = join(app.getPath("userData"), "diagnostics");
@@ -1158,7 +1219,7 @@ if (!gotSingleInstanceLock) {
       }
       return ok(null);
     });
-    registerWorktreeLifecycleHandlers(bus, db, indexer, settings, stateService);
+    registerWorktreeLifecycleHandlers(bus, db, indexer, settings, stateService, worktreeOperations);
     // PWRGIT_E2E_TRASH_DIR (e2e seam): move removed folders into a test
     // directory instead of the machine's Trash.
     const e2eTrashDir = app.isPackaged
@@ -1243,10 +1304,13 @@ if (!gotSingleInstanceLock) {
       refresher,
       worktreeOperations
     );
-    const maintenanceHandlers = registerMaintenanceHandlers(bus, db, execGit, worktreeOperations, indexer, prService);
+    const maintenanceHandlers = registerMaintenanceHandlers(
+      bus, db, execGit, worktreeOperations, indexer, prService, Date.now,
+      async (repoId, repoPath) => (await stateService.resolveDefaultBranch(repoId, repoPath)).name || null
+    );
     registerGraphHandlers(bus, db, stateService);
     registerChangesHandlers(bus, db, refresher, worktreeOperations);
-    registerRepositorySetupHandlers(bus, db, worktreeOperations);
+    registerRepositorySetupHandlers(bus, db, worktreeOperations, () => forgeHosts.overrides());
     registerOperationHandlers(bus, db, refresher, worktreeOperations);
     registerSubmoduleHandlers(bus, db);
     const fileInsightHandlers = registerFileInsightHandlers(bus, db);
@@ -1442,6 +1506,9 @@ if (!gotSingleInstanceLock) {
     });
     // Flush while renderer windows (and their inspector targets) still exist.
     app.on("before-quit", (event) => quitDrain.beforeQuit(event));
+    // An OS shutdown exits within seconds; finish the flush inside that, so
+    // the quit still reaches will-quit and quit instead of the exit.
+    systemShutdown.beforeQuit(() => quitDrain.hurry(SYSTEM_SHUTDOWN_FLUSH_MS));
     registerAppUpdateHandlers(bus);
     settings.onWrite(() => {
       handleUpdateSelectionChange();

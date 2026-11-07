@@ -38,13 +38,34 @@ counting" in `styles/AGENTS.md`.
 `apps/desktop/e2e` find rows with `.overlay-result` plus `hasText`. The sr-only
 kind label is a word that no fixture branch name contains.
 
+## Typing a repository's name puts it first
+
+`buildPaletteItems` groups main's answer; main's order stands inside each
+group. The groups, top down:
+
+1. **A repository the query names** (`searchNameKey`), always, even while
+   you are in it (operator's decision; #358 had put that repository's
+   same-named branches above it). Same-named repositories: the one you are
+   in, then this profile's, then by folder (`RepoIndexer.searchAll`).
+2. The hit holding the PR the query numbers (`106`, `#106`).
+3. The focused repository's rows of exactly that name (#358): `main`, Enter.
+4. Show hidden repositories, then a hidden repository named in full.
+5. **Repositories whose name or folder the query begins**, above files and
+   commits: people switch by typing a name's first letters.
+6. Files, commits, everything else.
+
+Main keeps the same promise before its 60-row cap (`src/main/AGENTS.md`).
+Tests: `RepoSwitcherOverlay.ranking.property.test.ts` runs SQL, main and
+this grouping over a real FTS5 index; `search-rank.property.test.ts` holds
+main's re-rank alone.
+
 ## A PR is found through the ref that holds it
 
 Main resolves a PR hit to the worktree or branch that holds its head
 (`RepoIndexer.searchAll`). The row keeps its own kind and gains `pr`.
 
-- **`buildPaletteItems` lifts the hit whose `pr.number` the query names** into
-  the leading group, beside an exactly-named repo. A bare number also matches
+- **`buildPaletteItems` lifts the hit whose `pr.number` the query names**
+  to just under an exactly named repo. A bare number also matches
   commit-hash prefixes and paths, whose groups otherwise sit above it.
 - **A `change_request` hit has nothing to pin or poll** (`hasNoCheckout`).
   Picking it calls `pr:fetchHead`. `hitForLocation` turns the answer into the
@@ -224,6 +245,35 @@ match the face. Verb, scope, interval and view live in
   repositories partial and dirty-but-current checkouts skipped.
 
 Design: `design/Fetch Toast and Scope - UX Review.dc.html`.
+
+## A Maintenance run outlives its dialog
+
+A reload keeps the webContents id, so main's `maintenance:run` goes on
+after the dialog is gone. `maintenance:current` (scoped by the window's
+`profileId`) hands the dialog back the live run or the profile's last
+finished one; `maintenance-attach.ts` is the one way to use it.
+
+- **Main and the dialog fold the same events** (`foldMaintenanceProgress`
+  in `@pwrgit/shared`). Main's snapshot is that fold, updated in
+  `progress()`. The dialogs hold it through `useMaintenanceRunView()`;
+  don't keep run rows in hand-written `useState` again.
+- **Subscribe before asking.** Events that arrive before the answer are
+  held and folded after the snapshot; each carries `seq`. Two fast-check
+  tests hold this: `maintenance-attach.property.test.ts` (reload anywhere,
+  answer anywhere among live events, same view as a window that watched it
+  all) and main's `maintenance-handlers.property.test.ts` (a model under
+  `fc.scheduler`: never neither running nor finished, profile-scoped,
+  owner-only cancel).
+- **A receipt is shown once.** `maintenance:seen` marks it: on a dialog's
+  own answer (even after a close cancelled it) and when a reattach draws
+  it. The Sidebar reopens the dialog by itself only for a run this window
+  started (`useReopenMaintenanceAfterReload`, `ownWindow`). Another
+  window's run is shown, but its Cancel is disabled: main only lets the
+  owner cancel. A live answer also says `cancelling`, so a run stopping
+  before the reload is drawn as stopping.
+- **A Combined plan does not resume.** Its steps lived in the lost dialog;
+  the running step reattaches on its own tab. The Worktrees pruner runs
+  `prune:*`, not `maintenance:run`, and does not reattach.
 
 ## The sidebar footer holds the profile's AI switch
 

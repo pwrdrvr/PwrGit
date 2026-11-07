@@ -1,4 +1,5 @@
-import { mkdirSync, writeFileSync } from "node:fs";
+import { createHash } from "node:crypto";
+import { mkdirSync, realpathSync, writeFileSync } from "node:fs";
 import { createServer, type Socket } from "node:net";
 import { delimiter, dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -258,6 +259,60 @@ test("the uncommitted-changes prompt, on a contrived repository", async () => {
 });
 
 /**
+ * The ⌘K palette's order when a repository's name is typed, inside that
+ * repository, for the palette-ordering PR (#358 put the focused repository's
+ * same-named checkout above it; files, commits and the repository's own
+ * checkouts sat above a name typed in part).
+ *
+ * Invented repositories under a temp dir; nothing came from a real account.
+ */
+test("the ⌘K palette for a repository's name, on contrived repositories", async () => {
+  mkdirSync(OUT, { recursive: true });
+  sandbox = createGitSandbox();
+  const box = sandbox;
+  const repo = box.makeRepo("orbit-console");
+  box.commit(repo.path, "orbit-console-notes.md", "docs: orbit console overview");
+  box.commit(repo.path, "orbit-console-boot.ts", "feat: orbit console boot screen");
+  box.commit(repo.path, "orbit-console-tray.ts", "fix: orbit console tray icon");
+  // A checkout on a branch named like the repository, as agents make them,
+  // and others whose folders carry the repository's name.
+  for (const branch of ["orbit-console", "fix/orbit-console-crash", "feat/telemetry"]) {
+    repo.addWorktree(branch);
+  }
+  box.makeRepo("orbit-docs");
+  box.makeRepo("lunar-api");
+
+  handle = await launchApp({ theme: "dark" });
+  const { app, window } = handle;
+  await app.evaluate(async ({ BrowserWindow }, size) => {
+    BrowserWindow.getAllWindows()[0]?.setBounds({ x: 0, y: 0, ...size });
+  }, WINDOW);
+
+  await addRootAndExpand(window, handle, box, "orbit-console");
+  await branchRow(window, "main").first().click();
+  await window.mouse.move(6, 6);
+
+  for (const [query, shot] of [
+    ["Orbit-Console", "palette-exact-name.png"],
+    ["orbit-c", "palette-name-begun.png"]
+  ] as const) {
+    await window.keyboard.press("Meta+k");
+    const panel = window.locator(".overlay-panel");
+    await panel.waitFor();
+    await window.locator(".overlay-search input").fill(query);
+    // Files are debounced 120ms behind the repository search; wait for the
+    // last group to land, then for the status chips to settle.
+    await window
+      .locator(".overlay-result", { hasText: "orbit-console-notes.md" })
+      .waitFor();
+    await window.waitForTimeout(300);
+    await panel.screenshot({ path: join(OUT, shot) });
+    await window.keyboard.press("Escape");
+    await panel.waitFor({ state: "hidden" });
+  }
+});
+
+/**
  * Fetch ▾ and the minimised run, for `design/Fetch Toast and Scope - UX
  * Review.dc.html` and its PR.
  *
@@ -368,4 +423,66 @@ test("Fetch ▾, the run's dialog and its toast, on contrived repositories", asy
     for (const socket of held) socket.destroy();
     silent.close();
   }
+});
+
+/**
+ * The gh default-repository warning: a fork checkout whose `upstream` would
+ * receive a bare `gh pr create`. Invented owners and repository; nothing is
+ * fetched, so the remotes need not exist. Captures the header chip, then the
+ * Repository setup sheet's GitHub CLI page it opens.
+ */
+test("the gh default-repository warning, on a contrived fork checkout", async () => {
+  mkdirSync(OUT, { recursive: true });
+  sandbox = createGitSandbox();
+  const box = sandbox;
+  const repo = box.makeRepo("northwind-labs");
+  box.commit(repo.path, "capture-window.ts", "base");
+  box.git(repo.path, "remote", "add", "origin", "git@github.com:mara-quill/northwind-labs.git");
+  box.git(repo.path, "remote", "add", "upstream", "git@github.com:northwind-oss/northwind-labs.git");
+  // PWRGIT_GH_SHOT: unset (default), "set" (on the fork: no warning), or
+  // "moved-on" (set to the original, then Pull's "this fork has moved on"
+  // answered "Pull from origin only").
+  const shot = process.env["PWRGIT_GH_SHOT"] ?? "unset";
+  if (shot === "set") box.git(repo.path, "config", "remote.origin.gh-resolved", "base");
+  if (shot === "moved-on") box.git(repo.path, "config", "remote.upstream.gh-resolved", "base");
+
+  // A signed-out gh: the warning is read from Git config alone, and a token
+  // would send PwrGit's change-request reader to api.github.com.
+  const signedOut = join(dirname(box.reposDir), "gh-signed-out");
+  mkdirSync(signedOut, { recursive: true });
+  writeFileSync(join(signedOut, "gh"), "#!/bin/sh\n[ \"$1\" = \"--version\" ] && echo \"gh version 2.99.0 (contrived)\" && exit 0\nexit 1\n", { mode: 0o755 });
+  process.env["PATH"] = `${signedOut}${delimiter}${process.env["PATH"] ?? ""}`;
+  handle = await launchApp({ theme: "dark" });
+  const { app, window } = handle;
+  await app.evaluate(async ({ BrowserWindow }, size) => {
+    BrowserWindow.getAllWindows()[0]?.setBounds({ x: 0, y: 0, ...size });
+  }, WINDOW);
+
+  if (shot === "moved-on") {
+    // The answer lives where the Pull card writes it, keyed by the repo id
+    // (sha1 of its path, `hashId` in repo-indexer.ts). Seeded before the
+    // folder is added, as if answered in an earlier session.
+    const ids = [...new Set([repo.path, realpathSync(repo.path)])].map((path) =>
+      createHash("sha1").update(path).digest("hex").slice(0, 12)
+    );
+    await window.evaluate((keys) => {
+      for (const id of keys) window.localStorage.setItem(`pwrgit.forkMovedOn.${id}`, "tracked");
+    }, ids);
+  }
+  await addRootAndExpand(window, handle, box, "northwind-labs");
+  await branchRow(window, "main").first().click();
+  const header = window.locator(".wt-header");
+  await header.waitFor();
+  await window.waitForTimeout(800);
+  await window.mouse.move(6, 6);
+  await header.screenshot({ path: join(OUT, `gh-default-header-${shot}.png`) });
+
+  const chip = window.locator(".discovery-gh-chip");
+  if ((await chip.count()) === 0) return;
+  await chip.click();
+  const sheet = window.locator(".repository-setup");
+  await sheet.waitFor();
+  await window.mouse.move(6, 6);
+  await window.waitForTimeout(400);
+  await sheet.screenshot({ path: join(OUT, `gh-default-sheet-${shot}.png`) });
 });

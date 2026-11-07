@@ -97,8 +97,14 @@ export function useTagStatus({
       setLoading(false);
       return;
     }
-    // Loading starts when the search is enabled, not when the debounce fires;
-    // callers read `!loading && rows.length === 0` as "nothing matches".
+    // Loading starts when the search is enabled, not when the debounce fires:
+    // between those two moments there are no rows and no request, and callers
+    // read `!loading && rows.length === 0` as "nothing matches".
+    //
+    // A new query also retires the fetch in flight now, not when the debounce
+    // fires: an older query's answer landing in between would otherwise clear
+    // `loading` and show its rows as this query's results.
+    generation.current += 1;
     setLoading(true);
     const timer = setTimeout(() => void fetchPage(0, false), SEARCH_DEBOUNCE_MS);
     return () => clearTimeout(timer);

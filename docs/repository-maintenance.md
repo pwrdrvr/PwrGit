@@ -7,6 +7,26 @@ Linked worktrees share an object store, so collection and branch review process
 that store once per run. A [hidden repository](hide-and-remove-repositories.md)
 is not maintained until it is unhidden.
 
+## Repairing worktree links
+
+Enable **Repair broken worktree links** in the Combined configurator to run
+`git worktree repair` before worktree review, branch cleanup, and collection.
+It is off by default. The **Repair links** tab runs the same operation alone.
+Both use the selected profile and process each shared object store once.
+
+When the main repository moves, its `.git/worktrees/<id>` registrations still
+know the checkout paths and branches, but each checkout's `.git` file may point
+back to the old repository location. Git repairs those links using the surviving
+registrations. Repair preserves working files, the index, branch refs, locks,
+and missing-checkout registrations; it does not prune or remove worktrees.
+
+If a linked checkout also moved, the old registration cannot discover its new
+location. Supply that path explicitly, for example
+`git -C /new/repository worktree repair /new/linked-checkout`. Missing or
+unmounted folders remain registered. A repair failure is reported per
+repository while later Combined steps continue; cancellation stops the plan
+after active operations finish.
+
 ## Garbage collection
 
 Start with **Standard (recommended)**. Git normally performs some maintenance
@@ -28,12 +48,12 @@ repository does not stop the others. Another window cannot start an overlapping
 maintenance run. **Cancel** finishes active local operations and skips
 remaining work. Closing the owning window also requests cancellation.
 
-In **Combined** maintenance, a repository's branch review or deletion failure
-does not prevent other repositories or the garbage collection phase from
+In **Combined** maintenance, a repository's repair, branch review or deletion
+failure does not prevent other repositories or the garbage collection phase from
 running. Branches that cannot be safely deleted are retained. Each step that
-left something behind gets one card above the successful results, Local
-branches first, then Garbage collection, headed by a count such as "1 branch
-wasn’t deleted". It has one row per retained branch, with the tip it was
+left something behind gets one card above the successful results: Repair links
+first when enabled, then Local branches and Garbage collection. The card has a
+headline such as "1 branch wasn’t deleted". It has one row per retained branch, with the tip it was
 reviewed at, and one row per repository that could not be reviewed or
 collected, with the reason. Git's own error text is behind **Details**. A long
 list scrolls inside its card. The cards appear as soon as a step finishes, so

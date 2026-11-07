@@ -63,6 +63,15 @@ const FAIL_FAST_AFTER = 10;
 const REGISTRY_VERSION = /^\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)*$/;
 
 /**
+ * The file's lines without their CR and without a leading byte-order mark, so
+ * a Windows checkout or editor reads the same settings as any other. A BOM
+ * on a first-line `minimumReleaseAge:` used to hide the cooldown.
+ */
+function yamlLines(yaml) {
+  return yaml.replace(/^\uFEFF/, "").split(/\r?\n/);
+}
+
+/**
  * Read `minimumReleaseAge` and `minimumReleaseAgeExclude` out of
  * `pnpm-workspace.yaml`.
  *
@@ -75,8 +84,7 @@ export function parseMaturityPolicy(yaml) {
   const exclusions = [];
   let inExclusions = false;
 
-  for (const raw of yaml.split("\n")) {
-    const line = raw.replace(/\r$/, "");
+  for (const line of yamlLines(yaml)) {
     if (line.trim() === "" || line.trimStart().startsWith("#")) continue;
 
     if (inExclusions) {
@@ -113,8 +121,7 @@ export function parseLockedPackages(yaml) {
   const seen = new Set();
   let inPackages = false;
 
-  for (const raw of yaml.split("\n")) {
-    const line = raw.replace(/\r$/, "");
+  for (const line of yamlLines(yaml)) {
     if (/^packages:\s*$/.test(line)) {
       inPackages = true;
       continue;

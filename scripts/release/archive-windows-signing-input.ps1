@@ -27,6 +27,8 @@ $archiveInputs = @(
   "apps/desktop/scripts/verify-asar-contents.mjs",
   "apps/desktop/scripts/packaged-html-rules.mjs",
   "apps/desktop/scripts/verify-embedded-git-notices.mjs",
+  "apps/desktop/scripts/stage-runtime.mjs",
+  "apps/desktop/custom-git-runtime.json",
   # Imported by windows-release-artifacts.mjs for its CLI guard.
   "scripts/lib/cli-entrypoint.mjs",
   "scripts/release/install-trusted-signing.ps1"

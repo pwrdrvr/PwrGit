@@ -79,6 +79,7 @@ import { BulkSyncDialog } from "./BulkSyncDialog";
 import { FIRST_RUN_MINIMIZE_MS } from "./bulk-sync-prefs";
 import { useBulkSyncRun } from "./useBulkSyncRun";
 import { MaintenanceDialog } from "./MaintenanceDialog";
+import { useReopenMaintenanceAfterReload } from "./maintenance-attach";
 import { HiddenReposButton } from "./HiddenReposButton";
 import { RemoveRepositoryDialog } from "./RemoveRepositoryDialog";
 import { hiddenToast } from "./remove-repo-view";
@@ -341,6 +342,7 @@ export function Sidebar({
     | { repo?: { id: string; name: string }; worktrees?: true }
     | null
   >(null);
+  useReopenMaintenanceAfterReload(activeProfile?.id, () => setMaintenance((old) => old ?? {}));
   /** The repository the Remove review is open on. */
   const [removing, setRemoving] = useState<Repo | null>(null);
   const [sel, setSel] = useState<Selection>({

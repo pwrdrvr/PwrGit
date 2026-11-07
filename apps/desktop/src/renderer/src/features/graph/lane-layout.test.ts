@@ -804,4 +804,87 @@ describe("layoutLanes with refs (branch-aware lanes)", () => {
     expect(rows[1].top).toEqual([{ from: 0, to: 0 }]);
     expect(laneCount).toBe(1);
   });
+
+  // Shrunk from lane-layout.property.test.ts ("keeps local main's
+  // first-parent chain on lane 0"): commit origin/main; commit f1; pull;
+  // commit origin/main; merge main into f1; pull. f1 merged a stale local
+  // main, so its merge sits above main's newer tip.
+  it("starts the spine at main's tip when a newer merge reaches older trunk history", () => {
+    const { rows, laneCount } = layoutLanes(
+      [c("M", "F", "A"), c("C", "A"), c("F", "B0"), c("A", "B0"), c("B0")],
+      {
+        tips: { M: ["f1"], C: ["main", "origin/main"] },
+        defaultBranch: "main",
+        defaultRefTips: ["C"],
+        localRefTips: ["M", "C"],
+        headBranch: "f1",
+        shownBranches: ["f1"]
+      }
+    );
+    const lanes = Object.fromEntries(
+      rows.map((r, i) => [["M", "C", "F", "A", "B0"][i], r.lane])
+    );
+    // Before the fix: { M: 1, C: 2, F: 1, A: 0, B0: 0 }.
+    expect(lanes).toEqual({ M: 1, C: 0, F: 1, A: 0, B0: 0 });
+    // M's merge line opens beside f1's lane, not in the spine's…
+    expect(rows[0].bottom).toEqual([
+      { from: 1, to: 1 },
+      { from: 1, to: 2 }
+    ]);
+    // …so main's tip starts lane 0, with nothing above it there…
+    expect(rows[1].top).toEqual([
+      { from: 1, to: 1 },
+      { from: 2, to: 2 }
+    ]);
+    // …and the merge line converges into A on the spine.
+    expect(rows[3].top).toEqual([
+      { from: 0, to: 0 },
+      { from: 1, to: 1 },
+      { from: 2, to: 0 }
+    ]);
+    expect(laneCount).toBe(3);
+  });
+
+  it("lets a merge line into the spine's own tip take lane 0", () => {
+    // The spine's lane is held for edges into main's tip, so a newer branch
+    // that merged main's tip still draws that line straight down lane 0.
+    const { rows, laneCount } = layoutLanes(
+      [c("M", "F", "C"), c("C", "B0"), c("F", "B0"), c("B0")],
+      {
+        tips: { M: ["f1"], C: ["main", "origin/main"] },
+        defaultBranch: "main",
+        defaultRefTips: ["C"],
+        localRefTips: ["M", "C"],
+        headBranch: "f1",
+        shownBranches: ["f1"]
+      }
+    );
+    expect(rows.map((r) => r.lane)).toEqual([1, 0, 1, 0]);
+    expect(rows[0].bottom).toEqual([
+      { from: 1, to: 0 },
+      { from: 1, to: 1 }
+    ]);
+    expect(laneCount).toBe(2);
+  });
+
+  // Shrunk from "keeps the checked-out branch's own line on lane 1": another
+  // branch merged an older commit of the checked-out branch.
+  it("starts the checked-out line at its tip when a newer merge reaches its history", () => {
+    const { rows } = layoutLanes(
+      [c("N", "B", "H1"), c("H", "H1"), c("H1", "B"), c("B")],
+      {
+        tips: { N: ["n"], H: ["h"], B: ["main", "origin/main"] },
+        defaultBranch: "main",
+        defaultRefTips: ["B"],
+        localRefTips: ["N", "H", "B"],
+        headBranch: "h",
+        shownBranches: ["n", "h"]
+      }
+    );
+    const lanes = Object.fromEntries(
+      rows.map((r, i) => [["N", "H", "H1", "B"][i], r.lane])
+    );
+    // Before the fix: { N: 2, H: 3, H1: 1, B: 0 }.
+    expect(lanes).toEqual({ N: 2, H: 1, H1: 1, B: 0 });
+  });
 });

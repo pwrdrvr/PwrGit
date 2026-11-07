@@ -1,7 +1,7 @@
 import { expect, test } from "@playwright/test";
 import { launchApp } from "./fixtures/electron-app";
 
-test("Settings runs bundled Git and LFS by default and lists the Gits it could run instead", async ({}, testInfo) => {
+test("Settings › Git runs bundled Git and LFS by default and lists the Gits it could run instead", async ({}, testInfo) => {
   const handle = await launchApp();
   try {
     const opened = handle.app.waitForEvent("window");
@@ -13,7 +13,10 @@ test("Settings runs bundled Git and LFS by default and lists the Gits it could r
       throw new Error("Settings menu is missing");
     });
     const page = await opened;
-    const section = page.locator('section[aria-label="Git runtime"]');
+    // Git is its own page now, right after General.
+    await page.locator(".settings-nav__button", { hasText: /^Git$/ }).click();
+    const section = page.locator('section[aria-label="In use"]');
+    const installs = page.locator('section[aria-label="Installs"]');
     // The header's chip, not the install rows' own "Using" chip.
     await expect(section.locator(".settings-panel__header .settings-card__chip")).toHaveText("Bundled");
     // The in-use rows show the version the probe parsed out of the real
@@ -27,16 +30,31 @@ test("Settings runs bundled Git and LFS by default and lists the Gits it could r
     ).toHaveCount(1);
     await expect(section).toContainText(/git-lfs\/\d/);
     // The bundle is always the first install, and the one in use.
-    const bundled = section.locator(".settings-ai-install").first();
+    const bundled = installs.locator(".settings-ai-install").first();
     await expect(bundled.locator(".settings-ai-install__meta")).toHaveText(/^Bundled · \d+\.\d+.* · LFS \d/);
     await expect(bundled.locator(".settings-card__chip")).toHaveText("Using");
-    await expect(section.getByRole("textbox", { name: "Custom Git path" })).toHaveValue("");
+    await expect(installs.getByRole("textbox", { name: "Custom Git path" })).toHaveValue("");
     await expect(section.locator(".settings-field__error")).toHaveCount(0);
     await expect(section.getByRole("alert")).toHaveCount(0);
+    await expect(page.locator(".settings-nav__subbutton", { hasText: "In use" }).locator(".settings-nav__subdot--ok")).toHaveCount(1);
+
+    // PwrGit’s Git: the release check really runs through main, offline here
+    // (no E2E may reach GitHub), and says what it last knew.
+    const managed = page.locator('section[aria-label="PwrGit’s Git"]');
+    const chip = managed.locator(".settings-panel__header .settings-card__chip");
+    if (process.platform === "win32") {
+      await expect(chip).toHaveText("Not offered");
+    } else {
+      await expect(chip).toHaveText("Couldn’t check");
+      await expect(managed).toContainText("Couldn’t check for newer builds");
+      await expect(managed).toContainText("None yet");
+      await expect(managed.getByRole("button", { name: "Download and verify" })).toHaveCount(0);
+    }
 
     // Screenshot uses entirely contrived paths and versions; assertions above
     // exercise the real renderer → IPC → bundled runtime probes.
-    await section.evaluate((element) => {
+    const pane = page.locator(".settings-stack--git");
+    await pane.evaluate((element) => {
       const values = ["2.53.0", "3.7.1"];
       element.querySelectorAll(".settings-field__value:not(.settings-field__value--absent)").forEach((value, index) => {
         if (index < values.length) value.textContent = values[index] ?? value.textContent;
@@ -63,6 +81,6 @@ test("Settings runs bundled Git and LFS by default and lists the Gits it could r
         if (metaNode !== null) metaNode.textContent = meta ?? "";
       });
     });
-    await section.screenshot({ path: testInfo.outputPath("git-runtime.png") });
+    await pane.screenshot({ path: testInfo.outputPath("git-runtime.png") });
   } finally { await handle.cleanup(); }
 });

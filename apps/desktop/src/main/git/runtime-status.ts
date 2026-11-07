@@ -2,10 +2,13 @@ import { execFile } from "node:child_process";
 import { access, realpath } from "node:fs/promises";
 import { constants } from "node:fs";
 import { homedir, tmpdir } from "node:os";
-import { posix, win32, type PlatformPath } from "node:path";
+import { join, posix, win32, type PlatformPath } from "node:path";
 import {
   err,
+  isManagedGitTrack,
   ok,
+  type GitReflinkStatus,
+  type GitReflinkSupport,
   type GitRuntimeCandidate,
   type GitRuntimeProblem,
   type GitRuntimeSource,
@@ -18,13 +21,23 @@ import { logMain } from "../logs";
 import type { SettingsService } from "../settings/settings-service";
 import {
   activeGitPath,
+  activeGitReflinkProbe,
+  bundleLaunch,
   bundledGitPath,
   bundledKeychainHelper,
   gitLaunch,
+  holdGitUntil,
   installedGitSelection,
+  managedGitDirectory,
+  noteGitReflinkSupport,
+  reflinkCheckoutActive,
+  reflinkCheckoutEnabled,
+  shippedBundleDirectory,
   useInstalledGit,
+  useManagedGit,
   type GitLaunch
 } from "./dugite";
+import type { ManagedGitService } from "./managed/managed-git-service";
 
 type ProbeResult = { ok: boolean; stdout: string };
 
@@ -148,23 +161,87 @@ async function discoveredGits(deps: GitDiscoveryDeps): Promise<Array<{ path: str
   return found.filter((entry) => !seen.has(entry.path) && seen.add(entry.path));
 }
 
-/** Probe one Git the way it would run: its own environment, then LFS through it. */
+/**
+ * Read copy-on-write support from `git worktree -h`. PwrGit's Git lists
+ * `[--[no-]reflink]` under `add` (checkout.reflink, runtime .1) and a
+ * `git worktree reflink` subcommand (re-share, runtime .2). A usage text is
+ * what Git promises to keep stable enough for people; a version string is
+ * not, and a local build of the same source carries none.
+ */
+export function parseReflinkSupport(usage: string): GitReflinkSupport {
+  return {
+    checkout: usage.includes("[--[no-]reflink]"),
+    reshare: /git worktree reflink\b/.test(usage)
+  };
+}
+
+/**
+ * Probe one Git the way it would run: its own environment, then LFS through
+ * it. A bundle-shaped Git (`bundle`: the shipped one or a downloaded build)
+ * runs as the bundle does, with that directory's helpers and config.
+ */
 export async function probeGitRuntime(
   path: string,
   source: GitRuntimeSource,
-  deps: GitDiscoveryDeps = machine
+  deps: GitDiscoveryDeps = machine,
+  bundle?: string
 ): Promise<GitRuntimeCandidate> {
-  const bundled = source === "bundled";
-  const candidate = (git: string | null, lfs: string | null, problem: GitRuntimeProblem | null): GitRuntimeCandidate =>
-    ({ path, source, git, lfs, problem });
+  const candidate = (
+    git: string | null,
+    lfs: string | null,
+    problem: GitRuntimeProblem | null,
+    reflink?: GitReflinkSupport
+  ): GitRuntimeCandidate =>
+    ({ path, source, git, lfs, problem, ...(reflink === undefined ? {} : { reflink }) });
   if (!(await deps.executable(path))) return candidate(null, null, "not_found");
-  const launch = gitLaunch({}, bundled ? null : path);
+  const directory = bundle ?? (source === "bundled" ? shippedBundleDirectory() : undefined);
+  const launch = directory !== undefined ? bundleLaunch(directory) : gitLaunch({}, path);
   const version = await deps.probe(launch, ["--version"]);
   if (!version.ok || !/^git version \S/.test(version.stdout)) return candidate(null, null, "no_version");
-  const lfs = await deps.probe(launch, ["lfs", "version"]);
+  const [lfs, usage] = await Promise.all([
+    deps.probe(launch, ["lfs", "version"]),
+    // Exit status varies by Git (0 or 129); the usage text is the answer.
+    deps.probe(launch, ["worktree", "-h"])
+  ]);
+  // No usage text means the probe never answered (a timeout while main was
+  // blocked, say), which is unknown, not "can't": leave it out so the next
+  // ask probes again.
+  const reflink = /\busage:/.test(usage.stdout) ? parseReflinkSupport(usage.stdout) : undefined;
   return lfs.ok && lfs.stdout.startsWith("git-lfs/")
-    ? candidate(version.stdout, lfs.stdout, null)
-    : candidate(version.stdout, null, "lfs_missing");
+    ? candidate(version.stdout, lfs.stdout, null, reflink)
+    : candidate(version.stdout, null, "lfs_missing", reflink);
+}
+
+let managedService: ManagedGitService | null = null;
+/** What the bundled row may claim it was verified as (packaged macOS/Linux:
+ *  the stager checked it at packaging; elsewhere, nothing). */
+let bundledTrust: GitRuntimeCandidate["trust"] | undefined;
+
+/** Set once at startup. */
+export function configureManagedGitRuntime(service: ManagedGitService | null, shippedTrust?: GitRuntimeCandidate["trust"]): void {
+  managedService = service;
+  bundledTrust = shippedTrust;
+}
+
+/** Downloaded builds as rows: each verified on disk first, and only then
+ *  run. One that fails its check is listed, unchosen and unprobed. */
+async function managedCandidates(deps: GitDiscoveryDeps): Promise<GitRuntimeCandidate[]> {
+  if (managedService === null) return [];
+  const builds = await managedService.verifiedBuilds();
+  return Promise.all(
+    builds.map(async ({ build, directory }) => {
+      const meta = { managedId: build.id, trust: build.trust };
+      if (directory === null) {
+        return { path: build.path, source: "managed" as const, git: null, lfs: null, problem: "failed_check" as const, ...meta };
+      }
+      return { ...(await probeGitRuntime(build.path, "managed", deps, directory)), ...meta };
+    })
+  );
+}
+
+function activeKind(): GitRuntimeStatus["active"] {
+  if (installedGitSelection() !== null) return "installed";
+  return managedGitDirectory() !== null ? "managed" : "bundled";
 }
 
 export async function readGitRuntimeStatus(deps: GitDiscoveryDeps = machine): Promise<GitRuntimeStatus> {
@@ -175,15 +252,82 @@ export async function readGitRuntimeStatus(deps: GitDiscoveryDeps = machine): Pr
   const custom = selected !== null && !discovered.some((entry) => entry.path === selected)
     ? [{ path: selected, source: "custom" as const }]
     : [];
-  const candidates = await Promise.all([
-    probeGitRuntime(bundledGitPath(), "bundled", deps),
-    ...[...discovered, ...custom].map((entry) => probeGitRuntime(entry.path, entry.source, deps))
+  const [shipped, managed, installed] = await Promise.all([
+    probeGitRuntime(bundledGitPath(), "bundled", deps, shippedBundleDirectory()),
+    managedCandidates(deps),
+    Promise.all([...discovered, ...custom].map((entry) => probeGitRuntime(entry.path, entry.source, deps)))
   ]);
+  const candidates = [
+    bundledTrust === undefined ? shipped : { ...shipped, trust: bundledTrust },
+    ...managed,
+    ...installed
+  ];
+  noteActiveCandidate(candidates);
   return {
-    active: selected === null ? "bundled" : "installed",
+    active: activeKind(),
     path: activeGitPath(),
     keychainHelper: bundledKeychainHelper(),
     candidates
+  };
+}
+
+const NO_REFLINK: GitReflinkSupport = { checkout: false, reshare: false };
+
+/** Keep main's copy-on-write state in step with whatever a probe saw of the
+ *  Git in use. A probe that didn't answer records nothing: until one does,
+ *  copy-on-write stays off and the next ask probes again. */
+function noteActiveCandidate(candidates: GitRuntimeCandidate[]): void {
+  const path = activeGitPath();
+  const active = candidates.find((candidate) => candidate.path === path);
+  if (active?.reflink !== undefined) noteGitReflinkSupport(path, active.git, active.reflink);
+}
+
+/** In-flight probes by path: callers asking about the same Git share one,
+ *  and a runtime switch never waits on the previous Git's answer. */
+const activeProbes = new Map<string, Promise<void>>();
+
+/**
+ * Probe only the Git in use, so `checkout.reflink` follows it: at launch
+ * and after every runtime switch. Until it answers, copy-on-write checkout
+ * stays off — the ordinary writer, never a wrong one.
+ */
+export function refreshActiveGitReflink(deps: GitDiscoveryDeps = machine): Promise<void> {
+  const path = activeGitPath();
+  const pending = activeProbes.get(path);
+  if (pending !== undefined) return pending;
+  const probe = (async () => {
+    const installed = installedGitSelection();
+    const managed = managedGitDirectory();
+    const probed =
+      installed !== null
+        ? await probeGitRuntime(path, "custom", deps)
+        : await probeGitRuntime(path, managed !== null ? "managed" : "bundled", deps, managed ?? shippedBundleDirectory());
+    noteActiveCandidate([probed]);
+    const support = probed.reflink;
+    logMain(
+      support === undefined ? "warn" : "info",
+      "git",
+      support === undefined
+        ? `copy-on-write support of ${path}: no answer${probed.problem === null ? "" : ` (${probed.problem})`}, asking again later; flag off`
+        : `copy-on-write support of ${path}: checkout ${support.checkout ? "yes" : "no"}, re-share ${support.reshare ? "yes" : "no"}; flag ${reflinkCheckoutActive() ? "on" : "off"}`
+    );
+  })().finally(() => {
+    activeProbes.delete(path);
+  });
+  activeProbes.set(path, probe);
+  return probe;
+}
+
+/** What `git:reflinkSupport` answers. */
+export async function readGitReflinkStatus(deps: GitDiscoveryDeps = machine): Promise<GitReflinkStatus> {
+  if (activeGitReflinkProbe() === null) await refreshActiveGitReflink(deps);
+  const probe = activeGitReflinkProbe();
+  return {
+    path: activeGitPath(),
+    version: probe?.version ?? null,
+    support: probe?.support ?? NO_REFLINK,
+    enabled: reflinkCheckoutEnabled(),
+    active: reflinkCheckoutActive()
   };
 }
 
@@ -191,33 +335,103 @@ const PROBLEM_MESSAGE: Record<GitRuntimeProblem, (path: string) => string> = {
   not_found: (path) => `There is no executable at ${path}.`,
   no_version: (path) => `${path} did not answer “git --version”, so PwrGit can’t use it as Git.`,
   lfs_missing: (path) =>
-    `${path} has no working Git LFS, so repositories that use LFS would check out pointer files. Install Git LFS for it, or keep the bundled Git.`
+    `${path} has no working Git LFS, so repositories that use LFS would check out pointer files. Install Git LFS for it, or keep the bundled Git.`,
+  failed_check: (path) => `${path} failed PwrGit’s check of its files and signatures, so PwrGit won’t run it.`
 };
+
+type Choice = { kind: "bundled" } | { kind: "installed"; path: string } | { kind: "managed"; id: string };
+
+/**
+ * The settings a choice writes. One choice at a time: a downloaded build
+ * clears an installed path and the reverse, and the build being left becomes
+ * `previous`, the rollback the Git page offers. Precedence when both are
+ * somehow stored (a hand-edited file) stays installed > managed > bundled.
+ */
+export function selectionPatch(
+  current: { gitPath?: string | undefined; managedGit?: { selected?: string | undefined; previous?: string | undefined } | undefined },
+  choice: Choice
+): { gitPath: string | undefined; managedGit: { selected?: string; previous?: string } } {
+  const selected = current.managedGit?.selected;
+  const chosen = choice.kind === "managed" ? choice.id : undefined;
+  // The build being left becomes the rollback; staying on it keeps the old one.
+  let previous = selected !== undefined && selected !== chosen ? selected : current.managedGit?.previous;
+  if (previous === chosen) previous = undefined;
+  const managedGit: { selected?: string; previous?: string } = {
+    ...(chosen !== undefined ? { selected: chosen } : {}),
+    ...(previous !== undefined ? { previous } : {})
+  };
+  return { gitPath: choice.kind === "installed" ? choice.path : undefined, managedGit };
+}
+
+/** Validate, persist and apply a downloaded build of PwrGit's Git. */
+export async function selectManagedGitRuntime(
+  settings: Pick<SettingsService, "update" | "get">,
+  service: ManagedGitService,
+  id: string,
+  deps: GitDiscoveryDeps = machine
+): Promise<Result<null>> {
+  let directory: string;
+  try {
+    directory = await service.verifyBuild(id);
+  } catch (cause) {
+    return err({
+      kind: "git",
+      code: "git_runtime_failed_check",
+      message: `PwrGit’s Git ${id} failed its check, so PwrGit won’t run it: ${cause instanceof Error ? cause.message : String(cause)}`
+    });
+  }
+  const path = join(directory, "bin", "git");
+  const probed = await probeGitRuntime(path, "managed", deps, directory);
+  if (probed.problem !== null) {
+    return err({ kind: "git", code: `git_runtime_${probed.problem}`, message: PROBLEM_MESSAGE[probed.problem](path) });
+  }
+  settings.update(selectionPatch(settings.get(), { kind: "managed", id }));
+  useInstalledGit(null);
+  useManagedGit(directory);
+  service.clearSelectedError();
+  holdGitUntil(Promise.resolve());
+  noteActiveCandidate([probed]);
+  logMain("info", "git", `repository commands use PwrGit’s Git ${id} at ${path}`);
+  return ok(null);
+}
 
 /** Validate, persist and apply a runtime choice. `null` is the bundle. */
 export async function selectGitRuntime(
-  settings: Pick<SettingsService, "update">,
+  settings: Pick<SettingsService, "update"> & Partial<Pick<SettingsService, "get">>,
   requested: string | null,
   deps: GitDiscoveryDeps = machine
 ): Promise<Result<null>> {
   const path = requested?.trim() ?? "";
   const chosen = path === "" || path === bundledGitPath() ? null : path;
+  let probed: GitRuntimeCandidate | null = null;
   if (chosen !== null) {
     if (!pathsFor(deps).isAbsolute(chosen)) {
       return err({ kind: "git", code: "git_runtime_relative", message: "Choose Git by its full path." });
     }
-    const probed = await probeGitRuntime(chosen, "custom", deps);
+    probed = await probeGitRuntime(chosen, "custom", deps);
     if (probed.problem !== null) {
       return err({ kind: "git", code: `git_runtime_${probed.problem}`, message: PROBLEM_MESSAGE[probed.problem](chosen) });
     }
   }
-  settings.update({ gitPath: chosen ?? undefined });
+  settings.update(
+    selectionPatch(settings.get?.() ?? {}, chosen === null ? { kind: "bundled" } : { kind: "installed", path: chosen })
+  );
   useInstalledGit(chosen);
+  useManagedGit(null);
+  managedService?.clearSelectedError();
+  holdGitUntil(Promise.resolve());
+  // The chosen Git was just probed; only the bundle still needs asking.
+  if (probed === null) await refreshActiveGitReflink(deps);
+  else noteActiveCandidate([probed]);
   logMain("info", "git", chosen === null ? "repository commands use the bundled Git" : `repository commands use the installed Git at ${chosen}`);
   return ok(null);
 }
 
-export function registerGitRuntimeHandlers(bus: CommandBus, settings: Pick<SettingsService, "update">): void {
+export function registerGitRuntimeHandlers(
+  bus: CommandBus,
+  settings: Pick<SettingsService, "update" | "get">,
+  managed: ManagedGitService | null = managedService
+): void {
   // Coalesce StrictMode/concurrent windows without persisting discovery results.
   let pending: Promise<GitRuntimeStatus> | undefined;
   const read = (): Promise<GitRuntimeStatus> => {
@@ -225,11 +439,53 @@ export function registerGitRuntimeHandlers(bus: CommandBus, settings: Pick<Setti
     return pending;
   };
   bus.register("git:runtimeStatus", async () => ok(await read()));
+  bus.register("git:reflinkSupport", async () => ok(await readGitReflinkStatus()));
   bus.register("git:selectRuntime", async (req) => {
-    const selected = await selectGitRuntime(settings, req.path);
+    const selected =
+      req.managed !== undefined
+        ? managed === null
+          ? err({ kind: "git" as const, code: "git_runtime_managed_unsupported", message: "PwrGit offers no build of its Git here." })
+          : await selectManagedGitRuntime(settings, managed, req.managed)
+        : await selectGitRuntime(settings, req.path);
     if (!selected.ok) return selected;
     // A read that started before the switch describes the old runtime.
     await pending?.catch(() => undefined);
     return ok(await read());
+  });
+  if (managed !== null) registerManagedGitHandlers(bus, managed, settings);
+}
+
+function failure(cause: unknown, code: string): Result<never> {
+  return err({ kind: "git", code, message: cause instanceof Error ? cause.message : String(cause) });
+}
+
+/** Settings › Git › PwrGit's Git. Main decides when the network is used:
+ *  `status` never, `check` only past the cooldown unless forced. */
+export function registerManagedGitHandlers(
+  bus: CommandBus,
+  managed: ManagedGitService,
+  settings: Pick<SettingsService, "update">
+): void {
+  bus.register("gitManaged:status", async () => ok(await managed.status()));
+  bus.register("gitManaged:check", async (req) => ok(await managed.check({ force: req.force === true })));
+  bus.register("gitManaged:install", async (req) => {
+    try {
+      return ok(await managed.install(req.version));
+    } catch (cause) {
+      return failure(cause, "git_managed_install_failed");
+    }
+  });
+  bus.register("gitManaged:cancel", async () => {
+    managed.cancel();
+    return ok(null);
+  });
+  // Changes what is offered, never which Git runs: a build in use stays in
+  // use on either track.
+  bus.register("gitManaged:setTrack", async (req) => {
+    if (!isManagedGitTrack(req.track)) {
+      return err({ kind: "git", code: "git_managed_track_invalid", message: "Choose the Latest or Prerelease track." });
+    }
+    settings.update({ managedGitTrack: req.track });
+    return ok(await managed.status());
   });
 }

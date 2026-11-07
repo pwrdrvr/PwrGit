@@ -14,6 +14,7 @@ import { FORGE_KINDS, type ProfileId } from "./types";
  *  moves. */
 export const SETTINGS_PAGES = [
   "general",
+  "git",
   "updates",
   "profiles",
   "forges",
@@ -38,6 +39,10 @@ export function isSettingsPage(value: unknown): value is SettingsPage {
  *  master switch — leads, because nothing below it runs while it is off. */
 export const AI_FEATURE_SECTIONS = ["availability", "default-agents", "guidance"] as const;
 
+/** Git's sections, in the order the pane reads: what runs, newer builds of
+ *  PwrGit's own Git, then every Git that could run instead. */
+export const GIT_SECTIONS = ["runtime", "managed", "installs"] as const;
+
 /** Profiles' sections, in the order the pane reads. Git's own identity
  *  leads: it is what every profile's identity overrides, and where the launch
  *  notice sends people. */
@@ -52,6 +57,7 @@ export const PROFILES_SECTIONS = ["git-identity", "git-folders", "list", "hidden
  * provider.
  */
 export const SETTINGS_PAGE_SUBS = {
+  git: GIT_SECTIONS,
   profiles: PROFILES_SECTIONS,
   forges: FORGE_KINDS,
   "ai-providers": AI_PROVIDER_IDS,

@@ -2,7 +2,6 @@ import type { RepoSearchHit } from "@pwrgit/shared";
 import { describe, expect, it } from "vitest";
 import {
   changeRequestAnswersQuery,
-  pathLeafLikePatterns,
   rankSearchHits,
   searchMatchTier
 } from "./search-rank";
@@ -99,24 +98,6 @@ describe("rankSearchHits", () => {
     const second = hit({ kind: "repo", name: "release", path: "/repos/release" });
     expect(rankSearchHits([first, second], "release")).toEqual([second, first]);
     expect(rankSearchHits([second, first], "release")).toEqual([second, first]);
-  });
-});
-
-describe("pathLeafLikePatterns", () => {
-  it("matches a path whose last segment is the query, on either platform", () => {
-    expect(pathLeafLikePatterns(" graph-x ")).toEqual([
-      "%/graph-x",
-      "%\\\\graph-x"
-    ]);
-  });
-
-  // `_` is LIKE's single-character wildcard and is ordinary in a branch name:
-  // unescaped, "wip_1" would claim "wip1" as an exact folder match.
-  it("escapes LIKE's own wildcards", () => {
-    expect(pathLeafLikePatterns("wip_1%")).toEqual([
-      "%/wip\\_1\\%",
-      "%\\\\wip\\_1\\%"
-    ]);
   });
 });
 

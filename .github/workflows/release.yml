@@ -130,6 +130,8 @@ jobs:
             apps/desktop/scripts/verify-asar-contents.mjs \
             apps/desktop/scripts/packaged-html-rules.mjs \
             apps/desktop/scripts/verify-embedded-git-notices.mjs \
+            apps/desktop/scripts/stage-runtime.mjs \
+            apps/desktop/custom-git-runtime.json \
             apps/desktop/node_modules \
             node_modules
           sha256="$(shasum -a 256 "$tarball" | awk '{print $1}')"
@@ -336,6 +338,14 @@ jobs:
       contents: read
       id-token: none
     steps:
+      - name: Move temporary I/O to runner work volume
+        shell: pwsh
+        env:
+          TEMP: ${{ runner.temp }}
+          TMP: ${{ runner.temp }}
+        run: |
+          "TEMP=$env:TEMP" >> $env:GITHUB_ENV
+          "TMP=$env:TMP" >> $env:GITHUB_ENV
       - name: Checkout repository
         uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
         with:
@@ -399,6 +409,14 @@ jobs:
       contents: read
       id-token: none
     steps:
+      - name: Move temporary I/O to runner work volume
+        shell: pwsh
+        env:
+          TEMP: ${{ runner.temp }}
+          TMP: ${{ runner.temp }}
+        run: |
+          "TEMP=$env:TEMP" >> $env:GITHUB_ENV
+          "TMP=$env:TMP" >> $env:GITHUB_ENV
       - name: Download Windows signing input
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:

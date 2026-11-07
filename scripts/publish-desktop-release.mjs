@@ -107,8 +107,19 @@ async function waitForRelease(tag, gh, delay) {
   return release;
 }
 
+/**
+ * Whether a release body says what the checked notes say. Line endings, a
+ * byte-order mark and surrounding blank lines are not content: GitHub stores
+ * a body edited in its web form with CRLF, and the notes file is LF.
+ */
+export function releaseNotesMatch(body, notes) {
+  // GitHub returns `body: null` for a release saved without notes.
+  const text = (value) => (value ?? "").replace(/^\uFEFF/, "").replace(/\r\n?/g, "\n").trim();
+  return text(body) === text(notes);
+}
+
 function assertMetadata(release, tag, notes) {
-  if (release.tag_name !== tag || release.name !== tag || release.body.trim() !== notes.trim() || !release.prerelease) {
+  if (release.tag_name !== tag || release.name !== tag || !releaseNotesMatch(release.body, notes) || !release.prerelease) {
     throw new Error(`Release ${tag} metadata differs from the checked changelog notes or Pre-release flag`);
   }
 }
