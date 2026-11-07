@@ -1,9 +1,10 @@
 import Database from "better-sqlite3";
 import fc from "fast-check";
-import type { MenuItemConstructorOptions } from "electron";
+import type { BrowserWindow, MenuItemConstructorOptions } from "electron";
 import { expect, test, vi } from "vitest";
 
-vi.mock("electron", () => ({ Menu: {} }));
+const electronMock = vi.hoisted(() => ({ getFocusedWindow: vi.fn() }));
+vi.mock("electron", () => ({ Menu: {}, BrowserWindow: electronMock }));
 
 const { buildAppMenuTemplate } = await import("./menu");
 
@@ -23,7 +24,11 @@ const labels = [
   "PwrGit Documentation"
 ] as const;
 type Label = (typeof labels)[number];
-type Click = { label: Label; interrupt: boolean };
+type Click = { label: Label; interrupt: boolean; focused: boolean };
+const borrowsPalette = new Set<Label>([
+  "Settings…", "About PwrGit", "Manage Profiles…", "Changelog",
+  "Copy Diagnostics Info", "Logs", "View License", "Third-Party Notices"
+]);
 
 // Model: menu gestures enter a FIFO queue. Each action runs exactly once,
 // after the interrupted statement has returned, whether the gesture arrived
@@ -34,6 +39,7 @@ async function checkDispatch(
 ): Promise<void> {
   const db = new Database(":memory:");
   const actual: string[] = [];
+  const actualOpeners: Array<{ label: Label; id: number | null }> = [];
   const errors: unknown[] = [];
   const action = (label: Label) => () => {
     try {
@@ -42,6 +48,10 @@ async function checkDispatch(
     } catch (error) {
       errors.push(error);
     }
+  };
+  const borrow = (label: Label) => (opener?: BrowserWindow | null) => {
+    actualOpeners.push({ label, id: opener?.id ?? null });
+    action(label)();
   };
   const template = buildAppMenuTemplate({
     profiles: [{
@@ -56,18 +66,18 @@ async function checkDispatch(
     currentProfileId: "personal",
     openProfileIds: ["personal"],
     developerMode: false,
-    onOpenSettings: action("Settings…"),
-    onAbout: action("About PwrGit"),
+    onOpenSettings: borrow("Settings…"),
+    onAbout: borrow("About PwrGit"),
     onCheckForUpdates: action("Check for Updates…"),
     onOpenProfile: action("Personal"),
     onNewProfile: action("New Profile…"),
-    onManageProfiles: action("Manage Profiles…"),
-    onOpenChangelog: action("Changelog"),
+    onManageProfiles: borrow("Manage Profiles…"),
+    onOpenChangelog: borrow("Changelog"),
     onReplayOnboarding: action("Replay Onboarding…"),
-    onCopyDiagnostics: action("Copy Diagnostics Info"),
-    onOpenLogs: action("Logs"),
-    onOpenLicense: action("View License"),
-    onOpenThirdPartyNotices: action("Third-Party Notices"),
+    onCopyDiagnostics: borrow("Copy Diagnostics Info"),
+    onOpenLogs: borrow("Logs"),
+    onOpenLicense: borrow("View License"),
+    onOpenThirdPartyNotices: borrow("Third-Party Notices"),
     onOpenExternalLink: action("PwrGit Documentation")
   }, platform);
   const items = template.flatMap(menu =>
@@ -86,7 +96,8 @@ async function checkDispatch(
     return index;
   });
   try {
-    clicks.forEach(({ label, interrupt }, index) => {
+    clicks.forEach(({ label, interrupt, focused }, index) => {
+      electronMock.getFocusedWindow.mockReturnValue(focused ? { id: index } : null);
       if (interrupt) {
         expect(db.prepare("SELECT interrupt(?) AS value").get(index)).toEqual({
           value: index
@@ -95,9 +106,15 @@ async function checkDispatch(
         click(label);
       }
     });
+    // Focus can move or disappear before queued actions run. The menu must
+    // retain the window that sent each gesture, as a native click does.
+    electronMock.getFocusedWindow.mockReturnValue({ id: clicks.length });
     await new Promise<void>(resolve => setImmediate(resolve));
     expect(errors).toEqual([]);
     expect(actual).toEqual(clicks.map(click => click.label));
+    expect(actualOpeners).toEqual(clicks.flatMap(({ label, focused }, index) =>
+      borrowsPalette.has(label) ? [{ label, id: focused ? index : null }] : []
+    ));
   } finally {
     db.close();
   }
@@ -106,7 +123,11 @@ async function checkDispatch(
 test("menu actions follow the dispatch model across SQLite interruptions", async () => {
   await fc.assert(fc.asyncProperty(
     fc.array(
-      fc.record({ label: fc.constantFrom(...labels), interrupt: fc.boolean() }),
+      fc.record({
+        label: fc.constantFrom(...labels),
+        interrupt: fc.boolean(),
+        focused: fc.boolean()
+      }),
       { minLength: 1, maxLength: 30 }
     ),
     fc.constantFrom("darwin", "linux", "win32"),
@@ -115,5 +136,6 @@ test("menu actions follow the dispatch model across SQLite interruptions", async
 });
 
 test("Settings clicked inside a query waits until the query returns", async () => {
-  await checkDispatch([{ label: "Settings…", interrupt: true }], "darwin");
+  await checkDispatch([{ label: "Settings…", interrupt: true, focused: true }], "darwin");
+  await checkDispatch([{ label: "Settings…", interrupt: true, focused: false }], "darwin");
 });

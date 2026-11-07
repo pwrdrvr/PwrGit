@@ -8,7 +8,8 @@ const electronMock = vi.hoisted(() => ({
 }));
 
 vi.mock("electron", () => ({
-  Menu: electronMock
+  Menu: electronMock,
+  BrowserWindow: { getFocusedWindow: () => null }
 }));
 
 const { buildAppMenuTemplate, rebuildAppMenu } = await import("./menu");

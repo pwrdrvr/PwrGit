@@ -1,4 +1,4 @@
-import { Menu, type MenuItemConstructorOptions } from "electron";
+import { BrowserWindow, Menu, type MenuItemConstructorOptions } from "electron";
 import { PWRGIT_LINKS, type Profile } from "@pwrgit/shared";
 
 /**
@@ -21,15 +21,15 @@ export type AppMenuOptions = {
   openProfileIds: string[];
   onOpenProfile: (profileId: string) => void;
   onNewProfile: () => void;
-  onManageProfiles: () => void;
-  onAbout: () => void;
+  onManageProfiles: (opener: BrowserWindow | null) => void;
+  onAbout: (opener: BrowserWindow | null) => void;
   onCheckForUpdates: () => void;
-  onOpenSettings: () => void;
-  onOpenLogs: () => void;
-  onOpenChangelog: () => void;
-  onOpenLicense: () => void;
-  onOpenThirdPartyNotices: () => void;
-  onCopyDiagnostics: () => void;
+  onOpenSettings: (opener: BrowserWindow | null) => void;
+  onOpenLogs: (opener: BrowserWindow | null) => void;
+  onOpenChangelog: (opener: BrowserWindow | null) => void;
+  onOpenLicense: (opener: BrowserWindow | null) => void;
+  onOpenThirdPartyNotices: (opener: BrowserWindow | null) => void;
+  onCopyDiagnostics: (opener: BrowserWindow | null) => void;
   onOpenExternalLink: (label: string, url: string) => void;
   onReplayOnboarding: () => void;
   /** Settings → Troubleshooting → Developer Mode: expose Force Reload and Toggle
@@ -69,9 +69,12 @@ function profileLabels(profiles: Profile[]): Map<string, string> {
  * call (including better-sqlite3's internal JS row builder). Dispatch from
  * a fresh task so an action's database reads cannot re-enter that connection.
  * A promise/microtask can still run before the native call has unwound. */
-function dispatchMenuAction(action: () => void): () => void {
+function dispatchMenuAction(action: (opener: BrowserWindow | null) => void): () => void {
   return () => {
-    setImmediate(action);
+    // Preserve the gesture's sender before focus can move (or disappear)
+    // between the native menu dispatch and the action's fresh task.
+    const opener = BrowserWindow.getFocusedWindow();
+    setImmediate(() => action(opener));
   };
 }
 
@@ -86,11 +89,11 @@ export function buildAppMenuTemplate(
   const settingsItem: MenuItemConstructorOptions = {
     label: "Settings…",
     accelerator: "CmdOrCtrl+,",
-    click: dispatchMenuAction(() => opts.onOpenSettings())
+    click: dispatchMenuAction(opener => opts.onOpenSettings(opener))
   };
   const aboutItem: MenuItemConstructorOptions = {
     label: "About PwrGit",
-    click: dispatchMenuAction(() => opts.onAbout())
+    click: dispatchMenuAction(opener => opts.onAbout(opener))
   };
   const checkForUpdatesItem: MenuItemConstructorOptions = {
     label: "Check for Updates…",
@@ -181,7 +184,7 @@ export function buildAppMenuTemplate(
       },
       {
         label: "Manage Profiles…",
-        click: dispatchMenuAction(() => opts.onManageProfiles())
+        click: dispatchMenuAction(opener => opts.onManageProfiles(opener))
       }
     ]
   };
@@ -218,7 +221,7 @@ export function buildAppMenuTemplate(
       link("PwrGit Documentation", PWRGIT_LINKS.documentation),
       {
         label: "Changelog",
-        click: dispatchMenuAction(() => opts.onOpenChangelog())
+        click: dispatchMenuAction(opener => opts.onOpenChangelog(opener))
       },
       {
         label: "Replay Onboarding…",
@@ -236,19 +239,19 @@ export function buildAppMenuTemplate(
       ),
       {
         label: "Copy Diagnostics Info",
-        click: dispatchMenuAction(() => opts.onCopyDiagnostics())
+        click: dispatchMenuAction(opener => opts.onCopyDiagnostics(opener))
       },
-      { label: "Logs", click: dispatchMenuAction(() => opts.onOpenLogs()) },
+      { label: "Logs", click: dispatchMenuAction(opener => opts.onOpenLogs(opener)) },
       separator,
       // Project
       link("PwrGit Website", PWRGIT_LINKS.website),
       link("View Source", PWRGIT_LINKS.source, "PwrGit Source"),
       separator,
       // Legal
-      { label: "View License", click: dispatchMenuAction(() => opts.onOpenLicense()) },
+      { label: "View License", click: dispatchMenuAction(opener => opts.onOpenLicense(opener)) },
       {
         label: "Third-Party Notices",
-        click: dispatchMenuAction(() => opts.onOpenThirdPartyNotices())
+        click: dispatchMenuAction(opener => opts.onOpenThirdPartyNotices(opener))
       },
       ...(isMac ? [] : [separator, checkForUpdatesItem, aboutItem])
     ]

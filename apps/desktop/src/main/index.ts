@@ -1007,7 +1007,7 @@ if (!gotSingleInstanceLock) {
     };
 
     openAuxiliaryWindow = (open, from) => {
-      const opener = from ?? BrowserWindow.getFocusedWindow();
+      const opener = from === undefined ? BrowserWindow.getFocusedWindow() : from;
       const window = open(windowAppearances.appearanceFor(opener));
       const known = windowAppearances.knows(window);
       const previous = windowAppearances.sourceFor(window);
@@ -1051,45 +1051,50 @@ if (!gotSingleInstanceLock) {
         onNewProfile: () => emitEvent("ui:newProfile", {}),
         // The profile LIST, not the focused window's profile: that one is a
         // click away in the sidebar's profile chip.
-        onManageProfiles: () =>
-          openAuxiliaryWindow((palette) =>
-            openSettingsWindow(palette, { page: "profiles" })
+        onManageProfiles: (opener) =>
+          openAuxiliaryWindow(
+            (palette) => openSettingsWindow(palette, { page: "profiles" }),
+            opener
           ),
         // Settings → About on every platform: it carries the version, the
         // release notes link and the build, where the native panel shows a
         // name and a version (and on Linux, a bare GTK dialog).
-        onAbout: () =>
-          openAuxiliaryWindow((palette) =>
-            openSettingsWindow(palette, { page: "about" })
+        onAbout: (opener) =>
+          openAuxiliaryWindow(
+            (palette) => openSettingsWindow(palette, { page: "about" }),
+            opener
           ),
         onReplayOnboarding: () => emitEvent("ui:replayOnboarding", {}),
         onCheckForUpdates: () => {
           void checkForAppUpdatesFromMenu();
         },
-        onOpenSettings: () => openAuxiliaryWindow(openSettingsWindow),
-        onOpenLogs: () => openAuxiliaryWindow(openLogsWindow),
-        onOpenChangelog: () =>
-          openAuxiliaryWindow((palette) =>
-            openAppDocumentWindow("changelog", palette)
+        onOpenSettings: (opener) => openAuxiliaryWindow(openSettingsWindow, opener),
+        onOpenLogs: (opener) => openAuxiliaryWindow(openLogsWindow, opener),
+        onOpenChangelog: (opener) =>
+          openAuxiliaryWindow(
+            (palette) => openAppDocumentWindow("changelog", palette),
+            opener
           ),
-        onCopyDiagnostics: () => {
+        onCopyDiagnostics: (opener) => {
           void copyDiagnosticsFromMenu(
             diagnosticsCopy,
             {
-              focused: windows.focusedProfileId(),
+              focused: windows.profileFor(opener),
               activeId: profiles.getActiveId()
             },
             (profileId, copied) =>
               emitEvent("ui:copyDiagnostics", { profileId, copied })
           );
         },
-        onOpenLicense: () =>
-          openAuxiliaryWindow((palette) =>
-            openAppDocumentWindow("license", palette)
+        onOpenLicense: (opener) =>
+          openAuxiliaryWindow(
+            (palette) => openAppDocumentWindow("license", palette),
+            opener
           ),
-        onOpenThirdPartyNotices: () =>
-          openAuxiliaryWindow((palette) =>
-            openAppDocumentWindow("third-party-notices", palette)
+        onOpenThirdPartyNotices: (opener) =>
+          openAuxiliaryWindow(
+            (palette) => openAppDocumentWindow("third-party-notices", palette),
+            opener
           ),
         onOpenExternalLink: (label, url) => {
           void openExternalUrlFromMenu(label, url);
