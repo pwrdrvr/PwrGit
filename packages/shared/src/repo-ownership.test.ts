@@ -57,6 +57,24 @@ describe("claimWorktreeOwnership", () => {
     expect(out[1]?.worktrees).toHaveLength(0);
   });
 
+  // The sidebar selection model (worktree-batch.property.test.ts) shrank to
+  // this: one worktree stranded twice under the same repository drew two
+  // rows for one id, both lit when it was selected.
+  it("keeps one row when a worktree is duplicated under the same repo", () => {
+    const repos = [
+      repo("r-a", "/gh/a", [wt("w-a", "/gh/a", true)]),
+      repo("r-b", "/gh/b", [
+        wt("w-b", "/gh/b", true),
+        wt("w-x", "/elsewhere/x", false),
+        wt("w-x", "/elsewhere/x", false)
+      ])
+    ];
+    expect(claimWorktreeOwnership(repos)[1]?.worktrees.map((w) => w.id)).toEqual([
+      "w-b",
+      "w-x"
+    ]);
+  });
+
   it("returns the same reference when nothing is duplicated", () => {
     const repos = [
       repo("r-a", "/gh/a", [wt("w-a", "/gh/a", true)]),
