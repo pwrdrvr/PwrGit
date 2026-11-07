@@ -37,6 +37,7 @@ import {
 import { visibleRepoSql } from "./hidden-repos";
 import { activeGitReflinkProbe } from "./dugite";
 import { refreshActiveGitReflink } from "./runtime-status";
+import { registerClonesOfferHandlers } from "./clones-offer";
 import { refreshRepositoryClones, softPullMainCheckout, type ReshareWorktreeRow } from "./worktree-reshare";
 
 /** Linked (non-primary) worktrees per repository, for Clones' scope. */
@@ -185,6 +186,9 @@ export function registerMaintenanceHandlers(
     string,
     { owner: number | undefined; run: RunRecord; summary: MaintenanceSummary; seen: boolean }
   >();
+
+  // The one-time Clones offer: a dry run per profile, then one toast.
+  registerClonesOfferHandlers(bus, db, git, operations, now);
 
   bus.register("maintenance:cancel", (req, ctx) => {
     if (active?.id !== req.operationId || active.owner !== ctx.webContentsId)

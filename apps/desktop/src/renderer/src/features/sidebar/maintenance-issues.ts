@@ -26,7 +26,7 @@ export type StepIssue = {
 };
 
 /** Which command produced a result, so its rows explain the right thing. */
-export type IssueSource = "review" | "delete" | "gc" | "repair";
+export type IssueSource = "review" | "delete" | "gc" | "repair" | "clones";
 
 const RAW_GIT = /^(?:error|fatal|warning|usage):/i;
 /** Git's own output, not a sentence PwrGit wrote: it never leads a row. */
@@ -94,6 +94,26 @@ export const deletedLead = (deleted: number, repos: number): string =>
 /** The Garbage collection step line: "81 collected · 1.2 GiB → 1.0 GiB · 1 failed". */
 export const gcStepLine = (collected: number, storage: string, issues: StepIssue[]): string =>
   `${collected} collected${storage}${issues.length > 0 ? ` · ${issues.length} failed` : ""}`;
+
+/** The Clones step line: "6.18 GiB now shared · 41 worktrees · 1 failed".
+ *  `shared` is Git's own count, already formatted; null when Git measured
+ *  nothing, which is not zero. Never "freed": see main/git/AGENTS.md. */
+export function clonesStepLine(shared: string | null, files: number, worktrees: number, issues: StepIssue[]): string {
+  const lead = files === 0 ? "Nothing new to share" : shared === null ? `${files.toLocaleString("en-US")} ${files === 1 ? "file" : "files"} re-shared` : `${shared} now shared`;
+  return `${lead} · ${worktrees.toLocaleString("en-US")} ${worktrees === 1 ? "worktree" : "worktrees"}${issues.length > 0 ? ` · ${issues.length} failed` : ""}`;
+}
+
+/** Head of the Clones card. Sharing only ever leaves files as they were. */
+export function clonesCardCopy(issues: StepIssue[]): CardCopy {
+  if (issues.every((issue) => issue.kind === "run"))
+    return { headline: "Clones couldn’t run", sub: "Maintenance stopped here.", listLabel: "Repositories not shared" };
+  const repos = new Set(issues.map((issue) => issue.path ?? issue.repo)).size;
+  return {
+    headline: `Clones: ${issues.length} ${issues.length === 1 ? "problem" : "problems"} in ${repositories(repos)}`,
+    sub: "Files Git did not share are left exactly as they were.",
+    listLabel: "Clones problems"
+  };
+}
 
 /** Splits a step line into its result and its issue counts ("1 not
  *  deleted", "2 failed"), so only the counts draw in danger ink. */

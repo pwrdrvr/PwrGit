@@ -1,5 +1,6 @@
 import type {
   BulkSyncWorktreeResult,
+  ClonesDryRun,
   MaintenanceRepo,
   MaintenanceRepoResult,
   ReshareMainCheckout,
@@ -181,6 +182,31 @@ export async function reshareWorktree(
     run.value.exitCode,
     run.value.stderr
   );
+}
+
+/**
+ * A dry run's summary (`git worktree reflink -n`), as the Clones offer needs
+ * it. Git compares nothing and changes nothing; `potential-private-reduction`
+ * is what a real run would report as `observed-private-reduction` against the
+ * main checkout as it is now (they matched to the byte on a scratch repo).
+ * A volume that cannot clone saves nothing, so it counts as measured zero.
+ */
+export function clonesDryRunFromPorcelain(porcelain: ReflinkPorcelain, exitCode: number): ClonesDryRun {
+  const { summary } = porcelain;
+  if (summary === null || exitCode !== 0) return { kind: "failed" };
+  if (porcelain.header.get("backend") === "unsupported")
+    return { kind: "measured", bytes: 0, eligible: 0, partial: false };
+  const eligible = count(summary, "eligible");
+  const potential = Number(summary.get("potential-private-reduction") ?? Number.NaN);
+  if (!Number.isFinite(potential) || potential < 0) return { kind: "unmeasured", eligible };
+  return { kind: "measured", bytes: potential, eligible, partial: count(summary, "allocation-unknown") > 0 };
+}
+
+/** One worktree's dry run. Read-only: Git shares nothing under `-n`. */
+export async function dryRunWorktreeClones(git: GitExec, worktreePath: string): Promise<ClonesDryRun> {
+  const run = await git(["worktree", "reflink", "-n", "--porcelain", "-z"], worktreePath);
+  if (!run.ok) return { kind: "failed" };
+  return clonesDryRunFromPorcelain(parseReflinkPorcelain(run.value.stdout), run.value.exitCode);
 }
 
 export type ReshareWorktreeRow = {

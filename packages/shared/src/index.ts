@@ -13,6 +13,7 @@ export * from "./image";
 export * from "./protocol";
 export * from "./ipc";
 export * from "./maintenance";
+export * from "./clones-offer";
 export * from "./product";
 export * from "./release-notes";
 export * from "./appearance";

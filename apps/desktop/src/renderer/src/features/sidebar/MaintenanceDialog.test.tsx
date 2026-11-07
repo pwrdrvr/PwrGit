@@ -21,7 +21,9 @@ vi.mock("../../lib/platform", async (importOriginal) => ({
   currentPlatform: () => "linux"
 }));
 import type { RemoveWorktreesOutcome } from "../../state/useRepoTree";
+import fc from "fast-check";
 import { MaintenanceDialog } from "./MaintenanceDialog";
+import { CLONES_ONLY_PLAN, DEFAULT_MAINTENANCE_PLAN, STEP_ORDER, type MaintenancePlan } from "./MaintenancePlan";
 
 const repo: MaintenanceRepo = {
   id: "repo",
@@ -1266,5 +1268,114 @@ describe("maintenance dialog after a window reload", () => {
     });
     expect(pressedTab()).toBe("Combined");
     expect(button("Start")).toBeDefined();
+  });
+});
+
+describe("Clones as a Combined step", () => {
+  const GIB = 1024 * 1024 * 1024;
+  const reflink = (reshare: boolean) => ({
+    ok: true,
+    value: { path: "/fixture/git", version: `git version ${reshare ? "2.56.0-dev-pwrgit.4" : "2.47.1"}`,
+      support: { checkout: reshare, reshare }, enabled: true, active: true }
+  });
+  const shared = (bytes: number): MaintenanceRepoResult => ({
+    repo, outcome: "success", message: "main up to date · 1 worktree · 12 files re-shared.",
+    reshare: {
+      main: { outcome: "up_to_date", message: "main up to date." },
+      worktrees: [{ worktreeId: "wt", path: "/fixtures/example-wt", branch: "feature", outcome: "reshared",
+        message: "12 files re-shared.", reshared: 12, alreadyShared: 0, skipped: 0, failed: 0, sharedBytes: bytes }]
+    }
+  });
+  const actions = () => runCalls().map(([, req]) => req.action.kind);
+  let mounts = 0;
+  /** Mount Combined with a Git that can (or cannot) re-share. `support`
+   *  pending holds the answer back. */
+  async function open(options: {
+    reshare?: boolean | "pending";
+    props?: Partial<Parameters<typeof MaintenanceDialog>[0]>;
+    branchMode?: "review" | "auto";
+  } = {}): Promise<void> {
+    const { reshare = true, props = {}, branchMode = "auto" } = options;
+    subscribe.mockImplementation(() => () => undefined);
+    dispatch.mockImplementation(async (name: string, req: { action?: { kind: string } }) => {
+      if (name === "git:reflinkSupport") return reshare === "pending" ? new Promise(() => undefined) : reflink(reshare);
+      if (name === "settings:read") return { ok: true, value: { general: {
+        branchCleanupPrProof: true, branchCleanupKeepDays: null, maintenanceBranchMode: branchMode } } };
+      if (name === "maintenance:run") return { ok: true, value: summary([
+        req.action?.kind === "reshare" ? shared(2 * GIB) : { repo, outcome: "success", message: "Finished",
+          ...(req.action?.kind === "scan-branches" ? { candidates: [], kept: [] } : {}) }
+      ]) };
+      return { ok: true, value: null };
+    });
+    await act(async () => root.render(<MaintenanceDialog key={`clones-${++mounts}`} profileId="one" platform="linux"
+      onClose={onClose} onRemoveWorktrees={async () => ({ removed: [], keptDirty: [], failed: [] })} {...props} />));
+  }
+  const checkbox = (label: string) => container.querySelector<HTMLInputElement>(`input[aria-label="${label}"]`)!;
+  const untick = async (label: string) => act(async () => checkbox(label).click());
+
+  it("is checked by default and runs after branches, before garbage collection", async () => {
+    await open();
+    expect(checkbox("Share unchanged files with clones").checked).toBe(true);
+    expect(container.textContent).toContain("No pause");
+    await untick("Remove finished worktrees");
+    await click("Start");
+    expect(actions()).toEqual(["scan-branches", "reshare", "gc"]);
+    expect(runCalls().find(([, req]) => req.action.kind === "reshare")?.[1].action).toEqual({ kind: "reshare", updateMain: true });
+    expect([...container.querySelectorAll(".maintenance__receipt-step strong")].map((node) => node.textContent))
+      .toEqual(["Worktrees", "Local branches", "Clones", "Garbage collection"]);
+    expect(container.textContent).toContain("2.00 GiB now shared · 1 worktree");
+    expect(container.textContent).toContain("2.00 GiB of file data now shared");
+    expect(container.textContent).not.toMatch(/freed/i);
+  });
+
+  it("passes the reader's Update main checkouts choice", async () => {
+    await open();
+    await untick("Remove finished worktrees");
+    await untick("Delete finished local branches");
+    await untick("Collect garbage");
+    const rule = [...container.querySelectorAll("label")].find((label) => label.textContent === "Update main checkouts first")!;
+    await act(async () => rule.querySelector("input")!.click());
+    await click("Start");
+    expect(runCalls().map(([, req]) => req.action)).toEqual([{ kind: "reshare", updateMain: false }]);
+  });
+
+  it("is unchecked and disabled on a Git that cannot re-share, and never runs", async () => {
+    await open({ reshare: false });
+    const box = checkbox("Share unchanged files with clones");
+    expect(box.checked).toBe(false);
+    expect(box.disabled).toBe(true);
+    expect(container.textContent).toContain("Needs PwrGit’s Git");
+    expect(container.textContent).toContain("(2.47.1)");
+    await untick("Remove finished worktrees");
+    await click("Start");
+    expect(actions()).toEqual(["scan-branches", "gc"]);
+  });
+
+  it("holds Start until the Git in use has answered", async () => {
+    await open({ reshare: "pending" });
+    expect(button("Start").disabled).toBe(true);
+  });
+
+  it("the offer's plan runs exactly Clones, on open, with every other step skipped", async () => {
+    await fc.assert(fc.asyncProperty(fc.constantFrom<"review" | "auto">("review", "auto"), async (branchMode) => {
+      dispatch.mockClear();
+      await open({ branchMode, props: { initialTab: "combined", initialPlan: CLONES_ONLY_PLAN, autoStart: true } });
+      expect(actions()).toEqual(["reshare"]);
+      expect(dispatch.mock.calls.some(([name]) => name === "prune:scan")).toBe(false);
+      expect(container.textContent).toContain("Maintenance finished");
+      const states = [...container.querySelectorAll(".maintenance__receipt-step")].map((node) =>
+        `${node.querySelector("strong")?.textContent}:${node.className.includes("is-skipped") ? "skipped" : "ran"}`);
+      expect(states).toEqual(["Worktrees:skipped", "Local branches:skipped", "Clones:ran", "Garbage collection:skipped"]);
+      // A new plan starts from the usual one, not the offer's.
+      await click("New plan");
+      expect(container.querySelectorAll(".maintenance__plan-step > input:checked")).toHaveLength(4);
+    }), { numRuns: 4 });
+  });
+
+  it("CLONES_ONLY_PLAN selects exactly one step, Clones; the default selects it too", () => {
+    const on = (plan: MaintenancePlan) => STEP_ORDER.filter((key) => plan[key]);
+    expect(on(CLONES_ONLY_PLAN)).toEqual(["clones"]);
+    expect(on(DEFAULT_MAINTENANCE_PLAN)).toEqual(["worktrees", "branches", "clones", "gc"]);
+    expect(STEP_ORDER).toEqual(["repair", "worktrees", "branches", "clones", "gc"]);
   });
 });

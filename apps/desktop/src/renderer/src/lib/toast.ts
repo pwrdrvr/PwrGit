@@ -41,6 +41,9 @@ export type Toast = {
   /** The one thing to do next, drawn as the card's leading button. Running it
    *  also dismisses the card. */
   action?: { label: string; run: () => void };
+  /** Runs when the reader closes the card by hand (×), not when its action
+   *  runs or a key replaces it: for an offer that records its answer. */
+  onDismiss?: () => void;
 };
 
 /**
