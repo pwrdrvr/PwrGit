@@ -26,7 +26,8 @@ export function changeRequestPickKey(repoId: string, entry: ChangeRequestEntry):
 
 /** The repository a `changeRequestPickKey` belongs to. */
 export function changeRequestKeyRepoId(key: string): string {
-  return key.slice(0, key.indexOf("\n"));
+  const end = key.indexOf("\n");
+  return end === -1 ? key : key.slice(0, end);
 }
 
 export type ChangeRequestSelection = {

@@ -109,6 +109,7 @@ import { useChangeRequestSelection } from "../change-request/change-request-sele
 import {
   neighbourOf,
   primaryUnlessHeld,
+  removableIds,
   selectionHolder,
   useWorktreeBatch
 } from "./worktree-batch";
@@ -1027,11 +1028,11 @@ export function Sidebar({
 
   const contextItems = (repo: Repo, targets: Worktree[]): MenuItem[] => {
     if (targets.length > 1) {
-      const ids = targets.map((t) => t.id);
+      const ids = removableIds(repo, targets.map((t) => t.id));
       return [
         {
           type: "item",
-          label: `Remove ${targets.length} worktrees…`,
+          label: `Remove ${ids.length} worktree${ids.length === 1 ? "" : "s"}…`,
           danger: true,
           onSelect: () => void onRemoveWorktrees(ids)
         },
@@ -1155,7 +1156,7 @@ export function Sidebar({
           onSetBranchPin(repo.id, branch, pinned)
         }
         onRemoveWorktree={onRemoveWorktree}
-        onRemoveSelected={() => void onRemoveWorktrees(Array.from(batch.batch.ids))}
+        onRemoveSelected={() => void onRemoveWorktrees(removableIds(repo, batch.idsFor(repo.id)))}
         onClearSelected={clearSel}
         onCycleSort={() => cycleSort(repo.id)}
         onReorder={(ids) => {

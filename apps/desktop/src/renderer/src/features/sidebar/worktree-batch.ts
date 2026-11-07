@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type { Repo, Worktree } from "@pwrgit/shared";
 import { changeRequestKeyRepoId } from "../change-request/change-request-selection";
 import type { SelectionModifiers } from "./repo-view";
@@ -19,8 +19,9 @@ export type WorktreeBatch = {
   ids: ReadonlySet<string>;
   /** The pivot for Shift-click ranges. */
   anchor: string | null;
-  /** The viewed row this batch last followed. A batch follows the viewed row
-   *  only when it changes, so a refresh never undoes a ⌘-click. */
+  /** What was on screen when this batch last followed it (`onScreen`). A
+   *  batch follows only when that changes, so a refresh never undoes a
+   *  ⌘-click. */
   viewed: string | null;
 };
 
@@ -41,6 +42,14 @@ export const viewedWorktree = (
   selectedWorktreeId: string | null,
   changeRequestKey: string | null
 ): string | null => (changeRequestKey === null ? selectedWorktreeId : null);
+
+/** What is on screen, as one token: the worktree, or the change request
+ *  (a different PR is a different screen even though no worktree is). */
+export const onScreen = (
+  selectedWorktreeId: string | null,
+  changeRequestKey: string | null
+): string | null =>
+  changeRequestKey === null ? selectedWorktreeId : `pr:${changeRequestKey}`;
 
 /** The batch that is just the viewed row, in its repository. */
 function seed(viewed: string | null, repos: readonly Repo[]): WorktreeBatch {
@@ -150,11 +159,12 @@ export function pruneBatch(batch: WorktreeBatch, repos: readonly Repo[]): Worktr
 export function reconcileBatch(
   batch: WorktreeBatch,
   viewed: string | null,
-  repos: readonly Repo[]
+  repos: readonly Repo[],
+  screen: string | null = viewed
 ): WorktreeBatch {
   const pruned = pruneBatch(batch, repos);
-  if (pruned.viewed === viewed) return pruned;
-  if (viewed === null) return NO_BATCH;
+  if (pruned.viewed === screen) return pruned;
+  if (viewed === null) return { ...NO_BATCH, viewed: screen };
   // Not in this tree yet (a restored or just-created worktree): try again
   // with the next list.
   if (repoHolding(repos, viewed) === undefined) return pruned;
@@ -190,17 +200,30 @@ export function useWorktreeBatch({
   clear: () => void;
 } {
   const viewed = viewedWorktree(selectedWorktreeId, changeRequestKey);
-  const [batch, setBatch] = useState<WorktreeBatch>(NO_BATCH);
+  const screen = onScreen(selectedWorktreeId, changeRequestKey);
+  const [batch, setBatchState] = useState<WorktreeBatch>(NO_BATCH);
+  // The latest batch, ahead of the next render: two clicks in one React batch
+  // (a fast ⌘-click pair, Enter's key-repeat) each build on the one before.
+  const latest = useRef(batch);
+  latest.current = batch;
+  const setBatch = useCallback((next: WorktreeBatch | ((prev: WorktreeBatch) => WorktreeBatch)) => {
+    setBatchState((prev) => {
+      const value = typeof next === "function" ? next(prev) : next;
+      latest.current = value;
+      return value;
+    });
+  }, []);
   useEffect(() => {
-    setBatch((prev) => reconcileBatch(prev, viewed, repos));
-  }, [viewed, repos]);
+    setBatch((prev) => reconcileBatch(prev, viewed, repos, screen));
+  }, [setBatch, viewed, screen, repos]);
   const click = (
     repo: Repo,
     worktreeId: string,
     modifiers: SelectionModifiers,
     orderedIds: readonly string[]
   ): boolean => {
-    const next = clickWorktreeRow(batch, { repo, worktreeId, modifiers, orderedIds, viewed });
+    const next = clickWorktreeRow(latest.current, { repo, worktreeId, modifiers, orderedIds, viewed });
+    latest.current = next.batch;
     setBatch(next.batch);
     return next.select;
   };
@@ -209,11 +232,18 @@ export function useWorktreeBatch({
     worktreeId: string,
     orderedIds: readonly string[]
   ): string[] => {
-    const next = contextWorktreeRow(batch, { repo, worktreeId, orderedIds, viewed });
-    if (next.batch !== batch) setBatch(next.batch);
+    const prev = latest.current;
+    const next = contextWorktreeRow(prev, { repo, worktreeId, orderedIds, viewed });
+    if (next.batch !== prev) {
+      latest.current = next.batch;
+      setBatch(next.batch);
+    }
     return next.targets;
   };
-  const clear = useCallback(() => setBatch(seed(viewed, repos)), [viewed, repos]);
+  const clear = useCallback(
+    () => setBatch({ ...seed(viewed, repos), viewed: screen }),
+    [setBatch, viewed, screen, repos]
+  );
   const idsFor = (repoId: string): ReadonlySet<string> =>
     batch.repoId === repoId ? batch.ids : NO_IDS;
   return { batch, idsFor, click, context, clear };
@@ -234,6 +264,14 @@ export function worktreeRowLook(input: {
       viewedWorktree(input.selectedWorktreeId, input.changeRequestKey),
     multiSelected: input.batchIds.has(input.worktreeId)
   };
+}
+
+/** The batch rows a bulk Remove may act on. The primary checkout is lit
+ *  whenever it is the row on screen, but only Remove repository… removes it;
+ *  sent to `worktree:removeMany` it would fail the run. */
+export function removableIds(repo: Repo, ids: Iterable<string>): string[] {
+  const linked = new Set(repo.worktrees.filter((w) => !w.isPrimary).map((w) => w.id));
+  return [...ids].filter((id) => linked.has(id));
 }
 
 /** The "N selected" bar's count, or null when the bar is not drawn. */

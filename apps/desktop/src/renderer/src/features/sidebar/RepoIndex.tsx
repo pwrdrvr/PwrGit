@@ -29,7 +29,8 @@ import type { ListReorder, ReorderTarget } from "./useListReorder";
 export type RepoIndexEntry = {
   id: string;
   name: string;
-  /** Holds the selected worktree: drawn in the accent, like its tree row. */
+  /** Holds what is on screen (`selectionHolder`: the selected worktree, or
+   *  the change request shown): drawn in the accent, like its tree row. */
   containsSelection: boolean;
 };
 

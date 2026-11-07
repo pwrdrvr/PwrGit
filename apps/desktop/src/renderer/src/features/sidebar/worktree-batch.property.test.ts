@@ -73,6 +73,7 @@ import {
 import {
   neighbourOf,
   primaryUnlessHeld,
+  removableIds,
   selectionBarCount,
   selectionHolder,
   useWorktreeBatch,
@@ -789,6 +790,38 @@ describe("sidebar selection model", () => {
       new Refresh([], false)
     ]);
     expect(ids(real)).toEqual(["r0-main", "w1"]);
+  });
+
+  it("bulk Remove leaves out the primary checkout lit as the row on screen", () => {
+    const real = session([one(2)], [
+      new IndexJump(0),
+      new ClickRow("meta", 0, 1),
+      new ClickRow("meta", 0, 2)
+    ]);
+    const repo = real.repos[0]!;
+    expect(selectionBarCount(real.hook.idsFor(repo.id))).toBe(3);
+    expect(removableIds(repo, real.hook.idsFor(repo.id)).sort()).toEqual(["w1", "w2"]);
+  });
+
+  it("two ⌘-clicks in one React batch both land", () => {
+    const real = session([one(2)], [new IndexJump(0)]);
+    const repo = real.repos[0]!;
+    const meta = { shiftKey: false, metaKey: true, ctrlKey: false };
+    real.act(() => {
+      real.hook.click(repo, "w1", meta, displayIds(repo));
+      real.hook.click(repo, "w2", meta, displayIds(repo));
+    });
+    expect(ids(real)).toEqual(["r0-main", "w1", "w2"]);
+  });
+
+  it("moving from one change request to another drops a ⌘-click batch", () => {
+    const real = session([one(0)], [
+      new IndexJump(0),
+      new PickChangeRequest(0, 0),
+      new ClickRow("meta", 0, 0),
+      new PickChangeRequest(0, 1)
+    ]);
+    expect(ids(real)).toEqual([]);
   });
 
   it("a Shift range over a pinned branch row holds only worktrees", () => {
