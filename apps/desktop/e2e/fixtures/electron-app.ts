@@ -8,6 +8,7 @@ import {
   type Page
 } from "@playwright/test";
 import type { Profile, ProfileList, PwrGitError, Result } from "@pwrgit/shared";
+import { assertVisibleE2EHost } from "../../test-support/visible-e2e-host";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const MAIN = join(HERE, "bootstrap.cjs");
@@ -130,6 +131,7 @@ export async function launchApp(
     trashDir?: string;
   } = {}
 ): Promise<AppHandle> {
+  assertVisibleE2EHost();
   const userData = mkdtempSync(join(tmpdir(), "pwrgit-e2e-ud-"));
   if (
     opts.worktreeRoot !== undefined ||

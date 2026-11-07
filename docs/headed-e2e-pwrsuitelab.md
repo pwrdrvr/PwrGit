@@ -1,12 +1,18 @@
-# Headed E2E in PwrSuiteLab
+# Visible Electron E2E in PwrSuiteLab
 
-Operator procedure for running PwrGit's Playwright suite headed on the
-dedicated PwrSuiteLab E2E VM. Writing or debugging specs is covered by
+Operator procedure for running PwrGit's full-app Playwright tests on the
+dedicated PwrSuiteLab E2E VM. Electron opens real desktop windows even when
+Playwright is invoked without `--headed`; omitting that flag does not make
+`launchApp()` headless. This procedure applies to individual specs, retries,
+design/docs screenshot specs and direct Playwright commands. Existing GitHub
+Actions workflows keep using their configured runners. Genuinely hidden
+`harness/electron-main.cjs` workflows (`show:false`, no Dock activation) can
+run locally. Writing or debugging specs is covered by
 [apps/desktop/e2e/AGENTS.md](../apps/desktop/e2e/AGENTS.md).
 
 ## Through PwrSuiteLab Control MCP
 
-Prefer the available **PwrSuiteLab Control MCP**. Discover its live tools and
+Use **PwrSuiteLab Control MCP** by default. Discover its live tools and
 input schemas, then read its served `manage-pwrlab-e2e` skill: `skills/list` →
 `skills/get` → `resources/read` (older clients: `resources/list` →
 `resources/read`, using `skill://manage-pwrlab-e2e/SKILL.md`). In PwrAgent,
@@ -15,10 +21,20 @@ discover connected tools with `search_mcp_tools` and invoke them through
 actions without per-operation native confirmation; Read only does not.
 Controller ownership, target, and transport checks still apply.
 
+If discovery fails, inspect `manage_mcp_connections` with `describe_thread`:
+distinguish an unselected connection from `reauthorization_required`, transport
+failure, or a ready connection with a missing tool. Reauthorization requires
+the operator in Settings → Plugins. A tool schema error is a different failure
+(see below). Report the specific blocker and keep the physical desktop free
+of test windows. An inaccessible or busy VM never authorizes local E2E.
+
 1. Call `lab_status` and use the exact dedicated E2E target from `roles.e2e`.
    Never select a GHA runner, base image, or the physical Mac desktop. Check
    status again before submitting: idle shutdown or another owner can change
-   state while you prepare. `lab_e2e_run` starts the configured VM if needed.
+   state while you prepare. A stopped VM is normal: `lab_e2e_run` starts it
+   when needed. No separate `lab_e2e_start` or reservation is needed for a job.
+   Guest lock/session/SSH fields that are `not_collected` while stopped stay
+   unknown until Control's startup and admission checks.
 2. Inspect this checkout's `.nvmrc`, `packageManager`, scripts and lockfile.
    Commit authorized changes and verify the **exact absolute worktree path**
    is clean; never discard changes to achieve that. Control stages committed
@@ -64,6 +80,14 @@ stages both native artifacts. Use the narrowest useful test selection and
 request only relevant output directories, never the entire checkout or secrets.
 The default reporter is `list`; request an HTML report only if you enable it.
 
+On-demand startup can borrow one eligible configured GHA runner if both Tart
+slots are occupied. Control preserves its active job for up to ten minutes;
+the deadline never authorizes interruption. Missing lifecycle grants, unsafe
+capacity, unknown ownership or a drain timeout must be reported. Do not
+manually stop runners or submit competing lifecycle operations. Control
+collects completed runs, stops only an agent-started E2E VM, and restores only
+its borrowed runner. A VM already running before the request stays running.
+
 Keep the returned request ID **and `run_id`**. Poll `lab_request_status` with
 the request ID; a completed launch request or `job_state: running` does not
 mean tests passed. Use `lab_e2e_collect` with the exact target and returned
@@ -71,9 +95,27 @@ mean tests passed. Use `lab_e2e_collect` with the exact target and returned
 Read `e2e.log` and requested artifacts under the returned `artifact_directory`
 (relative to the selected PwrSuiteLab checkout). Report tested commit, exit
 code, and artifact completeness; distinguish checkout/setup/baseline failures
-from test failures. Keep raw logs and artifacts out of Git. If the VM stopped,
-use `lab_e2e_start` on that target before collecting the saved run; never rerun
-tests just to retrieve results.
+from test failures. Keep raw logs and artifacts out of Git. Collect the saved
+run first even if the VM stopped: previously collected same-owner results
+remain available. If collection explicitly reports `e2e_vm_stopped` because
+artifacts were never collected, start that exact target when authorized
+capacity permits, then collect the saved run. Never rerun tests for retrieval.
+
+## Repository launch guard
+
+`launchApp` checks the host before allocating test data or launching Electron.
+Outside GitHub Actions, it requires macOS virtual hardware and the canonical
+repository path `~/PwrLab/runs/<mcp-run-id>/checkout`, with that same run ID in
+the guest display lock `~/PwrLab/locks/e2e/run-id`. This matches Control's
+repository-job contract and prevents the same direct Playwright command from
+opening the app on a developer's desktop. The hidden harness never calls this
+guard. `CI=true` does not bypass it.
+
+This is an accidental-launch guard, not an authorization boundary. Control
+owns exact-target admission, reservations and workload ownership. Do not set
+`GITHUB_ACTIONS` locally, fabricate owner files, or relax the guard to work
+around an unavailable lab. A changed guest staging contract needs a reviewed
+guard update; a refusal should identify that mismatch, not trigger local E2E.
 
 ## Schema errors, ownership and recovery
 
@@ -106,26 +148,12 @@ explore credentials. Missing VM baseline prerequisites require a separate
 operator-authorized repair; test setup does not authorize rebuilding the VM,
 changing allocation/network/access, or installing on the physical host.
 
-## Script fallback only when MCP is unavailable
+## When MCP is unavailable
 
-Read the selected PwrSuiteLab checkout's `AGENTS.md` and
-`macos-tart/README.md` before using its configured controller. From the clean,
-committed PwrGit worktree on the approved Tart host:
-
-```sh
-<lab>/macos-tart/run-e2e.sh --confirm-live-run --workload pwrgit \
-  --local "$PWD" [playwright arguments...]
-```
-
-Replace `<lab>` and the optional arguments. Preserve the original controller
-safety constraints: exact dedicated E2E guest (never a runner/base), configured
-strict SSH transport and provisioning markers, host/guest display locks,
-marked disposable checkout, and explicit workload. Existing sessions/locks
-remain owned work. Legacy launchers cannot consume a Control reservation;
-release only your own unused reservation through Control first. Preserve
-controller flags and authorization requirements; never use fallback to evade
-an MCP denial or validation error. Follow the lab's guarded stale-lock recovery
-procedure, not manual deletion or repeated launch attempts. Record the tested
-commit and collected results, leave artifacts outside Git, and stop only an
-idle guest that the authorized workflow owns.
+Report the connection, authorization, capacity or ownership blocker and the
+validation that remains undone. Continue safe Node/unit or hidden-harness
+work. Legacy script launchers use a different checkout contract and are not
+an automatic fallback for guarded full-app tests. Any separate operator-led
+lab repair or alternative workflow must preserve exact-target authorization,
+strict SSH and existing owners; an MCP refusal never authorizes a bypass.
 
