@@ -403,6 +403,21 @@ test("the selected worktree row clears BOTH sticky bars when grouped", async () 
   await expect(row).toBeVisible({ timeout: 15_000 });
   const id = await row.getAttribute("data-wt-id");
   expect(id).not.toBeNull();
+  // The primary worktree is already selected and sticky.  Chromium can leave
+  // this row visible but directly underneath that sticky row after expanding
+  // the section; a centre click then lands on the primary row's merged tag.
+  // Centre the intended row first and prove its centre owns the hit point, so
+  // the pointer gesture below selects the row this test is about.
+  await row.evaluate((el) => el.scrollIntoView({ block: "center" }));
+  await expect.poll(async () =>
+    row.evaluate((el) => {
+      const rect = el.getBoundingClientRect();
+      return document
+        .elementFromPoint(rect.left + rect.width / 2, rect.top + rect.height / 2)
+        ?.closest<HTMLElement>("[data-wt-id]")
+        ?.dataset["wtId"];
+    })
+  ).toBe(id);
   const pressTrace = await tracePress(window);
   await row.click();
   // Ask which row holds the selection, so a failure names it (or says none

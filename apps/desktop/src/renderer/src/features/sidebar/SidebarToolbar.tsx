@@ -187,6 +187,10 @@ export function SidebarToolbar({
   const lastRef = useRef<HTMLButtonElement>(null);
   const addRef = useRef<HTMLButtonElement>(null);
   const syncMenuRef = useRef<HTMLButtonElement>(null);
+  // Opening a modal blurs this button, and closing it returns focus here.
+  // That return is part of the click that opened Maintenance, not a fresh
+  // keyboard request for the hover card.
+  const suppressMaintenanceFocusRef = useRef(false);
   const [menu, setMenu] = useState<{ x: number; y: number } | null>(null);
   const [syncMenu, setSyncMenu] = useState<{ x: number; y: number } | null>(
     null
@@ -280,6 +284,10 @@ export function SidebarToolbar({
     ...(reason === undefined ? {} : { disabled: true, hint: reason }),
     onSelect
   });
+  const maintenanceTooltip = hoverTooltip(
+    tip,
+    "Repository maintenance… — collect Git garbage, prune finished worktrees, and review leftover local branches"
+  );
 
   return (
     <div
@@ -365,11 +373,20 @@ export function SidebarToolbar({
         className="sidebar-toolbar__btn sidebar-toolbar__icon"
         aria-label="Repository maintenance…"
         disabled={!hasProfile}
-        {...hoverTooltip(
-          tip,
-          "Repository maintenance… — collect Git garbage, prune finished worktrees, and review leftover local branches"
-        )}
-        onClick={onMaintenance}
+        {...maintenanceTooltip}
+        onFocus={(event) => {
+          if (suppressMaintenanceFocusRef.current) {
+            suppressMaintenanceFocusRef.current = false;
+            tip.hide();
+            return;
+          }
+          maintenanceTooltip.onFocus(event);
+        }}
+        onClick={() => {
+          suppressMaintenanceFocusRef.current = true;
+          tip.hide();
+          onMaintenance();
+        }}
       >
         <WrenchGlyph />
       </button>
