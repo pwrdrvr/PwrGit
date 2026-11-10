@@ -19,8 +19,8 @@ if (process.env.ELECTRON_SKIP_BINARY_DOWNLOAD) {
 const electronRequire = createRequire(electronPackageJsonPath);
 const { downloadArtifact } = electronRequire("@electron/get");
 const { version } = electronRequire("./package.json");
-const platform = process.env.npm_config_platform || process.platform;
-const arch = process.env.npm_config_arch || process.arch;
+const platform = process.env.ELECTRON_INSTALL_PLATFORM || process.env.npm_config_platform || process.platform;
+const arch = process.env.ELECTRON_INSTALL_ARCH || process.env.npm_config_arch || process.arch;
 const checksums = process.env.electron_use_remote_checksums || process.env.npm_config_electron_use_remote_checksums
   ? undefined
   : electronRequire("./checksums.json");
@@ -30,6 +30,9 @@ await ensureRuntime({
   version, platform, arch,
   cacheRoot: join(process.env.PWRAGENT_HOME || join(homedir(), ".pwragent"), "cache/electron-runtime/v1"),
   expectedChecksum: checksums?.[`electron-v${version}-${platform}-${arch}.zip`],
+  // Keep Electron's native extractor lazy: cache hits and working host tools
+  // must remain usable even when an OS policy blocks the native binding.
+  extractFallback: (zipPath, targetDir) => electronRequire("@electron-internal/extract-zip").extract(zipPath, { dir: targetDir }),
   download: (options) => downloadArtifact({
     version,
     artifactName: "electron",

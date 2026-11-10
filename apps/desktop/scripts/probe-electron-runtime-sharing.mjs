@@ -34,7 +34,7 @@ try {
   for (const name of ["legacy-a", "legacy-b"]) {
     const dist = join(root, name);
     mkdirSync(dist);
-    extractZip(zip, dist);
+    await extractZip(zip, dist, (zipPath, dir) => electronRequire("@electron-internal/extract-zip").extract(zipPath, { dir }));
     legacy.push(dist);
   }
   // Copy both products' real entrypoints into disposable package layouts.

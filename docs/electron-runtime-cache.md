@@ -39,10 +39,12 @@ No PwrGit-specific cache variable or product dimension is added. This affects
 only install-time runtime caching; PwrGit's application state locations do not
 change. Dependency trees remain independent in every checkout.
 
-`electron-runtime-cache.mjs` is copied unchanged from PwrAgent PR
+`electron-runtime-cache.mjs` derives from PwrAgent PR
 [pwrdrvr/PwrAgent#3580](https://github.com/pwrdrvr/PwrAgent/pull/3580), head
-`e64619ca8747e5c0c628ce6c6a87c07ed106f9eb`. The adapter resolves Electron
-relative to this desktop layout and preserves PwrGit's skip behavior.
+`e64619ca8747e5c0c628ce6c6a87c07ed106f9eb`, with the bundled-extraction
+compatibility fallback described below. The shared protocol is unchanged.
+The adapter resolves Electron relative to this desktop layout and preserves
+PwrGit's skip behavior.
 
 The identity is constructed in this exact order:
 
@@ -58,7 +60,9 @@ Links that escape the runtime are rejected. Version, platform, architecture
 and different archive bytes remain separate entries.
 
 The adapter uses Electron's `@electron/get` and package checksums, honoring
-`npm_config_platform`, `npm_config_arch`, `force_no_cache`,
+`ELECTRON_INSTALL_PLATFORM` and `ELECTRON_INSTALL_ARCH` first, then
+`npm_config_platform` and `npm_config_arch`, then the host target. It also honors
+`force_no_cache`,
 `electron_config_cache` and Electron's remote-checksum switches. It hashes the
 returned ZIP again and compares the embedded release checksum when available.
 Fresh installs need a verified ZIP from the download cache or network; the
@@ -84,6 +88,24 @@ hard-linked. Workspace packages and root `node_modules` are never shared with
 another product or donor checkout. Existing caches and installs are not
 rewritten or evicted. Cache entries are retained across Electron upgrades;
 cleanup requires an explicit operator decision.
+
+### Installer compatibility
+
+Explicit Electron platform and architecture overrides take precedence before
+checksum selection, cache identity construction and executable-path selection.
+A differential property test compares PwrGit's download target with the actual
+installed Electron `install.js`, including conflicting npm settings. The
+linux/x64-versus-darwin/arm64 regression failed before the fix.
+
+If host ZIP tools are unavailable or fail, the installer lazily calls the
+Electron package's bundled `@electron-internal/extract-zip` extractor. A warm
+extraction cache or completed install does not load that native binding. The
+same staging, version check and complete inventory verification apply after
+either extraction route. A disposable production-entrypoint test blocks every
+host ZIP tool and uses the real bundled extractor, verifies the complete tree,
+and confirms cache-hit installs still work when loading the binding is denied.
+The no-host-tools case failed before the fallback was added. The APFS probe
+also awaits extraction so either extraction route completes before measuring.
 
 ### Worktree-only write permissions
 

@@ -40,7 +40,7 @@ function fixture(version = "44.10.1", bytes = randomBytes(1024 * 1024)) {
   return { root, zip, version, bytes };
 }
 
-function prepareInstall({ root, zip, version }, name, { platform = "darwin", arch = "arm64", env = {}, denyCacheCode } = {}) {
+function prepareInstall({ root, zip, version }, name, { platform = "darwin", arch = "arm64", env = {}, denyCacheCode, noZipTools = false } = {}) {
   const target = join(root, name);
   const electron = join(target, "node_modules/electron");
   mkdirSync(join(electron, "node_modules/@electron/get"), { recursive: true });
@@ -67,24 +67,41 @@ function prepareInstall({ root, zip, version }, name, { platform = "darwin", arc
       }
       return ${JSON.stringify(zip)};
     };\n`);
-  writeFileSync(join(electron, "install.js"), `
-    const { execFileSync } = require("node:child_process");
-    const { mkdirSync, writeFileSync } = require("node:fs");
-    const { join } = require("node:path");
-    const dist = join(__dirname, "dist");
-    mkdirSync(dist, { recursive: true });
-    execFileSync("unzip", ["-q", "-o", ${JSON.stringify(zip)}, "-d", dist]);
-    writeFileSync(join(__dirname, "path.txt"), ${JSON.stringify(platformPath(platform))});
+  const installedRequire = createRequire(createRequire(import.meta.url).resolve("electron/package.json"));
+  cpSync(installedRequire.resolve("./install.js"), join(electron, "install.js"));
+  const bundled = join(electron, "node_modules/@electron-internal/extract-zip");
+  mkdirSync(bundled, { recursive: true });
+  writeFileSync(join(bundled, "index.js"), `
+    if (process.env.PWRGIT_FIXTURE_BLOCK_EXTRACTOR) throw new Error("Extractor must remain lazy");
+    exports.extract = async (zip, options) => {
+      require("fs").appendFileSync(${JSON.stringify(join(root, "extractions.jsonl"))}, JSON.stringify({ zip, options }) + "\\n");
+      return require(${JSON.stringify(installedRequire.resolve("@electron-internal/extract-zip"))}).extract(zip, options);
+    };
+  `);
+  const bootstrap = join(scripts, "bootstrap.mjs");
+  writeFileSync(bootstrap, `
+    import childProcess from "node:child_process";
+    import { syncBuiltinESMExports } from "node:module";
+    const execute = childProcess.execFileSync;
+    childProcess.execFileSync = (command, ...args) => {
+      if (["unzip", "bsdtar", "powershell.exe", "tar.exe"].includes(command)) {
+        throw Object.assign(new Error("Host ZIP tool is unavailable"), { code: "ENOENT" });
+      }
+      return execute(command, ...args);
+    };
+    syncBuiltinESMExports();
+    await import("./install.mjs");
   `);
   const options = {
-    env: { ...process.env, PWRAGENT_HOME: join(root, "home"), npm_config_platform: platform, npm_config_arch: arch, ELECTRON_SKIP_BINARY_DOWNLOAD: "", ...env },
+    env: { ...process.env, PWRAGENT_HOME: join(root, "home"), npm_config_platform: platform, npm_config_arch: arch, ELECTRON_SKIP_BINARY_DOWNLOAD: "", ELECTRON_INSTALL_PLATFORM: "", ELECTRON_INSTALL_ARCH: "", ...env },
     stdio: "pipe",
   };
   return {
     electron,
     binary: join(electron, "dist", platformPath(platform)),
-    run: () => execAsync(process.execPath, [join(scripts, "install.mjs")], options),
-    runSync: () => execFileSync(process.execPath, [join(scripts, "install.mjs")], options),
+    run: () => execAsync(process.execPath, [noZipTools ? bootstrap : join(scripts, "install.mjs")], options),
+    runSync: () => execFileSync(process.execPath, [noZipTools ? bootstrap : join(scripts, "install.mjs")], options),
+    runUpstream: () => execFileSync(process.execPath, [join(electron, "install.js")], options),
   };
 }
 
@@ -93,6 +110,62 @@ function installAt(setup, name) {
   install.runSync();
   return install.binary;
 }
+
+it("regression: explicit linux/x64 overrides conflicting darwin/arm64 npm settings", () => {
+  const setup = fixture("44.9.3", randomBytes(8192));
+  const env = { ELECTRON_INSTALL_PLATFORM: "linux", ELECTRON_INSTALL_ARCH: "x64",
+    npm_config_platform: "darwin", npm_config_arch: "arm64" };
+  const upstream = prepareInstall(setup, "upstream", { platform: "linux", arch: "x64", env });
+  const install = prepareInstall(setup, "pwrgit", { platform: "linux", arch: "x64", env });
+  upstream.runUpstream();
+  install.runSync();
+  const requests = readFileSync(join(setup.root, "requests.jsonl"), "utf8").trim().split("\n").map(JSON.parse);
+  expect(requests.map(({ platform, arch }) => [platform, arch])).toEqual([["linux", "x64"], ["linux", "x64"]]);
+  expect(readFileSync(join(install.electron, "path.txt"), "utf8")).toBe("electron");
+});
+
+it("property: explicit and npm target precedence agrees with Electron's installer", async () => {
+  const setup = fixture("44.9.3", randomBytes(8192));
+  let sequence = 0;
+  const platform = fc.constantFrom("darwin", "linux", "win32", "mas");
+  const arch = fc.constantFrom("x64", "arm64");
+  await fc.assert(fc.asyncProperty(fc.record({
+    explicitPlatform: fc.option(platform, { nil: "" }), explicitArch: fc.option(arch, { nil: "" }),
+    npmPlatform: fc.option(platform, { nil: "" }), npmArch: fc.option(arch, { nil: "" }),
+  }), (target) => {
+    const expected = { platform: target.explicitPlatform || target.npmPlatform || process.platform,
+      arch: target.explicitArch || target.npmArch || process.arch };
+    const env = { ELECTRON_INSTALL_PLATFORM: target.explicitPlatform, ELECTRON_INSTALL_ARCH: target.explicitArch,
+      npm_config_platform: target.npmPlatform, npm_config_arch: target.npmArch };
+    const upstream = prepareInstall(setup, `oracle-${sequence}`, { ...expected, env });
+    const install = prepareInstall(setup, `pwrgit-${sequence++}`, { ...expected, env });
+    upstream.runUpstream();
+    install.runSync();
+    const requests = readFileSync(join(setup.root, "requests.jsonl"), "utf8").trim().split("\n").map(JSON.parse).slice(-2);
+    expect(requests[1]).toMatchObject({ platform: requests[0].platform, arch: requests[0].arch });
+    expect(readFileSync(join(install.electron, "path.txt"), "utf8"))
+      .toBe(readFileSync(join(upstream.electron, "path.txt"), "utf8"));
+    const manifest = JSON.parse(readFileSync(join(install.electron, ".pwragent-runtime.json"), "utf8"));
+    expect(manifest.target).toMatchObject(expected);
+    expect(manifest.checksum).toBe(hash(readFileSync(setup.zip)));
+  }), { numRuns: 8 });
+}, 60_000);
+
+it("regression: real bundled extractor installs without host ZIP tools and stays lazy on cache hits", async () => {
+  const setup = fixture("44.9.3", randomBytes(8192));
+  const host = { platform: process.platform, arch: process.arch, noZipTools: true };
+  const first = prepareInstall(setup, "minimal-host", host);
+  first.runSync();
+  expect(readFileSync(first.binary)).toEqual(setup.bytes);
+  expect(await inventory(join(first.electron, "dist"))).toEqual(await inventory(join(setup.root, "payload")));
+  const second = prepareInstall(setup, "cache-hit", { ...host, env: { PWRGIT_FIXTURE_BLOCK_EXTRACTOR: "1" } });
+  second.runSync();
+  second.runSync();
+  expect(readFileSync(second.binary)).toEqual(setup.bytes);
+  const extractions = readFileSync(join(setup.root, "extractions.jsonl"), "utf8").trim().split("\n").map(JSON.parse);
+  expect(extractions).toHaveLength(1);
+  expect(extractions[0].zip).toBe(setup.zip);
+});
 
 it("runs the production entry point for the native host and reuses the same cache across project layouts", async () => {
   const setup = fixture("44.10.1", randomBytes(8192));

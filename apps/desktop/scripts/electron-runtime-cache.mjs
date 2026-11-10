@@ -141,7 +141,7 @@ async function acquireInstallLock(electronDir) {
   }
 }
 
-export function extractZip(zipPath, targetDir) {
+export async function extractZip(zipPath, targetDir, fallback) {
   const quotePowerShell = (value) => `'${value.replace(/'/g, "''")}'`;
   const attempts = process.platform === "win32"
     ? [
@@ -160,10 +160,18 @@ export function extractZip(zipPath, targetDir) {
       mkdirSync(targetDir);
     }
   }
+  if (fallback) {
+    try {
+      await fallback(zipPath, targetDir);
+      return;
+    } catch (error) {
+      errors.push(`bundled extractor: ${error.message}`);
+    }
+  }
   throw new Error(`Unable to extract Electron runtime artifact:\n${errors.join("\n")}`);
 }
 
-export async function ensureRuntime({ electronDir, version, platform, arch, cacheRoot, download, expectedChecksum, log = console.log }) {
+export async function ensureRuntime({ electronDir, version, platform, arch, cacheRoot, download, expectedChecksum, extractFallback, log = console.log }) {
   const executable = platformPath(platform);
   const target = { format: FORMAT, version, platform, arch };
   const installedManifest = join(electronDir, ".pwragent-runtime.json");
@@ -216,7 +224,7 @@ export async function ensureRuntime({ electronDir, version, platform, arch, cach
         cacheStage = mkdtempSync(join(electronDir, ".extract-"));
       }
       mkdirSync(join(cacheStage, "dist"));
-      extractZip(zipPath, join(cacheStage, "dist"));
+      await extractZip(zipPath, join(cacheStage, "dist"), extractFallback);
       if (!existsSync(join(cacheStage, "dist", executable))
         || readFileSync(join(cacheStage, "dist/version"), "utf8").trim() !== version) {
         throw new Error("Electron artifact has an unexpected runtime version or executable");
