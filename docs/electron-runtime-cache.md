@@ -10,6 +10,26 @@ the wrapper, adapter and runtime cache module; the import-closure guard follows
 side-effect imports as well as `from` imports. Electron remains a devDependency;
 production-only deployments and `ELECTRON_SKIP_BINARY_DOWNLOAD` still skip it.
 
+## Upstream validation completed
+
+On 2026-11-10, after the upstream CI prerequisite fired, I re-read both PR heads
+through `gh`. PwrAgent #3580 remained at
+`e64619ca8747e5c0c628ce6c6a87c07ed106f9eb` with passing CI (and had merged).
+PwrGit #584's implementation head
+`64423f72aa614e61212d173a2e6af7bb1962ff0d` also had passing CI. I fetched the
+upstream cache module at that exact ref and confirmed it is byte-for-byte
+identical to PwrGit's, with SHA-256
+`8ee380445b204d1599ba757202e1849b68a749a5ab3ce2a650b68af49616fba6`.
+No additional upstream code changes are required. The implementation is ready
+for review; PR #584 remains a draft and is not automatically merged.
+
+The allocation evidence below remains applicable: both disposable product
+installs shared one verified runtime with zero private bytes across 260 regular
+files. Independent extractions used 323,215,360 and 323,059,712 private bytes.
+The report also confirms matching clone IDs/hashes, distinct inodes and private
+write isolation. Worktree-only permission fallback is verified separately;
+when shared storage cannot be used, a local runtime may allocate private data.
+
 ## Shared protocol
 
 The cache is **the same cache as PwrAgent and PwrSnap**, at
