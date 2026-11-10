@@ -20,7 +20,7 @@ operator-run and are not part of product CI.
 For Electron, prefer conversion to verified shared clones: use `audit-share`
 and then `share` with an approved report. This includes busy worktrees when the
 runtime itself is unused. A loaded runtime is preserved. Existing runtime bytes,
-modes and links must match the package-checksummed artifact; modified runtimes
+modes (including sticky/setuid/setgid bits) and links must match the package-checksummed artifact; modified runtimes
 are preserved. Architecture comes from the installed Mach-O executable.
 
 ```sh
@@ -86,7 +86,9 @@ runtimes survive both operations. Verification can populate the shared cache. An
   The Electron installer lock prevents concurrent installation. Candidates are
   renamed and checked again before removal; new activity restores the old path
   when possible, otherwise reports the retained quarantine path. After clone publication, original
-  backup deletion requires successful filesystem and final process checks. A failed
+  backup deletion requires successful replacement/original filesystem and final
+  process checks. The original backup fingerprint must still match the approved
+  tree, including writes through file or directory handles opened before rename. A failed
   check retains the backup and reports its path, directory inode and file witness.
 
 This operation does not stop apps, delete worktrees, edit source, clean `.local`
