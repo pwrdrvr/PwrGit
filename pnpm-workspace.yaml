@@ -17,6 +17,9 @@ overrides:
 # Ignore machine-local hooks so every install hashes only .pnpmfile.cjs.
 globalPnpmfile: null
 
+# Workspace postinstall must reach the verified Electron extraction cache.
+ignoreScripts: false
+
 # Completed CI trees must use portable files and relative workspace links.
 packageImportMethod: auto
 

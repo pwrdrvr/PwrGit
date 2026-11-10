@@ -4,13 +4,28 @@ name = "PwrGit"
 
 [setup]
 script = '''
+unset PREFIX
 nvm install
 corepack enable
 pnpm install
 '''
 
+[setup.win32]
+script = '''
+. ./scripts/windows-environment.ps1 -InstallNode
+& $pnpmCommand install
+if ($LASTEXITCODE -ne 0) { throw "pnpm install failed" }
+'''
+
 [cleanup]
 script = "rm -rf node_modules"
+
+[cleanup.win32]
+script = '''
+if (Test-Path -LiteralPath node_modules) {
+  Remove-Item -LiteralPath node_modules -Recurse -Force -ErrorAction Stop
+}
+'''
 
 [[actions]]
 name = "Dev"
