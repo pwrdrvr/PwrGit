@@ -1,5 +1,13 @@
 # Changelog
 
+## v0.56.0 - 2026-11-10
+
+- Local agents - Moved desktop MCP from loopback TCP/OAuth and an independent server to protected Unix sockets or Windows named pipes. A bundled native stdio relay, or HTTP over the same local endpoint, connects clients to the running desktop, which owns discovery, consent, and repository operations. Live status uses MCP subscriptions and HTTP SSE rather than separate WebSocket listeners; approved permission and repository limits cannot be widened by later role changes.
+- MCP migration - Existing standalone npm or TCP/OAuth clients must copy the new native command or IPC HTTP configuration from Settings > Local Agents and approve a fresh session. Open PwrGit and enable local-agent access first. Legacy credentials are not transferred, and a missing or disconnected desktop requires manual reconnection; clients do not launch a fallback server or automatically restart an active turn.
+- Maintenance - Added Clones to Combined maintenance, enabled by default when the selected Git supports re-sharing. It runs after worktree and branch cleanup and before garbage collection, with Update main checkouts first enabled by default. Unsupported Git keeps the step visible but disabled, with a link to Git settings. Results report data now shared, not guaranteed disk space freed.
+- Clones offer - Added a one-time offer per profile after a read-only scan of eligible linked worktrees. It shows projected byte savings when measurable, or a shareable-file count otherwise. Share files starts a Combined run with only Clones selected; accepting, dismissing, or leaving an offer open does not cause repeated offers.
+- Maintenance interface - Kept the dialog and footer at a steady height across setup, progress, and results, with scrolling content and Close as the final primary action when finished. The toolbar tooltip now dismisses when maintenance opens and no longer reappears on the closing focus change.
+
 ## v0.55.0 - 2026-11-07
 
 - Maintenance - Added an opt-in Repair broken worktree links step before Combined cleanup and a standalone Repair links tab. It reconnects known linked checkouts after the primary repository moves, preserving working files, the index, branches, locks, and missing-folder registrations. Linked checkouts that also moved still need their new paths supplied explicitly. Unrelated branch cleanup can proceed without repair when registered Git state can be safely inspected.
