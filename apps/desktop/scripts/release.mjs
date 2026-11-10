@@ -613,7 +613,17 @@ if (win) {
 
   const nativeRelay = join(builtApp, "resources", "pwrgit-mcp.exe");
   if (!existsSync(nativeRelay)) throw new Error("Packaged native MCP relay is missing");
-  if (requireSigning) runChecked("powershell", ["-NoProfile", "-Command", `$s = Get-AuthenticodeSignature -LiteralPath '${nativeRelay.replaceAll("'", "''")}'; if ($s.Status -ne 'Valid') { throw 'MCP relay Authenticode verification failed' }`]);
+  if (requireSigning) {
+    // Stay in the pipeline's PowerShell 7 host. Through an intermediate Node
+    // process, legacy powershell inherits PS7 module paths and can fail to
+    // autoload Microsoft.PowerShell.Security before inspecting the signature.
+    // Transport the path as data, never as interpolated PowerShell source.
+    runChecked("pwsh", ["-NoProfile", "-NonInteractive", "-Command", [
+      "$ErrorActionPreference = 'Stop'",
+      "$s = Get-AuthenticodeSignature -LiteralPath $env:PWRGIT_NATIVE_RELAY_PATH -ErrorAction Stop",
+      "if ($null -eq $s -or $s.Status -ne 'Valid') { throw \"MCP relay Authenticode verification failed: $($s.Status)\" }",
+    ].join("; ")], { env: { PWRGIT_NATIVE_RELAY_PATH: nativeRelay } });
+  }
 
   step("verify installer artifact + write checksums");
   const checksumPath = writeWindowsChecksums(dist);
