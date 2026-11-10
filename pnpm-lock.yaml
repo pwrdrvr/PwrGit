@@ -255,8 +255,8 @@ importers:
         specifier: ^13.0.3
         version: 13.0.3
       dugite:
-        specifier: ^3.2.3
-        version: 3.2.3
+        specifier: ^3.3.2
+        version: 3.3.2
       electron-log:
         specifier: ^5.4.4
         version: 5.4.4
@@ -325,8 +325,8 @@ importers:
         specifier: 1.32.2
         version: 1.32.2(supports-color@7.2.0)(zod@4.6.7)
       dugite:
-        specifier: ^3.2.3
-        version: 3.2.3
+        specifier: ^3.3.2
+        version: 3.3.2
       zod:
         specifier: ^4.6.7
         version: 4.6.7
@@ -2061,8 +2061,8 @@ packages:
     resolution: {integrity: sha512-uBq4egWHTcTt33a72vpSG0z3HnPuIl6NqYcTrKEg2azoEyl2hpW0zqlxysq2pK9HlDIHyHyakeYaYnSAwd8bow==}
     engines: {node: '>=12'}
 
-  dugite@3.2.3:
-    resolution: {integrity: sha512-kPBJ0uevCPY4pcGl0R0+dgC/prPBvnHN9109ZUUWDttkWHz4HqFGwyFri9Btmd2YucAXIJTYMGECh/Q5VAfpfA==}
+  dugite@3.3.2:
+    resolution: {integrity: sha512-deO3178Y8uQ0y4Es5eD31PST78nyWskfqLDi+Za5UBHYvdlMMwuFirwShgCuX+8aT3B1BZ6xlr4Bb8j0eq4Bag==}
     engines: {node: '>= 20'}
 
   dunder-proto@1.0.1:
@@ -4943,7 +4943,7 @@ snapshots:
 
   dotenv@16.6.1: {}
 
-  dugite@3.2.3:
+  dugite@3.3.2:
     dependencies:
       progress: 2.0.3
       tar-stream: 3.2.0
