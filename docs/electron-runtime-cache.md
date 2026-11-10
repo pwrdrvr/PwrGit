@@ -5,7 +5,9 @@ PwrGit's `install:electron-binary` command delegates to
 staging and the Linux sandbox check. Both Codex setup paths run ordinary
 `pnpm install`; Windows bootstraps the exact `.nvmrc` Node and `packageManager`
 pnpm with `scripts/windows-environment.ps1`. `ignoreScripts: false` explicitly
-keeps workspace lifecycle hooks enabled. Electron remains a devDependency;
+keeps workspace lifecycle hooks enabled. CI completed-tree cache keys include
+the wrapper, adapter and runtime cache module; the import-closure guard follows
+side-effect imports as well as `from` imports. Electron remains a devDependency;
 production-only deployments and `ELECTRON_SKIP_BINARY_DOWNLOAD` still skip it.
 
 ## Shared protocol
@@ -76,7 +78,9 @@ The focused suite also checks generated platform/architecture combinations,
 exact identity field order and key hashing, distinct version/archive identities,
 cache content/mode/link corruption, unavailable caches, checksum rejection,
 offline completed installs, repair of incomplete files/types, concurrent
-processes and recovery after killing the lock owner. A native-host production
+processes and recovery after killing the lock owner. The completed-tree import-closure guard also failed before the CI key update,
+identifying the missing adapter, and passes after all producer/consumer keys
+include both new modules. A native-host production
 entrypoint test installs into three project layouts and requires exactly one
 cache entry and independent regular files. Setup guards trace both POSIX and
 Windows through the production lifecycle chain. Native Windows bootstrap

@@ -127,6 +127,8 @@ jobs:
             scripts/windows-tool-job.mjs
             scripts/windows-tool-job.ps1
             apps/desktop/scripts/install-electron-binary.mjs
+            apps/desktop/scripts/ensure-electron-runtime.mjs
+            apps/desktop/scripts/electron-runtime-cache.mjs
             apps/desktop/scripts/rebuild-native-for-electron.mjs
             apps/desktop/scripts/stage-better-sqlite3-arch.mjs
 
@@ -167,6 +169,8 @@ jobs:
             scripts/windows-tool-job.mjs
             scripts/windows-tool-job.ps1
             apps/desktop/scripts/install-electron-binary.mjs
+            apps/desktop/scripts/ensure-electron-runtime.mjs
+            apps/desktop/scripts/electron-runtime-cache.mjs
             apps/desktop/scripts/rebuild-native-for-electron.mjs
             apps/desktop/scripts/stage-better-sqlite3-arch.mjs
 
@@ -206,6 +210,8 @@ jobs:
             scripts/windows-tool-job.mjs
             scripts/windows-tool-job.ps1
             apps/desktop/scripts/install-electron-binary.mjs
+            apps/desktop/scripts/ensure-electron-runtime.mjs
+            apps/desktop/scripts/electron-runtime-cache.mjs
             apps/desktop/scripts/rebuild-native-for-electron.mjs
             apps/desktop/scripts/stage-better-sqlite3-arch.mjs
 
@@ -268,6 +274,8 @@ jobs:
             scripts/windows-tool-job.mjs
             scripts/windows-tool-job.ps1
             apps/desktop/scripts/install-electron-binary.mjs
+            apps/desktop/scripts/ensure-electron-runtime.mjs
+            apps/desktop/scripts/electron-runtime-cache.mjs
             apps/desktop/scripts/rebuild-native-for-electron.mjs
             apps/desktop/scripts/stage-better-sqlite3-arch.mjs
 
@@ -390,6 +398,8 @@ jobs:
             scripts/windows-tool-job.mjs
             scripts/windows-tool-job.ps1
             apps/desktop/scripts/install-electron-binary.mjs
+            apps/desktop/scripts/ensure-electron-runtime.mjs
+            apps/desktop/scripts/electron-runtime-cache.mjs
             apps/desktop/scripts/rebuild-native-for-electron.mjs
             apps/desktop/scripts/stage-better-sqlite3-arch.mjs
 
@@ -487,6 +497,8 @@ jobs:
             scripts/windows-tool-job.mjs
             scripts/windows-tool-job.ps1
             apps/desktop/scripts/install-electron-binary.mjs
+            apps/desktop/scripts/ensure-electron-runtime.mjs
+            apps/desktop/scripts/electron-runtime-cache.mjs
             apps/desktop/scripts/rebuild-native-for-electron.mjs
             apps/desktop/scripts/stage-better-sqlite3-arch.mjs
 
@@ -527,6 +539,8 @@ jobs:
             scripts/windows-tool-job.mjs
             scripts/windows-tool-job.ps1
             apps/desktop/scripts/install-electron-binary.mjs
+            apps/desktop/scripts/ensure-electron-runtime.mjs
+            apps/desktop/scripts/electron-runtime-cache.mjs
             apps/desktop/scripts/rebuild-native-for-electron.mjs
             apps/desktop/scripts/stage-better-sqlite3-arch.mjs
 
@@ -690,6 +704,8 @@ jobs:
             scripts/windows-tool-job.mjs
             scripts/windows-tool-job.ps1
             apps/desktop/scripts/install-electron-binary.mjs
+            apps/desktop/scripts/ensure-electron-runtime.mjs
+            apps/desktop/scripts/electron-runtime-cache.mjs
             apps/desktop/scripts/rebuild-native-for-electron.mjs
             apps/desktop/scripts/stage-better-sqlite3-arch.mjs
 
@@ -755,6 +771,8 @@ jobs:
             scripts/windows-tool-job.mjs
             scripts/windows-tool-job.ps1
             apps/desktop/scripts/install-electron-binary.mjs
+            apps/desktop/scripts/ensure-electron-runtime.mjs
+            apps/desktop/scripts/electron-runtime-cache.mjs
             apps/desktop/scripts/rebuild-native-for-electron.mjs
             apps/desktop/scripts/stage-better-sqlite3-arch.mjs
 
@@ -866,6 +884,8 @@ jobs:
             scripts/windows-tool-job.mjs
             scripts/windows-tool-job.ps1
             apps/desktop/scripts/install-electron-binary.mjs
+            apps/desktop/scripts/ensure-electron-runtime.mjs
+            apps/desktop/scripts/electron-runtime-cache.mjs
             apps/desktop/scripts/rebuild-native-for-electron.mjs
             apps/desktop/scripts/stage-better-sqlite3-arch.mjs
 
