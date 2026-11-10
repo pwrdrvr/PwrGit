@@ -12,7 +12,7 @@ overrides:
   "glob@13.0.6": "14.0.2"
   "minimatch@9.0.9": "11.0.1"
   "minimatch@10.2.6": "11.0.1"
-  "@pwrdrvr/codex-app-server-protocol": "0.159.2"
+  "@pwrdrvr/codex-app-server-protocol": "0.164.0"
 
 # Ignore machine-local hooks so every install hashes only .pnpmfile.cjs.
 globalPnpmfile: null
