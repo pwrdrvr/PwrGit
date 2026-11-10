@@ -86,6 +86,23 @@ cache entry and independent regular files. Setup guards trace both POSIX and
 Windows through the production lifecycle chain. Native Windows bootstrap
 fixtures run on Windows CI.
 
+### Sparse-checkout audit
+
+PwrAgent review (`84721056b`, PR #3580) found that dependency-cache hits had
+masked missing installer imports in sparse source checkouts. PwrGit has no
+sparse-checkout lists: all 26 workflow checkouts, including CI and release,
+currently select the full source tree. Its completed-tree keys already include
+the wrapper, adapter and cache module.
+
+`scripts/electron-install-sparse-checkout.test.mjs` ports the parent's Git
+oracle and audits every workflow checkout. It discovers the installer's local
+import closure, including the wrapper's side-effect import, then applies the
+checkout's patterns to a disposable Git index and tree. It uses Git's actual
+cone expansion and non-cone matching, independent of dependency cache hits.
+A negative regression case selects only the wrapper and adapter and confirms
+that the oracle rejects the missing helper. Future sparse patterns must retain
+all discovered imports; no duplicated helper inventory defines success.
+
 ### Real cross-product APFS measurement
 
 On 2026-11-10, Node 24.22.1, macOS arm64, the headless probe ran copied
@@ -125,7 +142,9 @@ node scripts/resource-run.mjs node apps/desktop/scripts/probe-electron-runtime-s
   .local/cross-product-allocation.json /path/to/fetched/pwragent/scripts
 node scripts/resource-run.mjs pnpm exec vitest run \
   apps/desktop/scripts/ensure-electron-runtime.test.mjs \
-  scripts/windows-environment.test.mjs
+  scripts/windows-environment.test.mjs \
+  scripts/electron-install-sparse-checkout.test.mjs \
+  scripts/dependency-cache-workflow.test.mjs
 pnpm lint
 ```
 
