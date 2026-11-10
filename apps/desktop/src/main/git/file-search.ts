@@ -140,7 +140,7 @@ export function createFileListCache(now: () => number = Date.now) {
   // Reads in flight, so concurrent queries for one worktree share a single
   // `git ls-files` instead of spawning one apiece. The palette debounces, but
   // the debounce lives in the renderer and this process owns process lifetime.
-  const inFlight = new Map<string, Promise<Result<PathIndex>>>();
+  const inFlight = new Map<string, { read: Promise<Result<PathIndex>>; signal?: AbortSignal }>();
 
   return {
     async index(
@@ -149,31 +149,40 @@ export function createFileListCache(now: () => number = Date.now) {
       cwd: string,
       signal?: AbortSignal
     ): Promise<Result<PathIndex>> {
-      const cached = lists.get(worktreeId);
-      if (cached !== undefined && now() - cached.readAt < FILE_LIST_TTL_MS) {
-        return ok(cached.index);
-      }
-      const running = inFlight.get(worktreeId);
-      if (running !== undefined) return running;
-
-      const read = readTrackedPaths(git, cwd, signal);
-      inFlight.set(worktreeId, read);
-      try {
-        const result = await read;
-        if (!result.ok) return result;
-        // Insertion order is the eviction order; re-reading a worktree moves it
-        // back to the end so the three most recently used lists are the ones
-        // kept.
-        lists.delete(worktreeId);
-        lists.set(worktreeId, { index: result.value, readAt: now() });
-        while (lists.size > FILE_LIST_CACHE_MAX) {
-          const oldest = lists.keys().next();
-          if (oldest.done === true) break;
-          lists.delete(oldest.value);
+      for (;;) {
+        const cached = lists.get(worktreeId);
+        if (cached !== undefined && now() - cached.readAt < FILE_LIST_TTL_MS) {
+          return ok(cached.index);
         }
-        return result;
-      } finally {
-        inFlight.delete(worktreeId);
+        const running = inFlight.get(worktreeId);
+        if (running !== undefined) {
+          const result = await running.read;
+          // A newer query can cancel the read's owner while sharing its promise.
+          // Wait for that Git process to finish, then let live callers start or
+          // share a replacement. Canceled callers must not restart the read.
+          if (!result.ok && running.signal?.aborted && !signal?.aborted) continue;
+          return result;
+        }
+
+        const read = readTrackedPaths(git, cwd, signal);
+        inFlight.set(worktreeId, { read, ...(signal === undefined ? {} : { signal }) });
+        try {
+          const result = await read;
+          if (!result.ok) return result;
+          // Insertion order is the eviction order; re-reading a worktree moves it
+          // back to the end so the three most recently used lists are the ones
+          // kept.
+          lists.delete(worktreeId);
+          lists.set(worktreeId, { index: result.value, readAt: now() });
+          while (lists.size > FILE_LIST_CACHE_MAX) {
+            const oldest = lists.keys().next();
+            if (oldest.done === true) break;
+            lists.delete(oldest.value);
+          }
+          return result;
+        } finally {
+          inFlight.delete(worktreeId);
+        }
       }
     },
     forget(worktreeId: string): void {

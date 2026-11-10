@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { ok, type Result } from "@pwrgit/shared";
+import { err, ok, type Result } from "@pwrgit/shared";
 import type { GitExec, GitOutput } from "./dugite";
 import {
   createFileListCache,
@@ -115,6 +115,32 @@ describe("createFileListCache", () => {
       await cache.index(git, id, "/repo");
     }
     expect(cache.size()).toBe(3);
+  });
+
+  it("does not restart a canceled read when every caller was canceled", async () => {
+    const cache = createFileListCache();
+    const owner = new AbortController();
+    const caller = new AbortController();
+    const git = vi.fn<GitExec>(async () => err({ kind: "git", code: "aborted", message: "Canceled" }));
+    const first = cache.index(git, "wt-1", "/repo", owner.signal);
+    owner.abort();
+    const second = cache.index(git, "wt-1", "/repo", caller.signal);
+    caller.abort();
+    const results = await Promise.all([first, second]);
+    expect(results.every((result) => !result.ok)).toBe(true);
+    expect(git).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not retry a shared Git failure when its owner was not canceled", async () => {
+    const cache = createFileListCache();
+    const failure = err({ kind: "git" as const, code: "spawn_failed", message: "Git unavailable" });
+    const git = vi.fn<GitExec>(async () => failure);
+    const results = await Promise.all([
+      cache.index(git, "wt-1", "/repo", new AbortController().signal),
+      cache.index(git, "wt-1", "/repo", new AbortController().signal)
+    ]);
+    expect(results).toEqual([failure, failure]);
+    expect(git).toHaveBeenCalledTimes(1);
   });
 
   it("shares one ls-files between concurrent readers of a worktree", async () => {

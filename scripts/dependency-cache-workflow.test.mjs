@@ -128,7 +128,7 @@ test("completed-tree inputs include install scripts and their local import closu
     const absolute = resolve(root, file);
     expect(existsSync(absolute)).toBe(true);
     const source = readFileSync(absolute, "utf8");
-    for (const match of source.matchAll(/from ["'](\.[^"']+)["']/g)) {
+    for (const match of source.matchAll(/\b(?:from\s*|import\s*)["'](\.[^"']+)["']/g)) {
       visit(relative(root, resolve(dirname(absolute), match[1])).replaceAll("\\", "/"), seen);
     }
   };

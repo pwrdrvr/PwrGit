@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { ok } from "@pwrgit/shared";
+import { err, ok } from "@pwrgit/shared";
 import { CommandBus } from "../command-bus";
 import type { DB } from "../persistence/db";
 
@@ -144,6 +144,28 @@ describe("file-insight handlers", () => {
       "src/App.tsx",
       "src/legacy/App.tsx"
     ]);
+  });
+
+  it("returns the final file query after an earlier shared listing is canceled", async () => {
+    let release: (() => void) | undefined;
+    let firstSignal: AbortSignal | undefined;
+    execGit.mockReset();
+    execGit.mockImplementationOnce((_args: string[], _cwd: string, options: { signal?: AbortSignal }) => {
+      firstSignal = options.signal;
+      return new Promise((resolve) => {
+        release = () => resolve(err({ kind: "git", code: "aborted", message: "Superseded query" }));
+      });
+    }).mockImplementation(() => listing(["README.md", "docs/stable.md"]));
+    const bus = new CommandBus();
+    registerFileInsightHandlers(bus, dbWith("/repo"));
+    const first = bus.dispatch("file:search", { worktreeId: "wt-1", query: "docs/" }, { webContentsId: 7 });
+    const latest = bus.dispatch("file:search", { worktreeId: "wt-1", query: "docs/stable.md" }, { webContentsId: 7 });
+    expect(firstSignal?.aborted).toBe(true);
+    expect(execGit).toHaveBeenCalledTimes(1);
+    release?.();
+    await first;
+    expect(await latest).toEqual(ok([{ path: "docs/stable.md", name: "stable.md", dir: "docs" }]));
+    expect(execGit).toHaveBeenCalledTimes(2);
   });
 
   it("stops a file search when its renderer goes away", async () => {

@@ -3,6 +3,7 @@ import { join } from "node:path";
 import { expect, test } from "@playwright/test";
 import { launchApp, type AppHandle } from "./fixtures/electron-app";
 import { createGitSandbox, type GitSandbox } from "./fixtures/git-sandbox";
+import { expectEmptyStash } from "./fixtures/stash-assertions";
 import {
   addRootAndExpand,
   branchRow,
@@ -155,9 +156,7 @@ test("leaving the changes stashes them on main and offers them back there", asyn
   await expect(offer).toBeVisible({ timeout: SETTLE_MS });
   await offer.getByRole("button", { name: "Restore" }).click();
 
-  await expect
-    .poll(() => box.git(path, "stash", "list"), { timeout: SETTLE_MS })
-    .toBe("");
+  await expectEmptyStash(() => box.git(path, "stash", "list"), SETTLE_MS);
   expect(read(path, "shared.txt")).toBe("edited on main\n");
   expect(read(path, "brand-new.txt")).toBe("untracked\n");
 });
