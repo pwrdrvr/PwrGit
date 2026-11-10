@@ -40,10 +40,7 @@ function fixture(version = "44.10.1", bytes = randomBytes(1024 * 1024)) {
   return { root, zip, version, bytes };
 }
 
-function prepareInstall({ root, zip, version }, name, { platform = "darwin", arch = "arm64", env = {}, denyCacheCode, noZipTools = false } = {}) {
-  const target = join(root, name);
-  const electron = join(target, "node_modules/electron");
-  mkdirSync(join(electron, "node_modules/@electron/get"), { recursive: true });
+function copyInstaller(target) {
   // Copy the actual entry point so its createRequire resolves our disposable
   // package. No production dependency or user's cache is changed by the test.
   const scripts = join(target, "scripts");
@@ -55,6 +52,34 @@ function prepareInstall({ root, zip, version }, name, { platform = "darwin", arc
   try { cpSync(helper, join(scripts, "electron-runtime-cache.mjs")); } catch (error) {
     if (error.code !== "ENOENT") throw error;
   }
+  return scripts;
+}
+
+// Skip branches must work with neither an archive nor downloader/extractor
+// dependencies. In particular, do not spawn Windows Compress-Archive here.
+function prepareSkippedInstall({ electronPresent }) {
+  const root = realpathSync.native(mkdtempSync(join(tmpdir(), "pwrgit-electron-skip-")));
+  roots.push(root);
+  const scripts = copyInstaller(root);
+  const electron = join(root, "node_modules/electron");
+  if (electronPresent) {
+    mkdirSync(electron, { recursive: true });
+    writeFileSync(join(electron, "package.json"), JSON.stringify({ name: "electron", version: "44.9.3" }));
+  }
+  return {
+    root, electron,
+    runSync: (env = {}) => execFileSync(process.execPath, [join(scripts, "install.mjs")], {
+      env: { ...process.env, PWRAGENT_HOME: join(root, "home"), ELECTRON_SKIP_BINARY_DOWNLOAD: "", ...env },
+      encoding: "utf8", stdio: "pipe",
+    }),
+  };
+}
+
+function prepareInstall({ root, zip, version }, name, { platform = "darwin", arch = "arm64", env = {}, denyCacheCode, noZipTools = false } = {}) {
+  const target = join(root, name);
+  const electron = join(target, "node_modules/electron");
+  mkdirSync(join(electron, "node_modules/@electron/get"), { recursive: true });
+  const scripts = copyInstaller(target);
   writeFileSync(join(electron, "package.json"), JSON.stringify({ name: "electron", version }));
   writeFileSync(join(electron, "checksums.json"), JSON.stringify({
     [`electron-v${version}-${platform}-${arch}.zip`]: hash(readFileSync(zip)),
@@ -214,20 +239,18 @@ it.each(["EACCES", "EPERM", "EROFS"])("native entry point forwards owned downloa
 });
 
 it("preserves the missing-Electron skip without downloading", () => {
-  const setup = fixture("44.9.3", randomBytes(8192));
-  const install = prepareInstall(setup, "production-only");
-  rmSync(install.electron, { recursive: true });
+  const install = prepareSkippedInstall({ electronPresent: false });
   install.runSync();
-  expect(existsSync(join(setup.root, "requests.jsonl"))).toBe(false);
+  expect(readdirSync(install.root)).toEqual(["scripts"]);
 });
 
 it("preserves the explicit binary-download skip without touching the shared cache", () => {
-  const setup = fixture("44.9.3", randomBytes(8192));
-  const install = prepareInstall(setup, "skip", { env: { ELECTRON_SKIP_BINARY_DOWNLOAD: "1" } });
-  install.runSync();
-  expect(existsSync(install.binary)).toBe(false);
-  expect(existsSync(join(setup.root, "home"))).toBe(false);
-  expect(existsSync(join(setup.root, "requests.jsonl"))).toBe(false);
+  const install = prepareSkippedInstall({ electronPresent: true });
+  install.runSync({ ELECTRON_SKIP_BINARY_DOWNLOAD: "1" });
+  expect(readdirSync(install.root).sort()).toEqual(["node_modules", "scripts"]);
+  expect(existsSync(join(install.electron, "dist"))).toBe(false);
+  expect(existsSync(join(install.electron, "checksums.json"))).toBe(false);
+  expect(existsSync(join(install.root, "home"))).toBe(false);
 });
 
 it.skipIf(process.platform !== "darwin")("APFS oracle: repeated extraction shares blocks with independent writable files", () => {
