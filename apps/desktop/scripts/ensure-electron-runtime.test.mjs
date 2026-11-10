@@ -1,6 +1,7 @@
 import { execFile, execFileSync, spawn } from "node:child_process";
 import { randomBytes, createHash } from "node:crypto";
-import { chmodSync, cpSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { chmodSync, copyFileSync, cpSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -20,7 +21,7 @@ afterEach(() => {
 });
 
 function fixture(version = "44.10.1", bytes = randomBytes(1024 * 1024)) {
-  const root = mkdtempSync(join(tmpdir(), "pwrgit-electron-cache-"));
+  const root = realpathSync.native(mkdtempSync(join(tmpdir(), "pwrgit-electron-cache-")));
   roots.push(root);
   const payload = join(root, "payload");
   mkdirSync(join(payload, "Electron.app/Contents/MacOS"), { recursive: true });
@@ -39,7 +40,7 @@ function fixture(version = "44.10.1", bytes = randomBytes(1024 * 1024)) {
   return { root, zip, version, bytes };
 }
 
-function prepareInstall({ root, zip, version }, name, { platform = "darwin", arch = "arm64", env = {} } = {}) {
+function prepareInstall({ root, zip, version }, name, { platform = "darwin", arch = "arm64", env = {}, denyCacheCode } = {}) {
   const target = join(root, name);
   const electron = join(target, "node_modules/electron");
   mkdirSync(join(electron, "node_modules/@electron/get"), { recursive: true });
@@ -61,6 +62,9 @@ function prepareInstall({ root, zip, version }, name, { platform = "darwin", arc
   writeFileSync(join(electron, "node_modules/@electron/get/index.js"),
     `exports.downloadArtifact = async (options) => {
       require("fs").appendFileSync(${JSON.stringify(join(root, "requests.jsonl"))}, JSON.stringify(options) + "\\n");
+      if (${JSON.stringify(denyCacheCode)} && options.cacheRoot === process.env.electron_config_cache) {
+        throw Object.assign(new Error("External ZIP cache is unwritable"), { code: ${JSON.stringify(denyCacheCode)} });
+      }
       return ${JSON.stringify(zip)};
     };\n`);
   writeFileSync(join(electron, "install.js"), `
@@ -112,6 +116,37 @@ it("runs the production entry point for the native host and reuses the same cach
   expect(requests).toHaveLength(3);
   for (const request of requests) expect(request).toMatchObject({ version: setup.version, ...host });
 }, 60_000);
+
+it.each(["EACCES", "EPERM", "EROFS"])("native entry point forwards owned download paths after %s", (code) => {
+  const setup = fixture("44.9.3", randomBytes(8192));
+  const host = { platform: process.platform, arch: process.arch };
+  const deniedCache = join(setup.root, "external-zip-cache");
+  const install = prepareInstall(setup, "worktree/apps/desktop", {
+    ...host, denyCacheCode: code,
+    env: { electron_config_cache: deniedCache, force_no_cache: "true" },
+  });
+  install.runSync();
+  const requests = readFileSync(join(setup.root, "requests.jsonl"), "utf8").trim().split("\n").map(JSON.parse);
+  expect(requests).toHaveLength(2);
+  expect(requests[0].cacheRoot).toBe(deniedCache);
+  expect(dirname(requests[0].tempDirectory)).toBe(install.electron);
+  expect(requests[1].tempDirectory).toBe(requests[0].tempDirectory);
+  expect(requests[1].cacheRoot).toBe(join(requests[0].tempDirectory, "cache"));
+  for (const request of requests) {
+    expect(request).toMatchObject({ ...host, version: setup.version, force: true });
+    expect(request.checksums[`electron-v${setup.version}-${host.platform}-${host.arch}.zip`]).toBe(hash(readFileSync(setup.zip)));
+  }
+  expect(existsSync(requests[0].tempDirectory)).toBe(false);
+  expect(readFileSync(install.binary)).toEqual(setup.bytes);
+});
+
+it("preserves the missing-Electron skip without downloading", () => {
+  const setup = fixture("44.9.3", randomBytes(8192));
+  const install = prepareInstall(setup, "production-only");
+  rmSync(install.electron, { recursive: true });
+  install.runSync();
+  expect(existsSync(join(setup.root, "requests.jsonl"))).toBe(false);
+});
 
 it("preserves the explicit binary-download skip without touching the shared cache", () => {
   const setup = fixture("44.9.3", randomBytes(8192));
@@ -282,6 +317,106 @@ it("uses isolated extraction when the cache is unavailable and releases the lock
   await ensureRuntime(opts);
   expect(readFileSync(join(opts.electronDir, "dist/electron"))).toEqual(setup.bytes);
   expect(readFileSync(cacheRoot, "utf8")).toBe("user data");
+});
+
+it("property: denied external ZIP-cache writes fall back to owned worktree paths", async () => {
+  const setup = fixture("44.10.1", randomBytes(8192));
+  await fc.assert(fc.asyncProperty(fc.constantFrom("EACCES", "EPERM", "EROFS"), async (code) => {
+    const electronDir = mkdtempSync(join(setup.root, "restricted-package-"));
+    const calls = [];
+    const opts = optionsFor(setup, electronDir, {
+      download: async (options) => {
+        calls.push(options);
+        if (calls.length === 1) throw Object.assign(new Error("External ZIP cache is unwritable"), { code });
+        return setup.zip;
+      },
+    });
+    await ensureRuntime(opts);
+    expect(calls).toHaveLength(2);
+    expect(dirname(calls[0].tempDirectory)).toBe(electronDir);
+    expect(calls[1].tempDirectory).toBe(calls[0].tempDirectory);
+    expect(calls[1].cacheRoot).toBe(join(calls[0].tempDirectory, "cache"));
+    expect(existsSync(calls[0].tempDirectory)).toBe(false);
+    expect(readFileSync(join(electronDir, "dist/electron"))).toEqual(setup.bytes);
+  }), { numRuns: 6 });
+}, 60_000);
+
+it("does not retry network failures as cache permission failures", async () => {
+  const setup = fixture("44.10.1", randomBytes(8192));
+  const calls = [];
+  const opts = optionsFor(setup, undefined, {
+    download: async (options) => {
+      calls.push(options);
+      throw Object.assign(new Error("Network failed"), { code: "ECONNRESET" });
+    },
+  });
+  await expect(ensureRuntime(opts)).rejects.toThrow("Network failed");
+  expect(calls).toHaveLength(1);
+  expect(existsSync(calls[0].tempDirectory)).toBe(false);
+});
+
+it.skipIf(process.platform === "win32" || process.getuid?.() === 0)("real @electron/get installs with both external caches write-denied", async () => {
+  const setup = fixture("44.10.1", randomBytes(8192));
+  const require = createRequire(import.meta.url);
+  const { downloadArtifact } = createRequire(require.resolve("electron/package.json"))("@electron/get");
+  const zipCache = join(setup.root, "external-zip-cache");
+  const extractionCache = join(setup.root, "external-extraction-cache");
+  for (const path of [zipCache, extractionCache]) { mkdirSync(path); chmodSync(path, 0o555); }
+  const denied = [];
+  const calls = [];
+  const opts = optionsFor(setup, join(setup.root, "worktree/node_modules/electron"), {
+    cacheRoot: extractionCache,
+    download: async (options) => {
+      calls.push(options);
+      try {
+        return await downloadArtifact({
+          version: setup.version, artifactName: "electron", platform: "darwin", arch: "arm64",
+          checksums: { [`electron-v${setup.version}-darwin-arm64.zip`]: hash(readFileSync(setup.zip)) },
+          cacheRoot: zipCache,
+          // Real checksum/cache handling; replace only HTTP with a local ZIP.
+          downloader: { download: async (_url, destination) => { copyFileSync(setup.zip, destination); } },
+          ...options,
+        });
+      } catch (error) { denied.push(error.code); throw error; }
+    },
+  });
+  try {
+    await ensureRuntime(opts);
+    expect(denied).toEqual(["EACCES"]);
+    expect(calls).toHaveLength(2);
+    expect(dirname(calls[0].tempDirectory)).toBe(opts.electronDir);
+    expect(calls[1].cacheRoot).toBe(join(calls[0].tempDirectory, "cache"));
+    expect(existsSync(calls[0].tempDirectory)).toBe(false);
+    expect(readFileSync(join(opts.electronDir, "dist/electron"))).toEqual(setup.bytes);
+    expect(readdirSync(zipCache)).toEqual([]);
+    expect(readdirSync(extractionCache)).toEqual([]);
+  } finally {
+    for (const path of [zipCache, extractionCache]) chmodSync(path, 0o755);
+  }
+}, 30_000);
+
+it("releases the package lock even when staging cleanup is denied", () => {
+  const setup = fixture("44.9.3", randomBytes(8192));
+  const opts = optionsFor(setup);
+  const script = `
+    import assert from "node:assert/strict";
+    import fs from "node:fs";
+    import { syncBuiltinESMExports } from "node:module";
+    const remove = fs.rmSync;
+    fs.rmSync = (path, options) => {
+      if (String(path).includes(".runtime-install-")) {
+        throw Object.assign(new Error("Staging cleanup denied"), { code: "EACCES" });
+      }
+      return remove(path, options);
+    };
+    syncBuiltinESMExports();
+    const { ensureRuntime } = await import(${JSON.stringify(pathToFileURL(join(here, "electron-runtime-cache.mjs")).href)});
+    await assert.rejects(ensureRuntime({
+      ...${JSON.stringify(opts)}, download: async () => ${JSON.stringify(setup.zip)}, log: () => {},
+    }), /Staging cleanup denied/);
+    assert.equal(fs.existsSync(${JSON.stringify(join(opts.electronDir, ".pwragent-runtime-lock"))}), false);
+  `;
+  execFileSync(process.execPath, ["--input-type=module", "-e", script], { stdio: "pipe" });
 });
 
 it("concurrent processes publish one shared cache and serialize writes to the same package", async () => {

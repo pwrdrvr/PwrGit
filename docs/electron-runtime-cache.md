@@ -21,7 +21,7 @@ change. Dependency trees remain independent in every checkout.
 
 `electron-runtime-cache.mjs` is copied unchanged from PwrAgent PR
 [pwrdrvr/PwrAgent#3580](https://github.com/pwrdrvr/PwrAgent/pull/3580), head
-`776c3c4d04a1b167f1e8d5d818446cf67d7a1a39`. The adapter resolves Electron
+`e64619ca8747e5c0c628ce6c6a87c07ed106f9eb`. The adapter resolves Electron
 relative to this desktop layout and preserves PwrGit's skip behavior.
 
 The identity is constructed in this exact order:
@@ -65,6 +65,22 @@ another product or donor checkout. Existing caches and installs are not
 rewritten or evicted. Cache entries are retained across Electron upgrades;
 cleanup requires an explicit operator decision.
 
+### Worktree-only write permissions
+
+Worktree-only write permissions are supported. Download and checksum temporary
+files live in an owned directory inside the current Electron package. If the
+ZIP cache rejects a write with `EACCES`, `EPERM` or `EROFS`, the installer makes
+one attempt with a ZIP cache inside that same temporary directory. Both attempts
+retain `@electron/get` checksum validation and download settings. Network and
+integrity failures do not trigger this permission fallback. The entry-point
+download callback must forward the installer's `tempDirectory` and optional
+`cacheRoot` overrides after its default download options.
+
+A readable, verified shared extraction can still be cloned without modifying
+the shared cache. When shared storage cannot be used, installation remains
+local and may allocate a private runtime. Download scratch and its local ZIP
+cache are removed after installation; no existing user cache is removed.
+
 ## Verification
 
 The APFS filesystem oracle in `ensure-electron-runtime.test.mjs` was run first
@@ -73,6 +89,18 @@ against PwrGit's original `install-electron-binary.mjs`. Its disposable Electron
 installer does. It failed the shared-clone-ID assertion (`236632767` versus
 `236632790`). With the cached installer, the same oracle passes and a private
 write leaves the other install's bytes unchanged.
+
+Permission regression tests fail against the pre-fix installer, including the
+real `@electron/get` test with disposable `chmod 0555` ZIP and extraction
+caches (only HTTP is replaced with a local fixture ZIP). A separate native
+entry-point test fails for all three permission codes when the callback omits
+the override forwarding, even with the helper fixed. These pass with both
+changes. Generated permission codes cover `EACCES`, `EPERM` and `EROFS`;
+network failures are not retried, scratch is removed, the package lock is
+released even under an injected staging-cleanup denial, and PwrGit's explicit and
+missing-Electron skip branches remain intact. The real permission oracle runs
+on non-root POSIX hosts; cross-platform model and entry-point tests cover the
+other host paths.
 
 The focused suite also checks generated platform/architecture combinations,
 exact identity field order and key hashing, distinct version/archive identities,
