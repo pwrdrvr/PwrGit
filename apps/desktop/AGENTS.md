@@ -54,7 +54,11 @@ Since Electron 42, `electron` fetches its binary on the first
 with "Electron uninstall"), and parallel Playwright workers would race. So
 `postinstall` runs
 [scripts/install-electron-binary.mjs](scripts/install-electron-binary.mjs)
-first. Repair a missing `dist/` with
+through [ensure-electron-runtime.mjs](scripts/ensure-electron-runtime.mjs), which
+shares PwrAgent’s verified extraction cache and installs independent runtime
+copies (native APFS clones on macOS). Protocol and headless allocation oracle:
+[docs/electron-runtime-cache.md](../../docs/electron-runtime-cache.md).
+Repair a missing `dist/` with
 `pnpm --filter @pwrgit/desktop run install:electron-binary`.
 
 A major Electron bump also changes:

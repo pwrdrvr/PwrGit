@@ -39,7 +39,7 @@ function fixture(version = "44.10.1", bytes = randomBytes(1024 * 1024)) {
   return { root, zip, version, bytes };
 }
 
-function prepareInstall({ root, zip, version }, name, { platform = "darwin", arch = "arm64" } = {}) {
+function prepareInstall({ root, zip, version }, name, { platform = "darwin", arch = "arm64", env = {} } = {}) {
   const target = join(root, name);
   const electron = join(target, "node_modules/electron");
   mkdirSync(join(electron, "node_modules/@electron/get"), { recursive: true });
@@ -73,7 +73,7 @@ function prepareInstall({ root, zip, version }, name, { platform = "darwin", arc
     writeFileSync(join(__dirname, "path.txt"), ${JSON.stringify(platformPath(platform))});
   `);
   const options = {
-    env: { ...process.env, PWRAGENT_HOME: join(root, "home"), npm_config_platform: platform, npm_config_arch: arch, ELECTRON_SKIP_BINARY_DOWNLOAD: "" },
+    env: { ...process.env, PWRAGENT_HOME: join(root, "home"), npm_config_platform: platform, npm_config_arch: arch, ELECTRON_SKIP_BINARY_DOWNLOAD: "", ...env },
     stdio: "pipe",
   };
   return {
@@ -100,12 +100,27 @@ it("runs the production entry point for the native host and reuses the same cach
   const cache = join(setup.root, "home/cache/electron-runtime/v1");
   const keys = readdirSync(cache).filter((name) => /^[a-f0-9]{64}$/.test(name));
   expect(keys).toHaveLength(1);
+  const inodes = installs.map((install) => lstatSync(install.binary).ino);
+  expect(new Set(inodes).size).toBe(installs.length);
+  for (const install of installs) {
+    expect(lstatSync(install.binary).isFile()).toBe(true);
+    expect(lstatSync(install.binary).nlink).toBe(1);
+  }
   const { identity } = JSON.parse(readFileSync(join(cache, keys[0], "runtime.json"), "utf8"));
   expect(identity).toMatchObject({ version: setup.version, ...host });
   const requests = readFileSync(join(setup.root, "requests.jsonl"), "utf8").trim().split("\n").map(JSON.parse);
   expect(requests).toHaveLength(3);
   for (const request of requests) expect(request).toMatchObject({ version: setup.version, ...host });
 }, 60_000);
+
+it("preserves the explicit binary-download skip without touching the shared cache", () => {
+  const setup = fixture("44.9.3", randomBytes(8192));
+  const install = prepareInstall(setup, "skip", { env: { ELECTRON_SKIP_BINARY_DOWNLOAD: "1" } });
+  install.runSync();
+  expect(existsSync(install.binary)).toBe(false);
+  expect(existsSync(join(setup.root, "home"))).toBe(false);
+  expect(existsSync(join(setup.root, "requests.jsonl"))).toBe(false);
+});
 
 it.skipIf(process.platform !== "darwin")("APFS oracle: repeated extraction shares blocks with independent writable files", () => {
   const setup = fixture();
@@ -149,7 +164,13 @@ it("property: cache entries partition every target dimension and archive identit
         expect(readFileSync(join(opts.electronDir, "dist", platformPath(platform)))).toEqual(setup.bytes);
       }
       const manifests = readdirSync(cacheRoot).filter((name) => /^[a-f0-9]{64}$/.test(name))
-        .map((name) => JSON.parse(readFileSync(join(cacheRoot, name, "runtime.json"), "utf8")));
+        .map((name) => {
+          const manifest = JSON.parse(readFileSync(join(cacheRoot, name, "runtime.json"), "utf8"));
+          expect(Object.keys(manifest.identity)).toEqual(["format", "version", "platform", "arch", "checksum"]);
+          expect(manifest.identity.format).toBe(1);
+          expect(name).toBe(hash(JSON.stringify(manifest.identity)));
+          return manifest;
+        });
       expect(manifests.map(({ identity }) => [identity.platform, identity.arch]).sort()).toEqual([...targets].sort());
     },
   ), { numRuns: 6 });

@@ -1,0 +1,84 @@
+{
+  "measuredAt": "2026-11-10T17:43:56.067Z",
+  "node": "v24.22.1",
+  "version": "44.9.3",
+  "platform": "darwin",
+  "arch": "arm64",
+  "zipSha256": "4af51382278d00291dfcda265eddd9bab6e98cebb09f46aadc8438bf606de162",
+  "products": [
+    "PwrAgent",
+    "PwrGit"
+  ],
+  "legacy": [
+    {
+      "regularFiles": 260,
+      "allocatedBytes": 328777728,
+      "privateBytes": 323215360
+    },
+    {
+      "regularFiles": 260,
+      "allocatedBytes": 338673664,
+      "privateBytes": 323059712
+    }
+  ],
+  "cloned": [
+    {
+      "regularFiles": 260,
+      "allocatedBytes": 322994176,
+      "privateBytes": 0
+    },
+    {
+      "regularFiles": 260,
+      "allocatedBytes": 322994176,
+      "privateBytes": 0
+    }
+  ],
+  "frameworkSha256": "dd63e2ed3669826c26ce9adaabaff14be544cae0937c36067577eff33f05bbf7",
+  "frameworkMetadata": [
+    {
+      "privateBytes": 203563008,
+      "cloneId": "236642939",
+      "inode": "236642939",
+      "allocatedBytes": 209125376
+    },
+    {
+      "privateBytes": 203407360,
+      "cloneId": "236643539",
+      "inode": "236643539",
+      "allocatedBytes": 219021312
+    },
+    {
+      "privateBytes": 0,
+      "cloneId": "236644163",
+      "inode": "236646978",
+      "allocatedBytes": 203341824
+    },
+    {
+      "privateBytes": 0,
+      "cloneId": "236644163",
+      "inode": "236647592",
+      "allocatedBytes": 203341824
+    }
+  ],
+  "cacheKey": "d3a2469bcddef14cc7c75cffe6e50104e4732ff60d9b23b770285f94d426e566",
+  "nodeCopyMetadata": {
+    "privateBytes": 203464704,
+    "cloneId": "236648102",
+    "inode": "236648102",
+    "allocatedBytes": 218169344
+  },
+  "afterPrivateWrite": [
+    {
+      "privateBytes": 0,
+      "cloneId": "236644163",
+      "inode": "236646978",
+      "allocatedBytes": 203341824
+    },
+    {
+      "privateBytes": 16384,
+      "cloneId": "236648103",
+      "inode": "236647592",
+      "allocatedBytes": 203341824
+    }
+  ]
+}
