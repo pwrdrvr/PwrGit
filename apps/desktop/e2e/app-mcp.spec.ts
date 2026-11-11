@@ -17,8 +17,8 @@ test("Native stdio MCP answers recent repos from the app and opens and refreshes
     await addRootAndExpand(handle.window, handle, sandbox, "zeta");
     await branchRow(handle.window, "main").first().click();
     const userData = await handle.app.evaluate(({ app }) => app.getPath("userData"));
-    // Create a bounded fixture role, then approve through the actual native
-    // consent window. A pre-minted legacy credential cannot authorize IPC.
+    // Create a bounded fixture role and name it on the relay's command line:
+    // PwrGit grants a relay exactly that role, with no consent window.
     const policy = new McpPolicyStore(join(userData, "mcp-policy.json"));
     policy.initialize();
     const role = policy.createRole({ name: "Fixture app control", description: "", permissions: [...MCP_AGENT_CAPABILITIES], repositoryRoots: [sandbox.reposDir, join(dirname(sandbox.reposDir), "worktrees")] });
@@ -27,14 +27,9 @@ test("Native stdio MCP answers recent repos from the app and opens and refreshes
     const endpoint = process.platform === "win32"
       ? "\\\\.\\pipe\\" + decodeURIComponent(new URL(enabled.value.mcpUrl).pathname.slice(6))
       : decodeURIComponent(new URL(enabled.value.mcpUrl).pathname);
-    const consentWindow = handle.app.waitForEvent("window");
-    const connection = client.connect(new StdioClientTransport({ command: enabled.value.executable, args: ["--endpoint", endpoint] }));
-    // Window events precede renderer navigation; wait for its real role input.
-    void connection.catch(() => undefined);
-    const consent = await consentWindow;
-    await consent.getByRole("combobox").selectOption(role.id);
-    await consent.getByRole("button", { name: "Approve", exact: true }).click();
-    await connection;
+    const windows = handle.app.windows().length;
+    await client.connect(new StdioClientTransport({ command: enabled.value.executable, args: ["--endpoint", endpoint, "--role", role.id] }));
+    expect(handle.app.windows()).toHaveLength(windows);
     const list = async () => {
       const response = await client.callTool({ name: "pwrgit_app_repositories", arguments: {} });
       expect(response.isError).not.toBe(true);
