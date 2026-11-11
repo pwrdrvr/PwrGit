@@ -42,6 +42,8 @@ describe("GitLab merge trains", () => {
     expect(status({ ...strategies, mergeTrainCar: null, detailedMergeStatus: "MERGEABLE" })).toBe("ready_to_queue");
     expect(status({ ...strategies, mergeTrainCar: null, detailedMergeStatus: "NOT_APPROVED" })).toBe("not_ready");
     expect(status({ availableAutoMergeStrategies: ["merge_when_checks_pass"], mergeTrainCar: null })).toBeNull();
+    // GitLab still working it out is not ready: there is no CI state to fall back on.
+    expect(status({ ...strategies, mergeTrainCar: null, detailedMergeStatus: "CHECKING" })).toBe("not_ready");
   });
 
   it("REST nodes and instances without the fields say nothing about a train", () => {

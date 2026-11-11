@@ -204,7 +204,8 @@ async function runQuery(
   repo: Pick<ForgeRepo, "host" | "port">,
   query: string,
   variables: Record<string, string | number>,
-  resolved: (data: unknown) => boolean = repositoryResolved
+  resolved: (data: unknown) => boolean = repositoryResolved,
+  maxRetries: number = MAX_RETRIES
 ): Promise<unknown> {
   const base = githubGraphqlBaseUrl(repo);
   const client = graphql.defaults({
@@ -243,7 +244,7 @@ async function runQuery(
       }
       attempt += 1;
       const wait = retryDelayMs(error, attempt);
-      if (wait === null || attempt > MAX_RETRIES) throw error;
+      if (wait === null || attempt > maxRetries) throw error;
       await delay(wait);
     }
   }
@@ -524,7 +525,10 @@ export async function enqueuePullRequest(
     mergeQueueEntry { position state }
   }
 }`, variables, (answer) => typeof (answer as { enqueuePullRequest?: unknown } | null)?.enqueuePullRequest === "object" &&
-    (answer as { enqueuePullRequest?: unknown }).enqueuePullRequest !== null) as {
+    (answer as { enqueuePullRequest?: unknown }).enqueuePullRequest !== null,
+  // A write is never sent twice: a lost answer to an enqueue that landed
+  // would come back as "already queued", an error for a success.
+  0) as {
     enqueuePullRequest?: { mergeQueueEntry?: { position?: number; state?: string } | null };
   };
   const entry = data.enqueuePullRequest?.mergeQueueEntry;

@@ -336,9 +336,6 @@ function carState(car: NonNullable<MrNode["mergeTrainCar"]>): MergeQueueEntrySta
   }
 }
 
-/** Statuses that are GitLab still working the answer out, not a block. */
-const UNSETTLED = new Set(["UNCHECKED", "CHECKING", "PREPARING", "APPROVALS_SYNCING"]);
-
 /**
  * GitLab's merge-train fields as a `PrMergeQueue`; nothing when the query did
  * not ask for them (REST, or an instance without merge trains).
@@ -370,7 +367,11 @@ export function mergeTrainSummary(node: MrNode): { mergeQueue?: PrMergeQueue } {
         }
       } : {}),
       ...(carStatus === "MERGED" ? { lastEvent: { kind: "added" as const } } : {}),
-      ...(detailed === "" || UNSETTLED.has(detailed) ? {} : { blocked: detailed !== "MERGEABLE" })
+      // Anything but MERGEABLE blocks, the unsettled CHECKING/UNCHECKED/
+      // PREPARING included: a GitLab summary has no check state to fall back
+      // on, so reading those as unblocked offered "Add to merge train" right
+      // after every push.
+      ...(detailed === "" ? {} : { blocked: detailed !== "MERGEABLE" })
     }
   };
 }

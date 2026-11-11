@@ -19,10 +19,10 @@ export function registerChangeRequestHandlers(
     /** A fetch added refs: re-index them so ⌘K and the sidebar see them. */
     onHeadFetched?: (repoId: string) => Promise<void>;
   } = {}
-): { refreshInBackground: (repoId: string, trigger: OpenListTrigger) => void } {
-  const refreshInBackground = (repoId: string, trigger: OpenListTrigger): void => {
+): { refreshInBackground: (repoId: string, trigger: OpenListTrigger, force?: boolean) => void } {
+  const refreshInBackground = (repoId: string, trigger: OpenListTrigger, force = false): void => {
     void openPrs
-      .refresh(repoId, { trigger })
+      .refresh(repoId, force ? { trigger, force } : { trigger })
       .then((changed) => {
         if (changed) emitEvent("pr:openChanged", { repoId });
       })

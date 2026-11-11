@@ -77,6 +77,15 @@ describe("Add to merge queue", () => {
     expect(container.querySelector("[role='alert']")).toBeNull();
   });
 
+  it("offers to re-queue a dropped PR once it is ready again, and not before", () => {
+    const dropped = { required: true, blocked: false, lastEvent: { kind: "removed" as const, reason: "failed_checks" } };
+    render({ ...ready, mergeQueue: dropped }, "repo-1");
+    expect(container.textContent).toContain("removed from queue");
+    expect(button()?.textContent).toBe("Add to merge queue");
+    render({ ...ready, checkState: "failing", mergeQueue: dropped }, "repo-1");
+    expect(button()).toBeNull();
+  });
+
   it("names the method only when the queue imposes one", () => {
     render({ ...ready, mergeQueue: { required: true, blocked: false, method: "squash" } }, "repo-1");
     expect(container.textContent).toContain("The queue squashes");

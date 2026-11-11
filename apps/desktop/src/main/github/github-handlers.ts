@@ -37,7 +37,10 @@ export function registerGitHubHandlers(
    * A whole-repository sweep ran (a repo row expanded). The open
    * change-request list rides the same trigger, under its own TTL.
    */
-  onRepoSweep?: (repoId: string) => void
+  onRepoSweep?: (repoId: string) => void,
+  /** A change request changed because of something PwrGit did (an enqueue):
+   *  re-read the open list now, past its TTL. */
+  onChangeRequestChanged?: (repoId: string) => void
 ): {
   stop: () => void;
   releaseWebContents: (webContentsId: number) => void;
@@ -186,8 +189,12 @@ export function registerGitHubHandlers(
     if (!Number.isSafeInteger(req.number) || req.number <= 0) {
       return err(pwrGitError("validation", "invalid_number", "Not a change request number."));
     }
-    const headOid = req.headOid === undefined || /^[0-9a-f]{40}$/i.test(req.headOid)
-      ? req.headOid : undefined;
+    // The pin is the point: a head that is not a full SHA is refused, never
+    // dropped, or the enqueue would take whatever head the forge has now.
+    if (req.headOid !== undefined && !/^[0-9a-f]{40}$/i.test(req.headOid)) {
+      return err(pwrGitError("validation", "invalid_head", "Not a full commit SHA."));
+    }
+    const headOid = req.headOid;
     const answer = await prs.enqueue(req.repoId, {
       number: req.number,
       ...(req.repoPath === undefined ? {} : { repoPath: req.repoPath }),
@@ -196,6 +203,9 @@ export function registerGitHubHandlers(
     if (!answer.ok) return answer;
     publishBranchPrs(req.repoId, answer.value.deltas.branches);
     publishCommitPrs(req.repoId, answer.value.deltas.commits);
+    // The Pull requests list is its own cache; without this, a PR enqueued
+    // from it kept reading "ready to queue" until the list's TTL.
+    onChangeRequestChanged?.(req.repoId);
     return ok(answer.value.result.position === undefined ? {} : { position: answer.value.result.position });
   });
 

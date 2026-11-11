@@ -83,8 +83,11 @@ export type MergeQueueStatus =
     }
   /** In the queue, and its merge group's checks are running. */
   | { kind: "group_checks_running"; position?: number; etaSeconds?: number }
-  /** Dropped from the queue and still open. */
-  | { kind: "removed"; reason?: string; at?: number }
+  /**
+   * Dropped from the queue and still open. `canRequeue`: the queue is still
+   * required and nothing is outstanding, so it can go straight back in.
+   */
+  | { kind: "removed"; reason?: string; at?: number; canRequeue: boolean }
   /** Merged, and the queue did it. */
   | { kind: "merged_by_queue"; at?: number };
 
@@ -135,17 +138,18 @@ export function mergeQueueStatus(
       failing: entry.state === "unmergeable"
     };
   }
+  const ready = queue.required && !pr.isDraft && queue.blocked !== true &&
+    pr.mergeState !== "conflicting" && pr.checkState !== "failing" &&
+    pr.checkState !== "pending";
   if (last?.kind === "removed" && last.reason !== MERGED_REASON) {
     return {
       kind: "removed",
       ...optional("reason", last.reason),
-      ...optional("at", last.at)
+      ...optional("at", last.at),
+      canRequeue: ready
     };
   }
   if (!queue.required) return null;
-  const ready = !pr.isDraft && queue.blocked !== true &&
-    pr.mergeState !== "conflicting" && pr.checkState !== "failing" &&
-    pr.checkState !== "pending";
   return ready
     ? { kind: "ready_to_queue", ...optional("method", queue.method) }
     : { kind: "not_ready" };
@@ -221,8 +225,13 @@ export function isMergeQueueRemoteRef(ref: string): boolean {
   return MERGE_GROUP_BRANCH.test(short);
 }
 
-/** `<remote…>/gh-readonly-queue/<base>/<rest>`. */
-const MERGE_GROUP_BRANCH = /^[^/]+(?:\/[^/]+)*?\/gh-readonly-queue\/.+\/.+$/;
+/**
+ * `<remote>/gh-readonly-queue/<base>/<rest>`, the remote being the first
+ * segment. Anchored there so a user's `origin/infra/gh-readonly-queue/…` is
+ * not hidden; a caller that knows a slashed remote name splits it and asks
+ * `isMergeQueueBranchName` instead.
+ */
+const MERGE_GROUP_BRANCH = /^[^/]+\/gh-readonly-queue\/.+\/.+$/;
 
 /** A branch name (no remote) that GitHub's merge queue made. */
 export function isMergeQueueBranchName(name: string): boolean {

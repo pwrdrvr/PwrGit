@@ -75,9 +75,15 @@ export function PrStatusCard({
         />
         <span>{status.label}</span>
       </div>
-      {status.queue?.kind === "ready_to_queue" && repoId !== undefined &&
+      {(status.queue?.kind === "ready_to_queue" ||
+        (status.queue?.kind === "removed" && status.queue.canRequeue)) &&
+      repoId !== undefined &&
       forgeCapabilities(pr.forge ?? ASSUMED_FORGE_KIND).addToMergeQueue ? (
-        <EnqueueAction pr={pr} repoId={repoId} method={status.queue.method} />
+        <EnqueueAction
+          pr={pr}
+          repoId={repoId}
+          method={status.queue.kind === "ready_to_queue" ? status.queue.method : pr.mergeQueue?.method}
+        />
       ) : null}
       {changes !== undefined ? (
         <div className="pr-status-card__section">

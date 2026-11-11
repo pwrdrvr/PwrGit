@@ -215,7 +215,11 @@ describe("merge queue model (GitHub)", () => {
           const status = pwrgit(m);
           reached.add(String(expected(m)));
           expect(status?.kind ?? null, step.name).toBe(expected(m));
-          if (status?.kind === "removed") expect(status.reason).toBe(m.dropped);
+          if (status?.kind === "removed") {
+            expect(status.reason).toBe(m.dropped);
+            // Fixed and green again: it can go straight back in.
+            expect(status.canRequeue, step.name).toBe(canEnqueue(m));
+          }
           if (status?.kind === "queued" || status?.kind === "group_checks_running") {
             expect(status.position).toBe(m.entry?.position);
           }

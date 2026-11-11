@@ -101,6 +101,13 @@ describe("enqueuePullRequest", () => {
     expect(client).toHaveBeenCalledTimes(1);
   });
 
+  it("never sends the enqueue twice, even after a transient failure", async () => {
+    const lost = Object.assign(new Error("HTTP 502"), { status: 502, response: { status: 502, headers: {}, data: null } });
+    client.mockResolvedValueOnce(read(ready)).mockRejectedValueOnce(lost);
+    await expect(enqueuePullRequest("t", DOTCOM, "o", "r", 1)).rejects.toBe(lost);
+    expect(client).toHaveBeenCalledTimes(2);
+  });
+
   it("enqueues with the expected head, and only through enqueuePullRequest", async () => {
     client
       .mockResolvedValueOnce(read(ready))

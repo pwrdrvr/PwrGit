@@ -11,7 +11,10 @@ describe("merge-group refs", () => {
     const head = "gh-readonly-queue/main/pr-26470-0123456789abcdef0123456789abcdef01234567";
     expect(isMergeQueueRemoteRef(`refs/remotes/origin/${head}`)).toBe(true);
     expect(isMergeQueueRemoteRef(`origin/${head}`)).toBe(true);
-    expect(isMergeQueueRemoteRef(`refs/remotes/team/fork/${head}`)).toBe(true);
+    // A remote named with a slash is split by callers that know the remotes
+    // (`isMergeQueueBranchName` on the branch part); alone, the first segment
+    // is the remote.
+    expect(isMergeQueueRemoteRef(`refs/remotes/team/fork/${head}`)).toBe(false);
     expect(isMergeQueueBranchName(head)).toBe(true);
     expect(isMergeQueueBranchName("gh-readonly-queue/release/v2/pr-1-abc")).toBe(true);
   });
@@ -21,6 +24,8 @@ describe("merge-group refs", () => {
     expect(isMergeQueueRemoteRef("refs/remotes/origin/gh-readonly-queue")).toBe(false);
     expect(isMergeQueueRemoteRef("refs/remotes/origin/feature/queue")).toBe(false);
     expect(isMergeQueueBranchName("feature/gh-readonly-queue/main/x")).toBe(false);
+    expect(isMergeQueueRemoteRef("refs/remotes/origin/infra/gh-readonly-queue/main/notes")).toBe(false);
+    expect(isMergeQueueRemoteRef("origin/infra/gh-readonly-queue/main/notes")).toBe(false);
   });
 });
 
@@ -30,7 +35,7 @@ describe("queue wording", () => {
       .toBe("queued #2 · ~4 min");
     expect(mergeQueueLabel({ kind: "group_checks_running", position: 1 }))
       .toBe("queued #1 · merge group checks running");
-    expect(mergeQueueLabel({ kind: "removed", reason: "failed_checks" }))
+    expect(mergeQueueLabel({ kind: "removed", reason: "failed_checks", canRequeue: false }))
       .toBe("removed from queue · merge group checks failed");
     expect(mergeQueueRemovalReason("SOMETHING_NEW")).toBe("something new");
     expect(mergeQueueRemovalReason("  ")).toBeUndefined();

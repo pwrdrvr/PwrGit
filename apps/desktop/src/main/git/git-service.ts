@@ -3610,12 +3610,13 @@ export function parseBranchRefs(
     if (isRemote && /^refs\/remotes\/[^/]+\/HEAD$/.test(full)) continue;
     // A merge group's `gh-readonly-queue/<base>/…` is GitHub's, made and
     // deleted by the queue: never a branch to switch to, list or index.
-    if (isRemote && isMergeQueueRemoteRef(full)) continue;
+    const owner = isRemote ? splitRemoteRefname(full, remotes) : null;
+    if (isRemote && (owner === null ? isMergeQueueRemoteRef(full)
+      : isMergeQueueBranchName(owner.remoteBranch))) continue;
     const ref: BranchRef = { name, isRemote, isCurrent: head === "*" };
     if (upstream !== "") ref.upstream = upstream;
     if (date !== "") ref.lastCommitAt = date;
     if (subject !== "") ref.subject = subject;
-    const owner = isRemote ? splitRemoteRefname(full, remotes) : null;
     if (owner !== null) {
       ref.remote = owner.remote;
       ref.remoteBranch = owner.remoteBranch;
