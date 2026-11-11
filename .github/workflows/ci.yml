@@ -27,7 +27,7 @@ permissions:
 
 jobs:
   # Keep the pull_request trigger path-unfiltered so the required check jobs
-  # exist on every PR. Docs/Dependabot-only PRs skip those jobs below instead.
+  # exist on every PR. Docs/Dependabot/agent-skill-only PRs skip expensive jobs below.
   changes:
     name: Classify Changes
     runs-on: ubuntu-latest
@@ -64,7 +64,12 @@ jobs:
             }
 
             const reportedCount = context.payload.pull_request.changed_files;
-            if (files.length === 0 || files.length !== reportedCount) {
+            const incompleteRecord = files.some((file) =>
+              !file || typeof file.filename !== "string" || !file.filename ||
+              (file.status === "renamed" &&
+                (typeof file.previous_filename !== "string" || !file.previous_filename)),
+            );
+            if (files.length === 0 || files.length !== reportedCount || incompleteRecord) {
               fullCi(
                 `changed-file list was incomplete (received ${files.length} of ${reportedCount})`,
               );
@@ -73,7 +78,8 @@ jobs:
 
             const isNonCodePath = (path) =>
               path === ".github/dependabot.yml" ||
-              path.startsWith("docs/") || path.toLowerCase().endsWith(".md");
+              path.startsWith("docs/") || path.toLowerCase().endsWith(".md") ||
+              path.startsWith(".agents/skills/");
             const codeImpactingFile = files.find((file) => {
               const paths = [file.filename, file.previous_filename].filter(Boolean);
               return paths.some((path) => !isNonCodePath(path));
@@ -89,7 +95,7 @@ jobs:
               ])
               .addRaw(
                 nonCodeOnly
-                  ? "Only documentation or Dependabot configuration changed; expensive CI jobs are skipped."
+                  ? "Only documentation, Dependabot configuration, or `.agents/skills/**` changed; expensive CI jobs are skipped."
                   : `Full CI runs because \`${codeImpactingFile.filename}\` requires it.`,
               )
               .write();

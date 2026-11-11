@@ -1,0 +1,6 @@
+interface:
+  display_name: "PwrGit Worktree Cache Cleanup"
+  short_description: "Clean Vitest caches and private Electron runtimes"
+
+policy:
+  allow_implicit_invocation: false
