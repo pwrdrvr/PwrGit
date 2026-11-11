@@ -336,12 +336,14 @@ or locked) blocks Git forever with no output. Timeouts are in *minutes*,
 because a large clone looks the same. So `silent` is per command, and Cancel
 exists.
 
-**The one exception is `remote:checkSelected`, the automatic check behind the
-header's "up to date".** The registry drives the header's buttons. Registered,
+**The exceptions are `remote:checkSelected`, the automatic check behind the
+header's "up to date", and the automatic published-tag check
+(`autoRefreshTags`).** The registry drives the header's buttons. Registered,
 this check showed "Preparing local changes…" on Fetch and locked Pull and Push
 every minute. It stays out because it cannot wedge: it has its own 12s
 timeout, holds the repository lock only for ref writes (`ls-remote` runs
 unlocked), and `tracked()` aborts it so a user's fetch never queues behind it.
+The tag check meets the same three (20s timeout, no lock, `autoCheckAborts`).
 A background check without all three belongs in the registry.
 
 ## `repo:changed` names its repositories when it can

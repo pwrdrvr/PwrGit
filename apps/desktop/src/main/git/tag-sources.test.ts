@@ -411,6 +411,43 @@ describe("listing lifecycle", () => {
     expect(sources.store.snapshot("repo-1", "origin")).toMatchObject({ error: null, tag_count: 1 });
   });
 
+  it("re-counting a remote that was never listed reads no local tag", async () => {
+    const { local } = fixture(false);
+    const { sources } = service();
+    const calls: string[][] = [];
+    const recount = await sources.recount(counting(calls), "repo-1", local, "origin");
+    expect(recount.ok && recount.value).toBe(false);
+    expect(calls).toEqual([]);
+  });
+
+  it("a restore that cannot read the kept value moves no ref", async () => {
+    const { local } = fixture(false);
+    const { sources } = service();
+    expect((await sources.refresh(systemGit, "repo-1", local, "origin")).ok).toBe(true);
+    const row = (await page(sources, local, "differs")).rows[0]!;
+    const adopted = await sources.adopt(systemGit, "repo-1", local, {
+      name: "v1.2.3",
+      remote: "origin",
+      expectedRemoteObjectId: row.published!.objectId,
+      expectedLocalObjectId: row.local!.objectId
+    });
+    if (!adopted.ok) throw new Error(adopted.error.message);
+    // The object read fails, as a stopped or failed spawn would.
+    const noObjectReads: GitExec = (args, cwd, options) =>
+      args[0] === "cat-file"
+        ? Promise.resolve({ ok: false, error: { kind: "git", code: "spawn_failed", message: "cat-file failed" } })
+        : systemGit(args, cwd, options);
+    const restored = await sources.restore(noObjectReads, "repo-1", local, {
+      name: "v1.2.3",
+      ref: adopted.value.replacedRef!,
+      expectedLocalObjectId: adopted.value.objectId
+    });
+    expect(restored.ok).toBe(false);
+    // Reported failed, so nothing may have moved: the tag and its pin stay.
+    expect(git(local, "rev-parse", "v1.2.3")).toBe(adopted.value.objectId);
+    expect(git(local, "for-each-ref", "--format=%(refname)", "refs/pwrgit/replaced-tags")).toBe(adopted.value.replacedRef);
+  });
+
   it("the sidebar line follows the configured remotes, and a removed remote is forgotten", () => {
     const { sources } = service();
     const tag = { name: "v1", objectId: "a".repeat(40), targetId: "a".repeat(40), annotated: false };

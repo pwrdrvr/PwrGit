@@ -1470,12 +1470,6 @@ export async function fetchRefspec(
   return fetchWithRefRaceRetry(git, cwd, ["fetch", "--no-tags", remote, refspec]);
 }
 
-// Fetch never adds tag flags. Git's own rules decide which tags arrive:
-// auto-follow of missing names, `remote.<name>.tagOpt`, shallow and partial
-// limits and custom refspecs. `--tags --force` would override all of them and
-// let the last remote fetched rewrite a shared tag name. A tag that moved on
-// the published remote is adopted one at a time instead (tag-sources.ts).
-
 /** Fetch the checked-out branch's configured remote (or origin) and prune. */
 export async function fetchRemote(
   git: GitExec,
@@ -3807,17 +3801,8 @@ export async function readTagSummaries(
   const wanted = new Set(names);
   for (let index = 0; index < names.length; index += 100) {
     const batch = names.slice(index, index + 100).map((name) => `refs/tags/${name}`);
-    const args = ["for-each-ref", `--format=${TAG_FORMAT}`, ...batch];
-    const raw = await git(args, cwd);
-    if (!raw.ok) return raw;
-    const checked = requireExit0(raw.value, ["for-each-ref"]);
-    if (!checked.ok) return checked;
-    for (const tag of parseTagRows(checked.value.stdout)) {
-      // `%(refname:short)` becomes `tags/<name>` when a branch shares the
-      // name, so key by the full ref.
-      const name = tag.fullName.slice("refs/tags/".length);
-      if (wanted.has(name)) found.set(name, { ...tag, name });
-    }
+    const read = await readTagSummariesByName(git, cwd, batch, wanted, found);
+    if (!read.ok) return read;
   }
   return ok(found);
 }
@@ -3827,15 +3812,25 @@ export async function readAllTagSummaries(
   git: GitExec,
   cwd: string
 ): Promise<Result<Map<string, TagSummary>>> {
-  const args = ["for-each-ref", `--format=${TAG_FORMAT}`, "refs/tags"];
-  const raw = await git(args, cwd);
+  return readTagSummariesByName(git, cwd, ["refs/tags"], null, new Map());
+}
+
+async function readTagSummariesByName(
+  git: GitExec,
+  cwd: string,
+  patterns: string[],
+  wanted: Set<string> | null,
+  found: Map<string, TagSummary>
+): Promise<Result<Map<string, TagSummary>>> {
+  const raw = await git(["for-each-ref", `--format=${TAG_FORMAT}`, ...patterns], cwd);
   if (!raw.ok) return raw;
   const checked = requireExit0(raw.value, ["for-each-ref"]);
   if (!checked.ok) return checked;
-  const found = new Map<string, TagSummary>();
   for (const tag of parseTagRows(checked.value.stdout)) {
+    // `%(refname:short)` becomes `tags/<name>` when a branch shares the
+    // name, so key by the full ref.
     const name = tag.fullName.slice("refs/tags/".length);
-    found.set(name, { ...tag, name });
+    if (wanted === null || wanted.has(name)) found.set(name, { ...tag, name });
   }
   return ok(found);
 }

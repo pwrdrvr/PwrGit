@@ -704,9 +704,12 @@ export class TagSources {
 
   /** Re-derive the stored "differs" count; true when it moved. */
   async recount(git: GitExec, repoId: string, cwd: string, remote: string): Promise<Result<boolean>> {
+    // Never listed: nothing can differ, and no local tag needs reading.
+    const published = this.store.tags(repoId, remote);
+    if (published === null) return ok(false);
     const local = await readLocalTagRefs(git, cwd);
     if (!local.ok) return local;
-    const { counts } = compareTags(local.value.tags, this.store.tags(repoId, remote), this.store.keeps(repoId, remote));
+    const { counts } = compareTags(local.value.tags, published, this.store.keeps(repoId, remote));
     return ok(this.store.setDiffers(repoId, remote, counts.differs));
   }
 
@@ -925,6 +928,10 @@ export class TagSources {
     if (current.value !== input.expectedLocalObjectId) {
       return err({ kind: "repo", code: "local_tag_changed", message: `Local ${name} changed after review. Refresh and review it again.` });
     }
+    // Read before the write: once the refs move, an error here would report
+    // a restore that already happened as failed.
+    const target = await peel(git, cwd, kept.value);
+    if (!target.ok) return target;
     let replacedRef: string | null = null;
     if (current.value !== null) {
       const next = await this.nextReplacedRef(git, cwd, name);
@@ -938,8 +945,6 @@ export class TagSources {
       `delete ${input.ref} ${kept.value}`
     ]);
     if (!written.ok) return written;
-    const target = await peel(git, cwd, kept.value);
-    if (!target.ok) return target;
     this.store.clearKeep(repoId, name);
     await this.recountPublisher(git, repoId, cwd);
     return ok({ name, objectId: kept.value, targetId: target.value.targetId, replacedRef });

@@ -207,6 +207,27 @@ describe("RepoRefsModal Tags tab — published tags", () => {
     expect(button(container, "Check once")).toBeTruthy();
   });
 
+  it("shows a failed automatic check in the strip, with Retry", async () => {
+    answer = page({ stale: true });
+    const failed = source({ stale: true, error: "Listing origin's tags timed out" });
+    dispatchMock.mockImplementation((channel: string) => {
+      if (channel === "repo:tagStatus") return Promise.resolve(ok(answer));
+      if (channel === "tag:refreshRemote") {
+        // Main recorded the failure; the next page read carries it.
+        answer = page({ stale: true, error: failed.error });
+        return Promise.resolve(ok({ checked: false, source: failed }));
+      }
+      return Promise.resolve(ok(null));
+    });
+    await open();
+    await act(async () => {
+      vi.advanceTimersByTime(250);
+    });
+    await act(async () => undefined);
+    expect(container.querySelector(".refs-tag-source")?.textContent).toContain("Couldn\u2019t reach origin");
+    expect(button(container, "Retry")).toBeTruthy();
+  });
+
   it("offers a choice instead of guessing when there is no origin", async () => {
     answer = { ...page({ primary: null, remotes: ["github", "mirror"], checkedAt: null, stale: false }), rows: [] };
     await open();

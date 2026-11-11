@@ -125,7 +125,8 @@ vi.mock("./tag-sources", async (importOriginal) => {
     ...actual,
     tagSourcesFor: () => ({
       source: async () =>
-        err({ kind: "git", code: "not_modeled", message: "Tag checks are not part of this model." })
+        err({ kind: "git", code: "not_modeled", message: "Tag checks are not part of this model." }),
+      recountPublisher: async () => ok(false)
     })
   };
 });

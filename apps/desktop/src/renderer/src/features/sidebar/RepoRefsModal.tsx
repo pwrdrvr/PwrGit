@@ -908,7 +908,11 @@ export function RepoRefsModal({
     void dispatch("tag:refreshRemote", { repoId: repo.id, mode: "auto" }).then((result) => {
       if (!mounted.current) return;
       setTagChecking(false);
-      if (result.ok && result.value.checked) setTagEpoch((value) => value + 1);
+      // A failed or timed-out check changed nothing but the source's error:
+      // re-read so the strip says so and offers Retry.
+      if (result.ok && (result.value.checked || result.value.source.error !== tagSource.error)) {
+        setTagEpoch((value) => value + 1);
+      }
     });
   }, [repo.id, tab, tagSource]);
 

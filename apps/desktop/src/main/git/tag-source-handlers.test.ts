@@ -156,6 +156,32 @@ describe("published tag handlers", () => {
     expect(sources.store.snapshot("repo-1", "origin")).toBeNull();
   });
 
+  it("a Fetch within the hour re-counts the sidebar line after a terminal moved a tag", async () => {
+    const { local, newHead } = fixture();
+    register(local);
+    expect((await bus.dispatch("tag:refreshRemote", { repoId: "repo-1", mode: "explicit" })).ok).toBe(true);
+    const sources = tagSourcesFor(db);
+    expect(sources.store.attention("repo-1", ["origin"])).toEqual({ remote: "origin", differs: 1 });
+    // The user takes origin's value outside PwrGit; the listing is still fresh.
+    git(local, "fetch", "origin", "+refs/tags/v1.0.0:refs/tags/v1.0.0");
+    expect(git(local, "rev-parse", "v1.0.0")).toBe(newHead);
+    expect((await bus.dispatch("remote:fetchRepo", { repoId: "repo-1", remote: "origin" })).ok).toBe(true);
+    await vi.waitFor(() => expect(sources.store.attention("repo-1", ["origin"])).toBeUndefined(), { timeout: 10_000 });
+  });
+
+  it("a failing remote's back-off does not hold back another publisher", async () => {
+    const { local } = fixture();
+    const origin = git(local, "remote", "get-url", "origin");
+    git(local, "remote", "add", "mirror", origin);
+    git(local, "remote", "set-url", "origin", join(tmpdir(), "pwrgit-missing-remote.git"));
+    register(local);
+    const failed = await bus.dispatch("tag:refreshRemote", { repoId: "repo-1", mode: "auto" });
+    expect(failed.ok && failed.value).toMatchObject({ checked: false, source: { primary: "origin" } });
+    expect((await bus.dispatch("tag:setPrimaryRemote", { repoId: "repo-1", remote: "mirror" })).ok).toBe(true);
+    const mirror = await bus.dispatch("tag:refreshRemote", { repoId: "repo-1", mode: "auto" });
+    expect(mirror.ok && mirror.value).toMatchObject({ checked: true, source: { primary: "mirror", stale: false } });
+  });
+
   it("refuses an unconfigured remote as the publisher", async () => {
     const { local } = fixture();
     register(local);

@@ -550,7 +550,8 @@ export function registerRemoteHandlers(
     if (state.primary === null || state.tagOpt === "no-tags" || !state.stale) return false;
     // A failing remote is retried at most every two minutes, not on every
     // open of the tab.
-    if ((tagChecksFailedAt.get(repoId) ?? 0) > Date.now() - 2 * 60_000) return false;
+    const failedKey = `${repoId}\0${state.primary}`;
+    if ((tagChecksFailedAt.get(failedKey) ?? 0) > Date.now() - 2 * 60_000) return false;
     const controller = new AbortController();
     const aborts = autoCheckAborts.get(repoId) ?? new Set();
     aborts.add(controller);
@@ -563,7 +564,7 @@ export function registerRemoteHandlers(
         // Yielding to the user's own operation is not a failure. Our own
         // timeout is: `refresh` leaves stopped listings unrecorded, so say it.
         if (!controller.signal.aborted) {
-          tagChecksFailedAt.set(repoId, Date.now());
+          tagChecksFailedAt.set(failedKey, Date.now());
           if (wasStopped(refreshed.error)) {
             tagSources.store.recordFailure(repoId, state.primary, `Listing ${state.primary}'s tags timed out`, Date.now());
           }
@@ -571,7 +572,7 @@ export function registerRemoteHandlers(
         logMain("debug", "tag", `automatic tag check (${reason}) of ${state.primary} unavailable for ${repo.path}: ${sanitizeGitLogDetail(refreshed.error.message)}`);
         return false;
       }
-      tagChecksFailedAt.delete(repoId);
+      tagChecksFailedAt.delete(failedKey);
       logMain("info", "tag", `listed ${state.primary}'s tags for ${repo.path} (${reason}, ${seconds(startedAt)})`);
       announceTags(repoId);
       return true;
@@ -580,9 +581,20 @@ export function registerRemoteHandlers(
       if (aborts.size === 0) autoCheckAborts.delete(repoId);
     }
   };
-  /** After a successful toolbar Fetch or Pull: hourly at most, never awaited. */
+  /**
+   * After a successful toolbar Fetch or Pull, never awaited: list the
+   * publisher hourly at most. Otherwise re-count against the stored listing
+   * (local name + id, no network), because local tags may have moved since
+   * the sidebar's count was stored (a `git tag -f` in a terminal).
+   */
   const tagCheckAfterSync = (repoId: string): void => {
-    void autoRefreshTags(repoId, TAG_SOURCE_SYNC_TTL_MS, "after sync").catch((cause) =>
+    void (async () => {
+      if (await autoRefreshTags(repoId, TAG_SOURCE_SYNC_TTL_MS, "after sync")) return;
+      const repo = repoOf(repoId);
+      if (repo === null) return;
+      const moved = await tagSources.recountPublisher(execGit, repoId, repo.path);
+      if (moved.ok && moved.value) announceTags(repoId);
+    })().catch((cause) =>
       logMain("warn", "tag", `automatic tag check failed: ${sanitizeGitLogDetail(cause)}`)
     );
   };
@@ -615,7 +627,7 @@ export function registerRemoteHandlers(
     );
     if (!result.ok) return err(classifyAuthFailure(result.error));
     logMain("info", "tag", `listed ${remote}'s tags for ${repo.path} (${seconds(startedAt)})`);
-    tagChecksFailedAt.delete(req.repoId);
+    tagChecksFailedAt.delete(`${req.repoId}\0${remote}`);
     announceTags(req.repoId);
     const source = await tagSources.source(execGit, req.repoId, repo.path);
     return source.ok ? ok({ checked: true, source: source.value.state }) : source;
