@@ -38,6 +38,9 @@ test("merge-queue states read as the queue's, not as green or merged", async () 
     await page.evaluate(() => (window as unknown as { __harness: Harness }).__harness.ready);
     for (const theme of ["dark", "light"] as const) {
       await mount(page, theme);
+      // Shot first, so a run against older code still records its "before".
+      await expect(page.locator(".mq-harness section")).toHaveCount(5);
+      if (shots) await page.locator(".mq-harness").screenshot({ path: join(shots, `merge-queue-${theme}.png`) });
       const row = (label: string) => page.locator(`[data-row="${label}"]`);
       await expect(row("Ready to queue").getByRole("button", { name: "Add to merge queue" })).toBeVisible();
       await expect(row("Queued, #3")).toContainText("queued #3");
@@ -45,7 +48,6 @@ test("merge-queue states read as the queue's, not as green or merged", async () 
       await expect(row("Merge group checks running")).toContainText("merge group checks running");
       await expect(row("Removed from queue")).toContainText("merge group checks failed");
       await expect(row("Merged by queue")).toContainText("merged by queue");
-      if (shots) await page.locator(".mq-harness").screenshot({ path: join(shots, `merge-queue-${theme}.png`) });
     }
   } finally {
     await app.close();
