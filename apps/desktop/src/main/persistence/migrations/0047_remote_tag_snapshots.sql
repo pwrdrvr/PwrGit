@@ -1,4 +1,4 @@
--- 0045_remote_tag_snapshots — what each remote published under refs/tags,
+-- 0047_remote_tag_snapshots — what each remote published under refs/tags,
 -- recorded beside Git's single local tag namespace instead of inside it.
 --
 -- Git keeps one `refs/tags/*` for every remote, and a fetch never rewrites an
@@ -9,11 +9,14 @@
 --
 -- Cached data: losing it costs one `ls-remote --tags`. It cascades with the
 -- repository row.
+--
+-- Written as 0045 before main shipped its own 0045. `IF NOT EXISTS` lets a
+-- database that ran it under the old name run it again harmlessly.
 
 -- The remote the user chose as the publisher of this repository's tags. No row
 -- means "origin if there is one, else nobody": the last remote fetched is
 -- never assumed.
-CREATE TABLE repo_tag_source (
+CREATE TABLE IF NOT EXISTS repo_tag_source (
   repo_id        TEXT PRIMARY KEY REFERENCES repos(id) ON DELETE CASCADE,
   primary_remote TEXT NOT NULL
 );
@@ -22,7 +25,7 @@ CREATE TABLE repo_tag_source (
 -- a failed attempt records `error` and leaves the previous rows, and their
 -- real age, in place. `differs` is the comparison count as of the last
 -- comparison, so the sidebar can show it without running Git.
-CREATE TABLE remote_tag_snapshots (
+CREATE TABLE IF NOT EXISTS remote_tag_snapshots (
   repo_id         TEXT NOT NULL REFERENCES repos(id) ON DELETE CASCADE,
   remote          TEXT NOT NULL,
   fetch_url       TEXT,
@@ -36,7 +39,7 @@ CREATE TABLE remote_tag_snapshots (
 
 -- The listing itself. `target_id` is the peeled object (`<name>^{}`), equal to
 -- `object_id` for a lightweight tag.
-CREATE TABLE remote_tags (
+CREATE TABLE IF NOT EXISTS remote_tags (
   repo_id   TEXT NOT NULL,
   remote    TEXT NOT NULL,
   name      TEXT NOT NULL,
@@ -50,7 +53,7 @@ CREATE TABLE remote_tags (
 
 -- "Keep my local value" for one exact pair of objects. Either side moving
 -- makes the pair stale, and the tag asks again.
-CREATE TABLE tag_keep_local (
+CREATE TABLE IF NOT EXISTS tag_keep_local (
   repo_id          TEXT NOT NULL REFERENCES repos(id) ON DELETE CASCADE,
   remote           TEXT NOT NULL,
   name             TEXT NOT NULL,

@@ -101,7 +101,7 @@ missing names. A tag re-cut on origin therefore stays at its old object here.
   override `remote.<name>.tagOpt=--no-tags`, download every tag-only history,
   and let the last remote fetched rewrite a shared name. Never edit the
   user's config to add tag refspecs either.
-- **A remote's tags live in SQLite** (`remote_tags`, 0045), keyed by remote,
+- **A remote's tags live in SQLite** (`remote_tags`, 0047), keyed by remote,
   from one `ls-remote --tags`. A Git ref cannot point at objects that are not
   here. The publisher is the chosen remote, else origin, else nobody; never
   the last one fetched.
