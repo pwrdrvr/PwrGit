@@ -196,6 +196,11 @@ match the face. Verb, scope, interval and view live in
   focus ring rings the pair. Don't give either half its own border or
   outline: as butted buttons, hover drew a three-sided orange box.
   Design: `design/Sync Split Button - UX Review.dc.html`.
+- **"Check tags after sync" is main's setting, not a `localStorage` pref**
+  (`general.tagCheckAfterSync`, `useTagCheckAfterSync`): main checks after
+  every Fetch and Pull, including a repository's own and timed ones. It
+  sits between the interval and Show last run, and hides until the setting
+  is read rather than showing a guessed check.
 - **The timer runs the face**: its verb and scope, read at each tick. A
   timed pull is the same soft pull (fast-forward only clean, tracked
   branches). 0.45.0 always fetched, so a face set to Pull never pulled.

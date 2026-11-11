@@ -148,6 +148,8 @@ export function SidebarToolbar({
   syncBusy = false,
   lastAutoRun,
   lastRun = null,
+  tagCheckAfterSync = null,
+  onToggleTagCheck,
   onAddFolder,
   onClone,
   onFork,
@@ -172,6 +174,9 @@ export function SidebarToolbar({
   lastRun?: LastBulkSyncRun | null;
   /** Show the run going now, or the last one's results. */
   onShowRun?: () => void;
+  /** `general.tagCheckAfterSync`; null until the setting has been read. */
+  tagCheckAfterSync?: boolean | null;
+  onToggleTagCheck?: (on: boolean) => void;
   onAddFolder: () => void;
   onClone: () => void;
   onFork: () => void;
@@ -248,6 +253,21 @@ export function SidebarToolbar({
       })
     ),
     { type: "sep" },
+    // What a sync does besides fetching. Every Fetch and Pull obeys it:
+    // this face, the timer, and a repository's own Fetch or Pull.
+    ...(tagCheckAfterSync === null
+      ? []
+      : [
+          {
+            type: "item",
+            label: "Check tags after sync",
+            hint: "Compares with the published remote, at most hourly. Never changes a tag.",
+            checked: tagCheckAfterSync,
+            keepOpen: true,
+            onSelect: () => onToggleTagCheck?.(!tagCheckAfterSync)
+          } satisfies MenuItem,
+          { type: "sep" } satisfies MenuItem
+        ]),
     // A timed run raises no toast, and a finished toast leaves: this is how
     // either is read afterwards. It opens the dialog, so the menu closes.
     syncBusy

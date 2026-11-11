@@ -87,6 +87,7 @@ import {
 import { registerGraphHandlers } from "./git/graph-handlers";
 import { registerRebaseHandlers } from "./git/rebase-handlers";
 import { registerRemoteHandlers } from "./git/remote-handlers";
+import { tagAutoChecksFor } from "./git/tag-auto-check";
 import { registerRepoHandlers } from "./git/repo-handlers";
 import {
   registerRepoRemovalHandlers,
@@ -1276,6 +1277,10 @@ if (!gotSingleInstanceLock) {
         });
     };
     registerCloneHandlers(bus, cloneService, refreshIdentity);
+    // The sync menu's "Check tags after sync", read at each sync.
+    tagAutoChecksFor(db).afterSyncWhen(
+      () => settings.get().general?.tagCheckAfterSync ?? GENERAL_DEFAULTS.tagCheckAfterSync
+    );
     const remoteTipChecker = registerRemoteHandlers(
       bus,
       db,

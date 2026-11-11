@@ -279,6 +279,26 @@ describe("SidebarToolbar", () => {
     expect(caret()).toBe("m6 9 6 6 6-6");
   });
 
+  it("offers Check tags after sync as a toggle that leaves the menu open", () => {
+    const onToggleTagCheck = vi.fn();
+    render({ hasProfile: true, rootCount: 1, repoCount: 3, tagCheckAfterSync: true, onToggleTagCheck });
+    act(() => button("Sync options").click());
+    const toggle = [...document.querySelectorAll<HTMLButtonElement>('[role="menuitemcheckbox"]')].find((el) =>
+      el.textContent?.startsWith("Check tags after sync")
+    )!;
+    expect(toggle.getAttribute("aria-checked")).toBe("true");
+    expect(toggle.textContent).toContain("Never changes a tag");
+    act(() => toggle.click());
+    expect(onToggleTagCheck).toHaveBeenCalledWith(false);
+    expect(document.querySelector('[role="menu"]')).not.toBeNull();
+  });
+
+  it("shows no tag toggle until the setting has been read", () => {
+    render({ hasProfile: true, rootCount: 1, repoCount: 3, tagCheckAfterSync: null });
+    act(() => button("Sync options").click());
+    expect(document.querySelector('[role="menuitemcheckbox"]')).toBeNull();
+  });
+
   it("closes the menu and runs the face when the face is clicked", () => {
     const h = render({ hasProfile: true, rootCount: 1, repoCount: 3 });
     act(() => button("Sync options").click());

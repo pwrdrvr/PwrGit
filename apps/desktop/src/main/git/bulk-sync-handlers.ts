@@ -9,6 +9,7 @@ import type { RepoIndexer } from "./repo-indexer";
 import type { WorktreeRefresher } from "./worktree-handlers";
 import { WorktreeOperationQueue } from "./worktree-operation-queue";
 import { visibleRepoSql } from "./hidden-repos";
+import { tagAutoChecksFor } from "./tag-auto-check";
 
 export type BulkSyncHandlers = {
   /** Cancel work owned by a renderer window that has gone away. */
@@ -189,6 +190,9 @@ export function registerBulkSyncHandlers(
               );
             }
           }
+          // Timed and bulk syncs check tags as a toolbar Fetch does: behind
+          // the sync menu's switch, hourly at most, a few at a time.
+          if (fetched) tagAutoChecksFor(db).afterSync(repo.id);
           logMain(
             result.outcome === "failed" ? "warn" : "info",
             "remote",

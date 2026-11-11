@@ -737,6 +737,13 @@ export type GeneralSettings = {
    */
   gitIdentityReminder: boolean;
   /**
+   * The sync menu's "Check tags after sync": after a Fetch or Pull (toolbar,
+   * bulk or timed), list the published remote's tags at most hourly per
+   * repository and re-count the sidebar's "N tags differ". Never changes a
+   * tag. On by default; the Tags tab's own check does not depend on it.
+   */
+  tagCheckAfterSync: boolean;
+  /**
    * Settings › Git: Git runs with `checkout.reflink` on,
    * so checkouts clone files the main checkout holds unchanged. Applies only
    * while the Git in use supports it; with any other Git the switch is shown
@@ -843,6 +850,7 @@ export const GENERAL_DEFAULTS: GeneralSettings = {
   worktreeCleanupKeepDays: 7,
   worktreeFinishedAfterDays: STALE_AGE_DAYS,
   gitIdentityReminder: true,
+  tagCheckAfterSync: true,
   gitIdentityByFolder: false,
   gitReflinkCheckout: true
 };
