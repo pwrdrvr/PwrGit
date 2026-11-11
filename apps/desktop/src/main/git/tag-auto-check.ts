@@ -20,8 +20,9 @@ type RepoRow = { path: string; profileId: string };
 export type TagAutoCheckOptions = {
   /** The sync menu's "Check tags after sync" (`general.tagCheckAfterSync`). */
   enabledAfterSync?: () => boolean;
-  /** Set by the remote handlers while the network is known to be down. */
-  networkPaused?: () => boolean;
+  /** True while a repository must not be listed: the network is known to be
+   *  down, or the user's own remote operation on it is live. */
+  paused?: (repoId: string) => boolean;
   git?: GitExec;
   sources?: Pick<TagSources, "source" | "refresh" | "recountPublisher" | "store">;
   now?: () => number;
@@ -43,7 +44,7 @@ export class TagAutoChecks {
   private readonly now: () => number;
   private readonly timeoutMs: number;
   private enabledAfterSync: () => boolean;
-  private networkPaused: () => boolean;
+  private paused: (repoId: string) => boolean;
   private readonly aborts = new Map<string, Set<AbortController>>();
   private readonly failedAt = new Map<string, number>();
   /** One check per repository and TTL at a time; a second asker shares it,
@@ -59,16 +60,19 @@ export class TagAutoChecks {
     this.now = options.now ?? Date.now;
     this.timeoutMs = options.timeoutMs ?? TAG_CHECK_TIMEOUT_MS;
     this.enabledAfterSync = options.enabledAfterSync ?? (() => true);
-    this.networkPaused = options.networkPaused ?? (() => false);
+    this.paused = options.paused ?? (() => false);
     this.queuedAfterSync = limitConcurrency(
       (repoId: string) => this.runAfterSync(repoId),
       options.concurrency ?? TAG_CHECK_CONCURRENCY
     );
   }
 
-  /** The remote handlers own the network-down signal. */
-  pauseWhile(networkPaused: () => boolean): void {
-    this.networkPaused = networkPaused;
+  /** The remote handlers own both signals: network down, and a live
+   *  tracked operation (so a check that waited for a slot never starts in
+   *  the middle of the user's Fetch, Pull or Push; `yield` only reaches
+   *  checks already running). */
+  pauseWhile(paused: (repoId: string) => boolean): void {
+    this.paused = paused;
   }
 
   /** `index.ts` binds the sync menu's switch (the setting). */
@@ -127,11 +131,14 @@ export class TagAutoChecks {
 
   private async listOnce(repoId: string, ttlMs: number, reason: string): Promise<boolean> {
     const repo = this.repoOf(repoId);
-    if (repo === null || this.networkPaused()) return false;
+    if (repo === null) return false;
     const source = await this.sources.source(this.git, repoId, repo.path, ttlMs);
     if (!source.ok) return false;
     const { state } = source.value;
     if (state.primary === null || state.tagOpt === "no-tags" || !state.stale) return false;
+    // Read just before listing: the user may have started an operation on
+    // this repository while the check waited for a slot or read its config.
+    if (this.paused(repoId)) return false;
     const failedKey = `${repoId}\0${state.primary}`;
     if ((this.failedAt.get(failedKey) ?? 0) > this.now() - TAG_CHECK_RETRY_MS) return false;
     const controller = new AbortController();

@@ -202,11 +202,18 @@ describe("published tag handlers", () => {
     register(local);
     db.prepare("INSERT INTO worktrees (id, repo_id, path, branch, is_primary) VALUES ('wt-1', 'repo-1', ?, 'main', 1)").run(local);
     tagAutoChecksFor(db).afterSyncWhen(() => false);
+    // Switched off, `afterSync` returns before queuing anything, and both
+    // handlers call it before they answer: no call now means none later.
+    const sources = tagSourcesFor(db);
+    const read = vi.spyOn(sources, "source");
+    const recount = vi.spyOn(sources, "recountPublisher");
     expect((await bus.dispatch("remote:fetchRepo", { repoId: "repo-1", remote: "origin" })).ok).toBe(true);
     expect((await bus.dispatch("remote:bulkSync", { operationId: "op-2", profileId: "p1", mode: "fetch" })).ok).toBe(true);
-    // Give a background check every chance to have started.
-    await new Promise((resolve) => setTimeout(resolve, 500));
-    expect(tagSourcesFor(db).store.snapshot("repo-1", "origin")).toBeNull();
+    expect(read).not.toHaveBeenCalled();
+    expect(recount).not.toHaveBeenCalled();
+    read.mockRestore();
+    recount.mockRestore();
+    expect(sources.store.snapshot("repo-1", "origin")).toBeNull();
     // The Tags tab's own check does not depend on the switch.
     const view = await bus.dispatch("tag:refreshRemote", { repoId: "repo-1", mode: "auto" });
     expect(view.ok && view.value.checked).toBe(true);

@@ -202,6 +202,38 @@ describe("automatic tag checks", () => {
     blocked.splice(0).forEach((release) => release());
   });
 
+  it("a check never lists a repository whose operation began while it waited", async () => {
+    const db = database();
+    let busy = false;
+    let releaseSource!: () => void;
+    let listings = 0;
+    const checks = new TagAutoChecks(db, {
+      paused: () => busy,
+      sources: {
+        source: async () => {
+          await new Promise<void>((resolve) => (releaseSource = resolve));
+          return ok({
+            state: { remotes: ["origin"], primary: "origin", chosen: false, tagOpt: null, checkedAt: null, publishedCount: 0, error: null, stale: true },
+            remote: null
+          });
+        },
+        refresh: async () => {
+          listings += 1;
+          return ok(undefined);
+        },
+        recountPublisher: async () => ok(false),
+        store: { recordFailure: () => undefined }
+      } as unknown as NonNullable<TagAutoCheckOptions["sources"]>
+    });
+    const check = checks.view("r0");
+    await vi.waitFor(() => expect(releaseSource).toBeTypeOf("function"));
+    // The user's Fetch starts after the check began but before it lists.
+    busy = true;
+    releaseSource();
+    expect(await check).toBe(false);
+    expect(listings).toBe(0);
+  });
+
   it("a listing stopped by the user's own operation does not start the back-off", async () => {
     const db = database();
     let started = 0;

@@ -528,12 +528,13 @@ export function registerRemoteHandlers(
   // `tag-auto-check.ts`, stopped by `yieldAutoChecks` like the tip checker.
   const tagSources = tagSourcesFor(db);
   const tagChecks = tagAutoChecksFor(db);
-  tagChecks.pauseWhile(() => Date.now() < networkPausedUntil);
+  tagChecks.pauseWhile(
+    (repoId) => Date.now() < networkPausedUntil || activities.list().some((activity) => activity.repoId === repoId)
+  );
   const announceTags = (repoId: string): void => {
     const repo = repoOf(repoId);
     if (repo !== null) emitEvent("repo:changed", { profileId: repo.profileId, repoIds: [repoId] });
   };
-  const tagCheckAfterSync = (repoId: string): void => tagChecks.afterSync(repoId);
 
   bus.register("tag:refreshRemote", async (req) => {
     const repo = repoOf(req.repoId);
@@ -664,7 +665,7 @@ export function registerRemoteHandlers(
     );
     refreshIdentity?.(worktree.repoId);
     refresher.refreshWorktree(req.worktreeId);
-    tagCheckAfterSync(worktree.repoId);
+    tagChecks.afterSync(worktree.repoId);
     return ok({ remotes: asked });
   });
 
@@ -700,7 +701,7 @@ export function registerRemoteHandlers(
     );
     refreshIdentity?.(req.repoId);
     refresher.refreshRepoWorktrees(req.repoId);
-    tagCheckAfterSync(req.repoId);
+    tagChecks.afterSync(req.repoId);
     return ok(null);
   });
 
@@ -983,6 +984,7 @@ export function registerRemoteHandlers(
       worktreeId: worktreeId,
       branch: worktree.branch
     });
+    let synced = false;
     try {
       // A stall warning that only says "no output" leaves the reader guessing
       // which command produced none. Name the command and the last line Git did
@@ -1165,10 +1167,12 @@ export function registerRemoteHandlers(
         "remote",
         `pull finished ${path}: ${outcome}${recoveryStash === undefined ? "" : ", recovery stash kept in Stashes"} (${seconds(startedAt)})`
       );
-      tagCheckAfterSync(worktree.repoId);
+      synced = true;
       return result;
     } finally {
       activity.finish();
+      // After finish: the check skips a repository with a live activity.
+      if (synced) tagChecks.afterSync(worktree.repoId);
       // Pull retains its recovery copy after successful and failed restoration.
       emitEvent("stash:changed", { repoId: worktree.repoId });
     }
