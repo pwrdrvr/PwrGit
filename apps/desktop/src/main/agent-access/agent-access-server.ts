@@ -6,6 +6,7 @@ import { IpcHttpMcp, IpcHttpTransport } from "./ipc-http-mcp";
 import { McpSessionPool } from "./mcp-session-pool";
 import { mcpExecutablePath } from "./mcp-executable";
 import type { RequestConsent } from "./agent-consent";
+import { relaySessionGrant } from "./relay-session-grant";
 
 export type AgentAccessServerOptions = {
   desktopVersion: string;
@@ -89,7 +90,7 @@ export class AgentAccessServer {
     const transport = input.createTransport(async initialize => {
       clearTimeout(timer);
       if (!(await admission) || input.identity !== null) throw new Error("Legacy credentials are not accepted; approve a new native Session");
-      await this.prepare(session, initialize);
+      await this.prepare(session, initialize, { role: input.role });
     });
     session = this.session(input.id, transport);
     const timer = setTimeout(() => void transport.close(), 30_000);
@@ -107,16 +108,24 @@ export class AgentAccessServer {
     return session;
   }
 
-  private async prepare(session: Session, message: JSONRPCMessage): Promise<void> {
+  /**
+   * Open a Session for a connection that just sent `initialize`.
+   *
+   * A relay connection (`relay`) is granted the role its command line named,
+   * or the default role, without asking: the operator chose that role when
+   * they configured the relay. A direct IPC HTTP client has no command line,
+   * so the operator still approves it in PwrGit's window.
+   */
+  private async prepare(session: Session, message: JSONRPCMessage, relay?: { role: string | null }): Promise<void> {
     const initialize = InitializeRequestSchema.parse(message);
     const signal = session.transport.controller.signal;
     const timer = setTimeout(() => void session.transport.close(), 5 * 60_000);
     timer.unref();
     try {
-      const decision = await this.options.requestConsent({
-        clientName: initialize.params.clientInfo.name.slice(0, 200),
-        scopes: [...MCP_AGENT_CAPABILITIES], signal
-      });
+      const clientName = initialize.params.clientInfo.name.slice(0, 200);
+      const decision = relay
+        ? { decision: "allow" as const, ...relaySessionGrant(this.policy.snapshot(), clientName, relay.role) }
+        : await this.options.requestConsent({ clientName, scopes: [...MCP_AGENT_CAPABILITIES], signal });
       if (signal.aborted || this.stopped || decision.decision !== "allow") throw new Error("Native consent denied or disconnected; reconnect manually");
       // ConsentBroker checks the displayed role is unchanged. Persist its
       // ceiling so later role assignment/editing cannot widen this approval.

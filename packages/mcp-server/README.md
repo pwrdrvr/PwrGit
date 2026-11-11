@@ -6,7 +6,9 @@ process provides the Git runner, app backend, policy authorizer and app version.
 Configure clients with the bundled Rust `pwrgit-mcp` executable shown in
 Settings → Local Agents. It relays stdio to the running desktop's protected Unix
 socket or Windows named pipe. Compatible hosts can use HTTP directly over that
-endpoint. Every connection requires native consent; there is no TCP listener,
+endpoint. A relay connection gets the role named by `pwrgit-mcp --role <id>`
+(default `builtin.app-operator`) without a prompt; direct HTTP still requires
+native consent. There is no TCP listener,
 app-launch fallback, standalone server fallback or request replay.
 
 The old Node/npm executable is retired. It exits with migration instructions. It never imports server handlers, starts

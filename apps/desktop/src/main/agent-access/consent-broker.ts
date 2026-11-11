@@ -3,6 +3,7 @@ import { err, ok, type AgentConsentDecision, type AgentConsentPrompt } from "@pw
 import type { McpPolicyStore } from "@pwrgit/mcp-server/access-policy";
 import type { CommandBus, CommandContext } from "../command-bus";
 import type { RequestConsent, ConsentDecision } from "./agent-consent";
+import { uniqueSessionName } from "./relay-session-grant";
 
 export type ConsentWindow = {
   webContents: { id: number };
@@ -23,10 +24,7 @@ export class ConsentBroker {
     if (signal.aborted || this.pending.size >= 8) return denied;
     const snapshot = this.policy.snapshot();
     const roles = snapshot.roles.filter(r => r.permissions.every(p => scopes.includes(p)));
-    const names = new Set(snapshot.sessions.filter(s => s.revokedAt === null).map(s => s.name));
-    const base = clientName.slice(0, 180);
-    let sessionName = base;
-    for (let suffix = 2; names.has(sessionName); suffix++) sessionName = base + " " + suffix;
+    const sessionName = uniqueSessionName(clientName, snapshot);
     const prompt: AgentConsentPrompt = { requestId: randomUUID(), clientName, sessionName, roles };
     const window = this.createWindow();
     return new Promise(resolve => {

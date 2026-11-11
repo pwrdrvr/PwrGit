@@ -17,6 +17,8 @@ export type McpConnection = {
   id: number;
   relayVersion: string;
   identity: string | null;
+  /** The role the relay's `--role` asked for; null when it named none. */
+  role: string | null;
   framing: "raw" | "http";
   createTransport: (prepare?: (message: JSONRPCMessage) => Promise<void>) => McpByteTransport;
   createStream: () => NativeIpcStream;
@@ -28,6 +30,7 @@ type Frame = {
   data?: string;
   relay_version?: string;
   identity?: string | null;
+  role?: string | null;
   framing?: "raw" | "http";
   endpoint?: string;
 };
@@ -149,9 +152,16 @@ export class McpByteTransport implements Transport {
           this.ready = true;
           this.drain();
         })
-        .catch((cause: unknown) =>
-          this.fail(cause instanceof Error ? cause : new Error("MCP consent failed"))
-        );
+        .catch(async (cause: unknown) => {
+          const error = cause instanceof Error ? cause : new Error("MCP consent failed");
+          // Answer the initialize request with the reason, such as an unknown
+          // `--role`, so the host can show it instead of a bare disconnect.
+          if ("id" in first && !this.closed) {
+            await this.send({ jsonrpc: "2.0", id: first.id, error: { code: -32600, message: error.message } })
+              .catch(() => undefined);
+          }
+          this.fail(error);
+        });
       return;
     }
     const messages = this.pending;
@@ -285,13 +295,15 @@ export class NativeMcpBridge {
     if (
       frame.type !== "open" ||
       !Number.isSafeInteger(frame.id) ||
-      typeof frame.relay_version !== "string"
+      typeof frame.relay_version !== "string" ||
+      !(frame.role === undefined || frame.role === null || typeof frame.role === "string")
     )
       throw new Error("invalid native transport event");
     this.options.onConnection({
       id: frame.id,
       relayVersion: frame.relay_version,
       identity: frame.identity ?? null,
+      role: frame.role ?? null,
       framing: frame.framing ?? "raw",
       createStream: () => {
         if (frame.framing !== "http" || !this.options.allowHttp) throw new Error("HTTP IPC disabled");

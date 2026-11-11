@@ -522,11 +522,21 @@ export class McpPolicyStore {
     if (name.length === 0 || name.length > 200) {
       throw new McpAccessError("invalid_input", "session name must contain 1 to 200 characters");
     }
-    if (policy.sessions.length >= MAX_SESSIONS) {
-      throw new McpAccessError("invalid_input", `session limit reached (${MAX_SESSIONS})`);
-    }
     if (!policy.roles.some((role) => role.id === roleId)) {
       throw new McpAccessError("invalid_input", "selected role does not exist");
+    }
+    // Every relay connection is a Session that is revoked when it closes, so
+    // revoked records pile up. Drop the longest-revoked ones to make room;
+    // only active Sessions count toward the limit.
+    if (policy.sessions.length >= MAX_SESSIONS) {
+      const revoked = policy.sessions
+        .filter((session) => session.revokedAt !== null)
+        .sort((a, b) => a.revokedAt!.localeCompare(b.revokedAt!));
+      const drop = new Set(revoked.slice(0, policy.sessions.length - MAX_SESSIONS + 1));
+      policy.sessions = policy.sessions.filter((session) => !drop.has(session));
+    }
+    if (policy.sessions.length >= MAX_SESSIONS) {
+      throw new McpAccessError("invalid_input", `session limit reached (${MAX_SESSIONS})`);
     }
     const timestamp = this.now().toISOString();
     const token = `${TOKEN_PREFIX}${randomBytes(32).toString("base64url")}`;

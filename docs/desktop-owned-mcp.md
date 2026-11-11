@@ -15,7 +15,7 @@ MIT attribution. This work starts from origin/main, without cherry-picking
 
 | Connection | Framing | Consent and lifetime |
 | --- | --- | --- |
-| Host starts `pwrgit-mcp` | Versioned raw preamble, then newline-delimited MCP bytes | Fresh native consent per connection |
+| Host starts `pwrgit-mcp [--role ID]` | Versioned raw preamble, then newline-delimited MCP bytes | One Session per connection, granted the requested role without a prompt |
 | Host connects to `unix:///…#/mcp` or `pipe:///pipe/…#/mcp` | Streamable HTTP over the same protected endpoint | Settings bootstrap, native consent, one credential bound to one live MCP Session |
 | Desktop starts `pwrgit-mcp --desktop-listen --allow-http` | Bounded control frames on inherited stdio | Desktop owns helper lifetime; helper loss closes all Sessions |
 
@@ -34,6 +34,11 @@ the old per-server TCP WebSocket event fallback is removed.
 MCP initialization reports the desktop app release (`app.getVersion()`). The
 native relay reports its own release and the listener transport release;
 `PWRGIT-MCP/1` identifies wire compatibility. Release equality is not required.
+The raw preamble is `PWRGIT-MCP/1 <relay version> <identity>`, plus a fourth
+`role=<id>` field only when the relay was started with `--role`. A relay that
+names no role sends the three fields every desktop accepts; a desktop that
+predates roles refuses four fields as an incompatible transport instead of
+granting more than was asked.
 MCP protocol/capability negotiation still happens end-to-end in the desktop.
 A transport mismatch fails with update/manual-reconnect instructions.
 
@@ -48,8 +53,11 @@ pending I/O on drop. These are OS connection checks, not MCP authorization.
 Direct HTTP hosts supply their own IPC client; PwrGit does not claim that those
 hosts implement the native relay's server-verification checks.
 
-Every Session requires approval in the specific native consent window. A host's
-claimed name is only a display label. The desktop snapshots the approved role's
+A relay Session is granted the role its `--role` names, or
+`builtin.app-operator` when it names none, without a prompt; an unknown role
+closes the connection with the valid ids in the initialize error. A direct HTTP
+Session still requires approval in the specific native consent window. A host's
+claimed name is only a display label, made unique among active Sessions. The desktop snapshots the approved role's
 capabilities and repository roots into a persisted consent ceiling. Later role
 edits or reassignment cannot exceed that ceiling. Authorization checks run on
 every incoming MCP message and every tool/resource operation. Repository paths
