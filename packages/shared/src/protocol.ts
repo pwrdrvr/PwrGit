@@ -1400,6 +1400,23 @@ export interface Commands {
     res: null;
   };
   /**
+   * Add a change request to its base branch's merge queue (GitHub) or merge
+   * train (GitLab). Never merges: a base without a queue is refused with
+   * `no_merge_queue`. `repoPath` names the forge repository that issued the
+   * number (a fork checkout's PR lives upstream) and must be one this
+   * checkout already knows the PR from; `headOid` pins the head the user saw.
+   * The new state reaches the tree through `pr:changed` like any refresh.
+   */
+  "pr:enqueue": {
+    req: {
+      repoId: string;
+      number: number;
+      repoPath?: string;
+      headOid?: string;
+    };
+    res: { position?: number };
+  };
+  /**
    * Atomically replace one graph's visible-commit monitoring reason. The main
    * process polls only the union of active reasons; an empty list removes it.
    */

@@ -341,7 +341,7 @@ export function WorktreeRow({
         />
       )}
       {showsPr && worktree.pr !== undefined ? (
-        <PrChip pr={worktree.pr} />
+        <PrChip pr={worktree.pr} repoId={worktree.repoId} />
       ) : missing ? null : (
         <>
           {!worktree.isDefaultBranch && worktree.mergedIntoDefault && (

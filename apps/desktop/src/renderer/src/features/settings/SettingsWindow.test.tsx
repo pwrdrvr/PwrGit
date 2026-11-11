@@ -164,7 +164,8 @@ function forge(overrides: Partial<ForgeStatus> = {}): ForgeStatus {
       changeSizeAndTimeline: true,
       commitAuthorIdentity: true,
       commitSignatures: true,
-      forkDefaultBranchOnly: true
+      forkDefaultBranchOnly: true,
+      addToMergeQueue: false
     },
     hosts: installed
       ? [{ host: product.saasHost, enabled: true, loggedIn }]

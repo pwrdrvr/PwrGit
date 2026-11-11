@@ -1,6 +1,7 @@
 import {
   changeRequestLabel,
   changeRequestNoun,
+  mergeQueueStatus,
   changeRequestPluralLabel,
   type ChangeRequestEntry,
   type ChangeRequestList,
@@ -41,12 +42,14 @@ export function isLocalChangeRequest(entry: ChangeRequestEntry): boolean {
   return entry.location.kind === "worktree" || entry.location.kind === "local";
 }
 
-/** Needs someone: failing checks, or a merge that cannot go in as it stands. */
+/** Needs someone: failing checks, a merge that cannot go in as it stands, or
+ *  a merge queue that dropped it. A queued PR is the queue's business. */
 export function isFailingChangeRequest(pr: OpenChangeRequest): boolean {
-  return (
-    pr.state === "open" &&
-    (pr.checkState === "failing" || pr.mergeState === "conflicting")
-  );
+  if (pr.state !== "open") return false;
+  const queue = mergeQueueStatus(pr);
+  if (queue?.kind === "removed") return true;
+  if (queue?.kind === "queued" || queue?.kind === "group_checks_running") return false;
+  return pr.checkState === "failing" || pr.mergeState === "conflicting";
 }
 
 /** One entry's identity across remotes: the fork's #14 is not the original's. */

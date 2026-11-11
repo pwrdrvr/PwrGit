@@ -1,6 +1,8 @@
 import type {
+  MergeQueueEntryState,
   OpenChangeRequest,
   PrLifecycle,
+  PrMergeQueue,
   PrSummary
 } from "@pwrgit/shared";
 import { UNAVAILABLE_FORK } from "../forge/types";
@@ -24,7 +26,32 @@ const PR_NODE_FIELDS = `number title url state isDraft mergeable headRefName bas
         } } }
       }
       createdAt mergedAt closedAt`;
-const PR_FIELDS = `nodes { ${PR_NODE_FIELDS} }`;
+/**
+ * The merge queue, asked in the same request so a queued PR can never be
+ * cached as plain green. GHES before 3.8 has none of these fields and refuses
+ * the whole document, so callers build with `mergeQueue: false` after such a
+ * refusal (`pr-client.ts` remembers it per host).
+ *
+ * A queue merge ends with a removal whose reason is `merged`; `last: 1` over
+ * both event types is enough to tell that from a failure.
+ */
+const MERGE_QUEUE_FIELDS = `isMergeQueueEnabled isInMergeQueue reviewDecision mergeStateStatus
+      mergeQueueEntry { state position estimatedTimeToMerge enqueuedAt }
+      mergeQueue { configuration { mergeMethod } }
+      queueEvents: timelineItems(last: 1, itemTypes: [ADDED_TO_MERGE_QUEUE_EVENT, REMOVED_FROM_MERGE_QUEUE_EVENT]) {
+        nodes { __typename
+          ... on AddedToMergeQueueEvent { createdAt }
+          ... on RemovedFromMergeQueueEvent { createdAt reason } }
+      }`;
+
+/** Whether a query carries `MERGE_QUEUE_FIELDS`. */
+export type PrQueryOptions = { mergeQueue?: boolean };
+
+function nodeFields(options: PrQueryOptions): string {
+  return options.mergeQueue === false
+    ? PR_NODE_FIELDS
+    : `${PR_NODE_FIELDS}\n      ${MERGE_QUEUE_FIELDS}`;
+}
 /**
  * Where a PR's head lives. Every name-based lookup needs this identity:
  * an unrelated fork's `main` must not be mistaken for ours.
@@ -58,6 +85,20 @@ type PrNode = {
   createdAt?: string | null;
   mergedAt?: string | null;
   closedAt?: string | null;
+  isMergeQueueEnabled?: boolean | null;
+  isInMergeQueue?: boolean | null;
+  reviewDecision?: string | null;
+  mergeStateStatus?: string | null;
+  mergeQueueEntry?: {
+    state?: string | null;
+    position?: number | null;
+    estimatedTimeToMerge?: number | null;
+    enqueuedAt?: string | null;
+  } | null;
+  mergeQueue?: { configuration?: { mergeMethod?: string | null } | null } | null;
+  queueEvents?: {
+    nodes?: ({ __typename?: string; createdAt?: string | null; reason?: string | null } | null)[] | null;
+  } | null;
 };
 
 const BRANCH_PR_PAGE_SIZE = 10;
@@ -73,7 +114,8 @@ export function buildPrQuery(
   owner: string,
   repo: string,
   branches: string[],
-  after: ReadonlyMap<string, string> = new Map()
+  after: ReadonlyMap<string, string> = new Map(),
+  options: PrQueryOptions = {}
 ): { query: string; variables: Record<string, string> } {
   const variables: Record<string, string> = { owner, name: repo };
   const decls = ["$owner: String!", "$name: String!"];
@@ -90,7 +132,7 @@ export function buildPrQuery(
       `a${i}: pullRequests(headRefName: $b${i}, first: ${BRANCH_PR_PAGE_SIZE}, ` +
         (cursor === undefined ? "" : `after: $after${i}, `) +
         `orderBy: { field: CREATED_AT, direction: DESC }, ` +
-        `states: [OPEN, MERGED, CLOSED]) { nodes { ${PR_NODE_FIELDS} ${PR_ORIGIN_FIELDS} } ` +
+        `states: [OPEN, MERGED, CLOSED]) { nodes { ${nodeFields(options)} ${PR_ORIGIN_FIELDS} } ` +
         `pageInfo { hasNextPage endCursor } }`
     );
   });
@@ -187,7 +229,71 @@ function toSummary(node: PrNode): PrSummary {
     ...optionalCount("commitCount", node.commits?.totalCount),
     ...optionalTime("createdAt", node.createdAt),
     ...optionalTime("mergedAt", node.mergedAt),
-    ...optionalTime("closedAt", node.closedAt)
+    ...optionalTime("closedAt", node.closedAt),
+    ...mergeQueueSummary(node)
+  };
+}
+
+const ENTRY_STATES: Record<string, MergeQueueEntryState> = {
+  QUEUED: "queued",
+  AWAITING_CHECKS: "awaiting_checks",
+  MERGEABLE: "mergeable",
+  UNMERGEABLE: "unmergeable",
+  LOCKED: "locked"
+};
+
+const QUEUE_METHODS: Record<string, NonNullable<PrMergeQueue["method"]>> = {
+  MERGE: "merge",
+  SQUASH: "squash",
+  REBASE: "rebase"
+};
+
+/**
+ * GitHub's queue fields as a `PrMergeQueue`, or nothing when the query did not
+ * ask (an older GHES): "not known" must stay distinguishable from "no queue".
+ *
+ * `blocked` reads `mergeStateStatus`/`reviewDecision`: GitHub reports BLOCKED
+ * while a required review or required check is outstanding, which is exactly
+ * when `enqueuePullRequest` would refuse.
+ */
+export function mergeQueueSummary(node: PrNode): { mergeQueue?: PrMergeQueue } {
+  if (node.isMergeQueueEnabled === undefined && node.mergeQueueEntry === undefined) return {};
+  const entryNode = node.mergeQueueEntry;
+  const entryState = entryNode?.state == null ? undefined : ENTRY_STATES[entryNode.state];
+  const inQueue = entryNode != null || node.isInMergeQueue === true;
+  const enqueuedAt = optionalTime("at", entryNode?.enqueuedAt).at;
+  const event = (node.queueEvents?.nodes ?? []).filter((item) => item != null).at(-1);
+  const eventKind = event?.__typename === "AddedToMergeQueueEvent" ? "added" as const
+    : event?.__typename === "RemovedFromMergeQueueEvent" ? "removed" as const : undefined;
+  const eventAt = optionalTime("at", event?.createdAt).at;
+  const reason = typeof event?.reason === "string" && event.reason.trim() !== ""
+    ? event.reason.trim().toLowerCase() : undefined;
+  const method = node.mergeQueue?.configuration?.mergeMethod;
+  const review = node.reviewDecision;
+  const blocked = node.mergeStateStatus === "BLOCKED" ||
+    review === "REVIEW_REQUIRED" || review === "CHANGES_REQUESTED";
+  return {
+    mergeQueue: {
+      required: node.isMergeQueueEnabled === true || inQueue,
+      ...(inQueue ? {
+        entry: {
+          state: entryState ?? "queued",
+          ...(typeof entryNode?.position === "number" ? { position: entryNode.position } : {}),
+          ...(typeof entryNode?.estimatedTimeToMerge === "number"
+            ? { etaSeconds: entryNode.estimatedTimeToMerge } : {}),
+          ...(enqueuedAt === undefined ? {} : { enqueuedAt })
+        }
+      } : {}),
+      ...(eventKind === undefined ? {} : {
+        lastEvent: {
+          kind: eventKind,
+          ...(eventAt === undefined ? {} : { at: eventAt }),
+          ...(reason === undefined || eventKind === "added" ? {} : { reason })
+        }
+      }),
+      ...(node.mergeStateStatus == null && review == null ? {} : { blocked }),
+      ...(method == null || QUEUE_METHODS[method] === undefined ? {} : { method: QUEUE_METHODS[method] })
+    }
   };
 }
 
@@ -225,7 +331,8 @@ function optionalTime(
 export function buildCommitPrQuery(
   owner: string,
   repo: string,
-  commitHashes: string[]
+  commitHashes: string[],
+  options: PrQueryOptions = {}
 ): { query: string; variables: Record<string, string> } {
   const variables: Record<string, string> = { owner, name: repo };
   const decls = ["$owner: String!", "$name: String!"];
@@ -235,7 +342,7 @@ export function buildCommitPrQuery(
     decls.push(`$c${i}: GitObjectID!`);
     aliases.push(
       `c${i}: object(oid: $c${i}) { ... on Commit { ` +
-        `associatedPullRequests(first: 10) { ${PR_FIELDS} } } }`
+        `associatedPullRequests(first: 10) { nodes { ${nodeFields(options)} } } } }`
     );
   });
   const query = `query (${decls.join(", ")}) {
@@ -275,7 +382,8 @@ export function parseCommitPrResponse(
 export function buildPrNumberQuery(
   owner: string,
   repo: string,
-  numbers: number[]
+  numbers: number[],
+  options: PrQueryOptions = {}
 ): { query: string; variables: Record<string, string | number> } {
   const variables: Record<string, string | number> = { owner, name: repo };
   const decls = ["$owner: String!", "$name: String!"];
@@ -284,7 +392,7 @@ export function buildPrNumberQuery(
     variables[`n${i}`] = number;
     decls.push(`$n${i}: Int!`);
     aliases.push(
-      `n${i}: pullRequest(number: $n${i}) { ${PR_NODE_FIELDS} ${PR_ORIGIN_FIELDS} }`
+      `n${i}: pullRequest(number: $n${i}) { ${nodeFields(options)} ${PR_ORIGIN_FIELDS} }`
     );
   });
   const query = `query (${decls.join(", ")}) {
@@ -309,7 +417,8 @@ export const OPEN_PR_PAGE_SIZE = 50;
 export function buildOpenPrQuery(
   owner: string,
   repo: string,
-  after: string | null
+  after: string | null,
+  options: PrQueryOptions = {}
 ): { query: string; variables: Record<string, string | number> } {
   const variables: Record<string, string | number> = {
     owner,
@@ -320,7 +429,7 @@ export function buildOpenPrQuery(
   const query = `query ($owner: String!, $name: String!, $first: Int!, $after: String) {
   repository(owner: $owner, name: $name) {
     pullRequests(states: [OPEN], first: $first, after: $after, orderBy: { field: UPDATED_AT, direction: DESC }) {
-      nodes { ${PR_NODE_FIELDS} ${PR_ORIGIN_FIELDS} updatedAt author { login } }
+      nodes { ${nodeFields(options)} ${PR_ORIGIN_FIELDS} updatedAt author { login } }
       pageInfo { hasNextPage endCursor }
     }
   }

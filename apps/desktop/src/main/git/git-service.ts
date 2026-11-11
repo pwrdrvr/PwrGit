@@ -16,6 +16,8 @@ import {
   changeRequestMatch,
   changeRequestNumberQuery,
   forkTrackingRepair,
+  isMergeQueueBranchName,
+  isMergeQueueRemoteRef,
   type ChangeSet,
   CHANGE_LIST_LIMIT,
   type Commit,
@@ -764,7 +766,7 @@ export async function selectAllGraphBranches(
     if (full.startsWith("refs/heads/")) {
       entries.push({ short, remote: false });
       locals.add(short);
-    } else if (!short.endsWith("/HEAD")) {
+    } else if (!short.endsWith("/HEAD") && !isMergeQueueRemoteRef(full)) {
       entries.push({ short, remote: true });
     }
   }
@@ -885,7 +887,8 @@ export async function branchTips(
     if (hash === "" || name === "") continue;
     if (full.startsWith("refs/heads/")) {
       (local[hash] ??= []).push(name);
-    } else if (full.startsWith("refs/remotes/") && !full.endsWith("/HEAD")) {
+    } else if (full.startsWith("refs/remotes/") && !full.endsWith("/HEAD") &&
+      !isMergeQueueRemoteRef(full)) {
       (remote[hash] ??= []).push(name);
     }
   }
@@ -2513,6 +2516,7 @@ async function countRemoteBranches(
     if (fullName === "") continue;
     const split = splitRemoteRef(fullName, longestFirst);
     if (split === null || split.name === "HEAD") continue;
+    if (isMergeQueueBranchName(split.name)) continue;
     total += 1;
   }
   return ok(total);
@@ -3604,6 +3608,9 @@ export function parseBranchRefs(
     // Git can shorten refs/remotes/origin/HEAD to just "origin". Filter the
     // full ref so that alias never becomes a switchable branch.
     if (isRemote && /^refs\/remotes\/[^/]+\/HEAD$/.test(full)) continue;
+    // A merge group's `gh-readonly-queue/<base>/…` is GitHub's, made and
+    // deleted by the queue: never a branch to switch to, list or index.
+    if (isRemote && isMergeQueueRemoteRef(full)) continue;
     const ref: BranchRef = { name, isRemote, isCurrent: head === "*" };
     if (upstream !== "") ref.upstream = upstream;
     if (date !== "") ref.lastCommitAt = date;
@@ -4828,6 +4835,8 @@ export async function listRemoteBranchPage(
     // out. Only the ref directly at `<remote>/HEAD` is that pointer — a branch
     // genuinely named `feature/HEAD` is a branch, and stays listed.
     if (name === "HEAD") continue;
+    // GitHub's merge-group branches are the queue's scratch space, not work.
+    if (isMergeQueueBranchName(name)) continue;
     const subject = fields.slice(4).join("\t");
     const pr = remotePrs?.get(split.remote)?.get(name);
     if (

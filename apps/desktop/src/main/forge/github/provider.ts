@@ -3,6 +3,7 @@ import {
   fetchOpenPrs,
   fetchPrsByNumbers,
   fetchPrsForCommits,
+  enqueuePullRequest,
   fetchPrsForRepo,
   getGitHubToken
 } from "../../github/pr-client";
@@ -73,6 +74,14 @@ export const githubProvider: TokenForgeProvider = {
       await fetchOpenPrs(token, repo, parts.owner, parts.name),
       repo
     );
+  },
+
+  enqueueChangeRequest: async (token, repo, number, expectedHeadOid) => {
+    const parts = githubOwnerAndName(repo);
+    if (parts === null) {
+      throw new ForgeResponseError("Not a GitHub owner/name repository path.");
+    }
+    return await enqueuePullRequest(token, repo, parts.owner, parts.name, number, expectedHeadOid);
   }
 };
 

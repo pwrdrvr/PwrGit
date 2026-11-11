@@ -1,5 +1,7 @@
 import {
+  err,
   ok,
+  pwrGitError,
   type GitHubCommitAuthorIdentityLookup,
   type PrSummary
 } from "@pwrgit/shared";
@@ -178,6 +180,23 @@ export function registerGitHubHandlers(
     // in place, no full repo:list reload.
     publishBranchPrs(req.repoId, changed);
     return ok(null);
+  });
+
+  bus.register("pr:enqueue", async (req) => {
+    if (!Number.isSafeInteger(req.number) || req.number <= 0) {
+      return err(pwrGitError("validation", "invalid_number", "Not a change request number."));
+    }
+    const headOid = req.headOid === undefined || /^[0-9a-f]{40}$/i.test(req.headOid)
+      ? req.headOid : undefined;
+    const answer = await prs.enqueue(req.repoId, {
+      number: req.number,
+      ...(req.repoPath === undefined ? {} : { repoPath: req.repoPath }),
+      ...(headOid === undefined ? {} : { headOid })
+    });
+    if (!answer.ok) return answer;
+    publishBranchPrs(req.repoId, answer.value.deltas.branches);
+    publishCommitPrs(req.repoId, answer.value.deltas.commits);
+    return ok(answer.value.result.position === undefined ? {} : { position: answer.value.result.position });
   });
 
   // Answered from main's cache, so a StrictMode double-mount costs one read

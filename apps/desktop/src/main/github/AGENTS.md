@@ -246,3 +246,26 @@ sidebar's PR view).
   green open chip for the ten-minute repo sweep.
 - A **merged PR** makes a branch prunable at any age (`isPrunableWorktree`),
   catching squash/rebase merges the git-ancestry "in default" check misses.
+
+## Merge queues
+
+GitHub merge queues and GitLab merge trains ride the same PR reads. Shared
+`merge-queue.ts` holds `PrMergeQueue` (the forge's answer, stored as JSON in
+`merge_queue`, migration 0046) and `mergeQueueStatus`, the one reading of it.
+
+- **Ask in the same request.** If a second query fails, a queued PR gets
+  cached as plain green. GHES before 3.8 and GitLab CE refuse the whole
+  document over the queue fields. `pr-client.ts`/`mr-client.ts` then ask
+  again without them and remember that per host. Absent means "not known".
+- **A queue merge ends with a removal.** GitHub writes
+  `RemovedFromMergeQueueEvent` with reason `merged` when the queue merges.
+  Only any other reason is "removed".
+- **Enqueue never merges.** `pr:enqueue` reads the PR first and refuses a
+  base with no queue. It then calls `enqueuePullRequest` (GitHub) or the
+  merge-train endpoint (GitLab), pinned to the head the user saw. PwrGit has
+  no direct-merge verb; don't add a fallback to one.
+- `gh-readonly-queue/*` remote refs are filtered in `git-service.ts`
+  (`isMergeQueueRemoteRef`). They never reach branch lists, graph labels or
+  the index.
+- `merge-queue.model.test.ts` drives a model of the queue lifecycle through
+  the parser, the column and the mapping. Extend it for any new queue field.

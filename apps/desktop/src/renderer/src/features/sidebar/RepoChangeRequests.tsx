@@ -2,6 +2,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   changeRequestMatch,
   changeRequestNumberQuery,
+  mergeQueueLabel,
+  mergeQueueStatus,
   type ChangeRequestEntry,
   type ChangeRequestList,
   type ChangeRequestLocation,
@@ -239,6 +241,9 @@ function locationTag(location: ChangeRequestLocation): {
 /** Short checks wording for the column; the chip's card has the full story. */
 function checksWord(pr: OpenChangeRequest): string {
   if (pr.state !== "open") return pr.state;
+  // In the queue the PR's own checks no longer decide; say where it stands.
+  const queue = mergeQueueStatus(pr);
+  if (queue !== null && queue.kind !== "not_ready") return mergeQueueLabel(queue);
   const parts: string[] = [];
   if (pr.isDraft) parts.push("draft");
   if (pr.mergeState === "conflicting") parts.push("conflicts");
@@ -250,6 +255,11 @@ function checksWord(pr: OpenChangeRequest): string {
 
 function checksClass(pr: OpenChangeRequest): string {
   if (pr.state !== "open") return `is-${pr.state}`;
+  const queue = mergeQueueStatus(pr);
+  if (queue?.kind === "queued" || queue?.kind === "group_checks_running") {
+    return queue.kind === "queued" && queue.failing ? "is-failing" : "is-merged";
+  }
+  if (queue?.kind === "removed") return "is-failing";
   if (pr.mergeState === "conflicting") return "is-failing";
   return pr.checkState === undefined ? "" : `is-${pr.checkState}`;
 }
@@ -451,7 +461,7 @@ export function ChangeRequestTable({
             tabIndex={-1}
           >
             <div className="refs-table__identity refs-pr-identity">
-              <PrChip pr={pr} />
+              <PrChip pr={pr} repoId={repoId} />
               <div>
                 <strong className="refs-pr-title" {...hoverTooltip(tip, pr.title)}>
                   {pr.title}

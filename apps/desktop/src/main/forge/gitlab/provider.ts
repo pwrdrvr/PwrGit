@@ -1,5 +1,6 @@
 import { getGitLabToken } from "./glab-cli";
 import {
+  addMergeRequestToTrain,
   fetchMrsByNumbers,
   fetchMrsForBranches,
   fetchMrsForCommits,
@@ -24,5 +25,7 @@ export const gitlabProvider: ForgeProvider = {
   fetchPrsByNumbers: async (token, repo, numbers) =>
     stampForge(await fetchMrsByNumbers(token, repo, numbers), repo),
   fetchOpenPrs: async (token, repo) =>
-    stampOpenList(await fetchOpenMrs(token, repo), repo)
+    stampOpenList(await fetchOpenMrs(token, repo), repo),
+  enqueueChangeRequest: async (token, repo, number, expectedHeadOid) =>
+    await addMergeRequestToTrain(token, repo, number, expectedHeadOid)
 };

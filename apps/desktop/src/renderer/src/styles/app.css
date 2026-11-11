@@ -14667,6 +14667,64 @@ body.is-col-resizing {
   background: var(--status-closed);
   box-shadow: 0 0 0 1px var(--pr-dot-ring);
 }
+/* Merge queue. In the queue a PR is neither merged nor plain green: it waits
+   and its merge group's checks decide, so it draws as a hollow ring in the
+   merged hue it is heading for. Ready to queue keeps the green fill with that
+   ring around it: green, and the next step is the queue, not a merge. */
+.pr-chip--queued .pr-chip__dot,
+.pr-status-card__dot--queued {
+  background: transparent;
+  box-shadow: inset 0 0 0 1.5px var(--brand-purple);
+}
+.pr-chip--queue-failing .pr-chip__dot,
+.pr-status-card__dot--queue-failing {
+  background: transparent;
+  box-shadow: inset 0 0 0 1.5px var(--status-error);
+}
+.pr-chip--queue-removed .pr-chip__dot,
+.pr-status-card__dot--queue-removed { background: var(--status-error); }
+.pr-chip--queue-ready .pr-chip__dot,
+.pr-status-card__dot--queue-ready {
+  background: var(--status-ok);
+  box-shadow: 0 0 0 1.5px var(--brand-purple);
+}
+.pr-status-card__queue {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 8px;
+  margin-top: 8px;
+}
+.pr-status-card__queue-action {
+  padding: 3px 8px;
+  border: 1px solid var(--accent-border);
+  border-radius: var(--radius-sm);
+  background: var(--accent-tint);
+  color: var(--text-primary);
+  font: 600 10.5px/1.2 var(--font-sans);
+  cursor: pointer;
+}
+.pr-status-card__queue-action:hover {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+.pr-status-card__queue-action:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 1px;
+}
+.pr-status-card__queue-action[aria-busy="true"] {
+  cursor: progress;
+  color: var(--text-secondary);
+}
+.pr-status-card__queue-method {
+  color: var(--text-muted);
+  font: 500 10px/1.2 var(--font-sans);
+}
+.pr-status-card__queue-error {
+  flex-basis: 100%;
+  color: var(--status-error);
+  font: 500 10.5px/1.35 var(--font-sans);
+}
 .pr-chip--checks-running .pr-chip__dot {
   animation: pr-checks-running 1.6s ease-in-out infinite;
 }

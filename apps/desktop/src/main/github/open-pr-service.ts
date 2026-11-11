@@ -29,7 +29,7 @@ import {
   type CheckoutRefs
 } from "../forge/change-request-location";
 import { resolveForge, type ResolvedForge } from "../forge/providers";
-import { OPEN_PR_COLUMNS, openPrFromRow, openPrSelect } from "../forge/pr-row";
+import { OPEN_PR_COLUMNS, openPrFromRow, openPrSelect, serializeMergeQueue } from "../forge/pr-row";
 import { connectForge, type OpenPrList } from "../forge/types";
 
 /** A list refresh riding the repo sweep (repo expand, lineage load). */
@@ -1351,6 +1351,7 @@ function storedFromOpen(pr: OpenChangeRequest): StoredRow {
     opened_at: pr.createdAt ?? null,
     merged_at: pr.mergedAt ?? null,
     closed_at: pr.closedAt ?? null,
+    merge_queue: serializeMergeQueue(pr.mergeQueue),
     author: pr.author ?? null,
     head_repo_path: pr.headRepoPath ?? null,
     updated_at: pr.updatedAt ?? null

@@ -1,3 +1,4 @@
+import type { PrMergeQueue } from "./merge-queue";
 // Domain types shared across processes. Modeled on the design prototype's
 // data shapes (design/PwrGit.dc.html): profiles own repos, repos own
 // worktrees, worktrees carry dirty/ahead/behind counts.
@@ -1124,6 +1125,9 @@ export type ForgeCapabilities = {
    *  equivalent, so the fork dialog hides the switch rather than accepting a
    *  control it would silently ignore. */
   forkDefaultBranchOnly: boolean;
+  /** PwrGit can add a change request to a required merge queue (GitHub) or
+   *  merge train (GitLab). It never merges directly in its place. */
+  addToMergeQueue: boolean;
 };
 
 /**
@@ -1239,6 +1243,12 @@ export type PrSummary = {
   /** Epoch milliseconds; set only on the matching terminal state. */
   mergedAt?: number;
   closedAt?: number;
+  /**
+   * The merge queue (GitHub) or merge train (GitLab) as the forge last
+   * reported it. Read it only through `mergeQueueStatus`. Absent: the forge
+   * did not say (an older instance, a row cached before this existed).
+   */
+  mergeQueue?: PrMergeQueue;
 };
 
 /**

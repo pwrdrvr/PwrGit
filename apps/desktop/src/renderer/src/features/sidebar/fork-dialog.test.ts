@@ -58,7 +58,8 @@ const CAPS = {
   changeSizeAndTimeline: true,
   commitAuthorIdentity: true,
   commitSignatures: true,
-  forkDefaultBranchOnly: true
+  forkDefaultBranchOnly: true,
+  addToMergeQueue: false
 };
 
 const statuses: ForgeStatus[] = [

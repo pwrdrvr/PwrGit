@@ -357,7 +357,7 @@ export function RepoChangeRequestSection({
         }}
       >
         <div className="ref-cr-row__line">
-          <PrChip pr={pr} />
+          <PrChip pr={pr} repoId={repo.id} />
           <span className="ref-cr-row__title" {...hoverTooltip(tip, pr.title)}>
             {pr.title}
           </span>
@@ -411,7 +411,7 @@ export function RepoChangeRequestSection({
               key={changeRequestKey(other)}
               aria-label={`Also #${other.pr.number} on ${other.remote}`}
             >
-              <PrChip pr={other.pr} />
+              <PrChip pr={other.pr} repoId={repo.id} />
               {manyRemotes && (
                 <span className="ref-cr-paired__remote">{other.remote}</span>
               )}

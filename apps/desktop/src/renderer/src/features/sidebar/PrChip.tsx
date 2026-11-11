@@ -26,9 +26,13 @@ import { PrStatusCard } from "./PrStatusCard";
  *  arrives through main's `pr:changed` deltas like everything else. */
 export function PrChip({
   pr,
+  repoId,
   hoverIntent: sharedIntent
 }: {
   pr: PrSummary;
+  /** The checkout this chip belongs to. Only with it can the card offer
+   *  "Add to merge queue": main resolves the forge from its `origin`. */
+  repoId?: string | undefined;
   /** Callers rendering many chips (commit rows) pass their own gate; a lone
    *  sidebar chip falls back to its own. */
   hoverIntent?: HoverIntent;
@@ -64,7 +68,7 @@ export function PrChip({
       : pr.state === "closed"
       ? `closed ${sigil}${pr.number}`
         : `${sigil}${pr.number}`;
-  const card = <PrStatusCard pr={pr} />;
+  const card = <PrStatusCard pr={pr} repoId={repoId} />;
   const open = (): void => void dispatch("shell:openExternal", { url: pr.url });
   const activate = (altKey: boolean): void => {
     if (altKey) void copyText(pr.url);
@@ -101,8 +105,8 @@ export function PrChip({
   // Depends on `pr`, not the element: a new element every render would make an
   // open card re-render on every parent paint.
   useEffect(() => {
-    updateTooltip(<PrStatusCard pr={pr} />);
-  }, [pr, updateTooltip]);
+    updateTooltip(<PrStatusCard pr={pr} repoId={repoId} />);
+  }, [pr, repoId, updateTooltip]);
 
   return (
     <>

@@ -89,6 +89,13 @@ it("makes PrService refetch inside a TTL the old stamp would still have held", a
   // one minute after the last fetch is well inside the ten-minute sweep TTL,
   // so only the expired merged row can explain a request.
   const head = "0123456789abcdef0123456789abcdef01234567";
+  // Today's PrService reads columns that only the migrations after this one
+  // add (0046's merge_queue); a real upgrade applies them all, so this does.
+  db.close();
+  for (const file of readdirSync(MIGRATIONS)) {
+    if (file > UPGRADE) cpSync(join(MIGRATIONS, file), join(dir, file));
+  }
+  db = openDatabase(path, dir);
   const asked: string[][] = [];
   const provider: TokenForgeProvider = {
     kind: "github",
