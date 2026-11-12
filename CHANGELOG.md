@@ -1,5 +1,13 @@
 # Changelog
 
+## v0.57.0 - 2026-11-11
+
+- Published tags - Added comparisons between local tags and a chosen publishing remote, using origin when available. The Tags tab and sidebar flag tags that differ without rewriting them during Fetch or Pull. Take the remote's value or keep the local one explicitly; replaced tag objects are retained for restoration, and stale reviews are refused. Remote-only tag history is downloaded only after confirmation.
+- Tag checks - Added Check tags after sync to the Fetch/Pull menus, enabled by default for individual, bulk, and timed sync. Background remote listings are shared per repository, limited to two at once, and normally refreshed at most hourly. Turning the option off stops these automatic checks; explicit Tags-tab checks remain available, and automatic listings respect --no-tags.
+- Local agents - Native MCP relay connections now receive their requested role without an approval prompt. With no --role, the relay receives PwrGit Workspace Control, the most capable built-in role; choose a narrower role when that access is not appropriate. Unknown roles are rejected rather than replaced with a fallback. Sessions remain visible and revocable in Settings, while direct IPC HTTP connections still require consent.
+- Quick navigation - Fixed overlapping file searches sharing a canceled Git read and incorrectly showing no results. Live searches now wait for that read to finish and share a replacement without restarting canceled requests.
+- Source installs - Improved reuse of verified Electron runtime data across PwrDrvr checkouts while keeping independent installed files. macOS can use APFS clones; unavailable shared storage falls back to a checkout-local cache rather than blocking installation.
+
 ## v0.56.0 - 2026-11-10
 
 - Local agents - Moved desktop MCP from loopback TCP/OAuth and an independent server to protected Unix sockets or Windows named pipes. A bundled native stdio relay, or HTTP over the same local endpoint, connects clients to the running desktop, which owns discovery, consent, and repository operations. Live status uses MCP subscriptions and HTTP SSE rather than separate WebSocket listeners; approved permission and repository limits cannot be widened by later role changes.
