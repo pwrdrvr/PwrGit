@@ -147,7 +147,7 @@ export function LocalAgentsSettings() {
       <SettingsPanelHead
         eyebrow="Access control"
         title="Local agents"
-        help="Authorize agents in PwrGit’s approval window, then manage their Sessions and roles here. Roles define permissions and repository access. Revocation applies to every tool and resource request."
+        help="A relay connection gets the role its pwrgit-mcp --role names (PwrGit Workspace Control when it names none); direct HTTP clients are approved in PwrGit’s window. Manage Sessions and roles here. Roles define permissions and repository access. Revocation applies to every tool and resource request."
       />
 
       <AgentAccessSection />

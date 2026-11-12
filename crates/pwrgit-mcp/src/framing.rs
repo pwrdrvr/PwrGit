@@ -8,8 +8,26 @@ pub enum Greeting {
     Raw {
         version: String,
         identity: Option<String>,
+        /// The role the relay's operator asked for with `--role`. `None`
+        /// means the relay named none, which the desktop answers with its
+        /// most capable role.
+        role: Option<String>,
     },
     Http(Vec<u8>),
+}
+/// Longest role id a relay may request. Generated custom role ids are 41
+/// characters.
+pub const MAX_ROLE_ID: usize = 64;
+/// A raw greeting: wire, version, optional identity and optional `role=<id>`.
+/// Room for a 43-character identity and the longest role id together.
+const MAX_RAW: usize = 192;
+/// The desktop's role-id alphabet (`access-policy.ts` `ID_PATTERN`), capped so
+/// the greeting stays bounded.
+pub fn valid_role_id(id: &str) -> bool {
+    (1..=MAX_ROLE_ID).contains(&id.len())
+        && id
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'.' | b'_' | b'-'))
 }
 const MAX_LINE: usize = 4096;
 const RAW_PREFIX: &[u8] = b"PWRGIT-MCP/";
@@ -35,7 +53,7 @@ async fn detect<R: AsyncRead + Unpin>(reader: &mut R, http: bool) -> io::Result<
             && METHODS
                 .iter()
                 .any(|method| method.starts_with(&bytes) || bytes.starts_with(method));
-        if (!raw && !is_http) || bytes.len() > MAX_LINE || (raw && bytes.len() >= 128) {
+        if (!raw && !is_http) || bytes.len() > MAX_LINE || (raw && bytes.len() >= MAX_RAW) {
             return Err(super::error("invalid or oversized IPC framing preamble"));
         }
         if bytes.last() != Some(&b'\n') {
@@ -44,7 +62,18 @@ async fn detect<R: AsyncRead + Unpin>(reader: &mut R, http: bool) -> io::Result<
         let line = std::str::from_utf8(&bytes).map_err(|_| super::error("invalid IPC framing"))?;
         if raw {
             let fields: Vec<_> = line.trim_end_matches('\n').split(' ').collect();
-            if !(2..=3).contains(&fields.len())
+            let role = match fields.get(3) {
+                None => None,
+                Some(field) => match field.strip_prefix("role=") {
+                    Some(role) if valid_role_id(role) => Some(role.to_owned()),
+                    _ => {
+                        return Err(super::error(
+                            "invalid requested role in MCP transport greeting",
+                        ));
+                    }
+                },
+            };
+            if !(2..=4).contains(&fields.len())
                 || fields[0] != super::WIRE
                 || fields[1].is_empty()
                 || fields
@@ -58,6 +87,7 @@ async fn detect<R: AsyncRead + Unpin>(reader: &mut R, http: bool) -> io::Result<
             return Ok(Greeting::Raw {
                 version: fields[1].into(),
                 identity: fields.get(2).filter(|s| !s.is_empty()).map(|s| (*s).into()),
+                role,
             });
         }
         let fields: Vec<_> = line.strip_suffix("\r\n").unwrap_or("").split(' ').collect();
@@ -112,7 +142,8 @@ mod tests {
                     .unwrap(),
                 Greeting::Raw {
                     version: "0.0.1".into(),
-                    identity: Some("token".into())
+                    identity: Some("token".into()),
+                    role: None
                 }
             );
             for line in ["POST /mcp HTTP/1.1\r\n", "GET / HTTP/1.0\r\n"] {
@@ -121,6 +152,10 @@ mod tests {
             for line in [
                 "PWRGIT-MCP/9 1\n",
                 "PWRGIT-MCP/1 1 token extra\n",
+                "PWRGIT-MCP/1 1  role=\n",
+                "PWRGIT-MCP/1 1  role=has space\n",
+                "PWRGIT-MCP/1 1  role=bad/char\n",
+                "PWRGIT-MCP/1 1  role=builtin.discovery extra\n",
                 "POST / HTTP/2.0\r\n",
                 "POST / HTTP/1.1\n",
                 "POST  / HTTP/1.1\r\n",
@@ -135,7 +170,7 @@ mod tests {
             }
             for line in [
                 format!("POST /{}", "x".repeat(MAX_LINE)),
-                format!("PWRGIT-MCP/1 {}", "x".repeat(128)),
+                format!("PWRGIT-MCP/1 {}", "x".repeat(MAX_RAW)),
             ] {
                 assert!(accept(&mut line.as_bytes(), true).await.is_err());
             }
@@ -152,6 +187,43 @@ mod tests {
             let task = tokio::spawn(async move { accept(&mut read, true).await });
             task.abort();
             assert!(task.await.unwrap_err().is_cancelled());
+        });
+    }
+    #[test]
+    fn requested_role_is_an_optional_fourth_field() {
+        runtime().block_on(async {
+            // A relay that names no role sends the three fields every
+            // earlier desktop accepts; it reports no role.
+            for (line, identity, role) in [
+                ("PWRGIT-MCP/1 1.0.0 \n", None, None),
+                ("PWRGIT-MCP/1 1.0.0\n", None, None),
+                (
+                    "PWRGIT-MCP/1 1.0.0  role=builtin.local-reader\n",
+                    None,
+                    Some("builtin.local-reader"),
+                ),
+                (
+                    "PWRGIT-MCP/1 1.0.0 token role=role_1f0e\n",
+                    Some("token"),
+                    Some("role_1f0e"),
+                ),
+            ] {
+                assert_eq!(
+                    accept(&mut line.as_bytes(), true).await.unwrap(),
+                    Greeting::Raw {
+                        version: "1.0.0".into(),
+                        identity: identity.map(Into::into),
+                        role: role.map(Into::into),
+                    },
+                    "{line:?}"
+                );
+            }
+            let longest = "r".repeat(MAX_ROLE_ID);
+            let identity = "t".repeat(43);
+            let line = format!("PWRGIT-MCP/1 1.0.0 {identity} role={longest}\n");
+            assert!(line.len() > 128);
+            assert!(accept(&mut line.as_bytes(), true).await.is_ok());
+            assert!(!valid_role_id(&"r".repeat(MAX_ROLE_ID + 1)));
         });
     }
 }
