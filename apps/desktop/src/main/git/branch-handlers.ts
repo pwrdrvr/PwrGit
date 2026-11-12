@@ -7,6 +7,7 @@ import type { OpenPrService } from "../github/open-pr-service";
 import type { DB } from "../persistence/db";
 import type { SettingsService } from "../settings/settings-service";
 import { deleteLocalBranch, renameLocalBranch } from "./branch-lifecycle";
+import { tagSourcesFor } from "./tag-sources";
 import { execGit } from "./dugite";
 import { worktreeMissingError } from "./worktree-liveness";
 import {
@@ -165,8 +166,14 @@ export function registerBranchHandlers(
       ids.push(worktree.id);
       checkedOut.set(worktree.branch, ids);
     }
-    const refs = await listRepoRefs(execGit, repo.path, checkedOut);
-    if (!refs.ok) return refs;
+    const listed = await listRepoRefs(execGit, repo.path, checkedOut);
+    if (!listed.ok) return listed;
+    // The stored comparison count only: the sidebar runs no extra Git for it.
+    const tagAttention = tagSourcesFor(db).store.attention(
+      req.repoId,
+      listed.value.remotes.map((remote) => remote.name)
+    );
+    const refs = tagAttention === undefined ? listed : ok({ ...listed.value, tagAttention });
     const prs = localBranchPrs(req.repoId);
     const pinned = indexer.pinnedBranchNames(req.repoId);
     if (prs.size === 0 && pinned.size === 0) return refs;

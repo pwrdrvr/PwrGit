@@ -1,5 +1,4 @@
 import { BranchGlyph } from "../../lib/BranchGlyph";
-import { LocateGlyph } from "../../lib/LocateGlyph";
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
   changeRequestMatch,
@@ -15,6 +14,8 @@ import {
   type Repo,
   type RepoRefs,
   type RoutedRemote,
+  type TagStatusFilter,
+  type TagStatusRow,
   type TagSummary,
   type Worktree
 } from "@pwrgit/shared";
@@ -24,7 +25,7 @@ import { confirmDialog } from "../shell/dialogs";
 import { dispatch } from "../../lib/pwrgit";
 import { useFocusTrap } from "../../lib/useFocusTrap";
 import { showErrorToast, showInfoToast } from "../../lib/toast";
-import { useTagSearch } from "../../lib/useTagSearch";
+import { useTagStatus } from "../../lib/useTagStatus";
 import {
   useRemoteBranchSearch,
   type RemoteBranchSearch
@@ -45,6 +46,9 @@ import { ForkRemoteStatus } from "./ForkRemoteStatus";
 import { forkParentOffer } from "./fork-parent-offer";
 import { useForgeHostMap } from "../../lib/useForgeHostMap";
 import { TagRemoteDialog } from "./TagRemoteDialog";
+import { TagDetailsDialog } from "./TagDetailsDialog";
+import { TagSourceStrip, TagStatusFilters } from "./TagSourceStrip";
+import { TagStatusTableRow } from "./TagStatusTableRow";
 import { PrChip } from "./PrChip";
 import { RefRowActions, RefRowMenu } from "./RefRowMenu";
 import { PinIcon } from "./WorktreeRow";
@@ -81,7 +85,6 @@ import {
 import { forkMenuLabel } from "../shell/worktree-menu-items";
 import { CloseGlyph } from "../../lib/CloseGlyph";
 import { SearchGlyph } from "../../lib/SearchGlyph";
-import { TagGlyph } from "../../lib/TagGlyph";
 
 export function trackingLabel(branch: LocalBranchSummary): string {
   switch (branch.tracking) {
@@ -586,6 +589,7 @@ export function RepoRefsModal({
   initialTab,
   initialStatus = "all",
   initialWorktreeStatus = "all",
+  initialTagFilter = "all",
   onCleanUpBranches,
   onPruneWorktrees,
   onFork,
@@ -610,6 +614,9 @@ export function RepoRefsModal({
   /** Which worktrees the Worktrees tab starts on — the sidebar's Finished row
    *  opens it on Finished. */
   initialWorktreeStatus?: WorktreeStatusFilter;
+  /** Which tags the Tags tab starts on — the sidebar's "N tags differ" opens
+   *  it on Differ. */
+  initialTagFilter?: TagStatusFilter;
   /** Where the Worktrees tab's Finished view sends its one verb. */
   onPruneWorktrees?: (() => void) | undefined;
   /** Fork the repository, from the Worktrees tab's row menu. */
@@ -637,6 +644,10 @@ export function RepoRefsModal({
   const [createTagOpen, setCreateTagOpen] = useState(false);
   const [remoteTag, setRemoteTag] = useState<TagSummary | null>(null);
   const [tagEpoch, setTagEpoch] = useState(0);
+  const [tagFilter, setTagFilter] = useState<TagStatusFilter>(initialTagFilter);
+  const [tagChecking, setTagChecking] = useState(false);
+  const [detailsTag, setDetailsTag] = useState<string | null>(null);
+  const [adoptingTag, setAdoptingTag] = useState<string | null>(null);
   const [remoteEditor, setRemoteEditor] = useState<RemoteSummary | "new" | null>(
     null
   );
@@ -696,9 +707,10 @@ export function RepoRefsModal({
     // count is the remote count until a query makes `counting` true.
     enabled: tab === "branches" || counting
   });
-  const tagSearch = useTagSearch({
+  const tagSearch = useTagStatus({
     repoId: repo.id,
     query,
+    filter: tagFilter,
     enabled: tab === "tags" || counting,
     refreshKey: tagEpoch
   });
@@ -871,6 +883,151 @@ export function RepoRefsModal({
   };
 
   const tagsChanged = (): void => {
+    setTagEpoch((value) => value + 1);
+    onRefresh();
+  };
+
+  // Opening the tab re-lists the published remote only when PwrGit's view of
+  // it is stale; main applies the same rule and skips a --no-tags remote.
+  // Once per publisher per open, so a failing remote is not asked per page.
+  const tagSource = tagSearch.source;
+  const autoCheckedFor = useRef<string | null>(null);
+  const mounted = useRef(true);
+  useEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+    };
+  }, []);
+  useEffect(() => {
+    if (tab !== "tags" || tagSource === null || tagSource.primary === null) return;
+    if (autoCheckedFor.current === tagSource.primary) return;
+    autoCheckedFor.current = tagSource.primary;
+    if (!tagSource.stale || tagSource.tagOpt === "no-tags") return;
+    setTagChecking(true);
+    void dispatch("tag:refreshRemote", { repoId: repo.id, mode: "auto" }).then((result) => {
+      if (!mounted.current) return;
+      setTagChecking(false);
+      // A failed or timed-out check changed nothing but the source's error:
+      // re-read so the strip says so and offers Retry.
+      if (result.ok && (result.value.checked || result.value.source.error !== tagSource.error)) {
+        setTagEpoch((value) => value + 1);
+      }
+    });
+  }, [repo.id, tab, tagSource]);
+
+  const refreshTagSource = async (): Promise<void> => {
+    const primary = tagSource?.primary ?? null;
+    if (primary === null || tagChecking) return;
+    setTagChecking(true);
+    const result = await dispatch("tag:refreshRemote", { repoId: repo.id, mode: "explicit" });
+    if (!mounted.current) return;
+    setTagChecking(false);
+    setTagEpoch((value) => value + 1);
+    if (!result.ok && result.error.code !== "canceled") {
+      showErrorToast({
+        title: `Couldn't check ${primary}'s tags`,
+        message: result.error.message.split("\n")[0],
+        detail: result.error.message,
+        subject: { repoId: repo.id, remote: { name: primary } }
+      });
+    }
+  };
+
+  const choosePublisher = async (remote: string): Promise<void> => {
+    const result = await dispatch("tag:setPrimaryRemote", { repoId: repo.id, remote });
+    if (!result.ok) {
+      showErrorToast({
+        title: "Couldn't change the published remote",
+        message: result.error.message.split("\n")[0],
+        detail: result.error.message,
+        subject: { repoId: repo.id }
+      });
+      return;
+    }
+    setTagFilter("all");
+    setTagEpoch((value) => value + 1);
+  };
+
+  /** Take the published value (a differing tag) or download it (published only). */
+  const adoptTag = async (row: TagStatusRow): Promise<void> => {
+    const published = row.published;
+    if (published === null || adoptingTag !== null) return;
+    const local = row.local;
+    const remote = published.remote;
+    if (local !== null) {
+      const confirmed = await confirmDialog({
+        title: `Replace local tag ${row.name} with ${remote}'s?`,
+        message:
+          `Local ${row.name} points at ${local.targetId.slice(0, 12)} (${local.kind}). ` +
+          `${remote}'s points at ${published.targetId.slice(0, 12)} (${published.kind}). ` +
+          `PwrGit fetches only this tag from ${remote}. Your current tag is kept as ` +
+          `refs/pwrgit/replaced-tags/…/${row.name}, and Restore in the tag's details puts it back.`,
+        confirmLabel: `Take ${remote}'s`
+      });
+      if (!confirmed) return;
+    } else if (published.available !== true) {
+      const confirmed = await confirmDialog({
+        title: `Download ${remote}'s ${row.name}?`,
+        message:
+          `Its commit ${published.targetId.slice(0, 12)} is not in this repository. Downloading fetches ` +
+          "this one tag and the history it points at — nothing else. That history may be large or unrelated to your branches.",
+        confirmLabel: "Download tag"
+      });
+      if (!confirmed) return;
+    }
+    setAdoptingTag(row.name);
+    const result = await dispatch("tag:adoptRemote", {
+      repoId: repo.id,
+      name: row.name,
+      remote,
+      expectedRemoteObjectId: published.objectId,
+      expectedLocalObjectId: local?.objectId ?? null
+    });
+    if (!mounted.current) return;
+    setAdoptingTag(null);
+    if (!result.ok) {
+      if (result.error.code !== "canceled") {
+        showErrorToast({
+          title: local === null ? "Download tag failed" : "Take tag failed",
+          message: result.error.message.split("\n")[0],
+          detail: result.error.message,
+          subject: { repoId: repo.id, remote: { name: remote } }
+        });
+      }
+      tagsChanged();
+      return;
+    }
+    showInfoToast({
+      title: local === null ? `Downloaded ${row.name}` : `Took ${remote}'s ${row.name}`,
+      message:
+        result.value.replacedRef === null
+          ? result.value.targetId.slice(0, 12)
+          : `${result.value.targetId.slice(0, 12)} · previous value kept as ${result.value.replacedRef}`,
+      subject: { repoId: repo.id, remote: { name: remote } }
+    });
+    tagsChanged();
+  };
+
+  const keepLocalTag = async (row: TagStatusRow, keep: boolean): Promise<void> => {
+    if (row.local === null || row.published === null) return;
+    const result = await dispatch("tag:keepLocal", {
+      repoId: repo.id,
+      name: row.name,
+      remote: row.published.remote,
+      localObjectId: row.local.objectId,
+      remoteObjectId: row.published.objectId,
+      keep
+    });
+    if (!result.ok) {
+      showErrorToast({
+        title: "Couldn't record the choice",
+        message: result.error.message.split("\n")[0],
+        detail: result.error.message,
+        subject: { repoId: repo.id }
+      });
+      return;
+    }
     setTagEpoch((value) => value + 1);
     onRefresh();
   };
@@ -1088,6 +1245,7 @@ export function RepoRefsModal({
       if (event.key !== "Escape" || event.defaultPrevented) return;
       event.preventDefault();
       if (renaming !== null) setRenaming(null);
+      else if (detailsTag !== null) setDetailsTag(null);
       else if (remoteTag !== null) setRemoteTag(null);
       else if (createTagOpen) setCreateTagOpen(false);
       else if (remoteEditor !== null) setRemoteEditor(null);
@@ -1097,7 +1255,7 @@ export function RepoRefsModal({
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [createTagOpen, onClose, parentDialogOpen, pushOpen, remoteEditor, remoteTag, renaming]);
+  }, [createTagOpen, detailsTag, onClose, parentDialogOpen, pushOpen, remoteEditor, remoteTag, renaming]);
 
   // Escape stays with the handler above, which closes a nested dialog's state
   // before the browser itself. The trap is what makes this a modal: without
@@ -1580,174 +1738,75 @@ export function RepoRefsModal({
 
           {shownTab === "tags" && (
             <div className="refs-table refs-tag-table">
+              {tagSearch.source !== null && (
+                <TagSourceStrip
+                  source={tagSearch.source}
+                  checking={tagChecking}
+                  now={now}
+                  onRefresh={() => void refreshTagSource()}
+                  onChoose={(remote) => void choosePublisher(remote)}
+                />
+              )}
+              {tagSearch.source?.primary != null &&
+                tagSearch.source.checkedAt !== null &&
+                tagSearch.counts !== null && (
+                  <TagStatusFilters
+                    counts={tagSearch.counts}
+                    primary={tagSearch.source.primary}
+                    filter={tagFilter}
+                    onFilter={setTagFilter}
+                  />
+                )}
               {/* Object and Target were separate columns, and for a
                   lightweight tag they are the same object with the same type —
                   the overwhelming majority of rows repeated one id twice and
                   spent a quarter of the table doing it. One "points at" column
                   carries the peeled commit, which is what the tag marks; the
                   intermediate tag object an annotated tag adds appears only on
-                  the rows that actually have one. */}
+                  the rows that actually have one. A tag that differs from the
+                  published remote spends a second line on that remote's
+                  value, and only then. */}
               <div className="refs-table__header refs-tag-table__row">
                 <span>Tag</span>
                 <span>Points at</span>
                 <span>Annotation</span>
                 <span>Actions</span>
               </div>
-              {tagSearch.rows.map((tag) => (
-                <div
-                  className="refs-table__row refs-tag-table__row"
-                  key={tag.fullName}
-                  data-refs-row=""
-                  tabIndex={-1}
-                >
-                  <div className="refs-table__identity">
-                    <span className="refs-tag-icon" aria-hidden="true">
-                      <TagGlyph size={11} />
-                    </span>
-                    <div>
-                      <CopyTarget
-                        value={tag.name}
-                        label={`Copy tag name ${tag.name}`}
-                        hint={`${tag.fullName}\nClick to copy tag name`}
-                        className="refs-copyable-name copyable"
-                        deferForDoubleClick
-                      >
-                        <strong>{tag.name}</strong>
-                      </CopyTarget>
-                      {/* Lightweight is the default and saying so on 97% of
-                          rows is noise; annotated is the fact worth carrying. */}
-                      {tag.kind === "annotated" && <small>annotated</small>}
-                    </div>
-                  </div>
-                  <div className="refs-tag-object">
-                    <span className="refs-tag-object__type">
-                      {tag.targetType}
-                    </span>
-                    <CopyTarget
-                      value={tag.targetId}
-                      label={`Copy tag target ${tag.targetId}`}
-                      hint={`${tag.targetId}\nClick to copy tag target`}
-                      className="refs-plan__copy copyable"
-                      deferForDoubleClick
-                    >
-                      {tag.targetId.slice(0, 12)}
-                    </CopyTarget>
-                    {/* Only when the tag ref does not point straight at the
-                        commit — i.e. an annotated tag, where the tag object is
-                        a distinct thing worth being able to copy. */}
-                    {tag.objectId !== tag.targetId && (
-                      <CopyTarget
-                        value={tag.objectId}
-                        label={`Copy tag object ${tag.objectId}`}
-                        hint={`${tag.objectId}\nClick to copy the ${tag.objectType} object`}
-                        className="refs-tag-object__via copyable"
-                        deferForDoubleClick
-                      >
-                        via {tag.objectType} {tag.objectId.slice(0, 8)}
-                      </CopyTarget>
-                    )}
-                  </div>
-                  <div className="refs-tag-annotation">
-                    {tag.annotation === undefined ? (
-                      <span className="refs-table__muted">—</span>
-                    ) : (
-                      <>
-                        <strong>{tag.annotation.subject || "Annotated tag"}</strong>
-                        <small>
-                          {tag.annotation.taggerName ?? "Unknown tagger"}
-                          {tag.annotation.taggedAt === undefined
-                            ? ""
-                            : ` · ${shortWhen(tag.annotation.taggedAt, now)}`}
-                        </small>
-                        {tag.annotation.body !== undefined && (
-                          <small {...hoverTooltip(tip, tag.annotation.body)}>
-                            {tag.annotation.body}
-                          </small>
-                        )}
-                      </>
-                    )}
-                  </div>
-                  <RefRowActions
-                    /* Locate is only offered when there is somewhere to locate
-                       into. Its disabled spelling is reserved for the one
-                       reason a reader can act on — the tag does not name a
-                       commit. */
-                    primary={
-                      onLocateTag !== undefined && (
-                        <button
-                          className="refs-row-action refs-row-action--icon"
-                          /* The reason rides on the name: `title` is hover-only,
-                             and assistive tech reads the label instead of it. */
-                          aria-label={
-                            tag.targetType === "commit"
-                              ? `Locate tag ${tag.name} in lineage`
-                              : `Locate tag ${tag.name} in lineage — unavailable, this tag points at a ${tag.targetType}, not a commit`
-                          }
-                          disabled={tag.targetType !== "commit"}
-                          {...hoverTooltip(
-                            tip,
-                            tag.targetType === "commit"
-                              ? "Locate tag in lineage"
-                              : `This tag points at a ${tag.targetType}, not a commit`
-                          )}
-                          onClick={() => {
-                            onLocateTag(repo.id, tag);
-                            onClose();
-                          }}
-                        >
-                          <LocateGlyph />
-                          Locate
-                        </button>
-                      )
-                    }
-                    secondary={
-                      <button
-                        className="refs-row-action refs-row-action--quiet"
-                        disabled={refs.remotes.length === 0}
-                        onClick={() => setRemoteTag(tag)}
-                      >
-                        Remote…
-                      </button>
-                    }
-                    menu={
-                      <RefRowMenu
-                        label={`Actions for tag ${tag.name}`}
-                        items={[
-                          {
-                            type: "item",
-                            label: "Copy tag name",
-                            onSelect: () => void copyText(tag.name)
-                          },
-                          { type: "sep" },
-                          /* Busy, not unavailable: a disabled control would
-                             blur focus mid-operation (SC 2.4.3), but a menu
-                             item is gone from view once picked, so `disabled`
-                             is right here. The in-flight guard still lives in
-                             deleteLocalTag. */
-                          {
-                            type: "item",
-                            label:
-                              deletingTag === tag.name
-                                ? "Deleting…"
-                                : "Delete local tag…",
-                            danger: true,
-                            disabled: deletingTag !== null,
-                            onSelect: () => void deleteLocalTag(tag)
-                          }
-                        ]}
-                      />
-                    }
-                  />
-                </div>
+              {tagSearch.rows.map((row) => (
+                <TagStatusTableRow
+                  key={row.name}
+                  row={row}
+                  now={now}
+                  tip={tip}
+                  canLocate={onLocateTag !== undefined}
+                  hasRemotes={refs.remotes.length > 0}
+                  adopting={adoptingTag}
+                  deleting={deletingTag}
+                  onLocate={(tag) => {
+                    onLocateTag?.(repo.id, tag);
+                    onClose();
+                  }}
+                  onRemote={setRemoteTag}
+                  onAdopt={(target) => void adoptTag(target)}
+                  onKeep={(target, keep) => void keepLocalTag(target, keep)}
+                  onDetails={setDetailsTag}
+                  onDelete={(tag) => void deleteLocalTag(tag)}
+                />
               ))}
               {/* "No matching" is only true when something was filtered out.
                   A repo with no tags at all is the common case here, and it
                   wants the answer plus the way forward, not a filter report. */}
               {tagSearch.rows.length === 0 && !tagSearch.loading && (
                 <div className="refs-browser__empty">
-                  {q === ""
-                    ? "No local tags yet. Create one here, or right-click a commit in the graph."
-                    : "No local tags match this filter."}
+                  {tagFilter === "differs" && q === ""
+                    ? `Every local tag matches ${tagSearch.source?.primary ?? "the published remote"}, or was kept on purpose.`
+                    : tagFilter === "remoteOnly" && q === ""
+                      ? `${tagSearch.source?.primary ?? "The published remote"} has no tags missing here.`
+                      : tagFilter === "localOnly" && q === ""
+                        ? `Every local tag is also on ${tagSearch.source?.primary ?? "the published remote"}.`
+                        : q === ""
+                          ? "No local tags yet. Create one here, or right-click a commit in the graph."
+                          : "No tags match this filter."}
                 </div>
               )}
               <RefsPageFooter
@@ -1878,6 +1937,15 @@ export function RepoRefsModal({
             repoName={repo.name}
             onCreated={tagsChanged}
             onClose={() => setCreateTagOpen(false)}
+          />
+        )}
+        {detailsTag !== null && (
+          <TagDetailsDialog
+            repo={repo}
+            name={detailsTag}
+            now={now}
+            onChanged={tagsChanged}
+            onClose={() => setDetailsTag(null)}
           />
         )}
         {remoteTag !== null && (

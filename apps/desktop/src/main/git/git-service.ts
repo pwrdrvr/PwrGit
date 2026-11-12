@@ -3786,6 +3786,55 @@ export function parseTagRows(stdout: string): TagSummary[] {
   return tags;
 }
 
+/**
+ * Rich rows for the named local tags, in the order asked. A `for-each-ref`
+ * pattern also matches refs below it (`refs/tags/v1` matches `refs/tags/v1/x`),
+ * so the answer is filtered to exact names. Batched to stay under Windows'
+ * command-line limit.
+ */
+export async function readTagSummaries(
+  git: GitExec,
+  cwd: string,
+  names: string[]
+): Promise<Result<Map<string, TagSummary>>> {
+  const found = new Map<string, TagSummary>();
+  const wanted = new Set(names);
+  for (let index = 0; index < names.length; index += 100) {
+    const batch = names.slice(index, index + 100).map((name) => `refs/tags/${name}`);
+    const read = await readTagSummariesByName(git, cwd, batch, wanted, found);
+    if (!read.ok) return read;
+  }
+  return ok(found);
+}
+
+/** Every local tag's rich row from one `for-each-ref`: the cost a metadata search already pays. */
+export async function readAllTagSummaries(
+  git: GitExec,
+  cwd: string
+): Promise<Result<Map<string, TagSummary>>> {
+  return readTagSummariesByName(git, cwd, ["refs/tags"], null, new Map());
+}
+
+async function readTagSummariesByName(
+  git: GitExec,
+  cwd: string,
+  patterns: string[],
+  wanted: Set<string> | null,
+  found: Map<string, TagSummary>
+): Promise<Result<Map<string, TagSummary>>> {
+  const raw = await git(["for-each-ref", `--format=${TAG_FORMAT}`, ...patterns], cwd);
+  if (!raw.ok) return raw;
+  const checked = requireExit0(raw.value, ["for-each-ref"]);
+  if (!checked.ok) return checked;
+  for (const tag of parseTagRows(checked.value.stdout)) {
+    // `%(refname:short)` becomes `tags/<name>` when a branch shares the
+    // name, so key by the full ref.
+    const name = tag.fullName.slice("refs/tags/".length);
+    if (wanted === null || wanted.has(name)) found.set(name, { ...tag, name });
+  }
+  return ok(found);
+}
+
 export type TagPageOptions = {
   query?: string;
   offset?: number;
@@ -3851,7 +3900,7 @@ export async function listTagPage(
   return ok({ rows: matches.slice(start, start + size), total: matches.length });
 }
 
-async function validTagName(
+export async function validTagName(
   git: GitExec,
   cwd: string,
   name: string

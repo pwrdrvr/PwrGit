@@ -1,4 +1,5 @@
 import { expect, test } from "@playwright/test";
+import { join } from "node:path";
 import { launchApp, type AppHandle } from "./fixtures/electron-app";
 import { createGitSandbox, type GitSandbox } from "./fixtures/git-sandbox";
 import { addRootAndExpand, branchRow, expandRepoGroup, primaryShortcut } from "./fixtures/steps";
@@ -14,6 +15,73 @@ test.afterEach(async () => {
   sandbox?.cleanup();
   sandbox = null;
 });
+
+for (const operation of ["Fetch", "Pull"]) {
+  test(`${operation} leaves a re-cut tag alone, flags it, and Take origin's moves it and its chip`, async () => {
+    test.setTimeout(90_000);
+    sandbox = createGitSandbox();
+    const box = sandbox;
+    const repo = box.makeRepoWithRemote("release-demo");
+    box.commit(repo.path, "release.txt", "Prepare release 1.2.3");
+    const oldHead = box.git(repo.path, "rev-parse", "HEAD");
+    box.git(repo.path, "tag", "-a", "-m", "Release 1.2.3", "v1.2.3");
+    box.git(repo.path, "push", "origin", "main", "--tags");
+    box.commit(repo.path, "notes.txt", "Refresh release 1.2.3 notes");
+    const newHead = box.git(repo.path, "rev-parse", "HEAD");
+    box.git(repo.path, "push", "origin", "main");
+    // Re-cut from a separate clone: the user's checkout keeps its old tag.
+    const publisher = join(box.worktreeRoot, "publisher");
+    box.git(repo.path, "clone", repo.remotePath, publisher);
+    box.git(publisher, "push", "origin", ":refs/tags/v1.2.3");
+    box.git(publisher, "tag", "-d", "v1.2.3");
+    box.git(publisher, "tag", "-a", "-m", "Reissued release 1.2.3", "v1.2.3");
+    box.git(publisher, "push", "origin", "refs/tags/v1.2.3");
+    const oldObject = box.git(repo.path, "rev-parse", "v1.2.3");
+
+    handle = await launchApp({ worktreeRoot: box.worktreeRoot, theme: "light" });
+    const { window } = handle;
+    const nativeWindow = await handle.app.browserWindow(window);
+    await nativeWindow.evaluate((win) => win.setIgnoreMouseEvents(true));
+    await addRootAndExpand(window, handle, box, "release-demo");
+    await branchRow(window, "main").click();
+    const toggle = window.getByRole("button", { name: /^Tags 1/ });
+    await toggle.click();
+    await expect(toggle).toHaveAttribute("aria-expanded", "true");
+    const tag = window.locator(".ref-tag-row", { hasText: "v1.2.3" });
+    await expect(tag).toContainText(oldHead.slice(0, 7));
+    const oldRow = window.locator(`.graph-row[data-hash="${oldHead}"]`);
+    const newRow = window.locator(`.graph-row[data-hash="${newHead}"]`);
+    await expect(oldRow.locator(".commit-tag--tag .commit-tag__name")).toHaveText("v1.2.3");
+
+    await window.getByRole("button", { name: operation, exact: true }).click();
+    // The first successful sync lists origin's tags in the background. The
+    // fetch itself never rewrites an existing tag.
+    const attention = window.locator(".ref-tag-attention");
+    await expect(attention).toHaveText(/1 tag differs from origin/, { timeout: 20_000 });
+    expect(box.git(repo.path, "rev-parse", "v1.2.3")).toBe(oldObject);
+    await expect(tag).toContainText(oldHead.slice(0, 7));
+    expect(box.git(repo.path, "rev-parse", "HEAD")).toBe(newHead);
+
+    await attention.click();
+    const browser = window.getByRole("dialog", { name: "release-demo branches, tags, and remotes" });
+    await expect(browser.locator(".refs-tag-filter.is-active")).toContainText("Differ");
+    const row = browser.locator('.refs-tag-table__row[data-tag-status="differs"]', { hasText: "v1.2.3" });
+    await expect(row).toContainText("differs from origin");
+    await row.getByRole("button", { name: "Take origin's v1.2.3" }).click();
+    const confirm = window.locator(".modal--dialog");
+    await expect(confirm).toContainText("Replace local tag v1.2.3 with origin's?");
+    await confirm.locator(".modal__create").click();
+
+    await expect.poll(() => box.git(repo.path, "rev-parse", "v1.2.3^{}"), { timeout: 20_000 }).toBe(newHead);
+    // The previous value is pinned by a real ref, so gc keeps it.
+    expect(box.git(repo.path, "for-each-ref", "--format=%(objectname)", "refs/pwrgit/replaced-tags/")).toBe(oldObject);
+    await expect(browser.locator('.refs-tag-table__row[data-tag-status="differs"]')).toHaveCount(0);
+    await browser.getByRole("button", { name: "Close" }).first().click();
+    await expect(newRow.locator(".commit-tag--tag .commit-tag__name")).toHaveText("v1.2.3");
+    await expect(oldRow.locator(".commit-tag--tag")).toHaveCount(0);
+    await expect(attention).toHaveCount(0);
+  });
+}
 
 test("browses, creates, deletes, and explicitly reviews remote tag actions", async () => {
   test.setTimeout(90_000);
