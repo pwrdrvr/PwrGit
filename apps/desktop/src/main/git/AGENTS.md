@@ -106,11 +106,15 @@ missing names. A tag re-cut on origin therefore stays at its old object here.
   here. The publisher is the chosen remote, else origin, else nobody; never
   the last one fetched.
 - **Listing is a full scan (protocol v2 has no "changed since").** So it never
-  rides on every Fetch: explicit Refresh is a tracked activity; the Tags tab
-  (stale after 10 min) and a toolbar Fetch/Pull (stale after 1 h) run it as a
-  background check (own timeout, no lock, yields to tracked work), never for
-  `--no-tags`. Bulk sync does not trigger it. No cap: a moved old tag is found
-  by the next listing.
+  rides on every Fetch: explicit Refresh is a tracked activity. The automatic
+  checks live in `tag-auto-check.ts` (own timeout, no lock, yield to tracked
+  work, never `--no-tags`): the Tags tab's (stale after 10 min) and the one
+  after every Fetch or Pull, toolbar, bulk or timed (stale after 1 h, else a
+  name + id recount). The second obeys the sync menu's "Check tags after
+  sync" (`general.tagCheckAfterSync`, on by default), runs at most
+  `TAG_CHECK_CONCURRENCY` at once, and shares one check per repository. An
+  unchanged re-listing writes one SQLite row. No cap: a moved old tag is
+  found by the next listing.
 - **Adopting is one tag:** `fetch --no-tags <remote> +refs/tags/<n>:<staging>`,
   check the staged object is the reviewed one, then one `update-ref --stdin`
   that pins the previous value under `refs/pwrgit/replaced-tags/<ms>/<n>`,
@@ -125,10 +129,12 @@ missing names. A tag re-cut on origin therefore stays at its old object here.
 - The rules themselves are property and model tests, with git as the oracle:
   `fetch-tags.property.test.ts` (no sync rewrites a tag, follows tag-only
   history or ignores `--no-tags`), `tag-sources.git.property.test.ts`
-  (statuses, the stored count, Take and Keep through the handlers) and
+  (statuses, the stored count, Take and Keep through the handlers),
   `tag-sources.property.test.ts` (parsing, classification, the sidebar and
-  Tags tab naming one publisher, concurrent and stopped listings). Run them
-  after any change here.
+  Tags tab naming one publisher, concurrent and stopped listings) and
+  `tag-auto-check.property.test.ts` (the ceiling, the switch, `--no-tags`
+  and the failure back-off under any interleaving). Run them after any
+  change here.
 
 ## Which Git runs: the bundle, set up the way an installed Git would be
 
@@ -338,12 +344,13 @@ exists.
 
 **The exceptions are `remote:checkSelected`, the automatic check behind the
 header's "up to date", and the automatic published-tag check
-(`autoRefreshTags`).** The registry drives the header's buttons. Registered,
+(`TagAutoChecks`, `tag-auto-check.ts`).** The registry drives the header's buttons. Registered,
 this check showed "Preparing local changes…" on Fetch and locked Pull and Push
 every minute. It stays out because it cannot wedge: it has its own 12s
 timeout, holds the repository lock only for ref writes (`ls-remote` runs
 unlocked), and `tracked()` aborts it so a user's fetch never queues behind it.
-The tag check meets the same three (20s timeout, no lock, `autoCheckAborts`).
+The tag check meets the same three (20s timeout, no lock, `yield`), and also
+skips a repository whose tracked operation is live.
 A background check without all three belongs in the registry.
 
 ## `repo:changed` names its repositories when it can

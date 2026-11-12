@@ -6,7 +6,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { CommandBus } from "../command-bus";
 import { emitEvent } from "../ipc";
 import { openDatabase, type DB } from "../persistence/db";
+import { registerBulkSyncHandlers } from "./bulk-sync-handlers";
 import { registerRemoteHandlers } from "./remote-handlers";
+import { tagAutoChecksFor } from "./tag-auto-check";
 import { registerTagHandlers } from "./tag-handlers";
 import { tagSourcesFor } from "./tag-sources";
 import type { WorktreeRefresher } from "./worktree-handlers";
@@ -58,7 +60,9 @@ function register(path: string): void {
     refreshWorktree: vi.fn(async () => undefined),
     refreshRepoWorktrees: vi.fn()
   } satisfies WorktreeRefresher;
-  registerRemoteHandlers(bus, db, refresher, new WorktreeOperationQueue());
+  const queue = new WorktreeOperationQueue();
+  registerRemoteHandlers(bus, db, refresher, queue);
+  registerBulkSyncHandlers(bus, db, refresher, queue);
   registerTagHandlers(bus, db);
 }
 
@@ -180,6 +184,39 @@ describe("published tag handlers", () => {
     expect((await bus.dispatch("tag:setPrimaryRemote", { repoId: "repo-1", remote: "mirror" })).ok).toBe(true);
     const mirror = await bus.dispatch("tag:refreshRemote", { repoId: "repo-1", mode: "auto" });
     expect(mirror.ok && mirror.value).toMatchObject({ checked: true, source: { primary: "mirror", stale: false } });
+  });
+
+  it("a bulk or timed sync checks tags as a toolbar Fetch does", async () => {
+    const { local } = fixture();
+    register(local);
+    // Bulk sync reads worktree rows; the primary checkout is enough.
+    db.prepare("INSERT INTO worktrees (id, repo_id, path, branch, is_primary) VALUES ('wt-1', 'repo-1', ?, 'main', 1)").run(local);
+    const synced = await bus.dispatch("remote:bulkSync", { operationId: "op-1", profileId: "p1", mode: "fetch" });
+    expect(synced.ok).toBe(true);
+    const sources = tagSourcesFor(db);
+    await vi.waitFor(() => expect(sources.store.attention("repo-1", ["origin"])).toEqual({ remote: "origin", differs: 1 }), { timeout: 10_000 });
+  });
+
+  it("with the sync menu's switch off, no Fetch, Pull or bulk sync checks tags", async () => {
+    const { local } = fixture();
+    register(local);
+    db.prepare("INSERT INTO worktrees (id, repo_id, path, branch, is_primary) VALUES ('wt-1', 'repo-1', ?, 'main', 1)").run(local);
+    tagAutoChecksFor(db).afterSyncWhen(() => false);
+    // Switched off, `afterSync` returns before queuing anything, and both
+    // handlers call it before they answer: no call now means none later.
+    const sources = tagSourcesFor(db);
+    const read = vi.spyOn(sources, "source");
+    const recount = vi.spyOn(sources, "recountPublisher");
+    expect((await bus.dispatch("remote:fetchRepo", { repoId: "repo-1", remote: "origin" })).ok).toBe(true);
+    expect((await bus.dispatch("remote:bulkSync", { operationId: "op-2", profileId: "p1", mode: "fetch" })).ok).toBe(true);
+    expect(read).not.toHaveBeenCalled();
+    expect(recount).not.toHaveBeenCalled();
+    read.mockRestore();
+    recount.mockRestore();
+    expect(sources.store.snapshot("repo-1", "origin")).toBeNull();
+    // The Tags tab's own check does not depend on the switch.
+    const view = await bus.dispatch("tag:refreshRemote", { repoId: "repo-1", mode: "auto" });
+    expect(view.ok && view.value.checked).toBe(true);
   });
 
   it("refuses an unconfigured remote as the publisher", async () => {

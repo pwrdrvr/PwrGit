@@ -3,8 +3,6 @@ import {
   ok,
   type PullProgressPhase,
   type PwrGitError,
-  TAG_SOURCE_SYNC_TTL_MS,
-  TAG_SOURCE_VIEW_TTL_MS,
   type RemoteActivityPhase,
   type CloneRepository,
   type ForkStatus,
@@ -78,7 +76,8 @@ import { WorktreeOperationQueue } from "./worktree-operation-queue";
 import { mapLimit } from "../util/map-limit";
 import { inspectForkTracking, repairForkTracking } from "./fork-tracking";
 import { inspectRetrack, listTrackingOptions, retrackBranch } from "./branch-tracking";
-import { tagSourcesFor, wasStopped } from "./tag-sources";
+import { tagSourcesFor } from "./tag-sources";
+import { tagAutoChecksFor } from "./tag-auto-check";
 
 /** Forge reads at once while confirming extra forks for tracking repair. */
 const FORK_CANDIDATE_READS = 3;
@@ -427,6 +426,7 @@ export function registerRemoteHandlers(
     for (const controller of autoCheckAborts.get(repoId) ?? []) {
       controller.abort(AUTO_CHECK_SUPERSEDED);
     }
+    tagAutoChecksFor(db).yield(repoId);
     tipChecker.invalidateRepository(repoId);
   };
   remoteOperationSucceeded = () => { networkPausedUntil = 0; };
@@ -522,88 +522,25 @@ export function registerRemoteHandlers(
   // ---- Published tags (tag-sources.ts) -----------------------------------
   //
   // Listing a remote's tags is a full `ls-remote --tags`: protocol v2 has no
-  // "changed since". So it never rides on every Fetch or Pull. It runs:
-  //  - explicitly (Refresh / Check once / Details), as a tracked activity;
-  //  - automatically when the Tags tab opens on a snapshot older than
-  //    TAG_SOURCE_VIEW_TTL_MS, or after a successful toolbar Fetch/Pull on one
-  //    older than TAG_SOURCE_SYNC_TTL_MS. Automatic checks are background
-  //    checks like the tip checker: untracked, their own timeout, no
-  //    repository lock (ls-remote writes no ref; the snapshot is SQLite), and
-  //    aborted by any tracked operation on the repository. A remote with
-  //    `tagOpt=--no-tags` is never listed automatically.
+  // "changed since". Explicit listings (Refresh / Check once / Details) are
+  // tracked activities here. The automatic ones (the Tags tab, and after any
+  // Fetch or Pull behind the sync menu's switch) are background checks in
+  // `tag-auto-check.ts`, stopped by `yieldAutoChecks` like the tip checker.
   const tagSources = tagSourcesFor(db);
-  const tagChecksFailedAt = new Map<string, number>();
+  const tagChecks = tagAutoChecksFor(db);
+  tagChecks.pauseWhile(
+    (repoId) => Date.now() < networkPausedUntil || activities.list().some((activity) => activity.repoId === repoId)
+  );
   const announceTags = (repoId: string): void => {
     const repo = repoOf(repoId);
     if (repo !== null) emitEvent("repo:changed", { profileId: repo.profileId, repoIds: [repoId] });
-  };
-  const autoRefreshTags = async (
-    repoId: string,
-    ttlMs: number,
-    reason: string
-  ): Promise<boolean> => {
-    const repo = repoOf(repoId);
-    if (repo === null || Date.now() < networkPausedUntil) return false;
-    const source = await tagSources.source(execGit, repoId, repo.path, ttlMs);
-    if (!source.ok) return false;
-    const { state } = source.value;
-    if (state.primary === null || state.tagOpt === "no-tags" || !state.stale) return false;
-    // A failing remote is retried at most every two minutes, not on every
-    // open of the tab.
-    const failedKey = `${repoId}\0${state.primary}`;
-    if ((tagChecksFailedAt.get(failedKey) ?? 0) > Date.now() - 2 * 60_000) return false;
-    const controller = new AbortController();
-    const aborts = autoCheckAborts.get(repoId) ?? new Set();
-    aborts.add(controller);
-    autoCheckAborts.set(repoId, aborts);
-    const signal = AbortSignal.any([controller.signal, AbortSignal.timeout(20_000)]);
-    const startedAt = Date.now();
-    try {
-      const refreshed = await tagSources.refresh(controlledGit(execGit, { signal }), repoId, repo.path, state.primary);
-      if (!refreshed.ok) {
-        // Yielding to the user's own operation is not a failure. Our own
-        // timeout is: `refresh` leaves stopped listings unrecorded, so say it.
-        if (!controller.signal.aborted) {
-          tagChecksFailedAt.set(failedKey, Date.now());
-          if (wasStopped(refreshed.error)) {
-            tagSources.store.recordFailure(repoId, state.primary, `Listing ${state.primary}'s tags timed out`, Date.now());
-          }
-        }
-        logMain("debug", "tag", `automatic tag check (${reason}) of ${state.primary} unavailable for ${repo.path}: ${sanitizeGitLogDetail(refreshed.error.message)}`);
-        return false;
-      }
-      tagChecksFailedAt.delete(failedKey);
-      logMain("info", "tag", `listed ${state.primary}'s tags for ${repo.path} (${reason}, ${seconds(startedAt)})`);
-      announceTags(repoId);
-      return true;
-    } finally {
-      aborts.delete(controller);
-      if (aborts.size === 0) autoCheckAborts.delete(repoId);
-    }
-  };
-  /**
-   * After a successful toolbar Fetch or Pull, never awaited: list the
-   * publisher hourly at most. Otherwise re-count against the stored listing
-   * (local name + id, no network), because local tags may have moved since
-   * the sidebar's count was stored (a `git tag -f` in a terminal).
-   */
-  const tagCheckAfterSync = (repoId: string): void => {
-    void (async () => {
-      if (await autoRefreshTags(repoId, TAG_SOURCE_SYNC_TTL_MS, "after sync")) return;
-      const repo = repoOf(repoId);
-      if (repo === null) return;
-      const moved = await tagSources.recountPublisher(execGit, repoId, repo.path);
-      if (moved.ok && moved.value) announceTags(repoId);
-    })().catch((cause) =>
-      logMain("warn", "tag", `automatic tag check failed: ${sanitizeGitLogDetail(cause)}`)
-    );
   };
 
   bus.register("tag:refreshRemote", async (req) => {
     const repo = repoOf(req.repoId);
     if (repo === null) return err({ ...notFound, message: "repo not found" });
     if (req.mode === "auto") {
-      const checked = await autoRefreshTags(req.repoId, TAG_SOURCE_VIEW_TTL_MS, "view");
+      const checked = await tagChecks.view(req.repoId);
       const source = await tagSources.source(execGit, req.repoId, repo.path);
       return source.ok ? ok({ checked, source: source.value.state }) : source;
     }
@@ -627,7 +564,7 @@ export function registerRemoteHandlers(
     );
     if (!result.ok) return err(classifyAuthFailure(result.error));
     logMain("info", "tag", `listed ${remote}'s tags for ${repo.path} (${seconds(startedAt)})`);
-    tagChecksFailedAt.delete(`${req.repoId}\0${remote}`);
+    tagChecks.clearFailure(req.repoId, remote);
     announceTags(req.repoId);
     const source = await tagSources.source(execGit, req.repoId, repo.path);
     return source.ok ? ok({ checked: true, source: source.value.state }) : source;
@@ -728,7 +665,7 @@ export function registerRemoteHandlers(
     );
     refreshIdentity?.(worktree.repoId);
     refresher.refreshWorktree(req.worktreeId);
-    tagCheckAfterSync(worktree.repoId);
+    tagChecks.afterSync(worktree.repoId);
     return ok({ remotes: asked });
   });
 
@@ -764,7 +701,7 @@ export function registerRemoteHandlers(
     );
     refreshIdentity?.(req.repoId);
     refresher.refreshRepoWorktrees(req.repoId);
-    tagCheckAfterSync(req.repoId);
+    tagChecks.afterSync(req.repoId);
     return ok(null);
   });
 
@@ -1047,6 +984,7 @@ export function registerRemoteHandlers(
       worktreeId: worktreeId,
       branch: worktree.branch
     });
+    let synced = false;
     try {
       // A stall warning that only says "no output" leaves the reader guessing
       // which command produced none. Name the command and the last line Git did
@@ -1229,10 +1167,12 @@ export function registerRemoteHandlers(
         "remote",
         `pull finished ${path}: ${outcome}${recoveryStash === undefined ? "" : ", recovery stash kept in Stashes"} (${seconds(startedAt)})`
       );
-      tagCheckAfterSync(worktree.repoId);
+      synced = true;
       return result;
     } finally {
       activity.finish();
+      // After finish: the check skips a repository with a live activity.
+      if (synced) tagChecks.afterSync(worktree.repoId);
       // Pull retains its recovery copy after successful and failed restoration.
       emitEvent("stash:changed", { repoId: worktree.repoId });
     }
