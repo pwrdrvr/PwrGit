@@ -28,20 +28,20 @@ export class ForgeCommitAuthorIdentityTransport
     return await this.byKind[proof.repo.kind].fetchCommit(proof);
   }
 
-  /** One request per call for a forge that batches; one per SHA otherwise. */
+  /**
+   * One request, for a forge that batches. Callers check `commitsPerRequest`
+   * first: a single-commit forge is asked through `fetchCommit`, one SHA per
+   * queued turn, never as an all-or-nothing loop here.
+   */
   async fetchCommits(
     repo: ForgeRepo,
     commitShas: readonly string[]
   ): Promise<Map<string, CommitAuthorRemoteCommit>> {
     const transport = this.byKind[repo.kind];
-    if (transport.fetchCommits !== undefined) {
-      return await transport.fetchCommits(repo, commitShas);
+    if (transport.fetchCommits === undefined) {
+      throw new Error("This forge answers one commit per request");
     }
-    const answers = new Map<string, CommitAuthorRemoteCommit>();
-    for (const commitSha of commitShas) {
-      answers.set(commitSha, await transport.fetchCommit({ repo, commitSha }));
-    }
-    return answers;
+    return await transport.fetchCommits(repo, commitShas);
   }
 
   commitsPerRequest(repo: ForgeRepo): number {

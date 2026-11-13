@@ -1,4 +1,4 @@
-import { runGh } from "../../github/gh-cli";
+import { runGh, type GhRunOptions } from "../../github/gh-cli";
 import {
   associatedAuthorMatches,
   type CommitAuthorIdentityTransport,
@@ -13,10 +13,17 @@ import type { ForgeRepo } from "../types";
 /** Commits one GraphQL request asks about, as `pr-query.ts` batches branches. */
 export const GITHUB_COMMITS_PER_REQUEST = 50;
 /**
- * Associated pull requests read per commit for the unlinked-email fallback.
- * More than this and the author cannot be shown to be unique, so it declines.
+ * Associated pull requests read per commit for the unlinked-email fallback,
+ * the size of the REST page it replaces. More than this and the author cannot
+ * be shown to be unique, so it declines.
  */
-const ASSOCIATED_PULLS = 5;
+const ASSOCIATED_PULLS = 30;
+/**
+ * One request answers up to 50 commits, and `associatedPullRequests` is slow
+ * on a large repository, so it gets longer than the runner's 10 s default
+ * meant for a single REST call. A timeout fails every commit in the batch.
+ */
+const BATCH_TIMEOUT_MS = 30_000;
 
 const COMMIT_FIELDS = `fragment CommitAuthorFields on Commit {
   oid
@@ -30,7 +37,7 @@ const COMMIT_FIELDS = `fragment CommitAuthorFields on Commit {
 
 export type GhCommitAuthorIdentityTransportOptions = {
   /** Test/non-desktop seam. The production path delegates auth to `gh`. */
-  run?: (args: string[]) => Promise<string>;
+  run?: (args: string[], options?: GhRunOptions) => Promise<string>;
 };
 
 /**
@@ -47,7 +54,7 @@ export type GhCommitAuthorIdentityTransportOptions = {
  */
 export class GhCliCommitAuthorIdentityTransport
   implements CommitAuthorIdentityTransport {
-  private readonly run: (args: string[]) => Promise<string>;
+  private readonly run: (args: string[], options?: GhRunOptions) => Promise<string>;
 
   constructor(options: GhCommitAuthorIdentityTransportOptions = {}) {
     this.run = options.run ?? runGh;
@@ -77,7 +84,10 @@ export class GhCliCommitAuthorIdentityTransport
     for (const [name, value] of Object.entries(variables)) {
       args.push("-f", `${name}=${value}`);
     }
-    return parseGitHubCommitAuthorResponse(commitShas, JSON.parse(await this.run(args)));
+    return parseGitHubCommitAuthorResponse(
+      commitShas,
+      JSON.parse(await this.run(args, { timeoutMs: BATCH_TIMEOUT_MS }))
+    );
   }
 
   commitsPerRequest(): number {

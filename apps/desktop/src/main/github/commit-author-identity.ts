@@ -376,9 +376,7 @@ export class GitHubCommitAuthorIdentityService {
         return undefined;
       }
     });
-    const revalidations = remote == null
-      ? new Map<string, Promise<CacheEntry | undefined>>()
-      : this.revalidateMany(remote, prepared, plans);
+    const revalidations = this.revalidateMany(prepared, plans);
 
     return await Promise.all(plans.map(async (plan, index) => {
       if (prepared[index] === undefined) return notEligibleLookup();
@@ -449,8 +447,16 @@ export class GitHubCommitAuthorIdentityService {
     ): RefreshPlan => ({
       kind: "answer",
       ...keys,
+      // Only a commit never asked about has an unknown signature; one the
+      // forge could not see was asked, and is asked again at its next due.
       answer: async () =>
-        await this.lookupFromCache(entry, now, refreshState, network, signatures)
+        await this.lookupFromCache(
+          entry,
+          now,
+          refreshState,
+          network,
+          signatures && cached === undefined
+        )
     });
     const fetch: RefreshPlan = { kind: "fetch", proof, ...keys };
 
@@ -493,7 +499,6 @@ export class GitHubCommitAuthorIdentityService {
    * already being revalidated joins that work instead of being asked twice.
    */
   private revalidateMany(
-    remote: ForgeRepo,
     prepared: ReadonlyArray<PreparedRequest | undefined>,
     plans: ReadonlyArray<RefreshPlan | undefined>
   ): Map<string, Promise<CacheEntry | undefined>> {
@@ -514,7 +519,10 @@ export class GitHubCommitAuthorIdentityService {
       started.set(plan.identityKey, Promise.resolve(undefined));
     });
 
-    const perRequest = this.commitsPerRequest(remote);
+    // Every plan here shares the worktree's one validated repository.
+    const repo = pending[0]?.plan.proof.repo;
+    if (repo === undefined) return started;
+    const perRequest = this.commitsPerRequest(repo);
     const fetchCommits = this.transport.fetchCommits?.bind(this.transport);
     if (fetchCommits === undefined || perRequest <= 1) {
       for (const { prepared: item, plan } of pending) {
@@ -526,7 +534,7 @@ export class GitHubCommitAuthorIdentityService {
     for (let offset = 0; offset < pending.length; offset += perRequest) {
       const chunk = pending.slice(offset, offset + perRequest);
       const shas = [...new Set(chunk.map(({ plan }) => plan.proof.commitSha))];
-      const response = this.enqueueRevalidation(async () => await fetchCommits(remote, shas));
+      const response = this.enqueueRevalidation(async () => await fetchCommits(repo, shas));
       // Settled per item below; never left as an unhandled rejection.
       response.catch(() => undefined);
       for (const { prepared: item, plan } of chunk) {
@@ -697,12 +705,12 @@ export class GitHubCommitAuthorIdentityService {
     now: number,
     refreshState: GitHubCommitAuthorIdentityLookup["refreshState"],
     network: boolean,
-    signatures = false
+    exactUnasked = false
   ): Promise<GitHubCommitAuthorIdentityLookup> {
     if (entry?.identity === undefined) return toLookup(entry, now, refreshState);
-    // An answer from the email association on a forge that reports
-    // signatures has not checked this commit's signature yet.
-    const unchecked = signatures && entry.fromAccount === true;
+    // An answer from the email association, for a commit never asked about
+    // on a forge that reports signatures: its signature is unknown.
+    const unchecked = exactUnasked && entry.fromAccount === true;
 
     const identity: GitHubCommitAuthorIdentity = { login: entry.identity.login };
     const sourceUrl = entry.identity.avatarSourceUrl;
@@ -752,7 +760,7 @@ export class GitHubCommitAuthorIdentityService {
           now,
           isFresh(account, now) ? "idle" : refreshState,
           network,
-          signatures
+          signatures && exact === undefined
         );
   }
 

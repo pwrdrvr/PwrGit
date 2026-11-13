@@ -87,7 +87,12 @@ type LocalRead = {
 type Reason = { worktreeId: string; recordKeys: string[] };
 
 /** The authors one forge request (or one single-commit visit) covers. */
-type PlannedVisit = { worktreeId: string; batched: boolean; records: AuthorRecord[] };
+type PlannedVisit = {
+  worktreeId: string;
+  /** Set only for a batching forge's request; a single-commit visit has none. */
+  forge?: ForgeRepo;
+  records: AuthorRecord[];
+};
 
 /**
  * Main's store of commit authors, and the only thing that decides when to ask
@@ -199,8 +204,11 @@ export class CommitAuthorPeopleStore {
       };
       await Promise.all(visits.map(async (visit) => {
         const before = visit.records.map((record) => record.person);
-        if (visit.batched) await this.visitBatch(visit.worktreeId, visit.records);
-        else await this.visit(visit.records[0]!);
+        if (visit.forge !== undefined) {
+          await this.visitBatch(visit.worktreeId, visit.forge, visit.records);
+        } else {
+          await this.visit(visit.records[0]!);
+        }
         visit.records.forEach((record, index) => note(record, before[index]));
       }));
       if (this.stopped) return;
@@ -298,33 +306,38 @@ export class CommitAuthorPeopleStore {
    * service sends only the commits whose exact answer is due.
    */
   private async planVisits(due: readonly AuthorRecord[]): Promise<PlannedVisit[]> {
-    const capacity = new Map<string, number>();
+    /** Each worktree's batching forge and its request size; absent = one at a time. */
+    const batching = new Map<string, { forge: ForgeRepo; limit: number }>();
     await Promise.all([...new Set(due.map((record) => record.worktreeId))].map(
       async (worktreeId) => {
         try {
           const forge = await this.identities.worktreeForge(worktreeId);
-          capacity.set(worktreeId, forge == null ? 1 : this.identities.commitsPerRequest(forge));
+          const limit = forge == null ? 1 : this.identities.commitsPerRequest(forge);
+          if (forge != null && limit > 1) batching.set(worktreeId, { forge, limit });
         } catch {
-          capacity.set(worktreeId, 1);
+          // Not known to batch: visit one commit at a time.
         }
       }
     ));
     const visits: PlannedVisit[] = [];
     const open = new Map<string, PlannedVisit & { commits: number }>();
     for (const record of due) {
-      const limit = capacity.get(record.worktreeId) ?? 1;
-      const batched = limit > 1;
-      const commits = batched ? record.commitHashes.length : 1;
+      const batch = batching.get(record.worktreeId);
+      const commits = record.commitHashes.length;
       const current = open.get(record.worktreeId);
-      if (batched && current !== undefined && current.commits + commits <= limit) {
+      if (batch !== undefined && current !== undefined && current.commits + commits <= batch.limit) {
         current.records.push(record);
         current.commits += commits;
         continue;
       }
       if (visits.length >= PEOPLE_REQUESTS_PER_TICK) continue;
-      const visit = { worktreeId: record.worktreeId, batched, records: [record], commits };
+      if (batch === undefined) {
+        visits.push({ worktreeId: record.worktreeId, records: [record] });
+        continue;
+      }
+      const visit = { worktreeId: record.worktreeId, forge: batch.forge, records: [record], commits };
       visits.push(visit);
-      if (batched) open.set(record.worktreeId, visit);
+      open.set(record.worktreeId, visit);
     }
     return visits;
   }
@@ -333,7 +346,11 @@ export class CommitAuthorPeopleStore {
    * One request's worth of authors on a batching forge: every interest commit
    * of each, so a signature on any of them can be seen, in one call.
    */
-  private async visitBatch(worktreeId: string, records: readonly AuthorRecord[]): Promise<void> {
+  private async visitBatch(
+    worktreeId: string,
+    forge: ForgeRepo,
+    records: readonly AuthorRecord[]
+  ): Promise<void> {
     const commits = records.flatMap((record) => record.commitHashes.map((commitHash) => ({
       commitHash,
       authorName: record.name,
@@ -345,15 +362,16 @@ export class CommitAuthorPeopleStore {
     } catch {
       lookups = commits.map(() => unavailable());
     }
+    // The batch answered every commit of every author, so each person comes
+    // straight from it; a local re-read would only repeat the same rows.
     let offset = 0;
     for (const record of records) {
-      this.reschedule(record, lookups.slice(offset, offset + record.commitHashes.length), false);
+      const mine = lookups.slice(offset, offset + record.commitHashes.length);
       offset += record.commitHashes.length;
+      this.reschedule(record, mine, false);
+      const best = bestLookup(mine);
+      record.person = personFrom(best, forge, signedByLinkedAccount(best, mine));
     }
-    await Promise.all(records.map(async (record) => {
-      const { person } = await this.read(record);
-      record.person = person;
-    }));
   }
 
   /** One single-commit forge visit — only as far as the identity cache says is due. */

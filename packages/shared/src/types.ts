@@ -2132,8 +2132,9 @@ export type GitHubCommitAuthorIdentityLookup = {
   signatureVerified?: true;
   /**
    * `identity` came from the reusable email→account association, on a forge
-   * that reports signatures, and this exact commit has not been asked about.
-   * So its signature is unknown, and a network lookup has work to do.
+   * that reports signatures, and this exact commit was never asked about (one
+   * the forge could not see was asked, and carries no mark). So its
+   * signature is unknown, and a network lookup has work to do.
    */
   signatureUnchecked?: true;
 };

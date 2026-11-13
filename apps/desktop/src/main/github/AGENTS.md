@@ -133,8 +133,9 @@ fails.
     batching forge one request carries every interest commit (up to 3) of as
     many due authors as fit, so a graph's people cost ⌈authors/16⌉ requests;
     a single-commit forge (GitLab) spends one per author, rotating commits.
-    An author is settled only when no commit is `signatureUnchecked`
-    (`commit-author-people.model.test.ts` holds the budget).
+    An author is settled only when no commit is `signatureUnchecked` (never
+    asked; an unpushed commit was asked, so it does not hold an author open).
+    `commit-author-people.model.test.ts` holds the budget.
   - `cacheOnly` lookups (the registration read,
     `github:hydrateCommitAuthorIdentities`) never call a forge or download a
     thumbnail, however stale the row.

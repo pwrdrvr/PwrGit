@@ -823,9 +823,11 @@ describe("GhCliCommitAuthorIdentityTransport", () => {
 
   it("uses gh api graphql with variables, without token extraction or a credential parameter", async () => {
     const calls: string[][] = [];
+    const timeouts: Array<number | undefined> = [];
     const transport = new GhCliCommitAuthorIdentityTransport({
-      run: async (args: string[]) => {
+      run: async (args, options) => {
         calls.push(args);
+        timeouts.push(options?.timeoutMs);
         return graphql({ c0: commitNode() });
       }
     });
@@ -842,6 +844,8 @@ describe("GhCliCommitAuthorIdentityTransport", () => {
     expect(sent.query).not.toContain(COMMIT_SHA);
     expect(calls[0]).not.toContain("auth");
     expect(calls[0]).not.toContain("token");
+    // A 50-commit batch outlasts the runner's 10 s default meant for one call.
+    expect(timeouts[0]).toBeGreaterThan(10_000);
   });
 
   it("answers many commits in one request and omits the ones GitHub cannot see", async () => {
@@ -1004,9 +1008,18 @@ describe("GitHubCommitAuthorIdentityService.requestMany", () => {
       expect(lookup.signatureVerified === true).toBe(i % 3 === 0);
       expect(lookup).not.toHaveProperty("signatureUnchecked");
     });
-    // The unpushed commit records a retry gate; its author still paints from
-    // the email row, which says the signature is unknown.
-    expect(lookups.at(-1)).toMatchObject({ identity: { login: "ada" }, signatureUnchecked: true });
+    // The unpushed commit records a retry gate. Its author still paints from
+    // the email row, and it was asked, so it does not hold the author
+    // unsettled: it is asked again when its gate and the recheck allow.
+    expect(lookups.at(-1)).toMatchObject({ identity: { login: "ada" } });
+    expect(lookups.at(-1)).not.toHaveProperty("signatureUnchecked");
+    // The local read the people store settles on agrees, so an author with an
+    // unpushed commit is not held unsettled (and re-asked) indefinitely.
+    expect(await requireCompletion(service.request({
+      ...INPUT,
+      commitHash: shas.at(-1)!,
+      cacheOnly: true
+    }).completion)).not.toHaveProperty("signatureUnchecked");
     expect(cachedRow({ repo: GITHUB_REPO, commitSha: shas.at(-1)! })).toMatchObject({
       status: "unavailable",
       next_retry_at: now + 60_000

@@ -88,8 +88,8 @@ describe("ForgeCommitAuthorIdentityTransport", () => {
       .resolves.toEqual(new Map([[shas[0], { sha: shas[0] }]]));
     expect(github.fetchCommits).toHaveBeenCalledTimes(1);
     expect(github.fetchCommit).not.toHaveBeenCalled();
-    // A single-commit forge is asked once per SHA.
-    await expect(router.fetchCommits(proofFor("gitlab").repo, shas)).resolves.toHaveProperty("size", 2);
-    expect(gitlab.fetchCommit).toHaveBeenCalledTimes(2);
+    // A single-commit forge is never batched through the router.
+    await expect(router.fetchCommits(proofFor("gitlab").repo, shas)).rejects.toThrow();
+    expect(gitlab.fetchCommit).not.toHaveBeenCalled();
   });
 });
