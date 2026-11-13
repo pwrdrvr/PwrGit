@@ -108,6 +108,11 @@ import { createForkSourceProbe } from "./git/fork-source-probe";
 import { VisibleWorktreeRefresher } from "./git/visible-refresh";
 import { registerWorktreeLifecycleHandlers } from "./git/worktree-lifecycle-handlers";
 import { createMissingRepoRescan } from "./git/missing-repo-rescan";
+import {
+  createRootDiscovery,
+  ROOT_DISCOVERY_FOCUS_GAP_MS,
+  ROOT_DISCOVERY_INTERVAL_MS
+} from "./git/root-discovery";
 import { createVanishedWorktreeRefresh } from "./git/vanished-worktrees";
 import { WorktreeStateService } from "./git/worktree-state";
 import {
@@ -902,6 +907,26 @@ if (!gotSingleInstanceLock) {
         .finally(() => profileScans.finish(profile.id, signal));
       return true;
     };
+    // A repository that appears under a root while PwrGit runs (a clone, an
+    // agent's checkout): walk the roots now and then, and scan when the walk
+    // finds a folder the last scan did not (root-discovery.ts says why).
+    const rootDiscovery = createRootDiscovery({
+      profiles: () => profiles.list(),
+      indexer,
+      rescan: (profile, { force }) => rescanInBackground(profile, { force }),
+      onFound: (profile, dirs) =>
+        logMain(
+          "info",
+          "scan",
+          `${dirs.length} new repository ${dirs.length === 1 ? "folder" : "folders"}` +
+            ` under the roots; rescanning profile "${profile.name}"`
+        )
+    });
+    const rootDiscoveryPoll = setInterval(
+      () => void rootDiscovery.check(),
+      ROOT_DISCOVERY_INTERVAL_MS
+    );
+
     // A repository's folder was deleted or moved: its row only leaves
     // through a rescan, so ask for one now (missing-repo-rescan.ts says why
     // that is safe).
@@ -1579,6 +1604,7 @@ if (!gotSingleInstanceLock) {
     };
     app.on("browser-window-focus", () => {
       refreshActive();
+      void rootDiscovery.check({ minGapMs: ROOT_DISCOVERY_FOCUS_GAP_MS });
       remoteTipChecker.focus();
       refreshMenu();
     });
@@ -1619,6 +1645,7 @@ if (!gotSingleInstanceLock) {
     app.on("before-quit", () => {
       clearTimeout(authoredSweepStart);
       clearInterval(authoredSweepPoll);
+      clearInterval(rootDiscoveryPoll);
       clearInterval(activeStatePoll);
       clearInterval(visibleStatePoll);
       remoteTipChecker.stop();

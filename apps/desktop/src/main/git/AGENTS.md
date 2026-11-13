@@ -553,9 +553,18 @@ one deliberate route to zero, and it prunes.
 - **The scan clock and the prune answer different questions.**
   `profile_scan_state` records only that a pass could *look*, and a readable
   empty root did look. Stamped after an unreadable root, it starts the 24h
-  throttle in `shouldRescanProfile` from a scan that saw nothing. The only
-  rescan channel is `profile:setRoots`, so the volume stays undiscovered for a
-  day after it mounts.
+  throttle in `shouldRescanProfile` from a scan that saw nothing.
+- **A new folder under a root asks for the scan within minutes.**
+  `root-discovery.ts` walks every profile's roots (no Git) every 2 minutes
+  and on window focus. It forces a scan when the walk finds a `.git` folder
+  that the last scan did not walk (`unscannedRepoDirs` against
+  `profile_scan_dirs`, 0048), and runs the daily scan when it is due. Compare
+  walk output with walk output, never with Git's paths: Git resolves
+  symlinks, so a quiet root would rescan every tick. `profile_scan_dirs` is
+  written after every completed scan, readable roots or not, so a volume's
+  folders read as new once it mounts. `root-discovery.property.test.ts` holds
+  the rule against real Git. Add ▾ → Rescan folders (`profile:rescan`) is
+  the manual route.
 - **A repository whose own folder is gone requests the rescan early.** When the
   state probe finds a PRIMARY checkout missing, `missing-repo-rescan.ts` runs
   the rescan past the throttle, at most once per repo per ten minutes. It

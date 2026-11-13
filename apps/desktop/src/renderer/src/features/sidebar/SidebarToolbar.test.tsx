@@ -34,6 +34,7 @@ afterEach(() => {
 function handlers() {
   return {
     onAddFolder: vi.fn(),
+    onRescanFolders: vi.fn(),
     onClone: vi.fn(),
     onFork: vi.fn(),
     onSync: vi.fn(),
@@ -75,13 +76,15 @@ describe("addMenuReasons", () => {
   it("names a reason for every entry until a profile has loaded", () => {
     expect(addMenuReasons({ hasProfile: false, rootCount: 0 })).toEqual({
       addFolders: "Load or create a profile first",
+      rescan: "Load or create a profile first",
       clone: "Load or create a profile first",
       fork: "Load or create a profile first"
     });
   });
 
-  it("leaves Add folders available and explains Clone and Fork with no folder", () => {
+  it("leaves Add folders available and explains Rescan, Clone and Fork with no folder", () => {
     expect(addMenuReasons({ hasProfile: true, rootCount: 0 })).toEqual({
+      rescan: "Add a repo folder first",
       clone: "Add a repo folder before cloning",
       fork: "Add a repo folder before forking"
     });
@@ -160,7 +163,7 @@ describe("SidebarToolbar", () => {
     expect(button("Repository maintenance…").disabled).toBe(false);
   });
 
-  it("opens Add with Add folders, Clone and Fork, and runs the one picked", () => {
+  it("opens Add with Add folders, Rescan, Clone and Fork, and runs the one picked", () => {
     const h = render({ hasProfile: true, rootCount: 1, repoCount: 3 });
     const add = button("Add repositories");
     expect(add.getAttribute("aria-expanded")).toBe("false");
@@ -168,7 +171,10 @@ describe("SidebarToolbar", () => {
     expect(add.getAttribute("aria-expanded")).toBe("true");
     expect(
       [...document.querySelectorAll('[role="menuitem"]')].map((el) => el.textContent)
-    ).toEqual(["Add folders…", "Clone…", "Fork…"]);
+    ).toEqual(["Add folders…", "Rescan folders", "Clone…", "Fork…"]);
+    act(() => menuItem("Rescan folders").click());
+    expect(h.onRescanFolders).toHaveBeenCalledTimes(1);
+    act(() => add.click());
     act(() => menuItem("Clone…").click());
     expect(h.onClone).toHaveBeenCalledTimes(1);
     // Picking closes the menu.
@@ -185,6 +191,9 @@ describe("SidebarToolbar", () => {
     expect(clone.disabled).toBe(true);
     expect(clone.textContent).toContain("Add a repo folder before cloning");
     expect(menuItem("Fork…").disabled).toBe(true);
+    const rescan = menuItem("Rescan folders");
+    expect(rescan.disabled).toBe(true);
+    expect(rescan.textContent).toContain("Add a repo folder first");
     const addFolders = menuItem("Add folders…");
     expect(addFolders.disabled).toBe(false);
     act(() => addFolders.click());

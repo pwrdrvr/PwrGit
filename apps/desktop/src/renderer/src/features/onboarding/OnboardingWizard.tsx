@@ -577,8 +577,8 @@ function DoneStep(props: { roots: string[]; repos: Repo[] }) {
             : `${repos.length} ${repos.length === 1 ? "repository" : "repositories"}, ${worktrees} ${worktrees === 1 ? "worktree" : "worktrees"}, ${roots.length} ${roots.length === 1 ? "folder" : "folders"}.`}
         </h1>
         <p className="onboarding-wizard__sub">
-          This is your sidebar. It rescans on its own once a day, and whenever
-          you ask it to.
+          This is your sidebar. A repository added to these folders shows up
+          on its own, and Rescan folders in the Add menu looks right away.
         </p>
       </div>
       {/* Only what a scan knows. Per-worktree state is computed lazily on

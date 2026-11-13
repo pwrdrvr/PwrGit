@@ -72,6 +72,21 @@ export function registerRepoHandlers(
     return rescanAfter(req.profileId, () => profiles.setRoots(req.profileId, req.roots));
   });
 
+  bus.register("profile:rescan", async (req) => {
+    const profile = profiles.get(req.profileId);
+    if (profile === null) {
+      return err({
+        kind: "profile" as const,
+        code: "not_found",
+        message: `No profile "${req.profileId}"`
+      });
+    }
+    const before = new Set(indexer.listRepos(profile.id).map((r) => r.id));
+    const repos = await indexer.rescanProfile(profile);
+    emitEvent("repo:changed", { profileId: profile.id });
+    return ok({ repos, added: repos.filter((r) => !before.has(r.id)) });
+  });
+
   bus.register("repo:setPin", (req) => {
     indexer.setRepoPinned(req.repoId, req.pinned);
     const profileId = profiles.getActiveId();

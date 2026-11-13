@@ -32,13 +32,14 @@ export const SIDEBAR_TOOLBAR_FIT_STEPS = [
 export function addMenuReasons(input: {
   hasProfile: boolean;
   rootCount: number;
-}): { addFolders?: string; clone?: string; fork?: string } {
+}): { addFolders?: string; rescan?: string; clone?: string; fork?: string } {
   if (!input.hasProfile) {
     const reason = "Load or create a profile first";
-    return { addFolders: reason, clone: reason, fork: reason };
+    return { addFolders: reason, rescan: reason, clone: reason, fork: reason };
   }
   if (input.rootCount === 0) {
     return {
+      rescan: "Add a repo folder first",
       clone: "Add a repo folder before cloning",
       fork: "Add a repo folder before forking"
     };
@@ -127,7 +128,7 @@ export function lastRunHint(last: LastBulkSyncRun): string {
 
 /**
  * The one row of profile-wide actions above the lens row: Add ▾ (Add folders,
- * Clone, Fork), the sync button, and Repository maintenance as a wrench.
+ * Rescan folders, Clone, Fork), the sync button, and Repository maintenance as a wrench.
  *
  * The sync button is one split button for Fetch and Try pull: Try pull
  * already fetches every repository before it fast-forwards, so two buttons
@@ -151,6 +152,7 @@ export function SidebarToolbar({
   tagCheckAfterSync = null,
   onToggleTagCheck,
   onAddFolder,
+  onRescanFolders,
   onClone,
   onFork,
   onSync,
@@ -178,6 +180,8 @@ export function SidebarToolbar({
   tagCheckAfterSync?: boolean | null;
   onToggleTagCheck?: (on: boolean) => void;
   onAddFolder: () => void;
+  /** Look through the profile's folders again now, past the daily scan. */
+  onRescanFolders?: (() => void) | undefined;
   onClone: () => void;
   onFork: () => void;
   /** The face: run the remembered verb and scope, or show the run in flight. */
@@ -419,6 +423,7 @@ export function SidebarToolbar({
           triggerRef={addRef}
           items={[
             item("Add folders…", reasons.addFolders, onAddFolder),
+            item("Rescan folders", reasons.rescan, () => onRescanFolders?.()),
             item("Clone…", reasons.clone, onClone),
             item("Fork…", reasons.fork, onFork)
           ]}
