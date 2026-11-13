@@ -1,6 +1,6 @@
-import { readFileSync } from "node:fs";
+import { readdirSync, readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-import { dirname, resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 
 /**
@@ -21,10 +21,16 @@ import { describe, expect, it } from "vitest";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const strip = (css: string): string => css.replace(/\/\*[\s\S]*?\*\//g, "");
-const appCss = strip(readFileSync(resolve(here, "app.css"), "utf8"));
+/** Every stylesheet under the renderer's `src`, not just app.css: feature
+ *  folders carry their own (`features/contributions/contributions.css`). */
+const rendererSrc = resolve(here, "..");
+const css = readdirSync(rendererSrc, { recursive: true, encoding: "utf8" })
+  .filter((file) => file.endsWith(".css"))
+  .map((file) => strip(readFileSync(join(rendererSrc, file), "utf8")))
+  .join("\n");
 
 /** Every rule as [selectors, body], `@media` contents included. */
-const rules = [...appCss.matchAll(/([^@{};\s][^{};]*)\{([^{}]*)\}/g)].map((m) => ({
+const rules = [...css.matchAll(/([^@{};\s][^{};]*)\{([^{}]*)\}/g)].map((m) => ({
   selectors: m[1]!.split(",").map((s) => s.trim().replace(/\s+/g, " ")),
   body: m[2]!
 }));
@@ -68,7 +74,10 @@ describe("idle animations", () => {
       .filter((rule) => rule.selectors.includes(".graph-lanes .head-ring"))
       .map((rule) => rule.body)
       .join(";");
-    expect(body).toMatch(/animation\s*:\s*head-pulse\b[^;]*\s\d+\s*;/);
+    // A few pulses to find HEAD, not a count that runs for minutes.
+    const count = /animation\s*:\s*head-pulse\b[^;]*\s(\d+)\s*;/.exec(body)?.[1];
+    expect(count).toBeDefined();
+    expect(Number(count)).toBeLessThanOrEqual(5);
     // Without a resting value the ring would jump to opacity 1 when the
     // pulse stops; the keyframes start and end at 0.9.
     expect(body).toMatch(/(?:^|;)\s*opacity\s*:\s*0\.9\s*;/);
