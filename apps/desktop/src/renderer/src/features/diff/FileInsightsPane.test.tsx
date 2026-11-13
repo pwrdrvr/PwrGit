@@ -237,7 +237,7 @@ describe("FileInsightsPane", () => {
         worktreeId: "wt-1",
         people: {
           "ada@example.test": {
-            state: "proven",
+            state: "linked",
             identity: { login: "ada-l" },
             forge: "github",
             checkedAt: 2

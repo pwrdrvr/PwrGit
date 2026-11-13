@@ -96,9 +96,15 @@ fails.
 - **Commit-author identity.**
   - Fetch only an exact full SHA from a recognized forge `origin`. Accept a
     login/avatar only after the SHA and the local Git author name/email match.
-  - Proof is GitHub's commit `author`. If null, a unique PR for that SHA can
-    supply the account, only if its login matches the Git author name or
+  - The match is GitHub's commit `author`. If null, a unique PR for that SHA
+    can supply the account, only if its login matches the Git author name or
     email local part.
+  - **A match is not proof of authorship.** It says whose email the commit
+    carries. UI says "matched", never "proven". Only a commit GitHub marks
+    `verification.verified` *and* whose committer email is its author email
+    (`signedByAuthor`) may read "verified". It is stored per exact commit
+    (`signature_verified`), never on the reusable email→account row, and a
+    PR-fallback account drops the signature.
   - SQLite stores the proof and a conflict-safe hashed email→account
     association, so the author's other commits paint at once in all repos.
   - 64px avatars are deduplicated under

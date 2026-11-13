@@ -7,7 +7,7 @@ import {
 import type { CommitAuthorPerson } from "./types";
 
 const proven = (checkedAt: number, avatarUrl?: string): CommitAuthorPerson => ({
-  state: "proven",
+  state: "linked",
   identity: { login: "ada", ...(avatarUrl === undefined ? {} : { avatarUrl }) },
   forge: "github",
   checkedAt

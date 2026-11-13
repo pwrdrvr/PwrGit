@@ -2094,7 +2094,7 @@ export type GitHubCommitAuthorIdentity = {
   avatarUrl?: string;
 };
 
-/** A proven identity whose local thumbnail is missing or past its TTL. */
+/** A linked identity whose local thumbnail is missing or past its TTL. */
 export type GitHubCommitAuthorAvatarCacheStatus = {
   cacheState: "stale" | "miss";
   /** `idle`: nothing is stopping a refresh; `backing-off`: a download failed. */
@@ -2107,7 +2107,7 @@ export type GitHubCommitAuthorAvatarCacheStatus = {
 
 /** Presentation-neutral result of a commit-author identity lookup. */
 export type GitHubCommitAuthorIdentityLookup = {
-  /** Present only after an exact commit proof has verified the mapping. */
+  /** Present only after an exact commit's forge answer matched the author. */
   identity?: GitHubCommitAuthorIdentity;
   cacheState: "fresh" | "stale" | "miss";
   refreshState: "idle" | "in-flight" | "backing-off" | "not-eligible";
@@ -2115,8 +2115,14 @@ export type GitHubCommitAuthorIdentityLookup = {
   refreshedAt?: number;
   /** Epoch milliseconds before which a failed proof may not be retried. */
   nextRetryAt?: number;
-  /** Present only while a proven avatar's local thumbnail is missing or stale. */
+  /** Present only while a linked avatar's local thumbnail is missing or stale. */
   avatarCache?: GitHubCommitAuthorAvatarCacheStatus;
+  /**
+   * The forge marked this exact commit's signature verified, and its author
+   * committed it (committer email = author email). Never set from the
+   * reusable email→account association: a signature belongs to one commit.
+   */
+  signatureVerified?: true;
 };
 
 /**
@@ -2128,19 +2134,28 @@ export type GitHubCommitAuthorIdentityLookup = {
  */
 export type CommitAuthorPerson = {
   /**
-   * - `proven`: the forge linked this author's commits to `identity`.
+   * - `linked`: this author's commits are matched to `identity`, by the
+   *   forge's commit-email link or the pull-request-author fallback. A match
+   *   says whose email it is, not who wrote the commit; only
+   *   `signatureVerified` says more.
    * - `none`: the forge answered, and links them to no account.
    * - `pending`: not known yet. Main has not asked, or is backing off.
-   * - `unsupported`: this worktree's origin is not a forge that can prove
+   * - `unsupported`: this worktree's origin is not a forge that can link
    *   commit authors, or the author has no usable email.
    */
-  state: "proven" | "none" | "pending" | "unsupported";
+  state: "linked" | "none" | "pending" | "unsupported";
   identity?: GitHubCommitAuthorIdentity;
-  /** The account's https page on `forge`, built by main from the proven login. */
+  /**
+   * Only with `linked`: at least one checked commit by this author, linked to
+   * `identity`, carries a signature the forge verified, committed by its
+   * author. The one thing the card may call verified.
+   */
+  signatureVerified?: true;
+  /** The account's https page on `forge`, built by main from the linked login. */
   profileUrl?: string;
   /** The forge that answered, or will be asked. Absent when not known. */
   forge?: ForgeKind;
-  /** Epoch milliseconds of the proof behind `proven` or `none`. */
+  /** Epoch milliseconds of the forge answer behind `linked` or `none`. */
   checkedAt?: number;
 };
 

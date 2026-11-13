@@ -128,7 +128,7 @@ export function GraphRow({
   flashing: boolean;
   /** branch name → PR / worktree adornments for tip chips. */
   branchInfo?: Record<string, LaneBranchInfo>;
-  /** The author's proven forge avatar, from main's people store. Absent
+  /** The author's linked forge avatar, from main's people store. Absent
    *  draws initials. */
   authorAvatarUrl?: string | undefined;
   /** This row's byline has the person card open. */

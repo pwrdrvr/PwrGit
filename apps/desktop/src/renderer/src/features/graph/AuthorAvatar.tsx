@@ -9,7 +9,7 @@ export function initials(name: string): string {
 }
 
 /**
- * A commit author's face: initials, with the proven GitHub avatar painted over
+ * A commit author's face: initials, with the linked GitHub avatar painted over
  * them when there is one. The initials stay underneath rather than being
  * swapped out, so a thumbnail that fails to decode simply hides and leaves them
  * showing — no second render, no empty circle.
@@ -26,7 +26,7 @@ export function AuthorAvatar({
 }: {
   block: string;
   name: string;
-  /** Only a local `pwrgit-avatar://` thumbnail from a proven identity. */
+  /** Only a local `pwrgit-avatar://` thumbnail from a linked identity. */
   avatarUrl: string | undefined;
   size: number;
 }) {

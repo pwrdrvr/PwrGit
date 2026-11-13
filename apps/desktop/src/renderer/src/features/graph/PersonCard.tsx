@@ -43,31 +43,44 @@ function OpenIcon() {
   );
 }
 
+/**
+ * How strongly the status line may speak. Only `verified` is green: an
+ * account match says whose email a commit carries, not who wrote it.
+ */
+export type PersonStatusTone = "verified" | "linked" | "muted";
+
 /** The one line that says what the forge knows, and how PwrGit knows it. */
 export function personStatus(person: CommitAuthorPerson | undefined): {
   text: string;
-  proven: boolean;
+  tone: PersonStatusTone;
 } {
   const forge = person?.forge === undefined ? undefined : forgeLabel(person.forge);
   switch (person?.state) {
-    case "proven":
-      return { text: `${forge ?? "Forge"} account, proven by a commit`, proven: true };
+    case "linked":
+      return person.signatureVerified === true
+        ? { text: `Signed commit verified by ${forge ?? "the forge"}`, tone: "verified" }
+        : {
+            text: forge === undefined
+              ? "Matched to this account, not verified"
+              : `Matched to this ${forge} account, not verified`,
+            tone: "linked"
+          };
     case "none":
       return {
         text: `${forge ?? "The forge"} links these commits to no account`,
-        proven: false
+        tone: "muted"
       };
     case "unsupported":
       return {
         text: forge === undefined
           ? "This repository's remote has no accounts to check"
           : `${forge} can't link commits to accounts`,
-        proven: false
+        tone: "muted"
       };
     default:
       return {
         text: forge === undefined ? "Not checked yet" : `Not checked with ${forge} yet`,
-        proven: false
+        tone: "muted"
       };
   }
 }
@@ -77,7 +90,7 @@ export function personStatus(person: CommitAuthorPerson | undefined): {
  * already holds — its loaded commits, and the person main's store pushed —
  * and issues no request of its own, exactly like `PrStatusCard`. The login,
  * photo and profile link appear together or not at all: never a handle
- * without the proof behind it.
+ * without the forge match behind it.
  */
 export function PersonCard({
   name,
@@ -96,7 +109,7 @@ export function PersonCard({
   now: number;
 }) {
   const displayName = name.trim() || "Unknown author";
-  const identity = person?.state === "proven" ? person.identity : undefined;
+  const identity = person?.state === "linked" ? person.identity : undefined;
   const status = personStatus(person);
   const profileUrl = identity === undefined ? undefined : person?.profileUrl;
   const forge = person?.forge === undefined ? "forge" : forgeLabel(person.forge);
@@ -142,9 +155,7 @@ export function PersonCard({
         </span>
       </div>
 
-      <div
-        className={`person-card__status${status.proven ? "" : " is-muted"}`}
-      >
+      <div className={`person-card__status is-${status.tone}`}>
         <span className="person-card__dot" aria-hidden="true" />
         {status.text}
       </div>

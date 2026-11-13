@@ -14906,13 +14906,17 @@ body.is-col-resizing {
   height: 7px;
   flex: 0 0 auto;
   border-radius: 50%;
+  background: var(--border-strong);
+}
+/* Green is reserved for a signature the forge verified; a match is neutral. */
+.person-card__status.is-verified .person-card__dot {
   background: var(--status-ok);
+}
+.person-card__status.is-linked .person-card__dot {
+  background: var(--text-muted);
 }
 .person-card__status.is-muted {
   color: var(--text-muted);
-}
-.person-card__status.is-muted .person-card__dot {
-  background: var(--border-strong);
 }
 .person-card__section {
   margin-top: 10px;

@@ -520,6 +520,101 @@
         </div>
         <p class="dv-next">Try next: &#8220;build 1b with 2b&#8217;s wiring&#8221; &#183; &#8220;answer 2c.1: count by login where proven, email otherwise&#8221; &#183; &#8220;draw the card at the 240px sidebar width in the dark theme&#8221;</p>
       </section>
+
+      <!-- ================================================================ -->
+      <section class="dv-turn" id="t3">
+        <div class="dv-thd"><a class="dv-tid" href="#t3">3</a><span class="dv-tname">Say what the forge actually knows &#8212; &#8220;proven&#8221; is reserved for a verified signature</span></div>
+        <p class="dv-sub">The card says <b>&#8220;GitHub account, proven by a commit&#8221;</b> for every linked author. Nothing behind it proves authorship. GitHub links a commit to an account because the commit&#8217;s author email is a verified address on that account, and anyone can put that address in <code>git config user.email</code>. Our pull-request fallback is weaker still: it accepts a PR author whose handle matches the Git name. The phrase is also stilted. <b>Recommendation: 3b-A.</b> A matched account reads plainly, with a neutral dot. Green and the word &#8220;verified&#8221; are reserved for a commit GitHub itself marked Verified that was signed by its own author. The signal is already in the response we fetch, so this costs no extra request. Specimens use the light theme, and all people, emails and avatars are contrived.</p>
+        <div class="dv-opts">
+
+          <!-- 3a -->
+          <div class="dv-opt" id="3a" data-screen-label="3a What each claim rests on">
+            <div class="dv-olabel"><a class="dv-oid" href="#3a">3a</a>What each source can honestly claim</div>
+            <div class="tbl">
+              <div class="tr head"><span>Source</span><span>What it establishes &#8212; and what the card may say</span></div>
+              <div class="tr"><b>Commit author email</b><span>GitHub&#8217;s <code>author</code> on the exact commit (GitLab: GraphQL <code>commit.author</code>). The address is verified on that account. Who typed the commit is not known. <span class="st chg">matched</span></span></div>
+              <div class="tr"><b>PR author fallback</b><span>One PR contains the SHA, and its author&#8217;s handle equals the Git name or the email&#8217;s local part. This is a heuristic PwrGit runs, not a link GitHub makes. <span class="st chg">matched</span></span></div>
+              <div class="tr"><b>Reused email &#8594; account</b><span>The cached association that paints an author&#8217;s other commits before they are fetched. It is about an email, never a commit, so it can never carry a signature. <span class="st chg">matched</span></span></div>
+              <div class="tr"><b>Verified signature</b><span>GitHub&#8217;s <code>commit.verification.verified</code> is true <b>and</b> the committer email is the author email. GitHub checked the signature against a key on the account that owns that address. <span class="st keep">verified</span></span></div>
+              <div class="tr last"><b>Signed by GitHub</b><span>Squash merges and web edits: GitHub is the committer and signs with its own key. That vouches for GitHub making the commit, not for the author signing it. <span class="st chg">matched</span></span></div>
+            </div>
+          </div>
+
+          <!-- 3b -->
+          <div class="dv-opt" id="3b" data-screen-label="3b Status line copy">
+            <div class="dv-olabel"><a class="dv-oid" href="#3b">3b</a>The status line, before and after</div>
+            <div style="display:flex; flex-wrap:wrap; gap:18px; width:940px;">
+              <div style="display:flex; flex-direction:column; gap:6px;">
+                <span class="stage-h">Today <em>every linked author</em></span>
+                <div class="pc">
+                  <div class="pc-h"><span class="pc-eye">Author</span><span class="pc-id">@wcastellanos</span></div>
+                  <div class="pc-who"><span class="av lg40"><svg><use href="#av-w" /></svg></span><div style="min-width:0;"><div class="pc-name">Wilhelmina Castellanos</div><div class="pc-mail"><span>wilhelmina@example.com</span><span class="cp"><svg width="11" height="11"><use href="#ic-copy" /></svg></span></div></div></div>
+                  <div class="pc-st"><i></i>GitHub account, proven by a commit</div>
+                  <div class="pc-acts"><span class="pb"><svg width="11" height="11"><use href="#ic-copy" /></svg>Co-author line</span><span class="pb"><svg width="11" height="11"><use href="#ic-out" /></svg>Open on GitHub</span></div>
+                </div>
+              </div>
+              <div style="display:flex; flex-direction:column; gap:6px;">
+                <span class="stage-h">A &#183; matched <em>recommended</em></span>
+                <div class="pc">
+                  <div class="pc-h"><span class="pc-eye">Author</span><span class="pc-id">@wcastellanos</span></div>
+                  <div class="pc-who"><span class="av lg40"><svg><use href="#av-w" /></svg></span><div style="min-width:0;"><div class="pc-name">Wilhelmina Castellanos</div><div class="pc-mail"><span>wilhelmina@example.com</span><span class="cp"><svg width="11" height="11"><use href="#ic-copy" /></svg></span></div></div></div>
+                  <div class="pc-st"><i style="background: var(--l-t3);"></i>Matched to this GitHub account, not verified</div>
+                  <div class="pc-acts"><span class="pb"><svg width="11" height="11"><use href="#ic-copy" /></svg>Co-author line</span><span class="pb"><svg width="11" height="11"><use href="#ic-out" /></svg>Open on GitHub</span></div>
+                </div>
+              </div>
+              <div style="display:flex; flex-direction:column; gap:6px;">
+                <span class="stage-h">A &#183; verified <em>recommended</em></span>
+                <div class="pc">
+                  <div class="pc-h"><span class="pc-eye">Author</span><span class="pc-id">@ndaraio</span></div>
+                  <div class="pc-who"><span class="av lg40"><svg><use href="#av-id" /></svg></span><div style="min-width:0;"><div class="pc-name">Nico Daraio</div><div class="pc-mail"><span>nico@example.com</span><span class="cp"><svg width="11" height="11"><use href="#ic-copy" /></svg></span></div></div></div>
+                  <div class="pc-st"><i></i>Signed commit verified by GitHub</div>
+                  <div class="pc-acts"><span class="pb"><svg width="11" height="11"><use href="#ic-copy" /></svg>Co-author line</span><span class="pb"><svg width="11" height="11"><use href="#ic-out" /></svg>Open on GitHub</span></div>
+                </div>
+              </div>
+              <div style="display:flex; flex-direction:column; gap:6px;">
+                <span class="stage-h">B &#183; badge by the login</span>
+                <div class="pc">
+                  <div class="pc-h"><span class="pc-eye">Author</span><span class="pc-id">@ndaraio <span class="st keep" style="margin-left:4px;">verified</span></span></div>
+                  <div class="pc-who"><span class="av lg40"><svg><use href="#av-id" /></svg></span><div style="min-width:0;"><div class="pc-name">Nico Daraio</div><div class="pc-mail"><span>nico@example.com</span><span class="cp"><svg width="11" height="11"><use href="#ic-copy" /></svg></span></div></div></div>
+                  <div class="pc-st muted"><i></i>Matched by commit email</div>
+                  <div class="pc-acts"><span class="pb"><svg width="11" height="11"><use href="#ic-copy" /></svg>Co-author line</span><span class="pb"><svg width="11" height="11"><use href="#ic-out" /></svg>Open on GitHub</span></div>
+                </div>
+              </div>
+              <div class="stage" style="width:288px;">
+                <div class="stage-h">Why A</div>
+                <p class="note"><b>One slot, one sentence, as turn 2 settled.</b> A puts the claim on the line that already explains the photo, and it holds for every source in 3a without telling them apart. The dot carries the strength: green only for verified, neutral grey for matched, faded for no account.</p>
+                <p class="note"><b>B reads like GitHub&#8217;s badge</b>, but it says &#8220;commit email&#8221;, which is false for the PR fallback. A pill in the header is also a second place to look.</p>
+                <p class="note"><b>Nothing else moves.</b> The photo, login and Open on GitHub still appear for a matched account: the match is useful, and only the claim about it was wrong. GitLab cards read &#8220;Matched to this GitLab account, not verified&#8221; until its signature is asked for (3c).</p>
+              </div>
+            </div>
+          </div>
+
+          <!-- 3c -->
+          <div class="dv-opt" id="3c" data-screen-label="3c Wiring">
+            <div class="dv-olabel"><a class="dv-oid" href="#3c">3c</a>Where &#8220;verified&#8221; comes from</div>
+            <div class="tbl">
+              <div class="tr head"><span>Step</span><span>What changes</span></div>
+              <div class="tr"><b>Transport</b><span>The <code>gh api repos/&#8230;/commits/SHA</code> response already carries <code>commit.verification</code> and <code>commit.committer</code>. Parse both. When the PR fallback supplies the account, the signature is dropped.</span></div>
+              <div class="tr"><b>Evaluation</b><span>Verified only when the forge says <code>verified: true</code> and the normalized committer email equals the author email. That one rule, as a property test, excludes GitHub-signed merges and a reviewer&#8217;s signed cherry-pick.</span></div>
+              <div class="tr"><b>Cache</b><span>A new <code>signature_verified</code> column on the per-commit identity row only. The reusable email &#8594; account row never carries it. The migration marks existing rows stale, so the people store re-checks them on its normal schedule, with no burst.</span></div>
+              <div class="tr"><b>Person</b><span><code>CommitAuthorPerson.state</code> is renamed from <code>proven</code> to <code>linked</code>, and the person gains <code>signatureVerified</code> when any checked commit for that account is verified (up to three per author).</span></div>
+              <div class="tr last"><b>GitLab</b><span>Not in this change. GraphQL <code>commit.signature</code> varies by self-managed version, and one unknown field fails the whole query. Follow-up.</span></div>
+            </div>
+          </div>
+
+          <!-- 3d -->
+          <div class="dv-opt" id="3d" data-screen-label="3d Open questions">
+            <div class="dv-olabel"><a class="dv-oid" href="#3d">3d</a>Questions for the operator</div>
+            <div class="find" style="width:420px;">
+              <div class="fitem"><span class="pin q">1</span><div><h4>Should the byline avatar show verified too?</h4><p>A small tick on the 16px avatar would surface it without a hover. Left out: a row-level badge is a bigger call than fixing a sentence.</p></div></div>
+              <div class="fitem"><span class="pin q">2</span><div><h4>Per person or per commit?</h4><p>The card is about a person, so it says verified if any checked commit is. The SHA card is the place for &#8220;this commit is signed&#8221;, and it could reuse the same column.</p></div></div>
+              <div class="fitem"><span class="pin ok">&#10003;</span><div><h4>Same wording elsewhere</h4><p>Code comments and the shared type say &#8220;proven&#8221; too. The rename keeps the word from coming back in the next feature.</p></div></div>
+            </div>
+          </div>
+
+        </div>
+        <p class="dv-next">Try next: &#8220;build 3b-A with 3c&#8217;s wiring&#8221; &#183; &#8220;ask GitLab for commit.signature where the host supports it&#8221; &#183; &#8220;draw 3d.1: a verified tick on the byline avatar&#8221;</p>
+      </section>
     </x-dc>
     <script
       type="text/x-dc"

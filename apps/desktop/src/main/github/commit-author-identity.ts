@@ -10,11 +10,12 @@ import {
 import type { GitExec } from "../git/dugite";
 import type { DB } from "../persistence/db";
 import { normalizeForgeAvatarSourceUrl, rememberForgeAvatarHost } from "../forge/avatar-source";
-import type {
-  CommitAuthorIdentityTransport,
-  CommitAuthorProof,
-  CommitAuthorRemoteCommit,
-  ForgeAccountProfile
+import {
+  signedByAuthor,
+  type CommitAuthorIdentityTransport,
+  type CommitAuthorProof,
+  type CommitAuthorRemoteCommit,
+  type ForgeAccountProfile
 } from "../forge/commit-author";
 import { ForgeCommitAuthorIdentityTransport } from "../forge/commit-author-transport";
 import { resolveForgeRepo } from "../forge/resolve";
@@ -24,7 +25,7 @@ import {
   type GitHubAvatarThumbnailStore
 } from "./avatar-thumbnail-cache";
 
-/** How long a proven GitHub identity remains fresh before revalidation. */
+/** How long a linked GitHub identity remains fresh before revalidation. */
 export const GITHUB_COMMIT_AUTHOR_IDENTITY_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 /** How long an exact commit with no GitHub account remains negative-cached. */
 export const GITHUB_COMMIT_AUTHOR_IDENTITY_NEGATIVE_TTL_MS = 24 * 60 * 60 * 1000;
@@ -79,6 +80,8 @@ type CacheEntry = {
   status: CacheStatus;
   /** The remote source URL stays main-process-only; output gets local bytes. */
   identity?: CachedIdentity;
+  /** Exact-commit rows only: the forge verified a signature by the author. */
+  signatureVerified?: true;
   fetchedAt: number;
   expiresAt: number;
   lastAccessedAt: number;
@@ -93,6 +96,7 @@ type CacheRow = {
   github_login: string | null;
   github_user_id: number | null;
   avatar_url: string | null;
+  signature_verified: number | null;
   fetched_at: number;
   expires_at: number;
   last_accessed_at: number;
@@ -129,7 +133,7 @@ type PreparedRequest = {
 };
 
 type RemoteOutcome =
-  | { kind: "resolved"; identity: CachedIdentity }
+  | { kind: "resolved"; identity: CachedIdentity; signatureVerified: boolean }
   | { kind: "negative" }
   | { kind: "inconclusive" };
 
@@ -215,7 +219,7 @@ export class GitHubCommitAuthorIdentityService {
     commitHash: string;
     authorName: string;
     authorEmail: string;
-    /** Read only already-proven exact or author-account data. */
+    /** Read only already-linked exact or author-account data. */
     cacheOnly?: boolean;
   }): GitHubCommitAuthorIdentityRequest {
     const author = normalizeAuthor({
@@ -416,6 +420,7 @@ export class GitHubCommitAuthorIdentityService {
           this.writeResolved({
             identityKey,
             identity: outcome.identity,
+            signatureVerified: outcome.signatureVerified,
             fetchedAt: completedAt,
             expiresAt: completedAt + this.resolvedTtlMs
           });
@@ -503,7 +508,7 @@ export class GitHubCommitAuthorIdentityService {
       if (thumbnail.avatarUrl !== undefined) identity.avatarUrl = thumbnail.avatarUrl;
       return toLookup(entry, now, refreshState, identity, toAvatarCacheStatus(thumbnail));
     } catch {
-      // A damaged/missing local thumbnail must not hide a proven login.
+      // A damaged/missing local thumbnail must not hide a linked login.
     }
     return toLookup(entry, now, refreshState, identity);
   }
@@ -563,8 +568,9 @@ export class GitHubCommitAuthorIdentityService {
     try {
       const row = this.db
         .prepare(
-          `SELECT identity_key, status, github_user_id, github_login, avatar_url, fetched_at,
-                  expires_at, last_accessed_at, failure_count, next_retry_at, updated_at
+          `SELECT identity_key, status, github_user_id, github_login, avatar_url,
+                  signature_verified, fetched_at, expires_at, last_accessed_at,
+                  failure_count, next_retry_at, updated_at
              FROM github_commit_author_identity_cache
             WHERE identity_key = ?`
         )
@@ -709,20 +715,23 @@ export class GitHubCommitAuthorIdentityService {
   private writeResolved(params: {
     identityKey: string;
     identity: CachedIdentity;
+    signatureVerified: boolean;
     fetchedAt: number;
     expiresAt: number;
   }): void {
     this.db
       .prepare(
         `INSERT INTO github_commit_author_identity_cache(
-           identity_key, status, github_user_id, github_login, avatar_url, fetched_at,
-           expires_at, last_accessed_at, failure_count, next_retry_at, updated_at
-         ) VALUES (?, 'resolved', ?, ?, ?, ?, ?, ?, 0, NULL, ?)
+           identity_key, status, github_user_id, github_login, avatar_url,
+           signature_verified, fetched_at, expires_at, last_accessed_at,
+           failure_count, next_retry_at, updated_at
+         ) VALUES (?, 'resolved', ?, ?, ?, ?, ?, ?, ?, 0, NULL, ?)
          ON CONFLICT(identity_key) DO UPDATE SET
            status = excluded.status,
            github_user_id = excluded.github_user_id,
            github_login = excluded.github_login,
            avatar_url = excluded.avatar_url,
+           signature_verified = excluded.signature_verified,
            fetched_at = excluded.fetched_at,
            expires_at = excluded.expires_at,
            last_accessed_at = excluded.last_accessed_at,
@@ -736,6 +745,7 @@ export class GitHubCommitAuthorIdentityService {
         params.identity.userId ?? null,
         params.identity.login,
         params.identity.avatarSourceUrl ?? null,
+        params.signatureVerified ? 1 : 0,
         params.fetchedAt,
         params.expiresAt,
         params.fetchedAt,
@@ -759,6 +769,7 @@ export class GitHubCommitAuthorIdentityService {
            github_user_id = NULL,
            github_login = NULL,
            avatar_url = NULL,
+           signature_verified = 0,
            fetched_at = excluded.fetched_at,
            expires_at = excluded.expires_at,
            last_accessed_at = excluded.last_accessed_at,
@@ -776,7 +787,7 @@ export class GitHubCommitAuthorIdentityService {
       );
   }
 
-  /** Keep stale proven data while a temporary failure is backed off. */
+  /** Keep stale linked data while a temporary failure is backed off. */
   private recordFailure(identityKey: string, now: number): void {
     const failureCount = Math.min(
       16,
@@ -938,7 +949,7 @@ function evaluateRemoteCommit(
   const identity = normalizeForgeIdentity(response.account, expectedProof.repo);
   return identity === undefined
     ? { kind: "inconclusive" }
-    : { kind: "resolved", identity };
+    : { kind: "resolved", identity, signatureVerified: signedByAuthor(response) };
 }
 
 function parseCacheRow(row: CacheRow): CacheEntry | undefined {
@@ -968,6 +979,7 @@ function parseCacheRow(row: CacheRow): CacheEntry | undefined {
         login,
         ...(avatarSourceUrl === undefined ? {} : { avatarSourceUrl })
       },
+      ...(row.signature_verified === 1 ? { signatureVerified: true as const } : {}),
       fetchedAt: row.fetched_at,
       expiresAt: row.expires_at,
       lastAccessedAt: row.last_accessed_at,
@@ -1084,7 +1096,10 @@ function toLookup(
       ? { refreshedAt: entry.fetchedAt }
       : {}),
     ...(entry?.nextRetryAt === undefined ? {} : { nextRetryAt: entry.nextRetryAt }),
-    ...(avatarCache === undefined ? {} : { avatarCache })
+    ...(avatarCache === undefined ? {} : { avatarCache }),
+    ...(identity !== undefined && entry?.signatureVerified === true
+      ? { signatureVerified: true as const }
+      : {})
   };
 }
 

@@ -270,7 +270,10 @@ export class CommitAuthorPeopleStore {
       ))
     ]);
     const best = bestLookup(lookups);
-    return { person: personFrom(best, forge), settled: isSettled(best) };
+    return {
+      person: personFrom(best, forge, signedByLinkedAccount(best, lookups)),
+      settled: isSettled(best)
+    };
   }
 
   /** One forge visit — only as far as the identity cache says is due. */
@@ -437,9 +440,27 @@ function bestLookup(
   return best;
 }
 
+/**
+ * Whether any checked commit carries a forge-verified signature by its author
+ * *and* is linked to the same account the person shows. A verified commit
+ * linked to some other login says nothing about this one.
+ */
+export function signedByLinkedAccount(
+  best: GitHubCommitAuthorIdentityLookup,
+  lookups: readonly GitHubCommitAuthorIdentityLookup[]
+): boolean {
+  const login = best.identity?.login.toLowerCase();
+  if (login === undefined) return false;
+  return lookups.some((lookup) =>
+    lookup.signatureVerified === true &&
+    lookup.identity?.login.toLowerCase() === login
+  );
+}
+
 function personFrom(
   lookup: GitHubCommitAuthorIdentityLookup,
-  forge: ForgeRepo | null | undefined
+  forge: ForgeRepo | null | undefined,
+  signatureVerified: boolean
 ): CommitAuthorPerson {
   const forgeField = forge == null ? {} : { forge: forge.kind };
   if (forge === null || lookup.refreshState === "not-eligible") {
@@ -448,8 +469,9 @@ function personFrom(
   const checkedAt = lookup.refreshedAt === undefined ? {} : { checkedAt: lookup.refreshedAt };
   if (lookup.identity !== undefined) {
     return {
-      state: "proven",
+      state: "linked",
       identity: lookup.identity,
+      ...(signatureVerified ? { signatureVerified: true as const } : {}),
       ...(forge === undefined
         ? {}
         : { profileUrl: `${forgeOrigin(forge)}/${encodeURIComponent(lookup.identity.login)}` }),
@@ -463,6 +485,7 @@ function personFrom(
 
 function samePerson(a: CommitAuthorPerson, b: CommitAuthorPerson): boolean {
   return a.state === b.state &&
+    a.signatureVerified === b.signatureVerified &&
     a.identity?.login === b.identity?.login &&
     a.identity?.avatarUrl === b.identity?.avatarUrl &&
     a.profileUrl === b.profileUrl &&

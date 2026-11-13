@@ -143,7 +143,7 @@ function newestFirst(commits: readonly Commit[]): Commit[] {
     .map(({ commit }) => commit);
 }
 
-// A proven person resolves to an opaque local thumbnail. Graph load waits for
+// A linked person resolves to an opaque local thumbnail. Graph load waits for
 // decode before rows become interactive and retains the decoded image for the
 // graph session. Keeping the element alive matters for custom protocols:
 // Chromium may otherwise discard its decoded surface before a card creates
@@ -176,7 +176,7 @@ function warmCommitAuthorAvatar(avatarUrl: string | undefined): Promise<void> {
       warmedCommitAuthorAvatars.set(avatarUrl, image);
     })
     .catch(() => {
-      // A missing/damaged local file still leaves the proven login usable.
+      // A missing/damaged local file still leaves the linked login usable.
     })
     .finally(() => {
       warmingCommitAuthorAvatarUrls.delete(avatarUrl);
@@ -193,9 +193,9 @@ async function warmPeopleAvatars(
   );
 }
 
-/** Only a proven identity is ever shown; the rest are initials. */
-function provenIdentity(person: CommitAuthorPerson | undefined) {
-  return person?.state === "proven" ? person.identity : undefined;
+/** Only a linked identity is ever shown; the rest are initials. */
+function linkedIdentity(person: CommitAuthorPerson | undefined) {
+  return person?.state === "linked" ? person.identity : undefined;
 }
 
 type CommitMenuState = { hash: string; x: number; y: number };
@@ -795,7 +795,7 @@ export function LineageGraph({
         defaultRef={data?.defaultRef ?? hoveredVm.defaultBranch}
         now={now}
         stats={commitStats[hoveredVm.commit.hash]}
-        githubIdentity={provenIdentity(
+        githubIdentity={linkedIdentity(
           people[commitAuthorPersonKey(hoveredVm.commit.authorEmail)]
         )}
         pullRequest={commitPullRequests[hoveredVm.commit.hash] ?? undefined}
@@ -835,7 +835,7 @@ export function LineageGraph({
         defaultRef={data?.defaultRef ?? vm.defaultBranch}
         now={now}
         stats={commitStats[vm.commit.hash]}
-        githubIdentity={provenIdentity(
+        githubIdentity={linkedIdentity(
           people[commitAuthorPersonKey(vm.commit.authorEmail)]
         )}
         pullRequest={commitPullRequests[vm.commit.hash] ?? undefined}
@@ -1298,7 +1298,7 @@ export function LineageGraph({
                 flashing={flash === vm.commit.hash}
                 branchInfo={data?.branches ?? {}}
                 authorAvatarUrl={
-                  provenIdentity(people[commitAuthorPersonKey(vm.commit.authorEmail)])
+                  linkedIdentity(people[commitAuthorPersonKey(vm.commit.authorEmail)])
                     ?.avatarUrl
                 }
                 personOpen={openPerson?.hash === vm.commit.hash && personCard.visible}
