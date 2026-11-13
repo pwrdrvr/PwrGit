@@ -1,5 +1,9 @@
 # Changelog
 
+## v0.58.0 - 2026-11-13
+
+- Commit graph - Reduced idle CPU use when HEAD is visible by stopping its highlight ring after three pulses instead of animating forever. The current commit stays highlighted without the animation continuously repainting the window.
+
 ## v0.57.0 - 2026-11-11
 
 - Published tags - Added comparisons between local tags and a chosen publishing remote, using origin when available. The Tags tab and sidebar flag tags that differ without rewriting them during Fetch or Pull. Take the remote's value or keep the local one explicitly; replaced tag objects are retained for restoration, and stale reviews are refused. Remote-only tag history is downloaded only after confirmation.
