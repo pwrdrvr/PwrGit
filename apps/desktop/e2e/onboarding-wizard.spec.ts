@@ -72,19 +72,20 @@ test("walks a first run from welcome to a populated sidebar", async () => {
   await expect(field(handle, "Author e-mail")).toHaveValue("test@pwrgit.com");
   await nextButton(handle).click();
 
-  // Forges → the scan explainer → the folder picker.
+  // Forges → step 3's choice → the folder picker. "I will choose the
+  // folders", not the default search: Find my repositories would walk this
+  // runner's real home folder.
   await expect(title(handle)).toHaveText(
     "Where PwrGit reads pull and merge requests from."
   );
   await nextButton(handle).click();
-  await expect(title(handle)).toHaveText(
-    "You name folders. PwrGit does the finding."
-  );
-  await nextButton(handle).click();
-
-  await expect(window.locator(".onboarding-wizard__roots-empty")).toBeVisible();
+  await expect(title(handle)).toHaveText("Where are your repositories?");
+  await window.getByText("I will choose the folders").click();
+  await expect(window.getByRole("radio", { name: /I will choose the folders/ })).toBeChecked();
+  // The button opens the picker as it promises, so stub it first.
   await handle.setPickDirectories([sandbox.reposDir]);
-  await window.getByRole("button", { name: "+ Add a folder…" }).click();
+  await expect(nextButton(handle)).toHaveText("Choose folders… →");
+  await nextButton(handle).click();
   await expect(window.locator(".onboarding-wizard__root-path")).toHaveText(
     sandbox.reposDir
   );
