@@ -1,13 +1,11 @@
 import type { Profile } from "@pwrgit/shared";
 
-/** A routine look at every profile's roots, while the app runs. */
-export const ROOT_DISCOVERY_INTERVAL_MS = 2 * 60_000;
 /**
- * A window coming forward looks too, but not more often than this. Short:
- * the usual case is "clone in a terminal, switch back", and a walk costs
- * milliseconds. At 30s the launch's own focus swallowed the next one.
+ * The fallback look while the app runs. Every Fetch/Pull run (yours or the
+ * timer's) also looks first, so this matters only with automatic sync off;
+ * it is the authored-commit sweep's cadence.
  */
-export const ROOT_DISCOVERY_FOCUS_GAP_MS = 5_000;
+export const ROOT_DISCOVERY_INTERVAL_MS = 15 * 60_000;
 /**
  * The same new folders ask again only after this long. A completed scan
  * records every folder it walked, so they stop being new; they stay new
@@ -24,8 +22,9 @@ export const ROOT_DISCOVERY_RETRY_MS = 10 * 60_000;
  * stayed out of the sidebar, ⌘K included, until the next window opened a day
  * after the last scan.
  *
- * Each check walks every profile's roots (milliseconds, no Git) and asks for a
- * scan when that walk found a repository folder the last scan did not
+ * A check runs at the start of every Fetch/Pull run and every 15 minutes. It
+ * walks every profile's roots (milliseconds, no Git) and asks for a scan when
+ * that walk found a repository folder the last scan did not
  * (`unscannedRepoDirs`, forced past the throttle), or when the daily scan is
  * due. Like `missing-repo-rescan.ts`, this moves WHEN a scan runs, never
  * what it may prune.
@@ -50,12 +49,11 @@ export function createRootDiscovery({
   now?: () => number;
   retryMs?: number;
 }): {
-  /** Look now, unless a look is running or one started within `minGapMs`. */
-  check(options?: { minGapMs?: number }): Promise<void>;
+  /** Look now, unless a look is already running. */
+  check(): Promise<void>;
 } {
   const asked = new Map<string, { key: string; at: number }>();
   let running = false;
-  let lastStart = Number.NEGATIVE_INFINITY;
 
   const checkProfile = async (profile: Profile): Promise<void> => {
     if (indexer.shouldRescanProfile(profile.id)) {
@@ -81,11 +79,9 @@ export function createRootDiscovery({
   };
 
   return {
-    async check({ minGapMs = 0 } = {}) {
-      const at = now();
-      if (running || at - lastStart < minGapMs) return;
+    async check() {
+      if (running) return;
       running = true;
-      lastStart = at;
       try {
         for (const profile of profiles()) {
           if (profile.roots.length === 0) continue;

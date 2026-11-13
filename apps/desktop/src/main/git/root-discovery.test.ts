@@ -1,10 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import type { Profile } from "@pwrgit/shared";
-import {
-  createRootDiscovery,
-  ROOT_DISCOVERY_FOCUS_GAP_MS,
-  ROOT_DISCOVERY_RETRY_MS
-} from "./root-discovery";
+import { createRootDiscovery, ROOT_DISCOVERY_RETRY_MS } from "./root-discovery";
 
 const profile = (id: string, roots: string[] = [`/roots/${id}`]): Profile =>
   ({ id, name: id, roots }) as unknown as Profile;
@@ -97,16 +93,11 @@ describe("root discovery", () => {
     );
   });
 
-  it("holds focus checks to the gap, and never runs two looks at once", async () => {
+  it("never runs two looks at once", async () => {
     const h = harness({ a: [], b: [] });
-    await h.discovery.check({ minGapMs: ROOT_DISCOVERY_FOCUS_GAP_MS });
-    await h.discovery.check({ minGapMs: ROOT_DISCOVERY_FOCUS_GAP_MS });
+    await Promise.all([h.discovery.check(), h.discovery.check()]);
     expect(h.unscannedRepoDirs).toHaveBeenCalledTimes(2);
-    h.advance(ROOT_DISCOVERY_FOCUS_GAP_MS);
-    await Promise.all([
-      h.discovery.check({ minGapMs: ROOT_DISCOVERY_FOCUS_GAP_MS }),
-      h.discovery.check()
-    ]);
+    await h.discovery.check();
     expect(h.unscannedRepoDirs).toHaveBeenCalledTimes(4);
   });
 });

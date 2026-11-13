@@ -14,11 +14,7 @@ import type { Profile } from "@pwrgit/shared";
 import { openDatabase } from "../persistence/db";
 import { ProfileService } from "../profiles/profile-service";
 import { RepoIndexer } from "./repo-indexer";
-import {
-  createRootDiscovery,
-  ROOT_DISCOVERY_FOCUS_GAP_MS,
-  ROOT_DISCOVERY_INTERVAL_MS
-} from "./root-discovery";
+import { createRootDiscovery, ROOT_DISCOVERY_INTERVAL_MS } from "./root-discovery";
 import { createSystemGit } from "./test-support/system-git";
 
 // The rule: while PwrGit runs, a checkout that appears under a profile's
@@ -56,7 +52,7 @@ type Op =
   | { kind: "plain" }
   | { kind: "advance"; ms: number }
   | { kind: "tick" }
-  | { kind: "focus" };
+  | { kind: "sync" };
 
 const opArb: fc.Arbitrary<Op> = fc.oneof(
   { arbitrary: fc.record({ kind: fc.constant("clone" as const), nested: fc.boolean() }), weight: 3 },
@@ -71,7 +67,7 @@ const opArb: fc.Arbitrary<Op> = fc.oneof(
     weight: 2
   },
   { arbitrary: fc.constant({ kind: "tick" as const }), weight: 2 },
-  { arbitrary: fc.constant({ kind: "focus" as const }), weight: 1 }
+  { arbitrary: fc.constant({ kind: "sync" as const }), weight: 1 }
 );
 
 let runNo = 0;
@@ -163,30 +159,23 @@ async function runScenario(ops: Op[]): Promise<void> {
       case "advance":
         clock += op.ms;
         break;
+      // The timer's look, or the one a Fetch/Pull run starts with.
       case "tick":
-      case "focus": {
+      case "sync": {
         const scansBefore = forcedScans;
-        if (op.kind === "tick") {
-          clock += ROOT_DISCOVERY_INTERVAL_MS;
-          await discovery.check();
-        } else {
-          await discovery.check({ minGapMs: ROOT_DISCOVERY_FOCUS_GAP_MS });
-        }
+        if (op.kind === "tick") clock += ROOT_DISCOVERY_INTERVAL_MS;
+        await discovery.check();
         await settle();
-        if (op.kind === "tick") {
-          // The rule.
-          const now = listed();
-          for (const dir of checkouts) {
-            expect(now, `${dir} is listed after a routine check`).toContain(
-              realpathSync(dir)
-            );
-          }
-          // And its price: a quiet root starts no Git-heavy scan.
-          if (!newSinceLastTick) expect(forcedScans).toBe(scansBefore);
-          newSinceLastTick = false;
-        } else if (forcedScans > scansBefore) {
-          newSinceLastTick = false;
+        // The rule.
+        const now = listed();
+        for (const dir of checkouts) {
+          expect(now, `${dir} is listed after a routine check`).toContain(
+            realpathSync(dir)
+          );
         }
+        // And its price: a quiet root starts no Git-heavy scan.
+        if (!newSinceLastTick) expect(forcedScans).toBe(scansBefore);
+        newSinceLastTick = false;
         break;
       }
     }

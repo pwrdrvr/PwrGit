@@ -46,3 +46,30 @@ describe("bulk sync identity refresh", () => {
     }
   );
 });
+
+describe("bulk sync and the profile's folders", () => {
+  it("looks for new repositories at the start of every run", async () => {
+    // A Fetch/Pull run, yours or the timer's, is when new clones get looked
+    // for (root-discovery.ts); an unknown profile starts nothing.
+    const db = {
+      prepare: (sql: string) => ({
+        get: (id: string) => (id === "profile-1" ? { id } : undefined),
+        all: () => (sql.includes("FROM repos") ? [] : [])
+      })
+    } as unknown as DB;
+    const onRunStart = vi.fn();
+    const bus = new CommandBus();
+    registerBulkSyncHandlers(bus, db, {
+      refreshWorktree: vi.fn(),
+      refreshRepoWorktrees: vi.fn()
+    }, new WorktreeOperationQueue(), undefined, undefined, onRunStart);
+
+    await bus.dispatch("remote:bulkSync", {
+      profileId: "profile-1", operationId: "bulk-1", mode: "fetch"
+    });
+    await bus.dispatch("remote:bulkSync", {
+      profileId: "nobody", operationId: "bulk-2", mode: "fetch"
+    });
+    expect(onRunStart).toHaveBeenCalledExactlyOnceWith("profile-1");
+  });
+});

@@ -15,18 +15,10 @@ test.afterEach(async () => {
   sandbox = null;
 });
 
-async function focusWindow(app: AppHandle): Promise<void> {
-  await app.app.evaluate(({ app: electronApp, BrowserWindow }) => {
-    const win = BrowserWindow.getAllWindows()[0];
-    // The hook a window coming forward runs; no private test channel.
-    if (win !== undefined) electronApp.emit("browser-window-focus", {}, win);
-  });
-}
-
 // The daily scan had already run, so a repository cloned into a root while
 // PwrGit stayed open never reached the sidebar or ⌘K until a window opened a
 // day later (pwrdrvr/PwrGit: ~/github/rgit, cloned by an agent).
-test("lists a repository cloned into a root while the app runs", async () => {
+test("a Fetch run lists a repository cloned into a root while the app runs", async () => {
   sandbox = createGitSandbox();
   sandbox.makeRepo("first");
   handle = await launchApp();
@@ -35,18 +27,9 @@ test("lists a repository cloned into a root while the app runs", async () => {
 
   sandbox.makeRepo("rgit");
   await expect(repoGroup(window, "rgit")).toHaveCount(0);
-  // Coming back to the window looks again, at most every 5s: the launch's
-  // own focus may have just looked, so come back until it does.
-  const app = handle;
-  await expect
-    .poll(
-      async () => {
-        await focusWindow(app);
-        return repoGroup(window, "rgit").count();
-      },
-      { timeout: 30_000, intervals: [1_000] }
-    )
-    .toBe(1);
+  // Every Fetch/Pull run, yours or the timer's, looks at the folders first.
+  const toolbar = window.getByRole("group", { name: "Repositories", exact: true });
+  await toolbar.getByRole("button", { name: "Fetch all repos" }).click();
   await expect(repoGroup(window, "rgit")).toBeVisible();
 });
 

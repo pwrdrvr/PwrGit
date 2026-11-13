@@ -554,10 +554,12 @@ one deliberate route to zero, and it prunes.
   `profile_scan_state` records only that a pass could *look*, and a readable
   empty root did look. Stamped after an unreadable root, it starts the 24h
   throttle in `shouldRescanProfile` from a scan that saw nothing.
-- **A new folder under a root asks for the scan within minutes.**
-  `root-discovery.ts` walks every profile's roots (no Git) every 2 minutes
-  and on window focus (at most every 5s). It forces a scan when the walk finds a `.git` folder
-  that the last scan did not walk (`unscannedRepoDirs` against
+- **A new folder under a root asks for the scan at the next look.**
+  `root-discovery.ts` walks every profile's roots (no Git) at the start of
+  every Fetch/Pull run (`remote:bulkSync`, yours or the timer's) and every 15
+  minutes. Not on focus: switching windows is not evidence of a clone. It
+  forces a scan when the walk finds a `.git` folder that the last scan did
+  not walk (`unscannedRepoDirs` against
   `profile_scan_dirs`, 0048), and runs the daily scan when it is due. Compare
   walk output with walk output, never with Git's paths: Git resolves
   symlinks, so a quiet root would rescan every tick. `profile_scan_dirs` is

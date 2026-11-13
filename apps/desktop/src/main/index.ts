@@ -110,7 +110,6 @@ import { registerWorktreeLifecycleHandlers } from "./git/worktree-lifecycle-hand
 import { createMissingRepoRescan } from "./git/missing-repo-rescan";
 import {
   createRootDiscovery,
-  ROOT_DISCOVERY_FOCUS_GAP_MS,
   ROOT_DISCOVERY_INTERVAL_MS
 } from "./git/root-discovery";
 import { createVanishedWorktreeRefresh } from "./git/vanished-worktrees";
@@ -908,8 +907,9 @@ if (!gotSingleInstanceLock) {
       return true;
     };
     // A repository that appears under a root while PwrGit runs (a clone, an
-    // agent's checkout): walk the roots now and then, and scan when the walk
-    // finds a folder the last scan did not (root-discovery.ts says why).
+    // agent's checkout): walk the roots before each Fetch/Pull run and every
+    // 15 minutes, and scan when the walk finds a folder the last scan did not
+    // (root-discovery.ts says why).
     const rootDiscovery = createRootDiscovery({
       profiles: () => profiles.list(),
       indexer,
@@ -1329,7 +1329,8 @@ if (!gotSingleInstanceLock) {
       refresher,
       worktreeOperations,
       indexer,
-      refreshIdentity
+      refreshIdentity,
+      () => void rootDiscovery.check()
     );
     const pruneHandlers = registerPruneHandlers(
       bus,
@@ -1604,7 +1605,6 @@ if (!gotSingleInstanceLock) {
     };
     app.on("browser-window-focus", () => {
       refreshActive();
-      void rootDiscovery.check({ minGapMs: ROOT_DISCOVERY_FOCUS_GAP_MS });
       remoteTipChecker.focus();
       refreshMenu();
     });
