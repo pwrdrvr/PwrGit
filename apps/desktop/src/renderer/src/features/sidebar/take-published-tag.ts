@@ -69,6 +69,11 @@ export async function takePublishedTag(input: {
     expectedLocalObjectId: local?.objectId ?? null
   });
   if (!result.ok) {
+    // The remote moved since the check that drew this mark: list it again so
+    // the marks show its value now, instead of offering the same refused Take.
+    if (result.error.code === "remote_tag_changed" || result.error.code === "remote_tag_missing") {
+      void dispatch("tag:refreshRemote", { repoId, remote, mode: "explicit" });
+    }
     if (result.error.code !== "canceled") {
       showErrorToast({
         title: local === null ? "Download tag failed" : "Take tag failed",

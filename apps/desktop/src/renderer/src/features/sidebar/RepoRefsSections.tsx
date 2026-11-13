@@ -922,7 +922,7 @@ export function RepoRefsSections({
                     className="ref-tag-moved"
                     aria-label={`${tag.name} moved on ${moved.remote} to ${moved.targetId.slice(0, 7)}. Take ${moved.remote}'s…`}
                     aria-busy={takingTag === tag.name}
-                    disabled={takingTag !== null}
+                    aria-disabled={takingTag !== null}
                     {...hoverTooltip(
                       tip,
                       `${moved.remote} moved ${tag.name}\n` +
@@ -933,6 +933,7 @@ export function RepoRefsSections({
                     onClick={(event) => {
                       event.stopPropagation();
                       tip.hide();
+                      if (takingTag !== null) return;
                       void takeMovedTag(tag, moved);
                     }}
                   >

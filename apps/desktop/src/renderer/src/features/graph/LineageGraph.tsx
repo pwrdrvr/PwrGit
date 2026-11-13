@@ -854,9 +854,15 @@ export function LineageGraph({
     setCommitMenu({ hash: vm.commit.hash, ...position });
   };
 
-  /** A moved or published tag chip: the Tags tab's own Take. */
+  /** A moved or published tag chip: the Tags tab's own Take, one at a time. */
+  const takingTagRef = useRef(false);
   const takeTag = (moved: MovedTag): void => {
-    void takePublishedTag({ repoId, name: moved.name, local: moved.local, published: moved.published });
+    if (takingTagRef.current) return;
+    takingTagRef.current = true;
+    void takePublishedTag({ repoId, name: moved.name, local: moved.local, published: moved.published })
+      .finally(() => {
+        takingTagRef.current = false;
+      });
   };
 
   const openBranchMenu = (target: BranchChipTarget): void => {

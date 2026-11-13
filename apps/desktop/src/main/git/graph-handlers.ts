@@ -33,8 +33,8 @@ import type { WorktreeStateService } from "./worktree-state";
  *  only the HEAD dot varies per worktree, so this is cached and reused. */
 type CachedLanes = {
   tags: NonNullable<LaneGraph["tags"]>;
-  /** Every local tag on a commit, for the per-request published comparison. */
-  localTags: GraphLocalTag[];
+  /** Every local tag on a commit by name, for the per-request published comparison. */
+  localTags: Map<string, GraphLocalTag>;
   /** Configured remote names: who publishes tags is chosen among them. */
   remotes: string[];
   commits: Commit[];
@@ -101,12 +101,10 @@ function drawnMovedTags(
   commits: readonly Commit[]
 ): MovedTag[] {
   const drawn = new Set(commits.map((commit) => commit.hash));
-  const moves = tagSourcesFor(db).store.moves(repoId, lanes.remotes, lanes.localTags);
-  if (moves.size === 0) return [];
-  const local = new Map(lanes.localTags.map((tag) => [tag.name, tag]));
+  const moves = tagSourcesFor(db).store.moves(repoId, lanes.remotes, lanes.localTags.values());
   const out: MovedTag[] = [];
   for (const [name, published] of moves) {
-    const tag = local.get(name);
+    const tag = lanes.localTags.get(name);
     if (tag === undefined) continue;
     if (!drawn.has(tag.targetId) && !drawn.has(published.targetId)) continue;
     // A published commit that is drawn is in this repository.
@@ -399,7 +397,7 @@ export function registerGraphHandlers(
       // refuse the graph — which is what returning the error here would do.
       cached = {
         tags: tags.ok ? tags.value.prominent : {},
-        localTags: tags.ok ? tags.value.all : [],
+        localTags: new Map((tags.ok ? tags.value.all : []).map((tag) => [tag.name, tag])),
         remotes: remoteConfig.ok ? remoteConfig.value.map((remote) => remote.name) : [],
         commits: topoMergeCommits([trunk.value, uniques.value]),
         tips: tips.value.local,

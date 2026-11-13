@@ -110,6 +110,31 @@ describe("published tag handlers", () => {
     expect(emitEvent).toHaveBeenCalledWith("repo:changed", { profileId: "p1", repoIds: ["repo-1"] });
   });
 
+  // A Take offered from a stale mark (origin re-cut again after the check)
+  // is refused; the surfaces that offered it must re-read, or the same chip
+  // keeps offering the same refused Take.
+  it("a Take refused because a value moved tells the sidebar and lineage to re-read", async () => {
+    const { local } = fixture();
+    register(local);
+    expect((await bus.dispatch("tag:refreshRemote", { repoId: "repo-1", mode: "explicit" })).ok).toBe(true);
+    const status = await bus.dispatch("repo:tagStatus", { repoId: "repo-1", filter: "differs" });
+    if (!status.ok) throw new Error(status.error.message);
+    const row = status.value.rows[0]!;
+
+    vi.mocked(emitEvent).mockClear();
+    const refused = await bus.dispatch("tag:adoptRemote", {
+      repoId: "repo-1",
+      name: "v1.0.0",
+      remote: "origin",
+      expectedRemoteObjectId: row.published!.objectId,
+      // The local tag moved in a terminal after the marks were drawn.
+      expectedLocalObjectId: "f".repeat(40)
+    });
+    expect(refused.ok ? "adopted" : refused.error.code).toBe("local_tag_changed");
+    expect(emitEvent).toHaveBeenCalledWith("graph:changed", { repoId: "repo-1" });
+    expect(emitEvent).toHaveBeenCalledWith("repo:changed", { profileId: "p1", repoIds: ["repo-1"] });
+  });
+
   it("never lists a remote with tagOpt=--no-tags on its own, but does when asked", async () => {
     const { local } = fixture();
     git(local, "config", "remote.origin.tagOpt", "--no-tags");

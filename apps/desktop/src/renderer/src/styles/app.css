@@ -8691,14 +8691,13 @@ button.agent-menu__item:hover {
   white-space: nowrap;
   cursor: pointer;
 }
-.ref-tag-moved:hover:not(:disabled) {
+.ref-tag-moved:hover:not([aria-disabled="true"]) {
   border-color: var(--status-warning);
   background: var(--status-warning);
   color: var(--bg-panel-elevated);
 }
-.ref-tag-moved:disabled {
+.ref-tag-moved[aria-disabled="true"] {
   cursor: default;
-  opacity: 0.6;
 }
 .ref-tag-moved:focus-visible {
   outline: 2px solid var(--focus-ring);

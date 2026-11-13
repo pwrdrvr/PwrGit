@@ -531,6 +531,8 @@ export function registerRemoteHandlers(
   tagChecks.pauseWhile(
     (repoId) => Date.now() < networkPausedUntil || activities.list().some((activity) => activity.repoId === repoId)
   );
+  /** Refusals of a Take whose reviewed values are no longer current. */
+  const STALE_TAKE_CODES = new Set(["local_tag_changed", "remote_tag_changed", "remote_tag_missing"]);
   /** A listing landed. The lineage redraws only when a moved tag came or went. */
   const announceTags = (repoId: string, movedSetChanged: boolean): void => {
     const repo = repoOf(repoId);
@@ -592,7 +594,12 @@ export function registerRemoteHandlers(
           expectedLocalObjectId: req.expectedLocalObjectId
         })
     );
-    if (!result.ok) return err(classifyAuthFailure(result.error));
+    if (!result.ok) {
+      // A value moved since the marks were drawn. Without a re-read, the
+      // sidebar and lineage chips keep offering the Take that just failed.
+      if (STALE_TAKE_CODES.has(result.error.code)) announceTags(req.repoId, true);
+      return err(classifyAuthFailure(result.error));
+    }
     logMain(
       "info",
       "tag",

@@ -589,10 +589,10 @@ export class TagSourceStore {
    * Database only. A tag kept local, never listed, or listed the same is not
    * here.
    */
-  moves(repoId: string, remotes: readonly string[], local: readonly LocalTagRef[]): Map<string, RemoteTagValue> {
+  moves(repoId: string, remotes: readonly string[], local: Iterable<LocalTagRef>): Map<string, RemoteTagValue> {
     const moved = new Map<string, RemoteTagValue>();
     const remote = this.publisherOf(repoId, remotes);
-    if (remote === null || local.length === 0) return moved;
+    if (remote === null) return moved;
     const published = this.tags(repoId, remote);
     if (published === null) return moved;
     const keeps = this.keeps(repoId, remote);
@@ -769,7 +769,8 @@ export class TagSources {
     const countMoved = this.store.setDiffers(repoId, remote, compared.counts.differs);
     const key = `${repoId}\0${remote}`;
     const signature = differsSignature(compared.rows);
-    // Unknown after a launch counts as empty: the stored count covers that case.
+    // Unknown after a launch counts as empty: a listing that landed since may
+    // differ at the same count, so the first comparison may cost one redraw.
     const setMoved = (this.differing.get(key) ?? "") !== signature;
     this.differing.set(key, signature);
     return countMoved || setMoved;
