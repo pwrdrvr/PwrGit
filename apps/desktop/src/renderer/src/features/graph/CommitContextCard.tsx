@@ -70,7 +70,7 @@ export function CommitContextCard({
   pullRequest?: PrSummary | undefined;
 }) {
   const authorName = commit.authorName.trim() || "Unknown author";
-  // Local Git authorship remains primary, while the proven GitHub handle is
+  // Local Git authorship remains primary, while the linked GitHub handle is
   // always explicit. Hiding `@huntharo` only when the Git name was `huntharo`
   // made commits by the same account render inconsistently.
   const githubLogin = githubIdentity?.login;

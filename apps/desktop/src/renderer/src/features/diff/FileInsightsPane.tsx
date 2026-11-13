@@ -92,7 +92,7 @@ type IdentityCandidate = {
 };
 
 /**
- * Proven identities for these commits: each commit's own cached proof, and the
+ * Linked identities for these commits: each commit's own cached proof, and the
  * author as main's people store knows them. The pane registers the authors it
  * shows, as the lineage graph does, so main keeps them fresh on its own
  * schedule; nothing here asks a forge.
@@ -189,7 +189,7 @@ function useAuthorIdentities(
     const identities: Record<string, GitHubCommitAuthorIdentity> = {};
     for (const candidate of unique) {
       const person = people[commitAuthorPersonKey(candidate.authorEmail)];
-      // A proven person carries the freshest login and face. Anything short of
+      // A linked person carries the freshest login and face. Anything short of
       // that is about the author's other commits, and must not hide this
       // commit's own exact proof.
       const identity = person?.state === "linked"

@@ -14918,9 +14918,6 @@ body.is-col-resizing {
 .person-card__status.is-muted {
   color: var(--text-muted);
 }
-.person-card__status.is-muted .person-card__dot {
-  background: var(--border-strong);
-}
 .person-card__section {
   margin-top: 10px;
   padding-top: 8px;
