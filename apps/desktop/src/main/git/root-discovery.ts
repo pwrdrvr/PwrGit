@@ -2,8 +2,12 @@ import type { Profile } from "@pwrgit/shared";
 
 /** A routine look at every profile's roots, while the app runs. */
 export const ROOT_DISCOVERY_INTERVAL_MS = 2 * 60_000;
-/** A window coming forward looks too, but not more often than this. */
-export const ROOT_DISCOVERY_FOCUS_GAP_MS = 30_000;
+/**
+ * A window coming forward looks too, but not more often than this. Short:
+ * the usual case is "clone in a terminal, switch back", and a walk costs
+ * milliseconds. At 30s the launch's own focus swallowed the next one.
+ */
+export const ROOT_DISCOVERY_FOCUS_GAP_MS = 5_000;
 /**
  * The same new folders ask again only after this long. A completed scan
  * records every folder it walked, so they stop being new; they stay new

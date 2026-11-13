@@ -35,7 +35,18 @@ test("lists a repository cloned into a root while the app runs", async () => {
 
   sandbox.makeRepo("rgit");
   await expect(repoGroup(window, "rgit")).toHaveCount(0);
-  await focusWindow(handle);
+  // Coming back to the window looks again, at most every 5s: the launch's
+  // own focus may have just looked, so come back until it does.
+  const app = handle;
+  await expect
+    .poll(
+      async () => {
+        await focusWindow(app);
+        return repoGroup(window, "rgit").count();
+      },
+      { timeout: 30_000, intervals: [1_000] }
+    )
+    .toBe(1);
   await expect(repoGroup(window, "rgit")).toBeVisible();
 });
 
