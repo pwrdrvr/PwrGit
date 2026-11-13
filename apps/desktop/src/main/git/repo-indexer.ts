@@ -368,11 +368,15 @@ export class RepoIndexer {
         indexedBranches: IndexedBranches | null;
       }
     >();
+    // Folders Git could not read this pass: recorded as unseen, so the next
+    // look asks again instead of treating a clone caught mid-write as known.
+    const unread = new Set<string>();
     await mapLimit([...found], GIT_CONCURRENCY, async (dir) => {
       const [listed, listedBranches] = await Promise.all([
         listWorktrees(this.git, dir),
         listIndexedBranches(this.git, dir)
       ]);
+      if (!listed.ok) unread.add(dir);
       if (!listed.ok || listed.value.length === 0) return;
       const primary = listed.value[0];
       if (primary === undefined || primary.bare) return;
@@ -438,10 +442,13 @@ export class RepoIndexer {
       // scan that saw nothing — leaving the volume undiscovered for a day after
       // it mounts, with no manual rescan to reach for.
       if (everyRootReadable) this.markProfileScanned(profile.id);
-      // What this pass's walk saw, for `unscannedRepoDirs`. Recorded readable
-      // roots or not: an unreadable root adds nothing here, so its folders
-      // read as new, and ask for a scan, once it mounts.
-      this.recordScannedDirs(profile.id, found);
+      // What this pass's walk saw and Git could read, for `unscannedRepoDirs`.
+      // Recorded readable roots or not: an unreadable root adds nothing here,
+      // so its folders read as new, and ask for a scan, once it mounts.
+      this.recordScannedDirs(
+        profile.id,
+        [...found].filter((dir) => !unread.has(dir))
+      );
     })();
 
     return this.listRepos(profile.id);
@@ -1917,7 +1924,7 @@ export class RepoIndexer {
       .run(profileId, this.now());
   }
 
-  private recordScannedDirs(profileId: ProfileId, dirs: Set<string>): void {
+  private recordScannedDirs(profileId: ProfileId, dirs: readonly string[]): void {
     this.db
       .prepare("DELETE FROM profile_scan_dirs WHERE profile_id = ?")
       .run(profileId);

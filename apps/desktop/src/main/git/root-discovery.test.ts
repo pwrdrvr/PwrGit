@@ -64,6 +64,13 @@ describe("root discovery", () => {
     h.advance(ROOT_DISCOVERY_RETRY_MS);
     await h.discovery.check();
     expect(h.rescan).toHaveBeenCalledTimes(2);
+    // Folders that stay unreadable wait twice as long each time.
+    h.advance(ROOT_DISCOVERY_RETRY_MS);
+    await h.discovery.check();
+    expect(h.rescan).toHaveBeenCalledTimes(2);
+    h.advance(ROOT_DISCOVERY_RETRY_MS);
+    await h.discovery.check();
+    expect(h.rescan).toHaveBeenCalledTimes(3);
   });
 
   it("asks at once for a different set of new folders", async () => {
@@ -93,11 +100,51 @@ describe("root discovery", () => {
     );
   });
 
-  it("never runs two looks at once", async () => {
+  it("never runs two looks at once, and does not lose the second", async () => {
+    // A Fetch that starts while the timer's look runs may come after the
+    // look walked its profile, so the look runs once more when it ends.
     const h = harness({ a: [], b: [] });
     await Promise.all([h.discovery.check(), h.discovery.check()]);
-    expect(h.unscannedRepoDirs).toHaveBeenCalledTimes(2);
-    await h.discovery.check();
     expect(h.unscannedRepoDirs).toHaveBeenCalledTimes(4);
+    await h.discovery.check();
+    expect(h.unscannedRepoDirs).toHaveBeenCalledTimes(6);
+  });
+
+  it("looks only at the profile a Fetch/Pull run is for", async () => {
+    const h = harness({ a: ["/roots/a/new"], b: ["/roots/b/new"] });
+    await h.discovery.check("b");
+    expect(h.unscannedRepoDirs).toHaveBeenCalledExactlyOnceWith(
+      expect.objectContaining({ id: "b" })
+    );
+    expect(h.rescan).toHaveBeenCalledExactlyOnceWith(
+      expect.objectContaining({ id: "b" }),
+      { force: true }
+    );
+  });
+
+  it("backs off a daily scan that cannot finish instead of rescanning every Fetch", async () => {
+    // An unreadable root never stamps the scan clock, so the daily scan
+    // stays due; each Fetch must not become a full rescan.
+    const h = harness({ a: [], b: [] });
+    h.shouldRescanProfile.mockImplementation((id) => id === "a");
+    await h.discovery.check("a");
+    expect(h.rescan).toHaveBeenCalledTimes(1);
+    for (let i = 0; i < 5; i += 1) {
+      h.advance(60_000);
+      await h.discovery.check("a");
+    }
+    expect(h.rescan).toHaveBeenCalledTimes(1);
+    // Still walked meanwhile: a new folder is found during the back-off.
+    expect(h.unscannedRepoDirs).toHaveBeenCalledTimes(5);
+    h.advance(ROOT_DISCOVERY_RETRY_MS);
+    await h.discovery.check("a");
+    expect(h.rescan).toHaveBeenCalledTimes(2);
+    // The next wait doubles.
+    h.advance(ROOT_DISCOVERY_RETRY_MS);
+    await h.discovery.check("a");
+    expect(h.rescan).toHaveBeenCalledTimes(2);
+    h.advance(ROOT_DISCOVERY_RETRY_MS);
+    await h.discovery.check("a");
+    expect(h.rescan).toHaveBeenCalledTimes(3);
   });
 });

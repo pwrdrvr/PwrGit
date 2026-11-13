@@ -907,8 +907,8 @@ if (!gotSingleInstanceLock) {
       return true;
     };
     // A repository that appears under a root while PwrGit runs (a clone, an
-    // agent's checkout): walk the roots before each Fetch/Pull run and every
-    // 15 minutes, and scan when the walk finds a folder the last scan did not
+    // agent's checkout): walk the roots after launch, before each Fetch/Pull
+    // run and every 15 minutes, and scan when the walk finds a folder the last scan did not
     // (root-discovery.ts says why).
     const rootDiscovery = createRootDiscovery({
       profiles: () => profiles.list(),
@@ -922,6 +922,9 @@ if (!gotSingleInstanceLock) {
             ` under the roots; rescanning profile "${profile.name}"`
         )
     });
+    // And once soon after launch: a clone made while PwrGit was closed, less
+    // than a day after the last scan, is not due a scan at window open.
+    const rootDiscoveryStart = setTimeout(() => void rootDiscovery.check(), 15_000);
     const rootDiscoveryPoll = setInterval(
       () => void rootDiscovery.check(),
       ROOT_DISCOVERY_INTERVAL_MS
@@ -1330,7 +1333,7 @@ if (!gotSingleInstanceLock) {
       worktreeOperations,
       indexer,
       refreshIdentity,
-      () => void rootDiscovery.check()
+      (profileId) => void rootDiscovery.check(profileId)
     );
     const pruneHandlers = registerPruneHandlers(
       bus,
@@ -1645,6 +1648,7 @@ if (!gotSingleInstanceLock) {
     app.on("before-quit", () => {
       clearTimeout(authoredSweepStart);
       clearInterval(authoredSweepPoll);
+      clearTimeout(rootDiscoveryStart);
       clearInterval(rootDiscoveryPoll);
       clearInterval(activeStatePoll);
       clearInterval(visibleStatePoll);

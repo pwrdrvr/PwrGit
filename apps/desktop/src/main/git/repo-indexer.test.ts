@@ -181,6 +181,37 @@ describe("RepoIndexer", () => {
     isolatedDb.close();
   });
 
+  it("keeps reporting a folder Git could not read during the scan", async () => {
+    // A clone caught mid-write (or any folder Git refuses) was recorded as
+    // seen, so the walk never reported it again and the repository stayed
+    // out of the sidebar until the daily scan.
+    const root = mkdtempSync(join(tmpdir(), "pwrgit-unscanned-unread-"));
+    initRepo(join(root, "fine"));
+    mkdirSync(join(root, "half-cloned", ".git"), { recursive: true });
+    const isolatedDb = openDatabase(":memory:");
+    const profile = new ProfileService(isolatedDb).create({
+      name: "Unread",
+      email: "r@example.com",
+      roots: [root]
+    });
+    const isolatedIndexer = new RepoIndexer(isolatedDb, systemGit);
+    await isolatedIndexer.rescanProfile(profile);
+    expect(await isolatedIndexer.unscannedRepoDirs(profile)).toEqual([
+      join(root, "half-cloned")
+    ]);
+
+    // Once Git can read it, the next scan lists it and the walk goes quiet.
+    rmSync(join(root, "half-cloned"), { recursive: true, force: true });
+    initRepo(join(root, "half-cloned"));
+    await isolatedIndexer.rescanProfile(profile);
+    expect(isolatedIndexer.listRepos(profile.id).map((r) => r.name).sort()).toEqual([
+      "fine",
+      "half-cloned"
+    ]);
+    expect(await isolatedIndexer.unscannedRepoDirs(profile)).toEqual([]);
+    isolatedDb.close();
+  });
+
   it("reports a root's folders once the root can be read", async () => {
     // A volume not mounted at scan time recorded nothing, so its folders
     // ask for a scan when it mounts, not a day later.

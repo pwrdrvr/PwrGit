@@ -555,16 +555,18 @@ one deliberate route to zero, and it prunes.
   empty root did look. Stamped after an unreadable root, it starts the 24h
   throttle in `shouldRescanProfile` from a scan that saw nothing.
 - **A new folder under a root asks for the scan at the next look.**
-  `root-discovery.ts` walks every profile's roots (no Git) at the start of
-  every Fetch/Pull run (`remote:bulkSync`, yours or the timer's) and every 15
-  minutes. Not on focus: switching windows is not evidence of a clone. It
-  forces a scan when the walk finds a `.git` folder that the last scan did
-  not walk (`unscannedRepoDirs` against
-  `profile_scan_dirs`, 0048), and runs the daily scan when it is due. Compare
-  walk output with walk output, never with Git's paths: Git resolves
-  symlinks, so a quiet root would rescan every tick. `profile_scan_dirs` is
-  written after every completed scan, readable roots or not, so a volume's
-  folders read as new once it mounts. `root-discovery.property.test.ts` holds
+  `root-discovery.ts` walks the roots (no Git) 15s after launch, at the
+  start of every Fetch/Pull run (`remote:bulkSync`, that profile only) and
+  every 15 minutes. Not on focus: switching windows is not evidence of a
+  clone. It forces a scan when the walk finds a `.git` folder that the last
+  scan did not record (`unscannedRepoDirs` against `profile_scan_dirs`,
+  0048), and runs the daily scan when it is due. Both back off (10 min,
+  doubling to a day) when the same request comes back, because an unreadable
+  root keeps the daily scan due forever. Compare walk output with walk
+  output, never with Git's paths: Git resolves symlinks, so a quiet root
+  would rescan every tick. A scan records only the folders Git could read,
+  so a clone caught mid-write is asked about again, and records readable
+  roots or not, so a volume's folders read as new once it mounts. `root-discovery.property.test.ts` holds
   the rule against real Git. Add ▾ → Rescan folders (`profile:rescan`) is
   the manual route.
 - **A repository whose own folder is gone requests the rescan early.** When the
