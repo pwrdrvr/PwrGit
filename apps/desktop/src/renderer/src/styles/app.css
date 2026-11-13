@@ -11143,9 +11143,13 @@ button.commit-byline:focus-visible {
   background: var(--bg-panel);
   border-radius: 999px;
 }
-/* HEAD's ring breathes gently so "where am I" is findable at a glance. */
+/* HEAD's ring breathes three times when it appears, so "where am I" is
+   findable at a glance, then rests at the pulse's own end value. Endless, it
+   repainted the window every frame while HEAD was on screen (styles/AGENTS.md,
+   "An idle window draws nothing"). */
 .graph-lanes .head-ring {
-  animation: head-pulse 2.6s ease-in-out infinite;
+  opacity: 0.9;
+  animation: head-pulse 2.6s ease-in-out 3;
 }
 @keyframes head-pulse {
   0%,
