@@ -62,6 +62,7 @@ function statuses(loggedIn = true): ForgeStatus[] {
       batchedCommitAssociation: true,
       changeSizeAndTimeline: true,
       commitAuthorIdentity: true,
+      commitSignatures: true,
       forkDefaultBranchOnly: true
     },
     hosts: []

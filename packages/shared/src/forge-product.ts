@@ -224,6 +224,7 @@ export const FORGE_PRODUCTS: Readonly<Record<ForgeKind, ForgeProduct>> = freeze(
       batchedCommitAssociation: false,
       changeSizeAndTimeline: false,
       commitAuthorIdentity: false,
+      commitSignatures: false,
       forkDefaultBranchOnly: false
     }
   },
@@ -271,6 +272,8 @@ export const FORGE_PRODUCTS: Readonly<Record<ForgeKind, ForgeProduct>> = freeze(
       batchedCommitAssociation: true,
       changeSizeAndTimeline: true,
       commitAuthorIdentity: true,
+      // GraphQL names the signer and whether GitHub signed it itself.
+      commitSignatures: true,
       forkDefaultBranchOnly: true
     }
   },
@@ -321,6 +324,9 @@ export const FORGE_PRODUCTS: Readonly<Record<ForgeKind, ForgeProduct>> = freeze(
       batchedCommitAssociation: false,
       changeSizeAndTimeline: true,
       commitAuthorIdentity: true,
+      // `commit.signature` differs across self-managed versions, and one
+      // unknown field fails the whole query; not asked until that is safe.
+      commitSignatures: false,
       // GitLab's fork API takes no branch filter; offering the switch would be
       // offering a control that does nothing.
       forkDefaultBranchOnly: false

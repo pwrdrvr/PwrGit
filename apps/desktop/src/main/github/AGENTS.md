@@ -100,13 +100,24 @@ fails.
     can supply the account, only if its login matches the Git author name or
     email local part.
   - **A match is not proof of authorship.** It says whose email the commit
-    carries. UI says "matched", never "proven". Only a commit GitHub marks
-    `verification.verified` *and* whose committer email is its author email
-    (`signedByAuthor`) may read "verified". It is stored per exact commit
+    carries. UI says "matched", never "proven". Only a commit whose signature
+    is valid, not made by GitHub (`wasSignedByGitHub`, e.g. `web-flow`), and
+    made by the linked account (`signer.login`, case-blind) may read
+    "verified" (`signedByAuthor`). It is stored per exact commit
     (`signature_verified`), never on the reusable email→account row, and a
     PR-fallback account drops the signature.
   - SQLite stores the proof and a conflict-safe hashed email→account
     association, so the author's other commits paint at once in all repos.
+    **The association never answers a network lookup on GitHub**
+    (`commitSignatures`): it paints, marked `signatureUnchecked`, and the
+    exact commit is still asked, or no signature is ever seen. Forges that
+    report no signature still reuse it without asking.
+  - **Batched.** The transport asks up to 50 exact commits per
+    `gh api graphql` request (aliased `object(oid: $cN)`, SHAs as variables,
+    container checked; `../forge/github/commit-author-transport.ts`).
+    `requestMany` plans each commit locally and sends only the due ones, each
+    request one turn of the two-at-a-time queue. Opt-in live check:
+    `PWRGIT_GH_ORACLE=1 pnpm vitest run commit-author-transport.oracle`.
   - 64px avatars are deduplicated under
     `userData/cache/github-avatar-thumbnails` with fetch/access timestamps.
     IPC exposes only a versioned local `pwrgit-avatar://` URL, never the
@@ -118,6 +129,12 @@ fails.
   (`commit-author-people.ts`). Renderers register who they show with
   `people:replaceInterest` and get cached answers. The store visits a few
   authors per tick on its own clock and pushes `people:changed`.
+  - A tick spends at most `PEOPLE_REQUESTS_PER_TICK` (4) forge requests. On a
+    batching forge one request carries every interest commit (up to 3) of as
+    many due authors as fit, so a graph's people cost ⌈authors/16⌉ requests;
+    a single-commit forge (GitLab) spends one per author, rotating commits.
+    An author is settled only when no commit is `signatureUnchecked`
+    (`commit-author-people.model.test.ts` holds the budget).
   - `cacheOnly` lookups (the registration read,
     `github:hydrateCommitAuthorIdentities`) never call a forge or download a
     thumbnail, however stale the row.

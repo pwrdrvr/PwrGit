@@ -12,9 +12,14 @@ export const PEOPLE_MAX_AUTHORS_PER_REASON = 200;
 /** Commits kept per author. The newest is asked first; the rest are fallbacks
  *  for a commit the forge cannot see (not pushed yet, or rewritten). */
 export const PEOPLE_MAX_COMMITS_PER_AUTHOR = 3;
-/** Forge visits one tick may spend. The identity service queues the proofs
- *  themselves two at a time; this bounds how much one tick can queue. */
-export const PEOPLE_VISITS_PER_TICK = 4;
+/**
+ * Forge requests one tick may spend; the identity service queues them two at
+ * a time. On a forge that answers one commit per request (GitLab) a request is
+ * one author's visit, as before. On one that batches (GitHub, 50 commits per
+ * GraphQL request) a request carries every interest commit of as many due
+ * authors as fit, so one tick covers about 64 authors in at most 4 requests.
+ */
+export const PEOPLE_REQUESTS_PER_TICK = 4;
 /** Closest two ticks may run, however much is due. */
 export const PEOPLE_TICK_SPACING_MS = 15_000;
 /** How long a newly registered author waits before its first visit, so
@@ -37,7 +42,7 @@ const READ_CONCURRENCY = 8;
 
 type IdentityLookups = Pick<
   GitHubCommitAuthorIdentityService,
-  "request" | "worktreeForge"
+  "request" | "requestMany" | "worktreeForge" | "commitsPerRequest"
 >;
 
 export type CommitAuthorPeopleStoreDeps = {
@@ -61,7 +66,8 @@ type AuthorRecord = {
   name: string;
   email: string;
   commitHashes: string[];
-  /** Which of `commitHashes` the next forge visit proves with. */
+  /** Which of `commitHashes` the next single-commit visit proves with. A
+   *  batching forge is asked about all of them at once instead. */
   commitIndex: number;
   /** Unsettled visits in a row; drives the retry backoff. */
   unsettledVisits: number;
@@ -79,6 +85,9 @@ type LocalRead = {
 };
 
 type Reason = { worktreeId: string; recordKeys: string[] };
+
+/** The authors one forge request (or one single-commit visit) covers. */
+type PlannedVisit = { worktreeId: string; batched: boolean; records: AuthorRecord[] };
 
 /**
  * Main's store of commit authors, and the only thing that decides when to ask
@@ -178,16 +187,21 @@ export class CommitAuthorPeopleStore {
     try {
       const due = this.referenced()
         .filter((record) => record.nextVisitAt <= now)
-        .sort((a, b) => a.nextVisitAt - b.nextVisitAt || a.order - b.order)
-        .slice(0, PEOPLE_VISITS_PER_TICK);
+        .sort((a, b) => a.nextVisitAt - b.nextVisitAt || a.order - b.order);
+      const visits = await this.planVisits(due);
       const changed = new Map<string, Record<string, CommitAuthorPerson>>();
-      await Promise.all(due.map(async (record) => {
-        const before = record.person;
-        const after = await this.visit(record);
-        if (before !== undefined && samePerson(before, after)) return;
+      const note = (record: AuthorRecord, before: CommitAuthorPerson | undefined): void => {
+        const after = record.person;
+        if (after === undefined || (before !== undefined && samePerson(before, after))) return;
         const people = changed.get(record.worktreeId) ?? {};
         people[record.key] = after;
         changed.set(record.worktreeId, people);
+      };
+      await Promise.all(visits.map(async (visit) => {
+        const before = visit.records.map((record) => record.person);
+        if (visit.batched) await this.visitBatch(visit.worktreeId, visit.records);
+        else await this.visit(visit.records[0]!);
+        visit.records.forEach((record, index) => note(record, before[index]));
       }));
       if (this.stopped) return;
       for (const [worktreeId, people] of changed) this.publish(worktreeId, people);
@@ -272,42 +286,117 @@ export class CommitAuthorPeopleStore {
     const best = bestLookup(lookups);
     return {
       person: personFrom(best, forge, signedByLinkedAccount(best, lookups)),
-      settled: isSettled(best)
+      settled: authorSettled(lookups)
     };
   }
 
-  /** One forge visit — only as far as the identity cache says is due. */
-  private async visit(record: AuthorRecord): Promise<CommitAuthorPerson> {
+  /**
+   * Spend at most `PEOPLE_REQUESTS_PER_TICK` forge requests on the due
+   * authors, in due order. A batching forge packs each due author's interest
+   * commits into its worktree's request until the request is full; the cost
+   * counted is the upper bound (every commit sent), though the identity
+   * service sends only the commits whose exact answer is due.
+   */
+  private async planVisits(due: readonly AuthorRecord[]): Promise<PlannedVisit[]> {
+    const capacity = new Map<string, number>();
+    await Promise.all([...new Set(due.map((record) => record.worktreeId))].map(
+      async (worktreeId) => {
+        try {
+          const forge = await this.identities.worktreeForge(worktreeId);
+          capacity.set(worktreeId, forge == null ? 1 : this.identities.commitsPerRequest(forge));
+        } catch {
+          capacity.set(worktreeId, 1);
+        }
+      }
+    ));
+    const visits: PlannedVisit[] = [];
+    const open = new Map<string, PlannedVisit & { commits: number }>();
+    for (const record of due) {
+      const limit = capacity.get(record.worktreeId) ?? 1;
+      const batched = limit > 1;
+      const commits = batched ? record.commitHashes.length : 1;
+      const current = open.get(record.worktreeId);
+      if (batched && current !== undefined && current.commits + commits <= limit) {
+        current.records.push(record);
+        current.commits += commits;
+        continue;
+      }
+      if (visits.length >= PEOPLE_REQUESTS_PER_TICK) continue;
+      const visit = { worktreeId: record.worktreeId, batched, records: [record], commits };
+      visits.push(visit);
+      if (batched) open.set(record.worktreeId, visit);
+    }
+    return visits;
+  }
+
+  /**
+   * One request's worth of authors on a batching forge: every interest commit
+   * of each, so a signature on any of them can be seen, in one call.
+   */
+  private async visitBatch(worktreeId: string, records: readonly AuthorRecord[]): Promise<void> {
+    const commits = records.flatMap((record) => record.commitHashes.map((commitHash) => ({
+      commitHash,
+      authorName: record.name,
+      authorEmail: record.email
+    })));
+    let lookups: GitHubCommitAuthorIdentityLookup[];
+    try {
+      lookups = await this.identities.requestMany({ worktreeId, commits });
+    } catch {
+      lookups = commits.map(() => unavailable());
+    }
+    let offset = 0;
+    for (const record of records) {
+      this.reschedule(record, lookups.slice(offset, offset + record.commitHashes.length), false);
+      offset += record.commitHashes.length;
+    }
+    await Promise.all(records.map(async (record) => {
+      const { person } = await this.read(record);
+      record.person = person;
+    }));
+  }
+
+  /** One single-commit forge visit — only as far as the identity cache says is due. */
+  private async visit(record: AuthorRecord): Promise<void> {
     const commitHash =
       record.commitHashes[record.commitIndex % record.commitHashes.length] ??
       record.commitHashes[0];
     const lookup = commitHash === undefined
       ? unavailable()
       : await this.lookup(record, commitHash, false);
-    const now = this.now();
-    if (isSettled(lookup)) {
-      record.unsettledVisits = 0;
-      record.nextVisitAt = now + PEOPLE_RECHECK_MS;
-    } else {
-      record.unsettledVisits += 1;
-      // The forge could not see this commit, or could not be reached; the
-      // next visit proves with the author's next commit instead.
-      if (lookup.identity === undefined && lookup.cacheState === "miss") {
-        record.commitIndex += 1;
-      }
-      const backoff = Math.min(
-        PEOPLE_RECHECK_MS,
-        PEOPLE_RETRY_BASE_MS * 2 ** Math.min(16, record.unsettledVisits - 1)
-      );
-      record.nextVisitAt = Math.max(
-        now + backoff,
-        lookup.nextRetryAt ?? 0,
-        lookup.avatarCache?.nextRetryAt ?? 0
-      );
-    }
+    this.reschedule(record, [lookup], true);
     const { person } = await this.read(record);
     record.person = person;
-    return person;
+  }
+
+  /** When to look at an author again, after a visit answered `lookups`. */
+  private reschedule(
+    record: AuthorRecord,
+    lookups: readonly GitHubCommitAuthorIdentityLookup[],
+    rotate: boolean
+  ): void {
+    const now = this.now();
+    const best = bestLookup(lookups);
+    if (authorSettled(lookups)) {
+      record.unsettledVisits = 0;
+      record.nextVisitAt = now + PEOPLE_RECHECK_MS;
+      return;
+    }
+    record.unsettledVisits += 1;
+    // The forge could not see this commit, or could not be reached; the next
+    // single-commit visit proves with the author's next commit instead.
+    if (rotate && best.identity === undefined && best.cacheState === "miss") {
+      record.commitIndex += 1;
+    }
+    const backoff = Math.min(
+      PEOPLE_RECHECK_MS,
+      PEOPLE_RETRY_BASE_MS * 2 ** Math.min(16, record.unsettledVisits - 1)
+    );
+    record.nextVisitAt = Math.max(
+      now + backoff,
+      best.nextRetryAt ?? 0,
+      best.avatarCache?.nextRetryAt ?? 0
+    );
   }
 
   private async lookup(
@@ -415,6 +504,16 @@ function isSettled(lookup: GitHubCommitAuthorIdentityLookup): boolean {
   return lookup.refreshState === "idle" &&
     lookup.cacheState === "fresh" &&
     lookup.avatarCache === undefined;
+}
+
+/**
+ * Nothing a visit could add for this author until a TTL runs out: the best
+ * answer is settled, and no commit still waits for its exact answer (and so
+ * its signature) on a forge that reports signatures.
+ */
+function authorSettled(lookups: readonly GitHubCommitAuthorIdentityLookup[]): boolean {
+  return isSettled(bestLookup(lookups)) &&
+    lookups.every((lookup) => lookup.signatureUnchecked !== true);
 }
 
 /**

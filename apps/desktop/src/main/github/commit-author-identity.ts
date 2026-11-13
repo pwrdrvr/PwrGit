@@ -82,6 +82,8 @@ type CacheEntry = {
   identity?: CachedIdentity;
   /** Exact-commit rows only: the forge verified a signature by the author. */
   signatureVerified?: true;
+  /** Read from the reusable email→account row, not this exact commit. */
+  fromAccount?: true;
   fetchedAt: number;
   expiresAt: number;
   lastAccessedAt: number;
@@ -131,6 +133,30 @@ type PreparedRequest = {
   author: NormalizedAuthor;
   cacheOnly: boolean;
 };
+
+type FetchPlan = {
+  kind: "fetch";
+  proof: CommitAuthorProof;
+  identityKey: string;
+  authorKey: string;
+  /** This forge reports signatures (`commitSignatures`). */
+  signatures: boolean;
+};
+
+/** What `plan` decided for one commit, from local state alone. */
+type RefreshPlan =
+  | FetchPlan
+  | {
+      kind: "answer";
+      answer: () => Promise<GitHubCommitAuthorIdentityLookup>;
+      identityKey?: string;
+      authorKey?: string;
+      signatures?: boolean;
+    };
+
+function answerWith(lookup: GitHubCommitAuthorIdentityLookup): RefreshPlan {
+  return { kind: "answer", answer: async () => lookup };
+}
 
 type RemoteOutcome =
   | { kind: "resolved"; identity: CachedIdentity; signatureVerified: boolean }
@@ -298,108 +324,264 @@ export class GitHubCommitAuthorIdentityService {
   private async refresh(
     prepared: PreparedRequest
   ): Promise<GitHubCommitAuthorIdentityLookup> {
-    const network = !prepared.cacheOnly;
-    let identityKey: string | undefined;
-    let authorKey: string | undefined;
+    let plan: RefreshPlan | undefined;
     try {
       const remote = await this.worktreeRemote(prepared.worktreeId);
-      if (remote === null) return notEligibleLookup();
-      if (remote === undefined) {
-        return { cacheState: "miss", refreshState: "backing-off" };
-      }
-      // A forge with no way to prove an author is not worth a backoff row:
-      // its transport answers nothing, which would read as inconclusive and
-      // retry forever.
-      if (!forgeProduct(remote.kind).capabilities.commitAuthorIdentity) {
-        return notEligibleLookup();
-      }
-
-      const proof = normalizeProof({ repo: remote, commitSha: prepared.commitSha });
-      if (proof === undefined) return notEligibleLookup();
-      identityKey = buildGitHubCommitAuthorIdentityCacheKey(prepared.author, proof);
-      authorKey = buildGitHubCommitAuthorAccountCacheKey(prepared.author, proof.repo);
-      if (identityKey === undefined || authorKey === undefined) return notEligibleLookup();
-
-      const now = this.now();
-      const cached = this.readCache(identityKey);
-      if (cached !== undefined) this.touch(cached, now);
-      if (cached?.identity !== undefined) {
-        // Backfill the reusable author account from exact proofs written by
-        // versions that only cached one SHA at a time.
-        this.writeAuthorAccount(
-          authorKey,
-          cached.identity,
-          cached.fetchedAt,
-          Math.max(cached.expiresAt, now + GITHUB_COMMIT_AUTHOR_ACCOUNT_TTL_MS)
-        );
-      }
-
-      // An exact answer — an account, or an authoritative "no account" — is
-      // this SHA's truth and outranks a broader author-email association, even
-      // while stale. A stale one is revalidated only on a network lookup.
-      if (cached?.status === "resolved" || cached?.status === "negative") {
-        if (isFresh(cached, now)) {
-          return await this.lookupFromCache(cached, now, "idle", network);
-        }
-        if (isRetryGated(cached, now)) {
-          return await this.lookupFromCache(cached, now, "backing-off", network);
-        }
-        if (!network) return await this.lookupFromCache(cached, now, "idle", false);
-        return await this.revalidateAndLookup(prepared, proof, identityKey, authorKey);
-      }
-
-      // GitHub associates command-line commits with accounts by author email.
-      // Once an exact response proves that association, reuse the same hashed
-      // author account across SHAs and repositories. Conflicts become
-      // ambiguous and are never served.
-      const account = this.readAuthorAccount(authorKey);
-      if (account !== undefined) {
-        this.touchAuthorAccount(account, now);
-        if (isFresh(account, now) || !network) {
-          return await this.lookupFromCache(account, now, "idle", network);
-        }
-        if (isRetryGated(cached, now)) {
-          return await this.lookupFromCache(account, now, "backing-off", network);
-        }
-        return await this.revalidateAndLookup(prepared, proof, identityKey, authorKey);
-      }
-
-      if (isRetryGated(cached, now)) {
-        return await this.lookupFromCache(cached, now, "backing-off", network);
-      }
-      if (!network) return { cacheState: "miss", refreshState: "idle" };
-      return await this.revalidateAndLookup(prepared, proof, identityKey, authorKey);
-    } catch {
-      const now = this.now();
-      if (identityKey === undefined) {
-        return { cacheState: "miss", refreshState: "backing-off" };
-      }
-      this.recordFailure(identityKey, now);
-      const cached = this.readCache(identityKey);
-      return await this.lookupBestAvailable(
-        authorKey,
-        cached,
-        now,
-        "backing-off",
-        false
+      plan = this.plan(prepared, remote);
+      if (plan.kind === "answer") return await plan.answer();
+      return await this.lookupAfter(
+        plan,
+        this.revalidate(prepared, plan.proof, plan.identityKey)
       );
+    } catch {
+      return await this.lookupAfterFailure(plan);
     }
   }
 
-  private async revalidateAndLookup(
+  /**
+   * The network lookup for many commits of one worktree, sending the ones
+   * whose exact answer is due to the forge in as few requests as its transport
+   * allows (`commitsPerRequest`), each request a turn of the two-at-a-time
+   * queue. Answers line up with `commits`.
+   *
+   * Each commit is planned exactly as `request` plans it; only the fetch is
+   * shared. Only main's people store calls this.
+   */
+  async requestMany(input: {
+    worktreeId: string;
+    commits: ReadonlyArray<{ commitHash: string; authorName: string; authorEmail: string }>;
+  }): Promise<GitHubCommitAuthorIdentityLookup[]> {
+    const worktreeId = safeText(input.worktreeId, 512);
+    const prepared = input.commits.map((commit): PreparedRequest | undefined => {
+      const author = normalizeAuthor({ name: commit.authorName, email: commit.authorEmail });
+      const commitSha = normalizeCommitSha(commit.commitHash);
+      return author === undefined || commitSha === undefined || worktreeId === undefined
+        ? undefined
+        : { worktreeId, commitSha, author, cacheOnly: false };
+    });
+    if (worktreeId === undefined) return prepared.map(() => notEligibleLookup());
+    this.pruneIfDue(this.now());
+
+    let remote: ForgeRepo | null | undefined;
+    try {
+      remote = await this.worktreeRemote(worktreeId);
+    } catch {
+      remote = undefined;
+    }
+    const plans = prepared.map((item): RefreshPlan | undefined => {
+      if (item === undefined) return undefined;
+      try {
+        return this.plan(item, remote);
+      } catch {
+        return undefined;
+      }
+    });
+    const revalidations = remote == null
+      ? new Map<string, Promise<CacheEntry | undefined>>()
+      : this.revalidateMany(remote, prepared, plans);
+
+    return await Promise.all(plans.map(async (plan, index) => {
+      if (prepared[index] === undefined) return notEligibleLookup();
+      try {
+        if (plan === undefined) throw new Error("unplanned");
+        if (plan.kind === "answer") return await plan.answer();
+        const revalidation = revalidations.get(plan.identityKey);
+        if (revalidation === undefined) throw new Error("not revalidated");
+        return await this.lookupAfter(plan, revalidation);
+      } catch {
+        return await this.lookupAfterFailure(plan);
+      }
+    }));
+  }
+
+  /** Most commits one forge request carries for this repository. */
+  commitsPerRequest(repo: ForgeRepo): number {
+    if (this.transport.fetchCommits === undefined) return 1;
+    const limit = this.transport.commitsPerRequest?.(repo) ?? 1;
+    return Number.isFinite(limit) ? Math.max(1, Math.floor(limit)) : 1;
+  }
+
+  /**
+   * Decide, from local state alone, whether this commit is answered from cache
+   * or needs its exact answer from the forge. Never touches the network.
+   */
+  private plan(
     prepared: PreparedRequest,
-    proof: GitHubCommitAuthorProof,
-    identityKey: string,
-    authorKey: string
+    remote: ForgeRepo | null | undefined
+  ): RefreshPlan {
+    const network = !prepared.cacheOnly;
+    if (remote === null) return answerWith(notEligibleLookup());
+    if (remote === undefined) {
+      return answerWith({ cacheState: "miss", refreshState: "backing-off" });
+    }
+    const capabilities = forgeProduct(remote.kind).capabilities;
+    // A forge with no way to prove an author is not worth a backoff row: its
+    // transport answers nothing, which would read as inconclusive and retry
+    // forever.
+    if (!capabilities.commitAuthorIdentity) return answerWith(notEligibleLookup());
+
+    const proof = normalizeProof({ repo: remote, commitSha: prepared.commitSha });
+    if (proof === undefined) return answerWith(notEligibleLookup());
+    const identityKey = buildGitHubCommitAuthorIdentityCacheKey(prepared.author, proof);
+    const authorKey = buildGitHubCommitAuthorAccountCacheKey(prepared.author, proof.repo);
+    if (identityKey === undefined || authorKey === undefined) {
+      return answerWith(notEligibleLookup());
+    }
+    const signatures = capabilities.commitSignatures;
+    const keys = { identityKey, authorKey, signatures };
+
+    const now = this.now();
+    const cached = this.readCache(identityKey);
+    if (cached !== undefined) this.touch(cached, now);
+    if (cached?.identity !== undefined) {
+      // Backfill the reusable author account from exact proofs written by
+      // versions that only cached one SHA at a time.
+      this.writeAuthorAccount(
+        authorKey,
+        cached.identity,
+        cached.fetchedAt,
+        Math.max(cached.expiresAt, now + GITHUB_COMMIT_AUTHOR_ACCOUNT_TTL_MS)
+      );
+    }
+    const fromCache = (
+      entry: CacheEntry | undefined,
+      refreshState: GitHubCommitAuthorIdentityLookup["refreshState"]
+    ): RefreshPlan => ({
+      kind: "answer",
+      ...keys,
+      answer: async () =>
+        await this.lookupFromCache(entry, now, refreshState, network, signatures)
+    });
+    const fetch: RefreshPlan = { kind: "fetch", proof, ...keys };
+
+    // An exact answer — an account, or an authoritative "no account" — is
+    // this SHA's truth and outranks a broader author-email association, even
+    // while stale. A stale one is revalidated only on a network lookup.
+    if (cached?.status === "resolved" || cached?.status === "negative") {
+      if (isFresh(cached, now)) return fromCache(cached, "idle");
+      if (isRetryGated(cached, now)) return fromCache(cached, "backing-off");
+      if (!network) return fromCache(cached, "idle");
+      return fetch;
+    }
+
+    // GitHub associates command-line commits with accounts by author email.
+    // Once an exact response proves that association, reuse the same hashed
+    // author account across SHAs and repositories to paint at once. Conflicts
+    // become ambiguous and are never served.
+    const account = this.readAuthorAccount(authorKey);
+    if (account !== undefined) {
+      this.touchAuthorAccount(account, now);
+      // The association says whose email this is, never who signed this
+      // commit. On a forge that reports signatures a network lookup still
+      // asks about the exact commit; elsewhere a fresh association is all the
+      // forge could add.
+      if (!network || (isFresh(account, now) && !signatures)) {
+        return fromCache(account, "idle");
+      }
+      if (isRetryGated(cached, now)) return fromCache(account, "backing-off");
+      return fetch;
+    }
+
+    if (isRetryGated(cached, now)) return fromCache(cached, "backing-off");
+    if (!network) return answerWith({ cacheState: "miss", refreshState: "idle" });
+    return fetch;
+  }
+
+  /**
+   * Start the exact fetches `plans` call for, batched per request where the
+   * transport can, and return each identity key's revalidation. A commit
+   * already being revalidated joins that work instead of being asked twice.
+   */
+  private revalidateMany(
+    remote: ForgeRepo,
+    prepared: ReadonlyArray<PreparedRequest | undefined>,
+    plans: ReadonlyArray<RefreshPlan | undefined>
+  ): Map<string, Promise<CacheEntry | undefined>> {
+    const started = new Map<string, Promise<CacheEntry | undefined>>();
+    const pending: Array<{ prepared: PreparedRequest; plan: FetchPlan }> = [];
+    plans.forEach((plan, index) => {
+      const item = prepared[index];
+      if (plan?.kind !== "fetch" || item === undefined || started.has(plan.identityKey)) {
+        return;
+      }
+      const existing = this.revalidationInFlight.get(plan.identityKey);
+      if (existing !== undefined) {
+        started.set(plan.identityKey, existing);
+        return;
+      }
+      pending.push({ prepared: item, plan });
+      // A placeholder until its chunk is built, so a duplicate is skipped.
+      started.set(plan.identityKey, Promise.resolve(undefined));
+    });
+
+    const perRequest = this.commitsPerRequest(remote);
+    const fetchCommits = this.transport.fetchCommits?.bind(this.transport);
+    if (fetchCommits === undefined || perRequest <= 1) {
+      for (const { prepared: item, plan } of pending) {
+        started.set(plan.identityKey, this.revalidate(item, plan.proof, plan.identityKey));
+      }
+      return started;
+    }
+
+    for (let offset = 0; offset < pending.length; offset += perRequest) {
+      const chunk = pending.slice(offset, offset + perRequest);
+      const shas = [...new Set(chunk.map(({ plan }) => plan.proof.commitSha))];
+      const response = this.enqueueRevalidation(async () => await fetchCommits(remote, shas));
+      // Settled per item below; never left as an unhandled rejection.
+      response.catch(() => undefined);
+      for (const { prepared: item, plan } of chunk) {
+        const completion = response.then(
+          (answers) =>
+            this.applyRemote(
+              item,
+              plan.proof,
+              plan.identityKey,
+              answers.get(plan.proof.commitSha) ?? {}
+            ),
+          () => {
+            this.recordFailure(plan.identityKey, this.now());
+            return this.readCache(plan.identityKey);
+          }
+        );
+        this.trackRevalidation(plan.identityKey, completion);
+        started.set(plan.identityKey, completion);
+      }
+    }
+    return started;
+  }
+
+  private async lookupAfter(
+    plan: FetchPlan,
+    revalidation: Promise<CacheEntry | undefined>
   ): Promise<GitHubCommitAuthorIdentityLookup> {
-    const refreshed = await this.revalidate(prepared, proof, identityKey);
+    const refreshed = await revalidation;
     const completedAt = this.now();
     return await this.lookupBestAvailable(
-      authorKey,
+      plan.authorKey,
       refreshed,
       completedAt,
       refreshStateFor(refreshed, completedAt),
-      true
+      true,
+      plan.signatures
+    );
+  }
+
+  private async lookupAfterFailure(
+    plan: RefreshPlan | undefined
+  ): Promise<GitHubCommitAuthorIdentityLookup> {
+    const now = this.now();
+    if (plan?.identityKey === undefined) {
+      return { cacheState: "miss", refreshState: "backing-off" };
+    }
+    this.recordFailure(plan.identityKey, now);
+    const cached = this.readCache(plan.identityKey);
+    return await this.lookupBestAvailable(
+      plan.authorKey,
+      cached,
+      now,
+      "backing-off",
+      false,
+      plan.signatures === true
     );
   }
 
@@ -412,50 +594,71 @@ export class GitHubCommitAuthorIdentityService {
     if (existing !== undefined) return existing;
 
     const completion = this.enqueueRevalidation(async () => {
+      let response: CommitAuthorRemoteCommit;
       try {
-        const response = await this.transport.fetchCommit(proof);
-        const completedAt = this.now();
-        const outcome = evaluateRemoteCommit(response, prepared.author, proof);
-        if (outcome.kind === "resolved") {
-          this.writeResolved({
-            identityKey,
-            identity: outcome.identity,
-            signatureVerified: outcome.signatureVerified,
-            fetchedAt: completedAt,
-            expiresAt: completedAt + this.resolvedTtlMs
-          });
-          const authorKey = buildGitHubCommitAuthorAccountCacheKey(prepared.author, proof.repo);
-          if (authorKey !== undefined) {
-            this.writeAuthorAccount(
-              authorKey,
-              outcome.identity,
-              completedAt,
-              completedAt + GITHUB_COMMIT_AUTHOR_ACCOUNT_TTL_MS
-            );
-          }
-        } else if (outcome.kind === "negative") {
-          this.writeNegative({
-            identityKey,
-            fetchedAt: completedAt,
-            expiresAt: completedAt + this.negativeTtlMs
-          });
-        } else {
-          this.recordFailure(identityKey, completedAt);
-        }
-        return this.readCache(identityKey);
+        response = await this.transport.fetchCommit(proof);
       } catch {
         this.recordFailure(identityKey, this.now());
         return this.readCache(identityKey);
       }
+      return this.applyRemote(prepared, proof, identityKey, response);
     });
+    this.trackRevalidation(identityKey, completion);
+    return completion;
+  }
 
+  private trackRevalidation(
+    identityKey: string,
+    completion: Promise<CacheEntry | undefined>
+  ): void {
     this.revalidationInFlight.set(identityKey, completion);
     void completion.then(() => {
       if (this.revalidationInFlight.get(identityKey) === completion) {
         this.revalidationInFlight.delete(identityKey);
       }
     });
-    return completion;
+  }
+
+  /** Persist one exact answer and read back what the cache now holds. */
+  private applyRemote(
+    prepared: PreparedRequest,
+    proof: GitHubCommitAuthorProof,
+    identityKey: string,
+    response: CommitAuthorRemoteCommit
+  ): CacheEntry | undefined {
+    try {
+      const completedAt = this.now();
+      const outcome = evaluateRemoteCommit(response, prepared.author, proof);
+      if (outcome.kind === "resolved") {
+        this.writeResolved({
+          identityKey,
+          identity: outcome.identity,
+          signatureVerified: outcome.signatureVerified,
+          fetchedAt: completedAt,
+          expiresAt: completedAt + this.resolvedTtlMs
+        });
+        const authorKey = buildGitHubCommitAuthorAccountCacheKey(prepared.author, proof.repo);
+        if (authorKey !== undefined) {
+          this.writeAuthorAccount(
+            authorKey,
+            outcome.identity,
+            completedAt,
+            completedAt + GITHUB_COMMIT_AUTHOR_ACCOUNT_TTL_MS
+          );
+        }
+      } else if (outcome.kind === "negative") {
+        this.writeNegative({
+          identityKey,
+          fetchedAt: completedAt,
+          expiresAt: completedAt + this.negativeTtlMs
+        });
+      } else {
+        this.recordFailure(identityKey, completedAt);
+      }
+    } catch {
+      this.recordFailure(identityKey, this.now());
+    }
+    return this.readCache(identityKey);
   }
 
   private enqueueRevalidation<T>(work: () => Promise<T>): Promise<T> {
@@ -493,24 +696,37 @@ export class GitHubCommitAuthorIdentityService {
     entry: CacheEntry | undefined,
     now: number,
     refreshState: GitHubCommitAuthorIdentityLookup["refreshState"],
-    network: boolean
+    network: boolean,
+    signatures = false
   ): Promise<GitHubCommitAuthorIdentityLookup> {
     if (entry?.identity === undefined) return toLookup(entry, now, refreshState);
+    // An answer from the email association on a forge that reports
+    // signatures has not checked this commit's signature yet.
+    const unchecked = signatures && entry.fromAccount === true;
 
     const identity: GitHubCommitAuthorIdentity = { login: entry.identity.login };
     const sourceUrl = entry.identity.avatarSourceUrl;
-    if (sourceUrl === undefined) return toLookup(entry, now, refreshState, identity);
+    if (sourceUrl === undefined) {
+      return toLookup(entry, now, refreshState, identity, undefined, unchecked);
+    }
 
     try {
       const thumbnail = network
         ? await this.thumbnails.refresh(sourceUrl, now)
         : await this.thumbnails.read(sourceUrl, now);
       if (thumbnail.avatarUrl !== undefined) identity.avatarUrl = thumbnail.avatarUrl;
-      return toLookup(entry, now, refreshState, identity, toAvatarCacheStatus(thumbnail));
+      return toLookup(
+        entry,
+        now,
+        refreshState,
+        identity,
+        toAvatarCacheStatus(thumbnail),
+        unchecked
+      );
     } catch {
       // A damaged/missing local thumbnail must not hide a linked login.
     }
-    return toLookup(entry, now, refreshState, identity);
+    return toLookup(entry, now, refreshState, identity, undefined, unchecked);
   }
 
   private async lookupBestAvailable(
@@ -518,7 +734,8 @@ export class GitHubCommitAuthorIdentityService {
     exact: CacheEntry | undefined,
     now: number,
     refreshState: GitHubCommitAuthorIdentityLookup["refreshState"],
-    network: boolean
+    network: boolean,
+    signatures: boolean
   ): Promise<GitHubCommitAuthorIdentityLookup> {
     // Exact positive and negative results both outrank the reusable account.
     // Only a true miss or transient unavailable row may fall back to it.
@@ -534,7 +751,8 @@ export class GitHubCommitAuthorIdentityService {
           account,
           now,
           isFresh(account, now) ? "idle" : refreshState,
-          network
+          network,
+          signatures
         );
   }
 
@@ -608,6 +826,7 @@ export class GitHubCommitAuthorIdentityService {
       return {
         identityKey: row.author_key,
         status: "resolved",
+        fromAccount: true,
         identity: {
           ...(userId === undefined ? {} : { userId }),
           login,
@@ -1080,7 +1299,8 @@ function toLookup(
   now: number,
   refreshState: GitHubCommitAuthorIdentityLookup["refreshState"],
   identity?: GitHubCommitAuthorIdentity,
-  avatarCache?: GitHubCommitAuthorAvatarCacheStatus
+  avatarCache?: GitHubCommitAuthorAvatarCacheStatus,
+  signatureUnchecked = false
 ): GitHubCommitAuthorIdentityLookup {
   const cacheState =
     entry === undefined || entry.status === "unavailable"
@@ -1099,6 +1319,9 @@ function toLookup(
     ...(avatarCache === undefined ? {} : { avatarCache }),
     ...(identity !== undefined && entry?.signatureVerified === true
       ? { signatureVerified: true as const }
+      : {}),
+    ...(identity !== undefined && signatureUnchecked
+      ? { signatureUnchecked: true as const }
       : {})
   };
 }

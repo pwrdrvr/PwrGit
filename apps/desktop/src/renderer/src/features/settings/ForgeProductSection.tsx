@@ -28,7 +28,8 @@ const CAPABILITY_LABELS: Record<keyof ForgeCapabilities, string> = {
   batchedCommitAssociation: "Commit links in bulk",
   changeSizeAndTimeline: "Diff size and timeline",
   forkDefaultBranchOnly: "Fork just the default branch",
-  commitAuthorIdentity: "Commit author avatars"
+  commitAuthorIdentity: "Commit author avatars",
+  commitSignatures: "Verified commit signatures"
 };
 
 /**

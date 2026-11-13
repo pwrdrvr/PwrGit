@@ -71,4 +71,25 @@ describe("ForgeCommitAuthorIdentityTransport", () => {
     expect(github.fetchCommit).toHaveBeenCalledTimes(1);
     expect(gitlab.fetchCommit).toHaveBeenCalledTimes(1);
   });
+
+  it("batches only through a forge transport that batches", async () => {
+    const shas = ["a".repeat(40), "b".repeat(40)];
+    const github = {
+      fetchCommit: vi.fn(async () => ({})),
+      fetchCommits: vi.fn(async () => new Map([[shas[0]!, { sha: shas[0] }]])),
+      commitsPerRequest: () => 50
+    };
+    const gitlab = { fetchCommit: vi.fn(async (proof: { commitSha: string }) => ({ sha: proof.commitSha })) };
+    const router = new ForgeCommitAuthorIdentityTransport({ github, gitlab });
+
+    expect(router.commitsPerRequest(proofFor("github").repo)).toBe(50);
+    expect(router.commitsPerRequest(proofFor("gitlab").repo)).toBe(1);
+    await expect(router.fetchCommits(proofFor("github").repo, shas))
+      .resolves.toEqual(new Map([[shas[0], { sha: shas[0] }]]));
+    expect(github.fetchCommits).toHaveBeenCalledTimes(1);
+    expect(github.fetchCommit).not.toHaveBeenCalled();
+    // A single-commit forge is asked once per SHA.
+    await expect(router.fetchCommits(proofFor("gitlab").repo, shas)).resolves.toHaveProperty("size", 2);
+    expect(gitlab.fetchCommit).toHaveBeenCalledTimes(2);
+  });
 });

@@ -4,8 +4,29 @@ import {
   type CommitAuthorIdentityTransport,
   type CommitAuthorProof,
   type CommitAuthorRemoteCommit,
+  type CommitSignatureVerdict,
   type ForgeAccountProfile
 } from "../commit-author";
+import { githubOwnerAndName } from "../resolve";
+import type { ForgeRepo } from "../types";
+
+/** Commits one GraphQL request asks about, as `pr-query.ts` batches branches. */
+export const GITHUB_COMMITS_PER_REQUEST = 50;
+/**
+ * Associated pull requests read per commit for the unlinked-email fallback.
+ * More than this and the author cannot be shown to be unique, so it declines.
+ */
+const ASSOCIATED_PULLS = 5;
+
+const COMMIT_FIELDS = `fragment CommitAuthorFields on Commit {
+  oid
+  author { name email user { login databaseId avatarUrl } }
+  signature { isValid state wasSignedByGitHub signer { login } }
+  associatedPullRequests(first: ${ASSOCIATED_PULLS}) {
+    totalCount
+    nodes { author { login avatarUrl ... on User { databaseId } } }
+  }
+}`;
 
 export type GhCommitAuthorIdentityTransportOptions = {
   /** Test/non-desktop seam. The production path delegates auth to `gh`. */
@@ -13,10 +34,16 @@ export type GhCommitAuthorIdentityTransportOptions = {
 };
 
 /**
- * Fetches exact commit metadata through `gh api` without extracting a token.
+ * Fetches exact commit metadata through `gh api graphql`, many commits per
+ * request, without extracting a token.
  *
  * `gh` reads its own credential store; no token enters this class, the service,
  * cache, shared protocol, logs, or renderer process.
+ *
+ * GraphQL, not REST: one request answers up to `GITHUB_COMMITS_PER_REQUEST`
+ * commits, and only GraphQL names who made a signature (`signer.login`) and
+ * whether GitHub made it itself (`wasSignedByGitHub`). REST's
+ * `verification.verified` says neither.
  */
 export class GhCliCommitAuthorIdentityTransport
   implements CommitAuthorIdentityTransport {
@@ -27,75 +54,100 @@ export class GhCliCommitAuthorIdentityTransport
   }
 
   async fetchCommit(proof: CommitAuthorProof): Promise<CommitAuthorRemoteCommit> {
-    const commit = parseGitHubCommitResponse(
-      JSON.parse(await this.api(proof, ["commits", proof.commitSha]))
-    );
-    if (commit.account !== null || commit.author == null) return commit;
-
-    const fallback = await this.fetchAssociatedPullAuthor(proof, commit.author);
-    if (fallback === undefined) return commit;
-    // The signature vouches for the commit's own link, which was empty; it
-    // says nothing about an account a pull request supplied.
-    const matched: CommitAuthorRemoteCommit = { ...commit, account: fallback };
-    delete matched.signatureVerified;
-    return matched;
+    return (await this.fetchCommits(proof.repo, [proof.commitSha])).get(proof.commitSha) ?? {};
   }
 
-  /**
-   * GitHub links ordinary command-line commits by account email. For a custom
-   * unlinked email, accept a unique associated-PR author only when its handle
-   * matches the exact commit author's Git name or email local part.
-   */
-  private async fetchAssociatedPullAuthor(
-    proof: CommitAuthorProof,
-    author: NonNullable<CommitAuthorRemoteCommit["author"]>
-  ): Promise<ForgeAccountProfile | undefined> {
-    const pulls = parseAssociatedPullAuthors(
-      JSON.parse(await this.api(proof, ["commits", proof.commitSha, "pulls"]))
-    );
-    if (pulls.length !== 1) return undefined;
-
-    const pullAuthor = pulls[0]!;
-    return associatedAuthorMatches(pullAuthor, author) ? pullAuthor : undefined;
+  /** One request for at most `GITHUB_COMMITS_PER_REQUEST` SHAs; more throws. */
+  async fetchCommits(
+    repo: ForgeRepo,
+    commitShas: readonly string[]
+  ): Promise<Map<string, CommitAuthorRemoteCommit>> {
+    if (commitShas.length === 0) return new Map();
+    if (commitShas.length > GITHUB_COMMITS_PER_REQUEST) {
+      throw new RangeError(
+        `At most ${GITHUB_COMMITS_PER_REQUEST} commits per request, got ${commitShas.length}`
+      );
+    }
+    const target = githubOwnerAndName(repo);
+    if (target === null) throw new Error("Not a GitHub owner/name path");
+    const { query, variables } = buildCommitAuthorQuery(target, commitShas);
+    const args = ["api", "--hostname", repo.host, "graphql", "-f", `query=${query}`];
+    // Variables, never interpolation: the owner, name and SHAs reach GitHub
+    // as typed values and cannot alter the query.
+    for (const [name, value] of Object.entries(variables)) {
+      args.push("-f", `${name}=${value}`);
+    }
+    return parseGitHubCommitAuthorResponse(commitShas, JSON.parse(await this.run(args)));
   }
 
-  private async api(proof: CommitAuthorProof, tail: string[]): Promise<string> {
-    const endpoint = ["repos", proof.repo.path, ...tail.map(encodeURIComponent)].join(
-      "/"
-    );
-    return await this.run([
-      "api",
-      "--hostname",
-      proof.repo.host,
-      endpoint,
-      "--method",
-      "GET",
-      "--header",
-      "Accept: application/vnd.github+json",
-      "--header",
-      "X-GitHub-Api-Version: 2022-11-28"
-    ]);
+  commitsPerRequest(): number {
+    return GITHUB_COMMITS_PER_REQUEST;
   }
 }
 
-export function parseGitHubCommitResponse(
-  value: unknown
-): CommitAuthorRemoteCommit {
-  const response = asRecord(value);
-  const commit = asRecord(response?.commit);
-  const commitAuthor = asRecord(commit?.author);
-  const commitCommitter = asRecord(commit?.committer);
-  const sha = readString(response?.sha);
-  const name = readString(commitAuthor?.name);
-  const email = readString(commitAuthor?.email);
-  const committerEmail = readString(commitCommitter?.email);
-  const verified = asRecord(commit?.verification)?.verified;
-  const account =
-    response?.author === null ? null : toAccountProfile(asRecord(response?.author));
+/** One aliased `object(oid: $cN)` per commit under one `repository`. */
+export function buildCommitAuthorQuery(
+  target: { owner: string; name: string },
+  commitShas: readonly string[]
+): { query: string; variables: Record<string, string> } {
+  const variables: Record<string, string> = { owner: target.owner, name: target.name };
+  const decls = ["$owner: String!", "$name: String!"];
+  const aliases: string[] = [];
+  commitShas.forEach((sha, i) => {
+    variables[`c${i}`] = sha;
+    decls.push(`$c${i}: GitObjectID!`);
+    aliases.push(`c${i}: object(oid: $c${i}) { ...CommitAuthorFields }`);
+  });
+  const query = `query (${decls.join(", ")}) {
+  repository(owner: $owner, name: $name) {
+    ${aliases.join("\n    ")}
+  }
+}
+${COMMIT_FIELDS}`;
+  return { query, variables };
+}
 
-  return {
+/**
+ * Map a response back to SHA → commit. Only commits GitHub could see are
+ * answered; a null alias (not pushed, rewritten away) is omitted, which the
+ * service treats as inconclusive rather than "no account".
+ *
+ * Check the container, not `data`: a refusal (SAML, a revoked scope, a spent
+ * budget) answers `{"data":{"repository":null},"errors":[…]}`, and reading
+ * aliases off it would say "not visible" for every commit. It throws instead.
+ */
+export function parseGitHubCommitAuthorResponse(
+  commitShas: readonly string[],
+  value: unknown
+): Map<string, CommitAuthorRemoteCommit> {
+  const repository = asRecord(asRecord(asRecord(value)?.data)?.repository);
+  if (repository === undefined) {
+    throw new Error("GitHub did not resolve the repository for a commit-author query");
+  }
+  const answers = new Map<string, CommitAuthorRemoteCommit>();
+  commitShas.forEach((sha, i) => {
+    const node = asRecord(repository[`c${i}`]);
+    if (node === undefined) return;
+    const commit = parseCommitNode(node);
+    if (commit.sha?.toLowerCase() === sha.toLowerCase()) answers.set(sha, commit);
+  });
+  return answers;
+}
+
+function parseCommitNode(node: Record<string, unknown>): CommitAuthorRemoteCommit {
+  const sha = readString(node.oid);
+  const gitAuthor = asRecord(node.author);
+  const name = readString(gitAuthor?.name);
+  const email = readString(gitAuthor?.email);
+  const linked = gitAuthor === undefined
+    ? undefined
+    : gitAuthor.user === null
+      ? null
+      : toAccountProfile(asRecord(gitAuthor.user));
+  const signature = parseSignature(asRecord(node.signature));
+  const commit: CommitAuthorRemoteCommit = {
     ...(sha === undefined ? {} : { sha }),
-    ...(commitAuthor === undefined
+    ...(gitAuthor === undefined
       ? {}
       : {
           author: {
@@ -103,20 +155,51 @@ export function parseGitHubCommitResponse(
             ...(email === undefined ? {} : { email })
           }
         }),
-    ...(committerEmail === undefined ? {} : { committer: { email: committerEmail } }),
-    ...(account === undefined ? {} : { account }),
-    ...(typeof verified === "boolean" ? { signatureVerified: verified } : {})
+    ...(linked === undefined ? {} : { account: linked }),
+    ...(signature === undefined ? {} : { signature })
+  };
+  if (commit.account !== null || commit.author == null) return commit;
+
+  // GitHub links ordinary command-line commits by account email. For a custom
+  // unlinked email, accept a unique associated-PR author only when its handle
+  // matches the exact commit author's Git name or email local part.
+  const fallback = uniquePullAuthor(asRecord(node.associatedPullRequests));
+  if (fallback === undefined || !associatedAuthorMatches(fallback, commit.author)) {
+    return commit;
+  }
+  // The signature vouches for the commit's own link, which was empty; it says
+  // nothing about an account a pull request supplied.
+  const matched: CommitAuthorRemoteCommit = { ...commit, account: fallback };
+  delete matched.signature;
+  return matched;
+}
+
+function parseSignature(
+  value: Record<string, unknown> | undefined
+): CommitSignatureVerdict | undefined {
+  if (value === undefined) return undefined;
+  const signerLogin = readString(asRecord(value.signer)?.login);
+  return {
+    valid: value.isValid === true && value.state === "VALID",
+    signedByForge: value.wasSignedByGitHub === true,
+    ...(signerLogin === undefined ? {} : { signerLogin })
   };
 }
 
-export function parseAssociatedPullAuthors(value: unknown): ForgeAccountProfile[] {
-  if (!Array.isArray(value)) return [];
+/** The one author of every associated PR, or undefined if not provably one. */
+function uniquePullAuthor(
+  connection: Record<string, unknown> | undefined
+): ForgeAccountProfile | undefined {
+  const nodes = Array.isArray(connection?.nodes) ? connection.nodes : [];
+  const total = connection?.totalCount;
+  // PRs past the page could have another author, so uniqueness is unproven.
+  if (typeof total !== "number" || total > nodes.length) return undefined;
   const authors = new Map<string, ForgeAccountProfile>();
-  for (const item of value) {
-    const profile = toAccountProfile(asRecord(asRecord(item)?.user));
+  for (const node of nodes) {
+    const profile = toAccountProfile(asRecord(asRecord(node)?.author));
     if (profile !== undefined) authors.set(profile.login.toLowerCase(), profile);
   }
-  return [...authors.values()];
+  return authors.size === 1 ? [...authors.values()][0] : undefined;
 }
 
 function toAccountProfile(
@@ -125,8 +208,8 @@ function toAccountProfile(
   if (value === undefined) return undefined;
   const login = readString(value.login);
   if (login === undefined) return undefined;
-  const id = readSafeInteger(value.id);
-  const avatarUrl = readString(value.avatar_url) ?? readString(value.avatarUrl);
+  const id = readSafeInteger(value.databaseId);
+  const avatarUrl = readString(value.avatarUrl);
   return {
     ...(id === undefined ? {} : { id }),
     login,

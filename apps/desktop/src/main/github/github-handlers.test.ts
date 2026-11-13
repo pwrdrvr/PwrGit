@@ -203,6 +203,9 @@ describe("people:replaceInterest handler", () => {
       lookup: { cacheState: "miss" as const, refreshState: "in-flight" as const },
       completion: Promise.resolve({ cacheState: "miss" as const, refreshState: "idle" as const })
     })),
+    requestMany: vi.fn(async ({ commits }: { commits: unknown[] }) =>
+      commits.map(() => ({ cacheState: "miss" as const, refreshState: "idle" as const }))),
+    commitsPerRequest: vi.fn(() => 50),
     worktreeForge: vi.fn(async () => ({
       kind: "github" as const,
       host: "github.com",
@@ -224,8 +227,10 @@ describe("people:replaceInterest handler", () => {
       ok: true,
       value: { "ada@example.test": { state: "pending", forge: "github" } }
     });
-    const network = (): unknown[] =>
-      vi.mocked(identities.request).mock.calls.filter(([input]) => input.cacheOnly !== true);
+    const network = (): unknown[] => [
+      ...vi.mocked(identities.request).mock.calls.filter(([input]) => input.cacheOnly !== true),
+      ...vi.mocked(identities.requestMany).mock.calls
+    ];
     expect(network()).toEqual([]);
 
     await vi.advanceTimersByTimeAsync(60_000);
@@ -263,6 +268,7 @@ describe("people:replaceInterest handler", () => {
 
     await vi.advanceTimersByTimeAsync(60 * 60_000);
     expect(identities.request).not.toHaveBeenCalled();
+    expect(identities.requestMany).not.toHaveBeenCalled();
     handlers.stop();
   });
 });

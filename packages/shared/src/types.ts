@@ -1114,6 +1114,12 @@ export type ForgeCapabilities = {
   changeSizeAndTimeline: boolean;
   /** Can prove the forge account behind an exact commit's Git author. */
   commitAuthorIdentity: boolean;
+  /**
+   * Reports who signed an exact commit, so PwrGit can call its author
+   * verified. Such a forge is asked about each commit a person card rests on,
+   * not only the first commit that linked the author's email.
+   */
+  commitSignatures: boolean;
   /** Forking can copy only the default branch. GitLab's fork API has no
    *  equivalent, so the fork dialog hides the switch rather than accepting a
    *  control it would silently ignore. */
@@ -2118,11 +2124,18 @@ export type GitHubCommitAuthorIdentityLookup = {
   /** Present only while a linked avatar's local thumbnail is missing or stale. */
   avatarCache?: GitHubCommitAuthorAvatarCacheStatus;
   /**
-   * The forge marked this exact commit's signature verified, and its author
-   * committed it (committer email = author email). Never set from the
-   * reusable email→account association: a signature belongs to one commit.
+   * The forge found a valid signature on this exact commit, made by the
+   * account the commit is linked to and not by the forge itself (see
+   * `signedByAuthor`). Never set from the reusable email→account
+   * association: a signature belongs to one commit.
    */
   signatureVerified?: true;
+  /**
+   * `identity` came from the reusable email→account association, on a forge
+   * that reports signatures, and this exact commit has not been asked about.
+   * So its signature is unknown, and a network lookup has work to do.
+   */
+  signatureUnchecked?: true;
 };
 
 /**

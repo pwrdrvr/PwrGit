@@ -57,6 +57,7 @@ const CAPS = {
   batchedCommitAssociation: true,
   changeSizeAndTimeline: true,
   commitAuthorIdentity: true,
+  commitSignatures: true,
   forkDefaultBranchOnly: true
 };
 
