@@ -89,6 +89,8 @@ import { registerRebaseHandlers } from "./git/rebase-handlers";
 import { registerRemoteHandlers } from "./git/remote-handlers";
 import { tagAutoChecksFor } from "./git/tag-auto-check";
 import { registerRepoHandlers } from "./git/repo-handlers";
+import { registerRepoSearchHandlers } from "./git/repo-search-handlers";
+import { NewRootService } from "./profiles/new-root";
 import {
   registerRepoRemovalHandlers,
   trashIntoDirectory
@@ -1216,7 +1218,31 @@ if (!gotSingleInstanceLock) {
     registerSshHostTrustHandlers(bus, new SshHostTrustService({
       allowed: (kind, hostname) => forgeHosts.kindFor(hostname).kind === kind && forgeHosts.isEnabled(hostname).enabled
     }));
-    registerForkHandlers(bus, forkService, identityService, indexer, refresher);
+    // Folders that may not exist yet: the wizard's "I do not have any" and
+    // Clone or Fork on a profile with no folder. Main creates one only by a
+    // suggested name under home or a path the folder picker returned.
+    const newRoots = new NewRootService(profiles, () => app.getPath("home"));
+    const newRootHooks = {
+      service: newRoots,
+      rootsChanged: () => emitEvent("profile:changed", profiles.snapshot()),
+      scanExisting: (profileId: string) => {
+        const profile = profiles.get(profileId);
+        if (profile === null) return;
+        void indexer
+          .rescanProfile(profile)
+          .then(() => emitEvent("repo:changed", { profileId }))
+          .catch((cause: unknown) => {
+            logMain("warn", "repo", "scan of a newly added folder failed:", cause);
+          });
+      }
+    };
+    const repoSearchHandlers = registerRepoSearchHandlers(bus, {
+      profiles,
+      indexer,
+      newRoots,
+      home: () => app.getPath("home")
+    });
+    registerForkHandlers(bus, forkService, identityService, indexer, refresher, newRootHooks);
     registerWorktreeHandlers(bus, stateService, db, refresher, execGit, (id) => {
       activeWorktreeId = id;
     });
@@ -1304,7 +1330,7 @@ if (!gotSingleInstanceLock) {
           logMain("debug", "forge", "post-fetch identity refresh failed:", cause);
         });
     };
-    registerCloneHandlers(bus, cloneService, refreshIdentity);
+    registerCloneHandlers(bus, cloneService, refreshIdentity, newRootHooks);
     // The sync menu's "Check tags after sync", read at each sync.
     tagAutoChecksFor(db).afterSyncWhen(
       () => settings.get().general?.tagCheckAfterSync ?? GENERAL_DEFAULTS.tagCheckAfterSync
@@ -1392,7 +1418,7 @@ if (!gotSingleInstanceLock) {
     bus.register("git:readIdentity", async () =>
       ok(await readEffectiveGitIdentity(execGit))
     );
-    registerDialogHandlers(bus);
+    registerDialogHandlers(bus, { onPicked: (paths) => newRoots.rememberPicked(paths) });
     registerClipboardHandlers(bus);
     registerShellHandlers(bus);
     const changeRequestHandlers = registerChangeRequestHandlers(
@@ -1514,6 +1540,7 @@ if (!gotSingleInstanceLock) {
         maintenanceHandlers.releaseWebContents(webContentsId);
         pruneHandlers.releaseWebContents(webContentsId);
         fileInsightHandlers.releaseWebContents(webContentsId);
+        repoSearchHandlers.releaseWebContents(webContentsId);
         visibleRefresher.releaseWebContents(webContentsId);
         remoteTipChecker.releaseWebContents(webContentsId);
         agentHandlers.releaseWebContents(webContentsId);
