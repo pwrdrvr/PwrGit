@@ -303,3 +303,16 @@ variant:
 (2c) merged the separate sidebar, refs browser, graph and ⌘K palette glyphs.
 A glyph also needs words: see "The kind glyph is labelled twice" in
 `features/sidebar/AGENTS.md`.
+
+## A sticky inset starts at the scroller's padding edge
+
+- **`top: 0` inside a scroller with `padding-top: 14px` sticks 14px down.**
+  Rows scroll past in that band, so content slides under the head and then
+  reappears above it.
+- **A padded scroller publishes its top padding as
+  `--sticky-scroll-pad-top`. Its sticky child uses
+  `top: calc(-1 * var(--sticky-scroll-pad-top, 0px))`.** See
+  `.diff-file__head`.
+- **Add each new sticky rule to `INVENTORY` in
+  `sticky-scroll-padding.test.ts`**, with the container it sticks in. For
+  layout proof, extend `e2e/sticky-heads.spec.ts` (a hidden harness).
