@@ -406,6 +406,14 @@ Identity is forge-wide (`commit-author.ts`, `commit-author-transport.ts`).
   "matched", never "verified", until that is asked for safely.
 - `fetchCommits` answers only commits the forge could see; an omitted SHA is
   inconclusive (backoff), never "no account". A null container throws.
+- **An older self-managed server may lack a field github.com has**, and
+  GraphQL rejects the whole document for it. GitHub's signature and PR-fallback
+  selections are optional per host (`graphql-feature-fallback.ts`). A response
+  made *only* of schema errors drops the named part for that host, for this
+  run, and the request is retried. If no error names a part, every optional
+  part is dropped. A rate limit, a refusal, or schema errors mixed with any
+  other error never drop anything. Such a host's authors read "matched".
+  Reuse it for any new optional GraphQL field.
 - **Account ids are GIDs** (`gid://gitlab/User/35145513`). Parse; do not cast.
 - **Cache keys are per forge instance:** identity key = kind+host+path;
   email→account key = kind+host. One email is a different person on each

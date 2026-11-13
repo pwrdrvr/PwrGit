@@ -7,6 +7,11 @@ import {
   type CommitSignatureVerdict,
   type ForgeAccountProfile
 } from "../commit-author";
+import {
+  GraphqlFeatureFallback,
+  GraphqlSchemaRejectedError,
+  schemaRejectionIn
+} from "../graphql-feature-fallback";
 import { githubOwnerAndName } from "../resolve";
 import type { ForgeRepo } from "../types";
 
@@ -25,15 +30,47 @@ const ASSOCIATED_PULLS = 30;
  */
 const BATCH_TIMEOUT_MS = 30_000;
 
-const COMMIT_FIELDS = `fragment CommitAuthorFields on Commit {
-  oid
-  author { name email user { login databaseId avatarUrl } }
-  signature { isValid state wasSignedByGitHub signer { login } }
-  associatedPullRequests(first: ${ASSOCIATED_PULLS}) {
-    totalCount
-    nodes { author { login avatarUrl ... on User { databaseId } } }
+/**
+ * What an older GitHub Enterprise Server may lack, as fields and types its
+ * schema error would name. GraphQL rejects the whole document for one unknown
+ * field, so each is optional per host (`../graphql-feature-fallback.ts`): a
+ * server without `wasSignedByGitHub` still answers who authored every commit,
+ * and its authors read "matched", never "verified".
+ */
+export const COMMIT_AUTHOR_FEATURES = {
+  signature: {
+    fields: ["signature", "isValid", "state", "wasSignedByGitHub", "signer"],
+    types: ["GitSignature"]
+  },
+  pulls: {
+    fields: ["associatedPullRequests", "totalCount"],
+    types: ["PullRequestConnection"]
   }
-}`;
+} as const;
+export type CommitAuthorFeature = keyof typeof COMMIT_AUTHOR_FEATURES;
+const ALL_FEATURES: ReadonlySet<CommitAuthorFeature> = new Set(
+  Object.keys(COMMIT_AUTHOR_FEATURES) as CommitAuthorFeature[]
+);
+
+function commitFields(features: ReadonlySet<CommitAuthorFeature>): string {
+  return [
+    "fragment CommitAuthorFields on Commit {",
+    "  oid",
+    "  author { name email user { login databaseId avatarUrl } }",
+    ...(features.has("signature")
+      ? ["  signature { isValid state wasSignedByGitHub signer { login } }"]
+      : []),
+    ...(features.has("pulls")
+      ? [
+          `  associatedPullRequests(first: ${ASSOCIATED_PULLS}) {`,
+          "    totalCount",
+          "    nodes { author { login avatarUrl ... on User { databaseId } } }",
+          "  }"
+        ]
+      : []),
+    "}"
+  ].join("\n");
+}
 
 export type GhCommitAuthorIdentityTransportOptions = {
   /** Test/non-desktop seam. The production path delegates auth to `gh`. */
@@ -55,6 +92,8 @@ export type GhCommitAuthorIdentityTransportOptions = {
 export class GhCliCommitAuthorIdentityTransport
   implements CommitAuthorIdentityTransport {
   private readonly run: (args: string[], options?: GhRunOptions) => Promise<string>;
+  /** Per host, what this run learned its schema lacks. */
+  private readonly fallback = new GraphqlFeatureFallback(COMMIT_AUTHOR_FEATURES);
 
   constructor(options: GhCommitAuthorIdentityTransportOptions = {}) {
     this.run = options.run ?? runGh;
@@ -77,17 +116,19 @@ export class GhCliCommitAuthorIdentityTransport
     }
     const target = githubOwnerAndName(repo);
     if (target === null) throw new Error("Not a GitHub owner/name path");
-    const { query, variables } = buildCommitAuthorQuery(target, commitShas);
-    const args = ["api", "--hostname", repo.host, "graphql", "-f", `query=${query}`];
-    // Variables, never interpolation: the owner, name and SHAs reach GitHub
-    // as typed values and cannot alter the query.
-    for (const [name, value] of Object.entries(variables)) {
-      args.push("-f", `${name}=${value}`);
-    }
-    return parseGitHubCommitAuthorResponse(
-      commitShas,
-      JSON.parse(await this.run(args, { timeoutMs: BATCH_TIMEOUT_MS }))
-    );
+    return await this.fallback.run(repo.host, async (features) => {
+      const { query, variables } = buildCommitAuthorQuery(target, commitShas, features);
+      const args = ["api", "--hostname", repo.host, "graphql", "-f", `query=${query}`];
+      // Variables, never interpolation: the owner, name and SHAs reach GitHub
+      // as typed values and cannot alter the query.
+      for (const [name, value] of Object.entries(variables)) {
+        args.push("-f", `${name}=${value}`);
+      }
+      return parseGitHubCommitAuthorResponse(
+        commitShas,
+        JSON.parse(await this.run(args, { timeoutMs: BATCH_TIMEOUT_MS }))
+      );
+    });
   }
 
   commitsPerRequest(): number {
@@ -98,7 +139,8 @@ export class GhCliCommitAuthorIdentityTransport
 /** One aliased `object(oid: $cN)` per commit under one `repository`. */
 export function buildCommitAuthorQuery(
   target: { owner: string; name: string },
-  commitShas: readonly string[]
+  commitShas: readonly string[],
+  features: ReadonlySet<CommitAuthorFeature> = ALL_FEATURES
 ): { query: string; variables: Record<string, string> } {
   const variables: Record<string, string> = { owner: target.owner, name: target.name };
   const decls = ["$owner: String!", "$name: String!"];
@@ -113,7 +155,7 @@ export function buildCommitAuthorQuery(
     ${aliases.join("\n    ")}
   }
 }
-${COMMIT_FIELDS}`;
+${commitFields(features)}`;
   return { query, variables };
 }
 
@@ -124,12 +166,16 @@ ${COMMIT_FIELDS}`;
  *
  * Check the container, not `data`: a refusal (SAML, a revoked scope, a spent
  * budget) answers `{"data":{"repository":null},"errors":[…]}`, and reading
- * aliases off it would say "not visible" for every commit. It throws instead.
+ * aliases off it would say "not visible" for every commit. It throws instead,
+ * and a body of schema errors throws `GraphqlSchemaRejectedError`, so the
+ * caller can drop what the server lacks rather than fail every commit.
  */
 export function parseGitHubCommitAuthorResponse(
   commitShas: readonly string[],
   value: unknown
 ): Map<string, CommitAuthorRemoteCommit> {
+  const rejection = schemaRejectionIn(value);
+  if (rejection !== undefined) throw new GraphqlSchemaRejectedError(rejection);
   const repository = asRecord(asRecord(asRecord(value)?.data)?.repository);
   if (repository === undefined) {
     throw new Error("GitHub did not resolve the repository for a commit-author query");
