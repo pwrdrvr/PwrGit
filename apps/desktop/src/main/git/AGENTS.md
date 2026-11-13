@@ -590,6 +590,31 @@ one deliberate route to zero, and it prunes.
   every depth: macOS denies a non-FDA app `~/Documents` and similar folders,
   and one EACCES would disable pruning permanently.
 
+## Find my repositories never looks inside a repository
+
+`repo-search.ts` walks the home folder (fs only, three levels, breadth first)
+and proposes folders; it adds nothing. Design: `design/New User Journey -
+UX Review.dc.html`, cards 2a, 2d, 2e.
+
+- **It stops at the first `.git`**, and at a bare repository's own folder.
+  Worktrees, submodules and clones kept inside a repository
+  (`repo/.claude/worktrees/x`) are never reached or counted. Home's own
+  `.git` does not stop it; home is never proposed.
+- **It shares the scan's never-opened rule** (`isScanSkippedDir`). Add to
+  `SKIP_DIRS`, never to a copy.
+- **Counts are repositories keyed by Git's common directory**, read from a
+  `.git` file's pointer, so they equal what `rescanProfile` indexes.
+  `repo-search.property.test.ts` holds that against the real scan; run it
+  after changing either walk.
+- **Main runs one search per window** (`repo-search-handlers.ts`); a second
+  supersedes the first. macOS's TCC folders (Documents, Desktop, Downloads)
+  are opened only when asked.
+
+A folder that may not exist yet (`profiles/new-root.ts`) is created or added
+only by a `SUGGESTED_ROOTS` name under home or a path the system picker
+returned this session. Clone and Fork take it as `newRoot` and take it back
+out if they fail.
+
 ## A worktree whose directory is gone is dropped, unless it may come back
 
 Agents delete checkouts without `git worktree remove` (Codex cleans up

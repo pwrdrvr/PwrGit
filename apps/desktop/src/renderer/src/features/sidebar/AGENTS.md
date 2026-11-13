@@ -150,11 +150,17 @@ maintenance wrench. The jump field is in the title strip (`TitleBar`'s
   (SC 2.5.3). E2E finds buttons by name; rename only with the specs.
 - **A disabled menu entry explains itself** with `hint` from
   `addMenuReasons`. Do not remove it from the menu.
-- **Day one lives in the empty list.** With no folder, `.sidebar__start`
-  draws Add folders in `.sidebar__empty`, outside `role="tree"`. E2E's
-  `clickAddFolders` (`e2e/fixtures/steps.ts`) handles both places.
+- **Day one lives in the main pane, not the list.** A profile with no
+  repositories gets the start screen (`onboarding/StartScreen.tsx`), drawn
+  from `repos.length === 0`, never from the lens being empty. The list keeps
+  one line ("No repositories yet."). E2E's `clickAddFolders` uses Add ▾.
+- **Clone and Fork never wait for a folder.** With none, their destination
+  step is `NoFolderDestination`; the request carries `newRoot`, and main
+  creates and adds the folder only as the operation starts. Only Rescan is
+  gated on a folder. Find repositories… stays in Add ▾ for good.
 
-Design: `design/Sidebar Header Toolbar - UX Review.dc.html`, 2b and 3.
+Design: `design/Sidebar Header Toolbar - UX Review.dc.html`, 2b and 3;
+`design/New User Journey - UX Review.dc.html`, 4a, 4d and 5a.
 
 ## Focused means something you did
 

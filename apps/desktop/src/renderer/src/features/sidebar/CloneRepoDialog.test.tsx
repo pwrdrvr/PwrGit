@@ -97,12 +97,12 @@ afterEach(async () => {
   vi.resetAllMocks();
 });
 
-async function openAndPick(onReveal = vi.fn()): Promise<void> {
+async function openAndPick(onReveal = vi.fn(), roots: string[] = ["/src"]): Promise<void> {
   await act(async () => root.render(
     <CloneRepoDialog
       profile={{
         id: "p", name: "Test", email: "test@example.com", mono: "T",
-        roots: ["/src"], onboardingCompleted: true,
+        roots, onboardingCompleted: true,
         showInMenu: true
       }}
       onCloned={() => undefined}
@@ -153,6 +153,46 @@ it("defaults to cloning your fork when you can't push and it already exists", as
     upstream: "octo-labs/sparkline",
     defaultBranchOnly: false
   }));
+});
+
+// design/New User Journey - UX Review, card 5a: with no folder, the
+// destination step offers to create one, and the request carries the choice
+// so main creates and adds it only as the clone starts.
+it("offers to create a folder when the profile has none, and sends it with the clone", async () => {
+  mockForge(preflight());
+  const base = dispatchMock.getMockImplementation()!;
+  dispatchMock.mockImplementation((channel: string, req: unknown) => {
+    if (channel === "profile:suggestedRoots") {
+      return Promise.resolve(ok(["projects", "github", "git"].map((name) => ({
+        name, path: `/Users/t/${name}`, display: `~/${name}`, exists: false
+      }))));
+    }
+    if (channel === "repo:cloneDestinations") return Promise.resolve(ok([]));
+    return base(channel, req);
+  });
+  await openAndPick(vi.fn(), []);
+
+  expect(container.textContent).toContain("Where should it go?");
+  expect(container.textContent).toContain("create and add to Test");
+  expect(container.textContent).not.toContain("Add a repo folder");
+  const github = [...container.querySelectorAll<HTMLInputElement>('input[name="clone-new-root"]')][1]!;
+  await act(async () => github.click());
+  expect(container.querySelector("#clone-destination-choice")?.textContent).toContain(
+    "github/sparkline"
+  );
+  await act(async () => submit().click());
+  expect(dispatchMock).toHaveBeenCalledWith("repo:clone", expect.objectContaining({
+    parentPath: "/Users/t/github",
+    newRoot: { kind: "suggested", name: "github" }
+  }));
+});
+
+it("sends no new folder once the profile has one", async () => {
+  mockForge(preflight());
+  await openAndPick();
+  await act(async () => submit().click());
+  const call = dispatchMock.mock.calls.find(([channel]) => channel === "repo:clone");
+  expect(call?.[1]).not.toHaveProperty("newRoot");
 });
 
 it("keeps the original as the default when no fork exists, and forks on request", async () => {

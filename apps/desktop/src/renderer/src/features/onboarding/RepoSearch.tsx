@@ -143,7 +143,9 @@ export function useRepoSearch(profileId: string): RepoSearch {
 
 /** The primary button's words: it counts what is checked. */
 export function addFoldersLabel(state: RepoSearchState): string {
+  // Disabled until something is checked; a count of nothing reads as a bug.
   const n = state.status === "done" ? state.checked.size : 0;
+  if (n === 0) return "Add folders";
   return `Add ${n} ${n === 1 ? "folder" : "folders"}`;
 }
 
