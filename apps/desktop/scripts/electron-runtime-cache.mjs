@@ -94,9 +94,29 @@ function atomicWrite(path, bytes) {
   }
 }
 
+// Windows refuses rmdir (EPERM/EACCES/EBUSY) while another process has the
+// directory open, e.g. a waiter polling the lock with readdir. Those codes
+// mean "busy", never "owned": the directory is already empty.
+const BUSY_DIRECTORY = ["EPERM", "EACCES", "EBUSY"];
+
+// Returns true once the empty lock directory is gone (or a successor's
+// nonempty lock replaced it); false while another process holds it open.
+function removeEmptyLock(lock) {
+  try {
+    rmdirSync(lock);
+    return true;
+  } catch (error) {
+    if (["ENOENT", "ENOTEMPTY", "EEXIST"].includes(error.code)) return true;
+    if (BUSY_DIRECTORY.includes(error.code)) return false;
+    throw error;
+  }
+}
+
 // Publish a nonempty lock directory atomically. Dead-owner recovery unlinks
 // only that owner's token, then removes an empty directory. It cannot delete
 // a new owner's nonempty lock, even with simultaneous stale-lock recovery.
+// An empty lock directory is free: rename replaces it on POSIX, and any
+// waiter's recovery pass removes it, so a busy release can leave it behind.
 async function acquireInstallLock(electronDir) {
   const lock = join(electronDir, ".pwragent-runtime-lock");
   const token = `${process.pid}-${randomUUID()}`;
@@ -107,11 +127,11 @@ async function acquireInstallLock(electronDir) {
     for (;;) {
       try {
         renameSync(candidate, lock);
-        return () => {
+        return async () => {
           unlinkSync(join(lock, token));
-          try { rmdirSync(lock); } catch (error) {
-            if (!["ENOENT", "ENOTEMPTY", "EEXIST"].includes(error.code)) throw error;
-          }
+          // Ownership ended with the unlink. Retry a busy rmdir briefly so a
+          // quiet package ends with no lock; a waiter reclaims any leftover.
+          for (let attempt = 0; attempt < 40 && !removeEmptyLock(lock); attempt++) await setTimeout(50);
         };
       } catch (error) {
         if (!existsSync(lock) && !["ENOTEMPTY", "EEXIST", "EPERM", "EACCES"].includes(error.code)) throw error;
@@ -127,11 +147,9 @@ async function acquireInstallLock(electronDir) {
             }
           }
         }
-        try { rmdirSync(lock); } catch (error) {
-          if (!["ENOENT", "ENOTEMPTY", "EEXIST"].includes(error.code)) throw error;
-        }
+        removeEmptyLock(lock);
       } catch (error) {
-        if (error.code !== "ENOENT") throw error;
+        if (error.code !== "ENOENT" && !BUSY_DIRECTORY.includes(error.code)) throw error;
       }
       if (Date.now() >= deadline) throw new Error(`Timed out waiting for Electron installer lock: ${lock}`);
       await setTimeout(50);
@@ -273,7 +291,7 @@ export async function ensureRuntime({ electronDir, version, platform, arch, cach
       if (cacheStage) rmSync(cacheStage, { recursive: true, force: true });
       if (downloadStage) rmSync(downloadStage, { recursive: true, force: true });
     } finally {
-      release();
+      await release();
     }
   }
 }
