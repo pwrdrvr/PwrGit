@@ -15,14 +15,15 @@ describe("rescanFoldersToast", () => {
 
   it("names one new repository and gives it the chip that goes there", () => {
     const toast = rescanFoldersToast([repo("rgit")], 4);
-    expect(toast.title).toBe("Found rgit");
+    expect(toast.title).toBe("New repository");
+    expect(toast.message).toBe("Found in your 4 folders and added to the sidebar.");
     expect(toast.subject).toEqual({ repoId: "id-rgit" });
     expect(toast.key).toBe(RESCAN_FOLDERS_TOAST_KEY);
   });
 
   it("names up to four and counts the rest", () => {
     expect(rescanFoldersToast(["a", "b"].map(repo), 2)).toMatchObject({
-      title: "Found 2 new repositories",
+      title: "2 new repositories",
       message: "a, b."
     });
     const many = rescanFoldersToast(["a", "b", "c", "d", "e", "f"].map(repo), 2);

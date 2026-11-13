@@ -11,9 +11,9 @@ const folders = (count: number): string =>
 
 /**
  * What Add ▾ → Rescan folders says when the scan answers. One new
- * repository gets its chip, which takes you there; several are named, up to
- * four. Nothing new says so, in the reader's terms: the scan looked, and
- * everything it found is already in the sidebar.
+ * repository is named by its chip, which takes you there; several are named
+ * in the message, up to four. Nothing new says so, in the reader's terms:
+ * the scan looked, and everything it found is already in the sidebar.
  */
 export function rescanFoldersToast(
   added: readonly Pick<Repo, "id" | "name">[],
@@ -29,10 +29,11 @@ export function rescanFoldersToast(
     };
   }
   if (added.length === 1) {
+    // The title is an eyebrow over the chip, and the chip carries the name.
     return {
       ...base,
-      title: `Found ${first.name}`,
-      message: `New in ${rootCount === 1 ? "your folder" : `your ${folders(rootCount)}`}.`,
+      title: "New repository",
+      message: `Found in ${rootCount === 1 ? "your folder" : `your ${folders(rootCount)}`} and added to the sidebar.`,
       subject: { repoId: first.id }
     };
   }
@@ -40,7 +41,7 @@ export function rescanFoldersToast(
   const more = added.length - names.length;
   return {
     ...base,
-    title: `Found ${added.length} new repositories`,
+    title: `${added.length} new repositories`,
     message: more > 0 ? `${names.join(", ")} and ${more} more.` : `${names.join(", ")}.`
   };
 }

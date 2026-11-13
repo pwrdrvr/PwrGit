@@ -51,7 +51,9 @@ test("Add ▾ → Rescan folders finds a new repository and says so", async () =
   await toolbar.getByRole("button", { name: "Add repositories" }).click();
   await window.getByRole("menuitem", { name: "Rescan folders" }).click();
 
-  await expect(window.locator(".app-toast")).toContainText("Found rgit");
+  const toast = window.locator(".app-toast");
+  await expect(toast).toContainText("New repository");
+  await expect(toast).toContainText("rgit");
   await expect(repoGroup(window, "rgit")).toBeVisible();
 
   await toolbar.getByRole("button", { name: "Add repositories" }).click();
