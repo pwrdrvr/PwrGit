@@ -189,13 +189,16 @@ describe("GitHubCommitAuthorIdentityService", () => {
       ...INPUT,
       commitHash: "1111111111111111111111111111111111111111"
     };
+    // GitHub reports signatures, so an answer from the email row says this
+    // commit's own signature has not been checked yet.
     expect(
       await requireCompletion(service.request({ ...unseen, cacheOnly: true }).completion)
     ).toEqual({
       identity: { login: "ada", avatarUrl: CACHED_AVATAR_URL },
       cacheState: "fresh",
       refreshState: "idle",
-      refreshedAt: now
+      refreshedAt: now,
+      signatureUnchecked: true
     });
     expect(fetchCalls).toBe(0);
 
@@ -209,7 +212,8 @@ describe("GitHubCommitAuthorIdentityService", () => {
       identity: { login: "ada", avatarUrl: CACHED_AVATAR_URL },
       cacheState: "fresh",
       refreshState: "idle",
-      refreshedAt: now
+      refreshedAt: now,
+      signatureUnchecked: true
     });
     expect(fetchCalls).toBe(0);
   });
@@ -606,7 +610,7 @@ describe("GitHubCommitAuthorIdentityService", () => {
     expect(cachedRow().next_retry_at).toBe(now + 2_000);
   });
 
-  it("reuses a proven author across repos on one forge, but not on an unclaimed remote", async () => {
+  it("paints a proven author across repos on one forge, but not on an unclaimed remote", async () => {
     await requireCompletion(service.request(INPUT).completion);
     expect(fetchCalls).toBe(1);
 
@@ -637,25 +641,53 @@ describe("GitHubCommitAuthorIdentityService", () => {
       commitSha: COMMIT_SHA
     };
     remoteUrl = "git@github.com:other-org/other-repo.git\n";
-    const otherRepository = service.request(INPUT);
-    expect(otherRepository.lookup).toEqual({
-      cacheState: "miss",
-      refreshState: "in-flight"
-    });
-    expect(await requireCompletion(otherRepository.completion)).toEqual({
+    expect(
+      await requireCompletion(service.request({ ...INPUT, cacheOnly: true }).completion)
+    ).toEqual({
       identity: {
         login: "ada",
         avatarUrl: CACHED_AVATAR_URL
       },
       cacheState: "fresh",
       refreshState: "idle",
-      refreshedAt: now
+      refreshedAt: now,
+      signatureUnchecked: true
     });
     expect(fetchCalls).toBe(1);
-    expect(requestedProofs).toEqual([PROOF]);
-    expect(cachedRow(PROOF)).toBeDefined();
     expect(cachedRowOrUndefined(otherProof)).toBeUndefined();
     expect(cacheRowCount()).toBe(1);
+  });
+
+  /**
+   * Review finding 1 on #594: the account row says whose email this is, never
+   * who signed this commit. On GitHub, which reports signatures, a network
+   * lookup still asks about the exact commit even while the row is fresh.
+   * Elsewhere a fresh row is all the forge could add, so it costs nothing.
+   */
+  it("still asks GitHub about an exact commit whose author's account is known", async () => {
+    await requireCompletion(service.request(INPUT).completion);
+    const unseen = { ...INPUT, commitHash: "1111111111111111111111111111111111111111" };
+    fetchImpl = async (proof) => ({
+      ...resolvedRemoteCommit(),
+      sha: proof.commitSha,
+      signature: { valid: true, signedByForge: false, signerLogin: "ada" }
+    });
+
+    const lookup = await requireCompletion(service.request(unseen).completion);
+    expect(fetchCalls).toBe(2);
+    expect(requestedProofs.at(-1)).toEqual({ repo: GITHUB_REPO, commitSha: unseen.commitHash });
+    expect(lookup).toMatchObject({ identity: { login: "ada" }, signatureVerified: true });
+    expect(lookup).not.toHaveProperty("signatureUnchecked");
+
+    // GitLab never reports a signature, so its account row still answers.
+    remoteUrl = "git@gitlab.com:octo-org/example-repo.git\n";
+    await requireCompletion(service.request(INPUT).completion);
+    expect(fetchCalls).toBe(3);
+    remoteUrl = "git@gitlab.com:octo-org/other-repo.git\n";
+    const gitlab = await requireCompletion(service.request(unseen).completion);
+    expect(fetchCalls).toBe(3);
+    expect(gitlab).toMatchObject({ identity: { login: "ada" }, cacheState: "fresh" });
+    expect(gitlab).not.toHaveProperty("signatureUnchecked");
   });
 
   /**
@@ -709,8 +741,7 @@ describe("GitHubCommitAuthorIdentityService signatures", () => {
   it("marks a lookup verified only for the exact commit its author signed", async () => {
     fetchImpl = async () => ({
       ...resolvedRemoteCommit(),
-      committer: { email: AUTHOR.email.toUpperCase() },
-      signatureVerified: true
+      signature: { valid: true, signedByForge: false, signerLogin: "ADA" }
     });
     const exact = await requireCompletion(service.request(INPUT).completion);
     expect(exact).toMatchObject({ identity: { login: "ada" }, signatureVerified: true });
@@ -732,11 +763,10 @@ describe("GitHubCommitAuthorIdentityService signatures", () => {
     ).toMatchObject({ signatureVerified: true });
   });
 
-  it("does not call a commit GitHub signed as committer verified for its author", async () => {
+  it("does not call a commit GitHub signed itself verified for its author", async () => {
     fetchImpl = async () => ({
       ...resolvedRemoteCommit(),
-      committer: { email: "noreply@github.com" },
-      signatureVerified: true
+      signature: { valid: true, signedByForge: true, signerLogin: "web-flow" }
     });
     const lookup = await requireCompletion(service.request(INPUT).completion);
     expect(lookup).toMatchObject({ identity: { login: "ada" } });
@@ -746,14 +776,16 @@ describe("GitHubCommitAuthorIdentityService signatures", () => {
   it("drops a verified signature when the commit later answers unverified", async () => {
     fetchImpl = async () => ({
       ...resolvedRemoteCommit(),
-      committer: { email: AUTHOR.email },
-      signatureVerified: true
+      signature: { valid: true, signedByForge: false, signerLogin: "ada" }
     });
     await requireCompletion(service.request(INPUT).completion);
     expect(cachedRow().signature_verified).toBe(1);
 
     now += 8 * 24 * 60 * 60 * 1000;
-    fetchImpl = async () => ({ ...resolvedRemoteCommit(), committer: { email: AUTHOR.email } });
+    fetchImpl = async () => ({
+      ...resolvedRemoteCommit(),
+      signature: { valid: false, signedByForge: false, signerLogin: "ada" }
+    });
     const lookup = await requireCompletion(service.request(INPUT).completion);
     expect(lookup).not.toHaveProperty("signatureVerified");
     expect(cachedRow().signature_verified).toBe(0);
@@ -761,111 +793,259 @@ describe("GitHubCommitAuthorIdentityService signatures", () => {
 });
 
 describe("GhCliCommitAuthorIdentityTransport", () => {
-  it("uses gh api without token extraction or a credential parameter", async () => {
+  /** One `object(oid:)` node, as GitHub's GraphQL answers it. */
+  const commitNode = (overrides: Record<string, unknown> = {}) => ({
+    oid: COMMIT_SHA,
+    author: {
+      name: AUTHOR.name,
+      email: AUTHOR.email,
+      user: {
+        login: "ada",
+        databaseId: 1,
+        avatarUrl: "https://avatars.githubusercontent.com/u/1?v=4"
+      }
+    },
+    signature: null,
+    associatedPullRequests: { totalCount: 0, nodes: [] },
+    ...overrides
+  });
+  const graphql = (nodes: Record<string, unknown>) =>
+    JSON.stringify({ data: { repository: nodes } });
+  const flags = (args: string[]): Record<string, string> => {
+    const out: Record<string, string> = {};
+    args.forEach((arg, index) => {
+      if (args[index - 1] !== "-f") return;
+      const at = arg.indexOf("=");
+      out[arg.slice(0, at)] = arg.slice(at + 1);
+    });
+    return out;
+  };
+
+  it("uses gh api graphql with variables, without token extraction or a credential parameter", async () => {
     const calls: string[][] = [];
+    const timeouts: Array<number | undefined> = [];
     const transport = new GhCliCommitAuthorIdentityTransport({
-      run: async (args: string[]) => {
+      run: async (args, options) => {
         calls.push(args);
-        return JSON.stringify({
-          sha: COMMIT_SHA,
-          commit: { author: AUTHOR },
-          author: {
-            id: 1,
-            login: "ada",
-            avatar_url: "https://avatars.githubusercontent.com/u/1?v=4"
-          }
-        });
+        timeouts.push(options?.timeoutMs);
+        return graphql({ c0: commitNode() });
       }
     });
 
     await expect(
       transport.fetchCommit({ repo: GITHUB_REPO, commitSha: COMMIT_SHA })
     ).resolves.toEqual(resolvedRemoteCommit());
-    expect(calls).toEqual([
-      [
-        "api",
-        "--hostname",
-        "github.com",
-        `repos/octo-org/example-repo/commits/${COMMIT_SHA}`,
-        "--method",
-        "GET",
-        "--header",
-        "Accept: application/vnd.github+json",
-        "--header",
-        "X-GitHub-Api-Version: 2022-11-28"
-      ]
-    ]);
+    expect(calls).toHaveLength(1);
+    expect(calls[0]!.slice(0, 4)).toEqual(["api", "--hostname", "github.com", "graphql"]);
+    const sent = flags(calls[0]!);
+    expect(sent).toMatchObject({ owner: "octo-org", name: "example-repo", c0: COMMIT_SHA });
+    // The SHA travels only as a typed variable, never inside the query text.
+    expect(sent.query).toContain("c0: object(oid: $c0)");
+    expect(sent.query).not.toContain(COMMIT_SHA);
     expect(calls[0]).not.toContain("auth");
     expect(calls[0]).not.toContain("token");
+    // A 50-commit batch outlasts the runner's 10 s default meant for one call.
+    expect(timeouts[0]).toBeGreaterThan(10_000);
   });
 
-  it("reads GitHub's signature verdict and the committer it verified", async () => {
-    const transport = new GhCliCommitAuthorIdentityTransport({
-      run: async () => JSON.stringify({
-        sha: COMMIT_SHA,
-        commit: {
-          author: AUTHOR,
-          committer: { name: "GitHub", email: "noreply@github.com" },
-          verification: { verified: true, reason: "valid" }
-        },
-        author: { id: 1, login: "ada", avatar_url: "https://avatars.githubusercontent.com/u/1?v=4" }
-      })
-    });
-    await expect(
-      transport.fetchCommit({ repo: GITHUB_REPO, commitSha: COMMIT_SHA })
-    ).resolves.toEqual({
-      ...resolvedRemoteCommit(),
-      committer: { email: "noreply@github.com" },
-      signatureVerified: true
-    });
-  });
-
-
-  it("corroborates a unique associated-PR author when GitHub leaves author null", async () => {
+  it("answers many commits in one request and omits the ones GitHub cannot see", async () => {
+    const shas = Array.from({ length: 50 }, (_, i) => i.toString(16).padStart(40, "0"));
     const calls: string[][] = [];
     const transport = new GhCliCommitAuthorIdentityTransport({
       run: async (args: string[]) => {
         calls.push(args);
-        const endpoint = args[3];
-        if (endpoint === `repos/openclaw/openclaw/commits/${COMMIT_SHA}`) {
-          return JSON.stringify({
-            sha: COMMIT_SHA,
-            commit: {
-              author: { name: "Peter Steinberger", email: "steipete@macos.shared" },
-              committer: { email: "steipete@macos.shared" },
-              // A signature vouches for the commit's own (empty) link, never
-              // for the account a pull request supplies.
-              verification: { verified: true }
-            },
-            author: null
-          });
-        }
-        if (endpoint === `repos/openclaw/openclaw/commits/${COMMIT_SHA}/pulls`) {
-          return JSON.stringify([{ user: {
-            id: 58493,
-            login: "steipete",
-            avatar_url: "https://avatars.githubusercontent.com/u/58493?v=4"
-          } }]);
-        }
-        throw new Error(`Unexpected endpoint: ${endpoint}`);
+        const nodes: Record<string, unknown> = {};
+        // Every other commit is unpushed: GitHub answers null for it.
+        shas.forEach((sha, i) => {
+          nodes[`c${i}`] = i % 2 === 0 ? commitNode({ oid: sha }) : null;
+        });
+        return graphql(nodes);
       }
     });
 
-    await expect(transport.fetchCommit({
-      repo: { kind: "github", host: "github.com", path: "openclaw/openclaw" },
-      commitSha: COMMIT_SHA
-    })).resolves.toEqual({
+    const answers = await transport.fetchCommits(GITHUB_REPO, shas);
+    expect(calls).toHaveLength(1);
+    expect([...answers.keys()]).toEqual(shas.filter((_, i) => i % 2 === 0));
+    expect(transport.commitsPerRequest()).toBe(50);
+    await expect(transport.fetchCommits(GITHUB_REPO, [...shas, "f".repeat(40)]))
+      .rejects.toThrow(RangeError);
+  });
+
+  it("throws on a refusal rather than reading every commit as unseen", async () => {
+    const transport = new GhCliCommitAuthorIdentityTransport({
+      run: async () => JSON.stringify({
+        data: { repository: null },
+        errors: [{ type: "FORBIDDEN", message: "SAML enforcement" }]
+      })
+    });
+    await expect(transport.fetchCommits(GITHUB_REPO, [COMMIT_SHA])).rejects.toThrow();
+  });
+
+  it("reads who signed the commit, and whether GitHub signed it itself", async () => {
+    const transport = new GhCliCommitAuthorIdentityTransport({
+      run: async () => graphql({
+        c0: commitNode({
+          signature: {
+            isValid: true,
+            state: "VALID",
+            wasSignedByGitHub: true,
+            signer: { login: "web-flow" }
+          }
+        }),
+        c1: commitNode({
+          oid: "1".repeat(40),
+          signature: {
+            isValid: false,
+            state: "UNKNOWN_KEY",
+            wasSignedByGitHub: false,
+            signer: null
+          }
+        })
+      })
+    });
+    const answers = await transport.fetchCommits(GITHUB_REPO, [COMMIT_SHA, "1".repeat(40)]);
+    expect(answers.get(COMMIT_SHA)).toEqual({
+      ...resolvedRemoteCommit(),
+      signature: { valid: true, signedByForge: true, signerLogin: "web-flow" }
+    });
+    expect(answers.get("1".repeat(40))?.signature).toEqual({
+      valid: false,
+      signedByForge: false
+    });
+  });
+
+  it("corroborates a unique associated-PR author when GitHub leaves author null", async () => {
+    const steipete = { name: "Peter Steinberger", email: "steipete@macos.shared" };
+    const unlinked = (pulls: unknown) => new GhCliCommitAuthorIdentityTransport({
+      run: async () => graphql({
+        c0: commitNode({
+          author: { ...steipete, user: null },
+          // A signature vouches for the commit's own (empty) link, never for
+          // the account a pull request supplies.
+          signature: {
+            isValid: true,
+            state: "VALID",
+            wasSignedByGitHub: false,
+            signer: { login: "steipete" }
+          },
+          associatedPullRequests: pulls
+        })
+      })
+    });
+    const repo: ForgeRepo = { kind: "github", host: "github.com", path: "openclaw/openclaw" };
+    const author = {
+      login: "steipete",
+      databaseId: 58493,
+      avatarUrl: "https://avatars.githubusercontent.com/u/58493?v=4"
+    };
+
+    await expect(
+      unlinked({ totalCount: 2, nodes: [{ author }, { author }] })
+        .fetchCommit({ repo, commitSha: COMMIT_SHA })
+    ).resolves.toEqual({
       sha: COMMIT_SHA,
-      author: { name: "Peter Steinberger", email: "steipete@macos.shared" },
-      committer: { email: "steipete@macos.shared" },
+      author: steipete,
       account: {
         id: 58493,
         login: "steipete",
         avatarUrl: "https://avatars.githubusercontent.com/u/58493?v=4"
       }
     });
-    expect(calls).toHaveLength(2);
-    expect(calls.flat()).not.toContain("token");
+
+    // More pull requests than were read: another author could be among them.
+    await expect(
+      unlinked({ totalCount: 6, nodes: [{ author }] }).fetchCommit({ repo, commitSha: COMMIT_SHA })
+    ).resolves.toMatchObject({ account: null });
+    // Two different authors: not unique.
+    await expect(
+      unlinked({ totalCount: 2, nodes: [{ author }, { author: { login: "other" } }] })
+        .fetchCommit({ repo, commitSha: COMMIT_SHA })
+    ).resolves.toMatchObject({ account: null });
+  });
+});
+
+describe("GitHubCommitAuthorIdentityService.requestMany", () => {
+  it("sends every due commit of a tick in one request and answers each from its own row", async () => {
+    const shas = Array.from({ length: 12 }, (_, i) => (i + 1).toString(16).padStart(40, "0"));
+    const batches: string[][] = [];
+    const transport: GitHubCommitAuthorIdentityTransport = {
+      fetchCommit: async () => {
+        throw new Error("a batching transport is never asked one commit at a time");
+      },
+      fetchCommits: async (_repo, commitShas) => {
+        batches.push([...commitShas]);
+        // The last commit is not on GitHub (unpushed).
+        return new Map(commitShas.slice(0, -1).map((sha, i) => [sha, {
+          ...resolvedRemoteCommit(),
+          sha,
+          ...(i % 3 === 0
+            ? { signature: { valid: true, signedByForge: false, signerLogin: "ada" } }
+            : {})
+        }]));
+      },
+      commitsPerRequest: () => 50
+    };
+    service = createService({ transport });
+    // One commit already has a fresh exact answer: it is not asked again.
+    await service.requestMany({
+      worktreeId: "worktree-1",
+      commits: [{ commitHash: shas[0]!, authorName: AUTHOR.name, authorEmail: AUTHOR.email }]
+    });
+    batches.length = 0;
+
+    const lookups = await service.requestMany({
+      worktreeId: "worktree-1",
+      commits: shas.map((commitHash) => ({
+        commitHash,
+        authorName: AUTHOR.name,
+        authorEmail: AUTHOR.email
+      }))
+    });
+    expect(batches).toEqual([shas.slice(1)]);
+    expect(lookups).toHaveLength(shas.length);
+    lookups.slice(1, -1).forEach((lookup, i) => {
+      expect(lookup).toMatchObject({ identity: { login: "ada" }, cacheState: "fresh" });
+      expect(lookup.signatureVerified === true).toBe(i % 3 === 0);
+      expect(lookup).not.toHaveProperty("signatureUnchecked");
+    });
+    // The unpushed commit records a retry gate. Its author still paints from
+    // the email row, and it was asked, so it does not hold the author
+    // unsettled: it is asked again when its gate and the recheck allow.
+    expect(lookups.at(-1)).toMatchObject({ identity: { login: "ada" } });
+    expect(lookups.at(-1)).not.toHaveProperty("signatureUnchecked");
+    // The local read the people store settles on agrees, so an author with an
+    // unpushed commit is not held unsettled (and re-asked) indefinitely.
+    expect(await requireCompletion(service.request({
+      ...INPUT,
+      commitHash: shas.at(-1)!,
+      cacheOnly: true
+    }).completion)).not.toHaveProperty("signatureUnchecked");
+    expect(cachedRow({ repo: GITHUB_REPO, commitSha: shas.at(-1)! })).toMatchObject({
+      status: "unavailable",
+      next_retry_at: now + 60_000
+    });
+  });
+
+  it("splits more due commits than one request carries into full requests", async () => {
+    const sizes: number[] = [];
+    const transport: GitHubCommitAuthorIdentityTransport = {
+      fetchCommit: async () => ({}),
+      fetchCommits: async (_repo, commitShas) => {
+        sizes.push(commitShas.length);
+        return new Map();
+      },
+      commitsPerRequest: () => 50
+    };
+    service = createService({ transport });
+    await service.requestMany({
+      worktreeId: "worktree-1",
+      commits: Array.from({ length: 120 }, (_, i) => ({
+        commitHash: (i + 1).toString(16).padStart(40, "0"),
+        authorName: AUTHOR.name,
+        authorEmail: AUTHOR.email
+      }))
+    });
+    expect(sizes).toEqual([50, 50, 20]);
   });
 });
 
@@ -894,6 +1074,7 @@ function createService(options?: {
   initialBackoffMs?: number;
   maxBackoffMs?: number;
   resolveForgeRepo?: () => ForgeRepo | null;
+  transport?: GitHubCommitAuthorIdentityTransport;
 }): GitHubCommitAuthorIdentityService {
   const git: GitExec = async () => {
     gitCalls += 1;
@@ -938,7 +1119,7 @@ function createService(options?: {
     pruneIfDue: async () => {}
   };
   return new GitHubCommitAuthorIdentityService(db, git, {
-    transport,
+    transport: options?.transport ?? transport,
     thumbnailStore,
     now: () => now,
     ...options

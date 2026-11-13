@@ -49,6 +49,7 @@ it("preserves a search typed before the catalog chooses the usable forge", async
       capabilities: {
         batchedBranchLookup: true, batchedCommitAssociation: true,
         changeSizeAndTimeline: true, commitAuthorIdentity: true,
+        commitSignatures: true,
         forkDefaultBranchOnly: false
       },
       hosts: [{ host: "gitlab.com", enabled: true, loggedIn: true }]
@@ -80,6 +81,7 @@ it("forks the seeded checkout in place, and only while it is the source", async 
         capabilities: {
           batchedBranchLookup: true, batchedCommitAssociation: true,
           changeSizeAndTimeline: true, commitAuthorIdentity: true,
+          commitSignatures: true,
           forkDefaultBranchOnly: true
         },
         hosts: [{ host: "github.com", enabled: true, loggedIn: true }]

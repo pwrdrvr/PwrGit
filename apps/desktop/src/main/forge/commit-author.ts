@@ -23,6 +23,20 @@ export type ForgeAccountProfile = {
 };
 
 /**
+ * A forge's verdict on one commit's signature, in the shape GitHub's GraphQL
+ * `Commit.signature` collapses into.
+ */
+export type CommitSignatureVerdict = {
+  /** The forge checked the signature and it is good (GitHub: `state: VALID`). */
+  valid: boolean;
+  /** The forge signed it itself (GitHub: `wasSignedByGitHub`), as it does for
+   *  a web merge or squash. That vouches for the forge, not for the author. */
+  signedByForge: boolean;
+  /** The forge account the signing key belongs to, when the forge names one. */
+  signerLogin?: string;
+};
+
+/**
  * Canonical subset of a forge's commit response used for verification.
  *
  * `account` is deliberately tri-state and mirrors both forges exactly:
@@ -36,37 +50,51 @@ export type CommitAuthorRemoteCommit = {
     name?: string | null;
     email?: string | null;
   } | null;
-  /** Who committed it. A forge verifies a signature against the committer. */
-  committer?: {
-    email?: string | null;
-  } | null;
   account?: ForgeAccountProfile | null;
   /**
-   * The forge's own verdict on this commit's signature (GitHub:
-   * `commit.verification.verified`). Absent when the forge did not say, and
-   * dropped when `account` came from a fallback rather than the commit.
+   * The forge's verdict on this commit's signature. Absent when the forge did
+   * not say (no signature, or a forge that never reports one), and dropped
+   * when `account` came from a fallback rather than the commit itself.
    */
-  signatureVerified?: boolean;
+  signature?: CommitSignatureVerdict;
 };
 
 /**
  * Whether a forge answer lets PwrGit call the commit's author verified: the
- * forge verified the signature, and the committer it verified is the author
- * (same normalized email). A commit GitHub signed as the committer of a
- * squash merge, or a reviewer's signed cherry-pick, verifies someone else.
+ * forge found a valid signature, did not make it itself, and the key belongs
+ * to the very account the commit is linked to (logins compare case-blind).
+ *
+ * A squash merge GitHub signed (`web-flow`), a reviewer's signed cherry-pick,
+ * or a rebase someone else signed all verify a different person, so each is a
+ * match at best. So is a signature with no named signer.
  */
 export function signedByAuthor(
-  response: Pick<CommitAuthorRemoteCommit, "author" | "committer" | "signatureVerified">
+  response: Pick<CommitAuthorRemoteCommit, "account" | "signature">
 ): boolean {
-  if (response.signatureVerified !== true) return false;
-  const authorEmail = safeLower(response.author?.email);
-  const committerEmail = safeLower(response.committer?.email);
-  return authorEmail !== undefined && authorEmail === committerEmail;
+  const signature = response.signature;
+  if (signature?.valid !== true || signature.signedByForge) return false;
+  const account = safeLower(response.account?.login);
+  const signer = safeLower(signature.signerLogin);
+  return account !== undefined && account === signer;
 }
 
-/** Credential-opaque seam for fetching one exact commit from a forge. */
+/**
+ * Credential-opaque seam for fetching exact commits from a forge.
+ *
+ * `fetchCommits` is the batch form, for a forge that can answer many commits
+ * in one request. It answers only SHAs the forge could see: an omitted SHA is
+ * "not visible" (unpushed, rewritten, or refused), never "no account". A
+ * refusal of the whole request — the repository did not resolve, a spent rate
+ * limit — throws rather than omitting everything.
+ */
 export type CommitAuthorIdentityTransport = {
   fetchCommit(proof: CommitAuthorProof): Promise<CommitAuthorRemoteCommit>;
+  fetchCommits?(
+    repo: ForgeRepo,
+    commitShas: readonly string[]
+  ): Promise<Map<string, CommitAuthorRemoteCommit>>;
+  /** Most SHAs one `fetchCommits` call sends as one request. */
+  commitsPerRequest?(repo: ForgeRepo): number;
 };
 
 /**

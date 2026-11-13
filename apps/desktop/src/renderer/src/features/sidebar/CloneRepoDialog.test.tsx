@@ -55,6 +55,7 @@ function mockForge(answer: ForkPreflight): void {
         capabilities: {
           batchedBranchLookup: true, batchedCommitAssociation: true,
           changeSizeAndTimeline: true, commitAuthorIdentity: true,
+          commitSignatures: true,
           forkDefaultBranchOnly: true
         },
         hosts: [{ host: "github.com", enabled: true, loggedIn: true }]

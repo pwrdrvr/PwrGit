@@ -10,7 +10,7 @@ import {
   PEOPLE_RETRY_BASE_MS,
   PEOPLE_SETTLE_MS,
   PEOPLE_TICK_SPACING_MS,
-  PEOPLE_VISITS_PER_TICK,
+  PEOPLE_REQUESTS_PER_TICK,
   signedByLinkedAccount
 } from "./commit-author-people";
 
@@ -35,6 +35,10 @@ let cached: Map<string, GitHubCommitAuthorIdentityLookup>;
 /** What asking the forge about each commit answers, and then caches. */
 let forge: Map<string, GitHubCommitAuthorIdentityLookup>;
 let forgeRepo: ForgeRepo | null;
+/** Commits one forge request carries: 1 is a single-commit forge (GitLab),
+ *  more is a batching one (GitHub). */
+let perRequest: number;
+let batches: Array<{ worktreeId: string; commitHashes: string[] }>;
 let published: Array<{ worktreeId: string; people: Record<string, CommitAuthorPerson> }>;
 let timers: Array<{ delay: number; run: () => void; cleared: boolean }>;
 let store: CommitAuthorPeopleStore;
@@ -45,6 +49,8 @@ beforeEach(() => {
   cached = new Map();
   forge = new Map();
   forgeRepo = GITHUB;
+  perRequest = 1;
+  batches = [];
   published = [];
   timers = [];
   store = createStore();
@@ -66,6 +72,16 @@ function createStore(): CommitAuthorPeopleStore {
           completion: Promise.resolve(cached.get(input.commitHash) ?? MISS)
         };
       },
+      requestMany: async ({ worktreeId, commits }) => {
+        batches.push({ worktreeId, commitHashes: commits.map((commit) => commit.commitHash) });
+        return commits.map((commit) => {
+          calls.push({ worktreeId, commitHash: commit.commitHash, cacheOnly: false });
+          const answer = forge.get(commit.commitHash) ?? { ...MISS, refreshState: "backing-off" };
+          cached.set(commit.commitHash, answer);
+          return answer;
+        });
+      },
+      commitsPerRequest: () => perRequest,
       worktreeForge: async () => forgeRepo
     },
     publish: (worktreeId, people) => published.push({ worktreeId, people }),
@@ -226,8 +242,8 @@ describe("CommitAuthorPeopleStore", () => {
     expect(visitsAt.length).toBeLessThan(12);
   });
 
-  it("spends a bounded number of visits per tick, oldest registration first", async () => {
-    const authors = Array.from({ length: PEOPLE_VISITS_PER_TICK + 3 }, (_, index) => ({
+  it("spends a bounded number of single-commit visits per tick, oldest registration first", async () => {
+    const authors = Array.from({ length: PEOPLE_REQUESTS_PER_TICK + 3 }, (_, index) => ({
       name: `Author ${index}`,
       email: `author-${index}@example.test`,
       commitHashes: [index.toString(16).padStart(40, "0")]
@@ -237,7 +253,7 @@ describe("CommitAuthorPeopleStore", () => {
     await store.tick();
 
     expect(networkCalls().map((call) => call.commitHash)).toEqual(
-      authors.slice(0, PEOPLE_VISITS_PER_TICK).map((author) => author.commitHashes[0])
+      authors.slice(0, PEOPLE_REQUESTS_PER_TICK).map((author) => author.commitHashes[0])
     );
     expect(pendingTimer()?.delay).toBe(PEOPLE_TICK_SPACING_MS);
   });
@@ -306,6 +322,54 @@ describe("CommitAuthorPeopleStore", () => {
       GRACE
     ]);
     expect(Object.keys(known)).toEqual(["grace@example.test"]);
+  });
+});
+
+describe("CommitAuthorPeopleStore on a batching forge", () => {
+  beforeEach(() => {
+    perRequest = 50;
+  });
+
+  it("asks about every interest commit of the due authors in one request", async () => {
+    await store.replace("window:1", "wt-1", [ADA, GRACE]);
+    now += PEOPLE_SETTLE_MS;
+    forge.set(ADA_2, { ...PROVEN, signatureVerified: true });
+    await store.tick();
+
+    expect(batches).toEqual([{ worktreeId: "wt-1", commitHashes: [ADA_1, ADA_2, GRACE_1] }]);
+    expect(published.at(-1)?.people["ada@example.test"]).toMatchObject({
+      state: "linked",
+      signatureVerified: true
+    });
+  });
+
+  it("visits an author the email row links, because no commit's signature was checked", async () => {
+    const fromEmailRow = { ...PROVEN, signatureUnchecked: true as const };
+    cached.set(ADA_1, fromEmailRow);
+    cached.set(ADA_2, fromEmailRow);
+    await store.replace("window:1", "wt-1", [ADA]);
+    expect(pendingTimer()?.delay).toBe(PEOPLE_SETTLE_MS);
+
+    forge.set(ADA_1, PROVEN);
+    forge.set(ADA_2, PROVEN);
+    now += PEOPLE_SETTLE_MS;
+    await store.tick();
+    expect(batches).toHaveLength(1);
+    // Every commit is checked now, so the author waits for the recheck.
+    expect(pendingTimer()?.delay).toBe(PEOPLE_RECHECK_MS);
+  });
+
+  it("packs authors into one worktree's request until it is full, then opens another", async () => {
+    perRequest = 4;
+    const authors = Array.from({ length: 6 }, (_, index) => ({
+      name: `Author ${index}`,
+      email: `author-${index}@example.test`,
+      commitHashes: [0, 1].map((commit) => (index * 2 + commit + 1).toString(16).padStart(40, "0"))
+    }));
+    await store.replace("window:1", "wt-1", authors);
+    now += PEOPLE_SETTLE_MS;
+    await store.tick();
+    expect(batches.map((batch) => batch.commitHashes.length)).toEqual([4, 4, 4]);
   });
 });
 
