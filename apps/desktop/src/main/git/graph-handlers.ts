@@ -4,6 +4,7 @@ import {
   type LaneGraph,
   err,
   type LaneBranchInfo,
+  type MovedTag,
   ok
 } from "@pwrgit/shared";
 import type { CommandBus } from "../command-bus";
@@ -24,13 +25,18 @@ import {
   topoMergeCommits,
   unappliedUpstreams
 } from "./git-service";
-import { readGraphTags } from "./graph-tags";
+import { readGraphTagIndex, type GraphLocalTag } from "./graph-tags";
+import { readRemoteConfig, tagSourcesFor } from "./tag-sources";
 import type { WorktreeStateService } from "./worktree-state";
 
 /** The repo-level part of the lane graph (same for every worktree of a repo);
  *  only the HEAD dot varies per worktree, so this is cached and reused. */
 type CachedLanes = {
   tags: NonNullable<LaneGraph["tags"]>;
+  /** Every local tag on a commit, for the per-request published comparison. */
+  localTags: GraphLocalTag[];
+  /** Configured remote names: who publishes tags is chosen among them. */
+  remotes: string[];
   commits: Commit[];
   tips: Record<string, string[]>;
   /** commit hash → remote-tracking refs tipped there (e.g. "origin/main"). */
@@ -81,6 +87,41 @@ async function readRefsStamp(git: GitExec, cwd: string): Promise<string | null> 
   );
   if (!raw.ok || raw.value.exitCode !== 0) return null;
   return createHash("sha1").update(raw.value.stdout).digest("hex");
+}
+
+/**
+ * Local tags whose published value differs, where either value is drawn. Read
+ * per request from the stored comparison (never cached with the lanes: a tag
+ * check moves it without moving a ref), so it costs no Git.
+ */
+function drawnMovedTags(
+  db: DB,
+  repoId: string,
+  lanes: Pick<CachedLanes, "localTags" | "remotes">,
+  commits: readonly Commit[]
+): MovedTag[] {
+  const drawn = new Set(commits.map((commit) => commit.hash));
+  const moves = tagSourcesFor(db).store.moves(repoId, lanes.remotes, lanes.localTags);
+  if (moves.size === 0) return [];
+  const local = new Map(lanes.localTags.map((tag) => [tag.name, tag]));
+  const out: MovedTag[] = [];
+  for (const [name, published] of moves) {
+    const tag = local.get(name);
+    if (tag === undefined) continue;
+    if (!drawn.has(tag.targetId) && !drawn.has(published.targetId)) continue;
+    // A published commit that is drawn is in this repository.
+    out.push({
+      name,
+      local: {
+        objectId: tag.objectId,
+        targetId: tag.targetId,
+        // A tag that peels to a commit other than its own object is annotated.
+        kind: tag.objectId === tag.targetId ? "lightweight" : "annotated"
+      },
+      published: drawn.has(published.targetId) ? { ...published, available: true } : published
+    });
+  }
+  return out;
 }
 
 export function registerGraphHandlers(
@@ -252,11 +293,12 @@ export function registerGraphHandlers(
         const hiddenBranches = Math.max(0, totalOther - shown.length);
         return ok({ shown, matchedBranches, hiddenBranches });
       };
-      const [selection, tips, unapplied, tags] = await Promise.all([
+      const [selection, tips, unapplied, tags, remoteConfig] = await Promise.all([
         select(),
         branchTips(git, wt.path),
         unappliedUpstreams(git, wt.path),
-        readGraphTags(git, wt.path)
+        readGraphTagIndex(git, wt.path),
+        readRemoteConfig(git, wt.path)
       ]);
       if (!selection.ok) return selection;
       const { shown, matchedBranches, hiddenBranches } = selection.value;
@@ -356,7 +398,9 @@ export function registerGraphHandlers(
       // process cannot read is a reason to draw no chips, not a reason to
       // refuse the graph — which is what returning the error here would do.
       cached = {
-        tags: tags.ok ? tags.value : {},
+        tags: tags.ok ? tags.value.prominent : {},
+        localTags: tags.ok ? tags.value.all : [],
+        remotes: remoteConfig.ok ? remoteConfig.value.map((remote) => remote.name) : [],
         commits: topoMergeCommits([trunk.value, uniques.value]),
         tips: tips.value.local,
         remoteTips: tips.value.remote,
@@ -507,9 +551,11 @@ export function registerGraphHandlers(
       const tag = out.tags[commit.hash];
       if (tag !== undefined) tags[commit.hash] = tag;
     }
+    const movedTags = drawnMovedTags(db, wt.repo_id, out, commits);
     return ok({
       commits,
       tags,
+      ...(movedTags.length === 0 ? {} : { movedTags }),
       tips: out.tips,
       remoteTips: out.remoteTips,
       ...(headUpstream === undefined ? {} : { headUpstream }),

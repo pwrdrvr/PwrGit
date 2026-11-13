@@ -16,6 +16,7 @@ import type {
   TagSummary,
   LocalBranchSummary,
   Repo,
+  RemoteTagValue,
   RepoRefs,
   Worktree
 } from "@pwrgit/shared";
@@ -67,6 +68,7 @@ import {
 } from "./RepoRefsModal";
 import type { WorktreeStatusFilter } from "./RepoWorktreeTable";
 import { TagGlyph } from "../../lib/TagGlyph";
+import { takePublishedTag } from "./take-published-tag";
 
 type RefSection = "branches" | "tags" | "remotes" | "changeRequests";
 
@@ -239,6 +241,20 @@ export function RepoRefsSections({
     onBrowserRequestHandled?.();
   }, [browserRequest, refs, onBrowserRequestHandled, setBrowser]);
   const [fetching, setFetching] = useState<string | null>(null);
+  /** The moved tag a Take is writing, so its chip shows busy. */
+  const [takingTag, setTakingTag] = useState<string | null>(null);
+  const takeMovedTag = async (tag: TagSummary, published: RemoteTagValue): Promise<void> => {
+    if (takingTag !== null) return;
+    await takePublishedTag({
+      repoId: repo.id,
+      name: tag.name,
+      local: tag,
+      published,
+      onConfirmed: () => setTakingTag(tag.name)
+    });
+    // tag:adoptRemote announces repo:changed, which reloads these rows.
+    setTakingTag(null);
+  };
   // Which branch row holds the group's single tab stop. A cursor, not a
   // selection: it carries no git meaning and no accent.
   const [branchCursor, setBranchCursor] = useState(0);
@@ -871,8 +887,15 @@ export function RepoRefsSections({
         </div>
         {openSections.has("tags") && (
           <div className="ref-section__body">
-            {refs?.previewTags.map((tag) => (
-              <div className="ref-tag-row" key={tag.fullName}>
+            {refs?.previewTags.map((tag) => {
+              // The publisher has another value for this name (2a): say so
+              // on the row, and offer the Tags tab's Take from it.
+              const moved = refs.tagMoves?.[tag.name];
+              return (
+              <div
+                className={moved === undefined ? "ref-tag-row" : "ref-tag-row is-moved"}
+                key={tag.fullName}
+              >
                 <span className="refs-tag-icon" aria-hidden="true">
                   <TagGlyph size={11} />
                 </span>
@@ -894,6 +917,28 @@ export function RepoRefsSections({
                 >
                   {tag.targetId.slice(0, 7)}
                 </small>
+                {moved !== undefined && (
+                  <button
+                    className="ref-tag-moved"
+                    aria-label={`${tag.name} moved on ${moved.remote} to ${moved.targetId.slice(0, 7)}. Take ${moved.remote}'s…`}
+                    aria-busy={takingTag === tag.name}
+                    disabled={takingTag !== null}
+                    {...hoverTooltip(
+                      tip,
+                      `${moved.remote} moved ${tag.name}\n` +
+                        `Local: ${tag.targetId.slice(0, 12)}\n` +
+                        `${moved.remote}: ${moved.targetId.slice(0, 12)}\n` +
+                        `Click to take ${moved.remote}'s. Keep local is in Review.`
+                    )}
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      tip.hide();
+                      void takeMovedTag(tag, moved);
+                    }}
+                  >
+                    {moved.remote} {moved.targetId.slice(0, 7)}
+                  </button>
+                )}
                 {/* Last in the row, like the branch and remote-branch rows'
                     mini actions: the three lists stack in one panel, so an
                     action parked mid-row breaks the column they share.
@@ -928,7 +973,8 @@ export function RepoRefsSections({
                   </button>
                 )}
               </div>
-            ))}
+              );
+            })}
             {/* From the stored comparison: no Git ran for this line. Only a
                 tag that differs asks for a decision; published-only tags are
                 common and wait in the browser. */}

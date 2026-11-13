@@ -296,6 +296,38 @@ const versionOrder = new Intl.Collator(undefined, { numeric: true, sensitivity: 
  * Local tags in their own order, then published-only names newest-version
  * first. `published === null` means the publisher was never listed.
  */
+/** One local tag against the publisher's listing (null: never listed). */
+function classifyLocal(
+  tag: LocalTagRef,
+  published: Map<string, ListedTag> | null,
+  keeps: Map<string, KeepDecision>
+): ComparedTag {
+  const remote = published?.get(tag.name) ?? null;
+  let status: TagSyncStatus;
+  if (published === null) status = "unchecked";
+  else if (remote === null) status = "local_only";
+  else if (remote.objectId === tag.objectId) status = "same";
+  else {
+    const keep = keeps.get(tag.name);
+    status =
+      keep !== undefined &&
+      keep.localObjectId === tag.objectId &&
+      keep.remoteObjectId === remote.objectId
+        ? "kept_local"
+        : "differs";
+  }
+  return { name: tag.name, status, local: tag, published: remote };
+}
+
+/** Which rows differ, as one comparable string: names and both object ids. */
+function differsSignature(rows: ComparedTag[]): string {
+  return rows
+    .filter((row) => row.status === "differs")
+    .map((row) => `${row.name}\0${row.local?.objectId ?? ""}\0${row.published?.objectId ?? ""}`)
+    .sort()
+    .join("\n");
+}
+
 export function compareTags(
   local: LocalTagRef[],
   published: Map<string, ListedTag> | null,
@@ -306,21 +338,7 @@ export function compareTags(
   const localNames = new Set<string>();
   for (const tag of local) {
     localNames.add(tag.name);
-    const remote = published?.get(tag.name) ?? null;
-    let status: TagSyncStatus;
-    if (published === null) status = "unchecked";
-    else if (remote === null) status = "local_only";
-    else if (remote.objectId === tag.objectId) status = "same";
-    else {
-      const keep = keeps.get(tag.name);
-      status =
-        keep !== undefined &&
-        keep.localObjectId === tag.objectId &&
-        keep.remoteObjectId === remote.objectId
-          ? "kept_local"
-          : "differs";
-    }
-    rows.push({ name: tag.name, status, local: tag, published: remote });
+    rows.push(classifyLocal(tag, published, keeps));
   }
   const remoteOnly = published === null
     ? []
@@ -551,13 +569,38 @@ export class TagSourceStore {
    * chosen remote, else origin, else none.
    */
   attention(repoId: string, remotes: readonly string[]): { remote: string; differs: number } | undefined {
-    const chosen = this.chosenPrimary(repoId);
-    const remote =
-      chosen !== null && remotes.includes(chosen) ? chosen : remotes.includes("origin") ? "origin" : null;
+    const remote = this.publisherOf(repoId, remotes);
     if (remote === null) return undefined;
     const meta = this.snapshot(repoId, remote);
     if (meta === null || meta.checked_at_ms === null || meta.differs <= 0) return undefined;
     return { remote, differs: meta.differs };
+  }
+
+  /** The publisher as `TagSources.resolve` picks it, from configured remote names. */
+  publisherOf(repoId: string, remotes: readonly string[]): string | null {
+    const chosen = this.chosenPrimary(repoId);
+    return chosen !== null && remotes.includes(chosen) ? chosen : remotes.includes("origin") ? "origin" : null;
+  }
+
+  /**
+   * The local tags among `local` that differ from the publisher's stored
+   * listing, each with the published value: the rows the count line counts,
+   * for the surfaces that draw a tag by name (sidebar rows, lineage chips).
+   * Database only. A tag kept local, never listed, or listed the same is not
+   * here.
+   */
+  moves(repoId: string, remotes: readonly string[], local: readonly LocalTagRef[]): Map<string, RemoteTagValue> {
+    const moved = new Map<string, RemoteTagValue>();
+    const remote = this.publisherOf(repoId, remotes);
+    if (remote === null || local.length === 0) return moved;
+    const published = this.tags(repoId, remote);
+    if (published === null) return moved;
+    const keeps = this.keeps(repoId, remote);
+    for (const tag of local) {
+      const row = classifyLocal(tag, published, keeps);
+      if (row.status === "differs" && row.published !== null) moved.set(tag.name, remoteValue(remote, row.published));
+    }
+    return moved;
   }
 }
 
@@ -575,7 +618,13 @@ const iso = (ms: number | null): string | null => (ms === null ? null : new Date
 export class TagSources {
   readonly store: TagSourceStore;
   /** One listing per repository and remote at a time; a second asker shares it. */
-  private readonly inFlight = new Map<string, Promise<Result<void>>>();
+  private readonly inFlight = new Map<string, Promise<Result<boolean>>>();
+  /**
+   * The differing set last recorded per repository and remote. The stored
+   * count alone misses a tag that moves while another is taken (10 stays 10),
+   * and the sidebar rows and lineage chips draw names, not the count.
+   */
+  private readonly differing = new Map<string, string>();
   /** Creator-date order per checkout, reused while the name+id listing is unchanged. */
   private readonly orders = new Map<string, { raw: string; tags: LocalTagRef[] }>();
 
@@ -661,7 +710,7 @@ export class TagSources {
    * was stopped: a background check yields to a tracked one by aborting, and
    * the tracked caller must not inherit that abort.
    */
-  async refresh(git: GitExec, repoId: string, cwd: string, remote: string): Promise<Result<void>> {
+  async refresh(git: GitExec, repoId: string, cwd: string, remote: string): Promise<Result<boolean>> {
     const key = `${repoId}\0${remote}`;
     const running = this.inFlight.get(key);
     if (running !== undefined) {
@@ -677,7 +726,8 @@ export class TagSources {
     }
   }
 
-  private async list(git: GitExec, repoId: string, cwd: string, remote: string): Promise<Result<void>> {
+  /** True when the publisher's differing set moved (its rows need redrawing). */
+  private async list(git: GitExec, repoId: string, cwd: string, remote: string): Promise<Result<boolean>> {
     const config = await readRemoteConfig(git, cwd);
     if (!config.ok) return config;
     const target = config.value.find((candidate) => candidate.name === remote);
@@ -695,22 +745,34 @@ export class TagSources {
     }
     this.store.recordListing(repoId, remote, target.url, listed.value, this.now());
     const source = this.resolve(repoId, config.value);
-    if (source.state.primary === remote) {
-      const recount = await this.recount(git, repoId, cwd, remote);
-      if (!recount.ok) return recount;
-    }
-    return ok(undefined);
+    if (source.state.primary === remote) return this.recount(git, repoId, cwd, remote);
+    return ok(false);
   }
 
-  /** Re-derive the stored "differs" count; true when it moved. */
+  /** Re-derive the stored "differs" count; true when it or the differing set moved. */
   async recount(git: GitExec, repoId: string, cwd: string, remote: string): Promise<Result<boolean>> {
     // Never listed: nothing can differ, and no local tag needs reading.
     const published = this.store.tags(repoId, remote);
     if (published === null) return ok(false);
     const local = await readLocalTagRefs(git, cwd);
     if (!local.ok) return local;
-    const { counts } = compareTags(local.value.tags, published, this.store.keeps(repoId, remote));
-    return ok(this.store.setDiffers(repoId, remote, counts.differs));
+    const compared = compareTags(local.value.tags, published, this.store.keeps(repoId, remote));
+    return ok(this.recordComparison(repoId, remote, compared));
+  }
+
+  /** Store the count and remember the set; true when either moved. */
+  private recordComparison(
+    repoId: string,
+    remote: string,
+    compared: { rows: ComparedTag[]; counts: TagStatusCounts }
+  ): boolean {
+    const countMoved = this.store.setDiffers(repoId, remote, compared.counts.differs);
+    const key = `${repoId}\0${remote}`;
+    const signature = differsSignature(compared.rows);
+    // Unknown after a launch counts as empty: the stored count covers that case.
+    const setMoved = (this.differing.get(key) ?? "") !== signature;
+    this.differing.set(key, signature);
+    return countMoved || setMoved;
   }
 
   /** The Tags tab. No network; only the requested page's rich rows are read. */
@@ -731,7 +793,7 @@ export class TagSources {
     const keeps = remote === null ? new Map<string, KeepDecision>() : this.store.keeps(repoId, remote.name);
     const { rows, counts } = compareTags(local.value, published, keeps);
     const differsChanged =
-      remote !== null && published !== null && this.store.setDiffers(repoId, remote.name, counts.differs);
+      remote !== null && published !== null && this.recordComparison(repoId, remote.name, { rows, counts });
 
     const needle = query.trim().toLowerCase();
     let rich: Map<string, TagSummary> | null = null;

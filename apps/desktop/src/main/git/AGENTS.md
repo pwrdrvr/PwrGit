@@ -120,6 +120,15 @@ missing names. A tag re-cut on origin therefore stays at its old object here.
   that pins the previous value under `refs/pwrgit/replaced-tags/<ms>/<n>`,
   swaps `refs/tags/<n>` with its old value as the lease, and drops the staging
   ref. An OID kept only in SQLite would not survive `gc`.
+- **A moved tag is marked wherever it is drawn by name, not only counted.**
+  The sidebar's preview rows (`repo:refs` `tagMoves`) and the lineage
+  (`graph:lanes` `movedTags`, computed per request, never cached with the
+  lanes) both read `TagSourceStore.moves`, the same comparison as the count.
+  Their chips take the value through the Tags tab's one flow
+  (`take-published-tag.ts`). PwrAgent's re-cut v1.4.1 was counted in
+  "10 tags differ" while its row and chip looked current. A re-count returns
+  true when the differing *set* moves, even at the same count; that is what
+  emits `graph:changed`. Design: `design/Moved Tags Where You Look - UX Review.dc.html`.
 - **Read local tags as name + id only** for comparisons. `objecttype`,
   `*objectname` or `creatordate` read every object (27 ms -> ~400 ms on 20,000
   tags). The tab's creator-date order is cached until that listing changes.

@@ -56,10 +56,9 @@ export function registerTagHandlers(bus: CommandBus, db: DB): void {
     });
     if (!page.ok) return page;
     const { differsChanged, ...value } = page.value;
-    // The sidebar's "N tags differ" line reads the stored count.
-    if (differsChanged) {
-      emitEvent("repo:changed", { profileId: repo.profile_id, repoIds: [req.repoId] });
-    }
+    // The sidebar's "N tags differ" line, its rows and the lineage chips
+    // read the stored comparison.
+    if (differsChanged) tagsMoved(req.repoId, repo.profile_id);
     return ok(value);
   });
 
@@ -74,9 +73,8 @@ export function registerTagHandlers(bus: CommandBus, db: DB): void {
     tagSources.setPrimary(req.repoId, req.remote);
     logMain("info", "tag", `published tag source for ${repo.path} is now ${req.remote}`);
     const recount = await tagSources.recountPublisher(execGit, req.repoId, repo.path);
-    if (recount.ok) {
-      emitEvent("repo:changed", { profileId: repo.profile_id, repoIds: [req.repoId] });
-    }
+    // Another publisher marks other tags, even when the count is the same.
+    if (recount.ok) tagsMoved(req.repoId, repo.profile_id);
     const next = await tagSources.source(execGit, req.repoId, repo.path);
     return next.ok ? ok(next.value.state) : next;
   });
@@ -92,9 +90,7 @@ export function registerTagHandlers(bus: CommandBus, db: DB): void {
       `${req.keep ? "keeping" : "no longer keeping"} local ${req.name} ${req.localObjectId.slice(0, 12)} over ${req.remote} ${req.remoteObjectId.slice(0, 12)}`
     );
     const recount = await tagSources.recountPublisher(execGit, req.repoId, repo.path);
-    if (recount.ok && recount.value) {
-      emitEvent("repo:changed", { profileId: repo.profile_id, repoIds: [req.repoId] });
-    }
+    if (recount.ok && recount.value) tagsMoved(req.repoId, repo.profile_id);
     return ok(null);
   });
 

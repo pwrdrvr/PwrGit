@@ -1,0 +1,264 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Moved Tags Where You Look</title>
+    <script src="./support.js"></script>
+  </head>
+  <body>
+    <x-dc>
+      <helmet data-dc-atomics>
+        <meta name="design_doc_mode" content="canvas" />
+        <link href="https://fonts.googleapis.com/css2?family=Geist:wght@400..700&amp;family=Geist+Mono:wght@400..700&amp;display=swap" rel="stylesheet" />
+        <style>
+          /* PwrGit tokens.css, light theme (the screenshots were taken in it). */
+          :root {
+            --bg: #ffffff; --side: #f7f4ef; --panel: #fdfcfa; --hover: #f4f0e8; --hover2: #ebe5da;
+            --rowact: #fff5e9; --actstrong: #ffe8cf;
+            --line: rgba(0,0,0,.08); --line2: rgba(0,0,0,.12); --line3: rgba(0,0,0,.18);
+            --t1: #1a1612; --t2: #524a40; --t3: #736c64;
+            --acc: #b74c00; --accb: #994c00; --accon: #ffffff;
+            --asoft: color-mix(in srgb, #b74c00 12%, transparent); --abord: color-mix(in srgb, #b74c00 42%, transparent);
+            --warn: #805200; --warnsoft: color-mix(in srgb, #805200 14%, transparent); --warnbord: color-mix(in srgb, #805200 45%, transparent);
+            --ok: #2e7d3c; --lane2: #2f8a4a; --lane3: #2f5fbf;
+            --bad: #a8472a;
+            --sans: "Geist", "SF Pro Text", "Inter", system-ui, sans-serif;
+            --mono: "Geist Mono", "SF Mono", "JetBrains Mono", Consolas, monospace;
+          }
+          *, *::before, *::after { box-sizing: border-box; }
+          html, body { margin: 0; background: #f2efe9; font-family: var(--sans); color: var(--t1); }
+
+          .dv-turn { padding: 40px 44px 32px; border-bottom: 1px solid var(--line2); }
+          .dv-thd { display: flex; align-items: baseline; gap: 10px; margin: 0 0 6px; }
+          .dv-tid { font: 600 10px var(--mono); padding: 3px 7px; background: var(--t1); color: #fff; border-radius: 4px; }
+          .dv-tname { font: 600 13px/1.2 var(--sans); color: var(--t1); margin: 0; }
+          .dv-sub { margin: 0 0 22px; font: 400 12px/1.55 var(--sans); color: var(--t2); max-width: 900px; text-wrap: pretty; }
+          .dv-sub b, .note b { color: var(--t1); font-weight: 600; }
+          .dv-opts { display: flex; flex-wrap: wrap; gap: 28px; align-items: flex-start; }
+          .dv-opt { flex: none; display: flex; flex-direction: column; gap: 9px; scroll-margin-top: 16px; }
+          .dv-oid { font: 600 10.5px var(--mono); padding: 3px 7px; background: rgba(0,0,0,.07); color: var(--t1); border-radius: 5px; }
+          .dv-opt:target .dv-oid { background: var(--acc); color: var(--accon); }
+          .dv-olabel { display: flex; align-items: baseline; gap: 8px; font: 400 11.5px/1.3 var(--sans); color: var(--t2); max-width: 900px; }
+          .dv-next { margin: 22px 0 0; font: 12px/1.5 var(--sans); color: var(--t3); }
+          .note { margin: 0; font: 400 11px/1.55 var(--sans); color: var(--t2); text-wrap: pretty; max-width: 470px; }
+          .note code, .dv-sub code, td code { font: 500 10.5px/1.4 var(--mono); color: var(--t1); }
+          .pin { display: inline-flex; align-items: center; justify-content: center; flex: none; width: 15px; height: 15px; border-radius: 999px; background: var(--bad); color: #fff; font: 700 9px/1 var(--mono); vertical-align: -2px; }
+          .pin.ok { background: var(--ok); }
+
+          /* sidebar refs block, from app.css */
+          .sb { width: 470px; background: var(--side); border: 1px solid var(--line2); border-radius: 10px; padding: 8px 10px 10px; box-shadow: 0 10px 30px rgba(0,0,0,.08); }
+          .sec { display: flex; align-items: center; gap: 7px; padding: 6px 6px; font: 500 12px var(--mono); color: var(--t2); }
+          .row { position: relative; display: flex; align-items: center; gap: 8px; height: 36px; padding: 0 6px 0 14px; border-radius: 6px; font: 500 13px var(--mono); color: var(--t1); }
+          .row:hover { background: var(--hover); }
+          .row .glyph { color: var(--acc); flex: none; }
+          .row .name { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+          .row .sha { flex: none; font: 500 11px var(--mono); color: var(--t3); }
+          .mini { flex: none; display: inline-flex; align-items: center; justify-content: center; width: 24px; height: 24px; border-radius: 6px; border: 1px solid transparent; background: transparent; color: var(--t3); cursor: pointer; }
+          .mini:hover { border-color: var(--line2); background: #fff; color: var(--t1); }
+          .attn { display: flex; align-items: center; gap: 8px; width: 100%; height: 30px; margin-top: 4px; padding: 0 10px; border: 0; border-radius: 6px; background: var(--hover2); font: 500 12px var(--mono); color: var(--warn); cursor: pointer; text-align: left; }
+          .attn .dot { width: 6px; height: 6px; border-radius: 999px; background: var(--warn); flex: none; }
+          .attn .go { margin-left: auto; color: var(--acc); }
+          .viewall { display: block; margin: 6px 0 0 6px; font: 500 12px var(--mono); color: var(--acc); }
+
+          /* 2a: the moved row */
+          .row.moved { background: var(--warnsoft); }
+          .row.moved .sha.old { text-decoration: line-through; text-decoration-color: var(--warnbord); }
+          .moved-chip { flex: none; display: inline-flex; align-items: center; gap: 5px; height: 22px; padding: 0 8px; border: 1px solid var(--warnbord); border-radius: 999px; background: #fff; color: var(--warn); font: 600 11px var(--mono); cursor: pointer; }
+          .moved-chip:hover { background: var(--warn); color: #fff; border-color: var(--warn); }
+          .moved-chip:focus-visible, .mini:focus-visible, .attn:focus-visible, .gchip:focus-visible, .btn:focus-visible { outline: 2px solid var(--acc); outline-offset: 2px; }
+          .tip { position: absolute; right: 36px; top: 34px; z-index: 2; width: 300px; padding: 9px 11px; border-radius: 8px; background: #fff; border: 1px solid var(--line2); box-shadow: 0 12px 32px rgba(0,0,0,.14); font: 400 11.5px/1.45 var(--sans); color: var(--t2); white-space: normal; }
+          .tip b { color: var(--t1); }
+
+          /* confirm, from ConfirmDialog */
+          .dlg { width: 470px; background: #fff; border: 1px solid var(--line2); border-radius: 12px; box-shadow: 0 24px 60px rgba(0,0,0,.18); padding: 18px 18px 14px; }
+          .dlg h3 { margin: 0 0 8px; font: 650 14px/1.3 var(--sans); }
+          .dlg p { margin: 0 0 14px; font: 400 12px/1.55 var(--sans); color: var(--t2); }
+          .dlg p code { font: 500 11px var(--mono); color: var(--t1); }
+          .dlg-foot { display: flex; justify-content: flex-end; gap: 8px; }
+          .btn { height: 30px; padding: 0 14px; border-radius: 7px; border: 1px solid var(--line3); background: #fff; font: 600 12px var(--sans); color: var(--t1); cursor: pointer; }
+          .btn.primary { background: var(--acc); border-color: var(--acc); color: var(--accon); }
+
+          /* lineage rows, from LineageGraph */
+          .lg { width: 760px; background: var(--bg); border: 1px solid var(--line2); border-radius: 10px; overflow: hidden; box-shadow: 0 10px 30px rgba(0,0,0,.08); }
+          .lrow { position: relative; display: grid; grid-template-columns: 70px 1fr; align-items: center; height: 72px; border-bottom: 1px solid var(--line); }
+          .lrow.sel { background: #f9e3d8; }
+          .lane { position: relative; height: 100%; }
+          .lane::before { content: ""; position: absolute; left: 24px; top: 0; bottom: 0; width: 2px; background: #c8692f; }
+          .lane::after { content: ""; position: absolute; left: 46px; top: 0; bottom: 0; width: 2px; background: var(--lane2); }
+          .lane .dot { position: absolute; left: 19px; top: 30px; width: 12px; height: 12px; border-radius: 999px; background: #c8692f; border: 2px solid var(--bg); }
+          .lbody { display: flex; flex-direction: column; gap: 6px; padding-right: 14px; min-width: 0; }
+          .lline { display: flex; align-items: center; gap: 10px; min-width: 0; }
+          .hash { flex: none; padding: 2px 7px; border: 1px solid var(--line2); border-radius: 6px; font: 500 11.5px var(--mono); color: var(--t2); }
+          .subj { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: 650 13.5px var(--sans); }
+          .age { flex: none; font: 500 12px var(--mono); color: var(--t2); }
+          .pill { display: inline-flex; align-items: center; gap: 5px; height: 22px; padding: 0 8px; border-radius: 999px; border: 1px solid var(--line2); font: 600 11.5px var(--mono); color: var(--t2); }
+          .pill.pr::before { content: ""; width: 7px; height: 7px; border-radius: 999px; background: var(--brand, #6a4ba8); }
+          .gchip { display: inline-flex; align-items: center; gap: 5px; height: 22px; padding: 0 8px; border-radius: 999px; border: 1px solid var(--abord); background: #fff; color: var(--acc); font: 600 11.5px var(--mono); cursor: pointer; }
+          .gchip.moved { border-style: dashed; border-color: var(--warnbord); color: var(--warn); background: var(--warnsoft); }
+          .gchip.ghost { border-style: dashed; border-color: var(--warnbord); color: var(--warn); background: transparent; }
+          .gchip.ghost:hover, .gchip.moved:hover { background: var(--warn); color: #fff; border-color: var(--warn); }
+          .gchip .rmt { font-weight: 500; opacity: .8; }
+
+          table.facts { border-collapse: collapse; font: 400 12px/1.4 var(--sans); color: var(--t2); background: #fff; border: 1px solid var(--line2); border-radius: 10px; overflow: hidden; }
+          table.facts th, table.facts td { text-align: left; padding: 8px 12px; border-bottom: 1px solid var(--line); vertical-align: top; }
+          table.facts th { font: 600 10px/1 var(--sans); letter-spacing: .06em; text-transform: uppercase; color: var(--t3); background: var(--panel); }
+          table.facts tr:last-child td { border-bottom: 0; }
+          .bad-t { color: var(--bad); font-weight: 600; }
+          .ok-t { color: var(--ok); font-weight: 600; }
+        </style>
+      </helmet>
+
+      <!-- ============================== TURN 1 ============================== -->
+      <section class="dv-turn">
+        <div class="dv-thd"><span class="dv-tid">1</span><h2 class="dv-tname">Findings: the moved tag was detected but not shown where you look</h2></div>
+        <p class="dv-sub">
+          PwrAgent's <code>v1.4.1</code> was tagged on <code>10f7471</code> (chore(release): prepare v1.4.1) at 04:10 PT on Nov 12, then re-cut on origin at 12:56 PT on <code>0e7e3db</code> (fix(tests) #3666).
+          The fetch kept the local tag, as Git does. PwrGit's tag check at 06:20 on Nov 13 <b>did</b> record origin's value, and <code>v1.4.1</code> is one of the
+          <b>10 tags that differ from origin</b>. Nothing is broken in detection. The problem is where the result appears: one count line under the tag list,
+          while the <code>v1.4.1</code> row and its lineage chip both look correct.
+        </p>
+        <div class="dv-opts">
+          <div class="dv-opt" id="1a">
+            <div class="dv-olabel"><span class="dv-oid">1a</span>Before: the sidebar as shipped (0.58.0)</div>
+            <div class="sb" aria-label="Sidebar tags, before">
+              <div class="sec">▾ <span aria-hidden="true">⌂</span> 118</div>
+              <div class="row"><span class="glyph" aria-hidden="true">◇</span><span class="name">v1.4.1</span><span class="sha">10f7471</span><span class="pin" aria-label="Finding 1">1</span><button class="mini" aria-label="Locate tag v1.4.1 in lineage">⌖</button></div>
+              <div class="row"><span class="glyph" aria-hidden="true">◇</span><span class="name">v1.4.0</span><span class="sha">afb18d4</span><button class="mini" aria-label="Locate tag v1.4.0 in lineage">⌖</button></div>
+              <div class="row"><span class="glyph" aria-hidden="true">◇</span><span class="name">v1.3.16</span><span class="sha">f256367</span><button class="mini" aria-label="Locate tag v1.3.16 in lineage">⌖</button></div>
+              <div class="row"><span class="glyph" aria-hidden="true">◇</span><span class="name">v1.3.15</span><span class="sha">bea7442</span><button class="mini" aria-label="Locate tag v1.3.15 in lineage">⌖</button></div>
+              <button class="attn"><span class="dot" aria-hidden="true"></span>10 tags differ from origin<span class="pin" aria-label="Finding 2">2</span><span class="go">Review…</span></button>
+              <a class="viewall" href="#1a">View all 118 tags…</a>
+            </div>
+            <p class="note"><span class="pin">1</span> <b>The row is wrong and looks right.</b> The original review found exactly this in the Tags tab (Published Tags 1a). The fix gave the tab its badges but left the sidebar row and the lineage chip as they were.</p>
+            <p class="note"><span class="pin">2</span> <b>The count does not change identity.</b> Eight of the ten are older re-cuts (alphas from August through v1.3.10). The line had already been on screen for weeks, so <code>v1.4.1</code> and <code>v1.4.0</code> joining it changed one number. Nothing read as new.</p>
+          </div>
+
+          <div class="dv-opt" id="1b">
+            <div class="dv-olabel"><span class="dv-oid">1b</span>What PwrGit knew, from its own database (read-only)</div>
+            <table class="facts">
+              <thead><tr><th>Tag</th><th>Local peels to</th><th>origin peels to</th><th>Shown on row?</th></tr></thead>
+              <tbody>
+                <tr><td><code>v1.4.1</code></td><td><code>10f7471</code></td><td><code>0e7e3db</code></td><td class="bad-t">No</td></tr>
+                <tr><td><code>v1.4.0</code></td><td><code>afb18d4</code></td><td><code>241ae62</code></td><td class="bad-t">No</td></tr>
+                <tr><td><code>v1.3.10</code></td><td><code>0145e0f</code></td><td><code>ff9b702</code></td><td class="bad-t">No</td></tr>
+                <tr><td>7 more</td><td colspan="2">v1.3.6, v1.3.5, v1.1.5, v1.1.0-beta.2, -alpha.4, -alpha.3, -alpha.1</td><td>(not in the 6-row preview)</td></tr>
+                <tr><td colspan="3">Snapshot <code>origin</code>, checked 06:20, 84 published tags, <code>differs = 10</code></td><td class="ok-t">Count only</td></tr>
+              </tbody>
+            </table>
+            <p class="note">Every origin commit is already present locally, so <b>Take origin's</b> is one local ref update. It needs no download.</p>
+          </div>
+        </div>
+      </section>
+
+      <!-- ============================== TURN 2 ============================== -->
+      <section class="dv-turn">
+        <div class="dv-thd"><span class="dv-tid">2</span><h2 class="dv-tname">Sidebar: the row that moved says so, and offers the fix</h2></div>
+        <p class="dv-sub">
+          <b>Recommended: 2a.</b> A preview row whose tag differs from the published remote gets a warm wash and a <b>split value</b>: the local hash, struck through, then an
+          <code>origin 0e7e3db</code> chip. The chip is a real button that opens the same <b>Take origin's</b> confirm the Tags tab uses, so the fix is one click and one confirm.
+          The data is the same stored comparison the count line already uses (SQLite, limited to the six preview names). It adds no Git process and no network call.
+          "Kept local" rows stay quiet, and the count line stays for tags outside the preview.
+        </p>
+        <div class="dv-opts">
+          <div class="dv-opt" id="2a">
+            <div class="dv-olabel"><span class="dv-oid">2a</span>After: marked rows, hover card, one-click Take</div>
+            <div class="sb" aria-label="Sidebar tags, after">
+              <div class="sec">▾ <span aria-hidden="true">⌂</span> 118</div>
+              <div class="row moved">
+                <span class="glyph" aria-hidden="true">◇</span><span class="name">v1.4.1</span>
+                <span class="sha old">10f7471</span>
+                <button class="moved-chip" aria-label="v1.4.1 moved on origin to 0e7e3db. Take origin's…">origin 0e7e3db</button>
+                <button class="mini" aria-label="Locate tag v1.4.1 in lineage">⌖</button>
+                <div class="tip" role="tooltip"><b>origin moved v1.4.1</b><br />Local: 10f7471 · chore(release): prepare v1.4.1<br />origin: 0e7e3db · fix(tests): use owned Git…<br />Click to take origin's. Keep local is in Review.</div>
+              </div>
+              <div class="row moved">
+                <span class="glyph" aria-hidden="true">◇</span><span class="name">v1.4.0</span>
+                <span class="sha old">afb18d4</span>
+                <button class="moved-chip" aria-label="v1.4.0 moved on origin to 241ae62. Take origin's…">origin 241ae62</button>
+                <button class="mini" aria-label="Locate tag v1.4.0 in lineage">⌖</button>
+              </div>
+              <div class="row"><span class="glyph" aria-hidden="true">◇</span><span class="name">v1.3.16</span><span class="sha">f256367</span><button class="mini" aria-label="Locate tag v1.3.16 in lineage">⌖</button></div>
+              <div class="row"><span class="glyph" aria-hidden="true">◇</span><span class="name">v1.3.15</span><span class="sha">bea7442</span><button class="mini" aria-label="Locate tag v1.3.15 in lineage">⌖</button></div>
+              <button class="attn"><span class="dot" aria-hidden="true"></span>10 tags differ from origin<span class="go">Review…</span></button>
+              <a class="viewall" href="#2a">View all 118 tags…</a>
+            </div>
+            <p class="note">The chip sits before Locate, so Locate keeps its column. The hover card names both commits by subject, which is how you tell a re-cut from a mistake. The chip's accessible name carries the action, and Keep local stays in Review, where every value is shown.</p>
+          </div>
+
+          <div class="dv-opt" id="2b">
+            <div class="dv-olabel"><span class="dv-oid">2b</span>The chip's click: the Tags tab's own confirm</div>
+            <div class="dlg" role="dialog" aria-label="Replace local tag v1.4.1">
+              <h3>Replace local tag v1.4.1 with origin's?</h3>
+              <p>Local v1.4.1 points at <code>10f74711519a</code> (annotated). origin's points at <code>0e7e3dbf3e81</code> (annotated). PwrGit fetches only this tag from origin. Your current tag is kept as <code>refs/pwrgit/replaced-tags/…/v1.4.1</code>, and Restore in the tag's details puts it back.</p>
+              <div class="dlg-foot"><button class="btn">Cancel</button><button class="btn primary">Take origin's</button></div>
+            </div>
+            <p class="note">Same text, same <code>tag:adoptRemote</code> lease (both expected object ids). A tag moved again since the check is refused and asks for a refresh, as in the Tags tab. When the commit is missing locally, the chip says <b>Download…</b> and uses the Tags tab's download confirm.</p>
+          </div>
+
+          <div class="dv-opt" id="2c">
+            <div class="dv-olabel"><span class="dv-oid">2c</span>Rejected: a louder count line</div>
+            <div class="sb" aria-label="Sidebar, louder line only">
+              <div class="row"><span class="glyph" aria-hidden="true">◇</span><span class="name">v1.4.1</span><span class="sha">10f7471</span><button class="mini" aria-label="Locate tag v1.4.1 in lineage">⌖</button></div>
+              <button class="attn" style="background: var(--warn); color: #fff;"><span class="dot" aria-hidden="true" style="background:#fff"></span>v1.4.1 and 9 more differ from origin<span class="go" style="color:#fff">Review…</span></button>
+            </div>
+            <p class="note">Naming the newest tag helps a little, but the row above still says <code>10f7471</code> without qualification, and a louder line becomes wallpaper the same way within a week.</p>
+          </div>
+        </div>
+      </section>
+
+      <!-- ============================== TURN 3 ============================== -->
+      <section class="dv-turn">
+        <div class="dv-thd"><span class="dv-tid">3</span><h2 class="dv-tname">Lineage: mark the chip, and draw origin's tag where it now points</h2></div>
+        <p class="dv-sub">
+          The graph is where you checked. <b>Recommended: 3a.</b> The local <code>v1.4.1</code> chip on <code>10f7471</code> turns dashed amber. Origin's value is drawn as a ghost chip on
+          <code>0e7e3db</code>, using the dashed style the graph already uses for fetched work that has not been applied. Both chips open the 2b confirm. Only tags that differ from the
+          <b>published</b> remote are drawn, only on commits already on screen, and only from the stored snapshot. Building the graph runs no extra Git.
+        </p>
+        <div class="dv-opts">
+          <div class="dv-opt" id="3a">
+            <div class="dv-olabel"><span class="dv-oid">3a</span>After: both values in the lineage</div>
+            <div class="lg" aria-label="Lineage, after">
+              <div class="lrow">
+                <div class="lane" aria-hidden="true"><span class="dot"></span></div>
+                <div class="lbody">
+                  <div class="lline"><span class="hash">0e7e3db</span><span class="subj">fix(tests): use owned Git for same-worktree metadata oracle</span><span class="age">17h 28m</span></div>
+                  <div class="lline"><span class="pill pr">merged #3666</span><button class="gchip ghost" aria-label="origin's v1.4.1 points here. Take origin's…"><span class="rmt">origin</span> v1.4.1</button><span class="age" style="color:var(--t3)">you</span></div>
+                </div>
+              </div>
+              <div class="lrow sel">
+                <div class="lane" aria-hidden="true"><span class="dot"></span></div>
+                <div class="lbody">
+                  <div class="lline"><span class="hash">10f7471</span><span class="subj">chore(release): prepare v1.4.1</span><span class="age">1d</span></div>
+                  <div class="lline"><button class="gchip moved" aria-label="v1.4.1, moved on origin to 0e7e3db. Take origin's…">◇ v1.4.1 <span class="rmt">· moved</span></button><span class="age" style="color:var(--t3)">you</span></div>
+                </div>
+              </div>
+            </div>
+            <p class="note">Tooltip on the moved chip: “origin's v1.4.1 is at 0e7e3db (fix(tests): use owned Git…). Click to take origin's.” The ghost's tooltip reads the other way round. After Take, the ghost becomes the solid chip and the old row loses its chip. The graph refreshes on <code>repo:changed</code>, as it does for any tag command.</p>
+          </div>
+          <div class="dv-opt" id="3b">
+            <div class="dv-olabel"><span class="dv-oid">3b</span>Edge cases</div>
+            <table class="facts" style="max-width: 470px">
+              <thead><tr><th>Case</th><th>Drawn</th></tr></thead>
+              <tbody>
+                <tr><td>Origin's commit is off screen</td><td>Moved chip only; its tooltip names the hash</td></tr>
+                <tr><td>Kept local</td><td>Nothing: you decided</td></tr>
+                <tr><td>Remote-only tag</td><td>Nothing: common and no decision needed (as in the sidebar)</td></tr>
+                <tr><td>Never checked / no publisher</td><td>Nothing</td></tr>
+                <tr><td>Ghost on a commit that already has a local tag chip</td><td>Both: the row shows the local tag and the ghost</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+        <p class="dv-next">Try next: “the moved chip at a 222px sidebar” · “what the hover card says for Download” · “a ghost on a commit with two branch tips”</p>
+      </section>
+    </x-dc>
+    <script type="text/x-dc" data-dc-script data-props='{}'>
+class Component extends DCLogic {
+  renderVals() {
+    return {};
+  }
+}
+    </script>
+  </body>
+</html>

@@ -115,7 +115,7 @@ export class TagAutoChecks {
     const repo = this.repoOf(repoId);
     if (repo === null) return;
     const moved = await this.sources.recountPublisher(this.git, repoId, repo.path);
-    if (moved.ok && moved.value) this.announce(repoId, repo);
+    if (moved.ok && moved.value) this.announce(repoId, repo, true);
   }
 
   private list(repoId: string, ttlMs: number, reason: string): Promise<boolean> {
@@ -163,7 +163,7 @@ export class TagAutoChecks {
       }
       this.failedAt.delete(failedKey);
       logMain("info", "tag", `listed ${state.primary}'s tags for ${repo.path} (${reason}, ${((this.now() - startedAt) / 1000).toFixed(1)}s)`);
-      this.announce(repoId, repo);
+      this.announce(repoId, repo, refreshed.value);
       return true;
     } finally {
       aborts.delete(controller);
@@ -179,8 +179,10 @@ export class TagAutoChecks {
     );
   }
 
-  private announce(repoId: string, repo: RepoRow): void {
+  /** The sidebar re-reads its count and rows; the lineage only when a moved tag came or went. */
+  private announce(repoId: string, repo: RepoRow, movedSetChanged: boolean): void {
     emitEvent("repo:changed", { profileId: repo.profileId, repoIds: [repoId] });
+    if (movedSetChanged) emitEvent("graph:changed", { repoId });
   }
 }
 

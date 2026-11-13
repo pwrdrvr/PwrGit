@@ -16,6 +16,7 @@ import {
   type CommitAuthorPerson,
   type CommitStats,
   type LaneGraph,
+  type MovedTag,
   type PrSummary
 } from "@pwrgit/shared";
 import { announce } from "../../lib/announce";
@@ -25,6 +26,7 @@ import { useFitLadder } from "../../lib/useFitLadder";
 import { useMenuNavigation } from "../../lib/useMenuNavigation";
 import { useHoverIntent } from "../../lib/hoverIntent";
 import { dispatch, subscribe } from "../../lib/pwrgit";
+import { takePublishedTag } from "../sidebar/take-published-tag";
 import { showErrorToast, showInfoToast } from "../../lib/toast";
 import { useRelativeClock } from "../../lib/useRelativeClock";
 import {
@@ -572,6 +574,14 @@ export function LineageGraph({
     for (const [h, ns] of Object.entries(tips)) {
       for (const n of ns) localTipByName.set(n, h);
     }
+    // Tags whose published value differs: the local chip is marked where it
+    // stands, and the published value is drawn where it points (3a).
+    const movedAt = new Map<string, MovedTag[]>();
+    const publishedAt = new Map<string, MovedTag[]>();
+    for (const moved of data?.movedTags ?? []) {
+      movedAt.set(moved.local.targetId, [...(movedAt.get(moved.local.targetId) ?? []), moved]);
+      publishedAt.set(moved.published.targetId, [...(publishedAt.get(moved.published.targetId) ?? []), moved]);
+    }
     return commits.map((commit, i) => {
       const pullRequest = commitPullRequests[commit.hash];
       const names = tips[commit.hash] ?? [];
@@ -594,13 +604,20 @@ export function LineageGraph({
         }
         return [n];
       });
+      const tag = revealCommit?.hash === commit.hash && revealCommit.tagName !== undefined
+        ? { name: revealCommit.tagName, kind: revealCommit.tagKind ?? "lightweight" as const }
+        : data?.tags?.[commit.hash];
+      const tagMoved = tag === undefined
+        ? undefined
+        : movedAt.get(commit.hash)?.find((moved) => moved.name === tag.name);
+      const publishedTags = publishedAt.get(commit.hash);
       return {
         commit,
         row: layout.rows[i] ?? { lane: 0, top: [], bottom: [] },
         refs,
-        tag: revealCommit?.hash === commit.hash && revealCommit.tagName !== undefined
-          ? { name: revealCommit.tagName, kind: revealCommit.tagKind ?? "lightweight" }
-          : data?.tags?.[commit.hash],
+        tag,
+        ...(tagMoved === undefined ? {} : { tagMoved }),
+        ...(publishedTags === undefined ? {} : { publishedTags }),
         remoteRefs,
         isHead: commit.hash === head,
         isHeadOnly: headOnlyCommits.has(commit.hash),
@@ -835,6 +852,11 @@ export function LineageGraph({
     personCard.hide();
     setBranchMenu(null);
     setCommitMenu({ hash: vm.commit.hash, ...position });
+  };
+
+  /** A moved or published tag chip: the Tags tab's own Take. */
+  const takeTag = (moved: MovedTag): void => {
+    void takePublishedTag({ repoId, name: moved.name, local: moved.local, published: moved.published });
   };
 
   const openBranchMenu = (target: BranchChipTarget): void => {
@@ -1288,6 +1310,7 @@ export function LineageGraph({
                 onOpenContextMenu={(position) => openCommitMenu(vm, position)}
                 onOpenBranchMenu={openBranchMenu}
                 onRevealWorktree={onRevealWorktree}
+                onTakeTag={takeTag}
               />
             ))}
           </div>
