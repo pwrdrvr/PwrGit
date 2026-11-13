@@ -516,46 +516,82 @@ it("releases the package lock even when staging cleanup is denied", () => {
 });
 
 // Windows refuses rmdir while a waiter's readdir holds the lock directory
-// open (main run 43439808747). A busy, already-empty lock is never ownership:
-// release and stale-lock recovery must both survive any run of busy codes.
-it("property: busy lock-directory removal never fails an install or strands the lock", async () => {
-  const setup = fixture("44.9.3", randomBytes(8192));
-  const deadPid = spawnSync(process.execPath, ["-e", ""]).pid;
-  const scenarios = fc.sample(fc.record({
-    stale: fc.boolean(),
-    faults: fc.array(fc.constantFrom("EPERM", "EACCES", "EBUSY"), { minLength: 1, maxLength: 6 }),
-  }), { numRuns: 12, seed: 43439808747 % 2 ** 31 }).map((scenario, index) => ({
-    ...scenario, opts: optionsFor(setup, join(setup.root, `busy-${index}`)),
-  }));
-  const script = `
+// open (main run 43439808747), and readdir fails while a removed lock is
+// delete-pending. A busy, already-empty lock is never ownership: release and
+// stale-lock recovery must both survive any run of busy codes.
+function busyLockHarness(scenarios) {
+  return `
     import assert from "node:assert/strict";
     import fs from "node:fs";
     import { join } from "node:path";
     import { syncBuiltinESMExports } from "node:module";
-    const remove = fs.rmdirSync;
-    let faults = [];
-    fs.rmdirSync = (path, ...rest) => {
-      if (String(path).endsWith(".pwragent-runtime-lock") && faults.length) {
-        throw Object.assign(new Error("Directory busy"), { code: faults.shift() });
-      }
-      return remove(path, ...rest);
-    };
+    const faults = { rmdirSync: [], readdirSync: [] };
+    for (const name of Object.keys(faults)) {
+      const original = fs[name];
+      fs[name] = (path, ...rest) => {
+        if (String(path).endsWith(".pwragent-runtime-lock") && faults[name].length) {
+          throw Object.assign(new Error("Directory busy"), { code: faults[name].shift() });
+        }
+        return original(path, ...rest);
+      };
+    }
     syncBuiltinESMExports();
     const { ensureRuntime } = await import(${JSON.stringify(pathToFileURL(join(here, "electron-runtime-cache.mjs")).href)});
     for (const scenario of ${JSON.stringify(scenarios)}) {
       const lock = join(scenario.opts.electronDir, ".pwragent-runtime-lock");
-      if (scenario.stale) {
+      if (scenario.staleOwner) {
         fs.mkdirSync(lock);
-        fs.writeFileSync(join(lock, "${deadPid}-00000000-0000-0000-0000-000000000000"), "");
+        fs.writeFileSync(join(lock, scenario.staleOwner + "-00000000-0000-0000-0000-000000000000"), "");
       }
-      faults = [...scenario.faults];
-      await ensureRuntime({ ...scenario.opts, download: async () => ${JSON.stringify(setup.zip)} });
-      assert.deepEqual(faults, [], "every injected busy code reached a lock rmdir");
-      assert.equal(fs.existsSync(lock), false, JSON.stringify(scenario));
+      faults.rmdirSync = [...scenario.rmdirFaults];
+      faults.readdirSync = [...(scenario.readdirFaults ?? [])];
+      await ensureRuntime({ ...scenario.opts, download: async () => scenario.zip });
+      assert.deepEqual(faults, { rmdirSync: [], readdirSync: [] }, "every injected busy code reached the lock");
+      assert.equal(fs.existsSync(lock), scenario.expectLeftover ?? false, JSON.stringify(scenario));
+      if (scenario.expectLeftover) assert.deepEqual(fs.readdirSync(lock), [], "a leftover lock is empty, never owned");
     }
   `;
-  await execAsync(process.execPath, ["--input-type=module", "-e", script]);
+}
+
+// A pid whose process has exited and not (yet) been reused.
+function deadPid() {
+  for (;;) {
+    const { pid } = spawnSync(process.execPath, ["-e", ""]);
+    try { process.kill(pid, 0); } catch (error) {
+      if (error.code === "ESRCH") return pid;
+    }
+  }
+}
+
+it("property: busy lock-directory removal never fails an install or strands the lock", async () => {
+  const setup = fixture("44.9.3", randomBytes(8192));
+  const busy = fc.constantFrom("EPERM", "EACCES", "EBUSY");
+  const scenarios = fc.sample(fc.record({
+    stale: fc.boolean(),
+    rmdirFaults: fc.array(busy, { minLength: 1, maxLength: 6 }),
+    readdirFaults: fc.array(busy, { maxLength: 3 }),
+  }), { numRuns: 12, seed: 43439808747 % 2 ** 31 }).map(({ stale, rmdirFaults, readdirFaults }, index) => ({
+    rmdirFaults, zip: setup.zip,
+    // readdir runs only during recovery, so only a stale lock can consume it.
+    ...(stale ? { staleOwner: deadPid(), readdirFaults } : {}),
+    opts: optionsFor(setup, join(setup.root, `busy-${index}`)),
+  }));
+  await execAsync(process.execPath, ["--input-type=module", "-e", busyLockHarness(scenarios)]);
   for (const { opts } of scenarios) expect(readFileSync(join(opts.electronDir, "dist", platformPath("darwin")))).toEqual(setup.bytes);
+}, 60_000);
+
+it("a release that stays busy leaves an empty lock the next installer reclaims", async () => {
+  const setup = fixture("44.9.3", randomBytes(8192));
+  const opts = optionsFor(setup, join(setup.root, "exhausted"));
+  // 40 busy codes exhaust the release's retry budget; the next run starts with
+  // the leftover empty lock and must take it over without waiting for a timeout.
+  const scenarios = [
+    { opts, zip: setup.zip, rmdirFaults: Array(40).fill("EPERM"), expectLeftover: true },
+    { opts, zip: setup.zip, rmdirFaults: [] },
+  ];
+  const started = Date.now();
+  await execAsync(process.execPath, ["--input-type=module", "-e", busyLockHarness(scenarios)]);
+  expect(Date.now() - started).toBeLessThan(30_000);
 }, 60_000);
 
 it("concurrent processes publish one shared cache and serialize writes to the same package", async () => {

@@ -123,6 +123,7 @@ async function acquireInstallLock(electronDir) {
   const candidate = mkdtempSync(join(electronDir, ".runtime-lock-"));
   writeFileSync(join(candidate, token), "");
   const deadline = Date.now() + 120_000;
+  let lastBusy;
   try {
     for (;;) {
       try {
@@ -131,10 +132,10 @@ async function acquireInstallLock(electronDir) {
           unlinkSync(join(lock, token));
           // Ownership ended with the unlink. Retry a busy rmdir briefly so a
           // quiet package ends with no lock; a waiter reclaims any leftover.
-          for (let attempt = 0; attempt < 40 && !removeEmptyLock(lock); attempt++) await setTimeout(50);
+          for (let attempt = 1; !removeEmptyLock(lock) && attempt < 40; attempt++) await setTimeout(50);
         };
       } catch (error) {
-        if (!existsSync(lock) && !["ENOTEMPTY", "EEXIST", "EPERM", "EACCES"].includes(error.code)) throw error;
+        if (!existsSync(lock) && !["ENOTEMPTY", "EEXIST", ...BUSY_DIRECTORY].includes(error.code)) throw error;
       }
       try {
         for (const owner of readdirSync(lock)) {
@@ -150,8 +151,14 @@ async function acquireInstallLock(electronDir) {
         removeEmptyLock(lock);
       } catch (error) {
         if (error.code !== "ENOENT" && !BUSY_DIRECTORY.includes(error.code)) throw error;
+        if (error.code !== "ENOENT") lastBusy = error;
       }
-      if (Date.now() >= deadline) throw new Error(`Timed out waiting for Electron installer lock: ${lock}`);
+      if (Date.now() >= deadline) {
+        // A lock that stays busy for the whole wait is likely a real permission
+        // problem; surface its last errno rather than a bare timeout.
+        const detail = lastBusy ? ` (last ${lastBusy.code}: ${lastBusy.message})` : "";
+        throw new Error(`Timed out waiting for Electron installer lock: ${lock}${detail}`, { cause: lastBusy });
+      }
       await setTimeout(50);
     }
   } finally {
