@@ -16,6 +16,7 @@ import type { GhDefaultRepository, HookRun, IgnoreDestination, IgnoreOptions, Ig
 import type { MaintenanceScope, MaintenanceAction, MaintenanceSummary, MaintenanceProgress, MaintenanceCurrent, BranchCleanupKeepDays } from "./maintenance";
 import { DEFAULT_BRANCH_CLEANUP_OPTIONS } from "./maintenance";
 import type { ClonesOffer } from "./clones-offer";
+import type { NewRootChoice, RepoSearchProgress, RepoSearchResult, SuggestedRoot } from "./repo-search";
 import type { ManagedGitProgress, ManagedGitStatus, ManagedGitTrack } from "./managed-git";
 import { STALE_AGE_DAYS, type WorktreeFinishedAfterDays } from "./prunable";
 import type {
@@ -963,6 +964,30 @@ export interface Commands {
     req: { profileId: ProfileId };
     res: { repos: Repo[]; added: Repo[] };
   };
+  /**
+   * Find my repositories: walk the home folder (names only, three levels,
+   * never inside a repository) and propose the folders that hold
+   * repositories. Adds nothing. One search per window: a second request
+   * supersedes the first, which answers `superseded`. Progress arrives as
+   * `repo:searchProgress` with this `searchId`.
+   */
+  "repo:searchHome": {
+    req: { searchId: string; profileId: ProfileId; includeProtected: boolean };
+    res: RepoSearchResult;
+  };
+  /** Stop a running search; it answers with what it found so far. */
+  "repo:stopSearch": { req: { searchId: string }; res: null };
+  /** The suggested repository folders under home, and which exist. */
+  "profile:suggestedRoots": { req: void; res: SuggestedRoot[] };
+  /**
+   * Create a repository folder if it does not exist, add it to the profile
+   * and scan. Accepts only a suggested name under home or a path the system
+   * folder picker returned (`NewRootChoice`).
+   */
+  "profile:createRoot": {
+    req: { profileId: ProfileId; root: NewRootChoice };
+    res: { path: string; created: boolean; repos: Repo[] };
+  };
   /** Mark a profile's first-run setup finished. Sent on Finish and on Skip;
    *  a Help-menu replay does not send it, so the flag stays true once set. */
   "profile:completeOnboarding": {
@@ -1170,6 +1195,10 @@ export interface Commands {
        *  re-asks the forge and refuses a repository the source was not forked
        *  from. Absent or null adds nothing. */
       upstream?: string | null;
+      /** A profile with no folder yet: create this one (if needed) and add it
+       *  when the clone starts, and clone into it. `parentPath` is ignored.
+       *  A failed or cancelled clone takes the folder back out. */
+      newRoot?: NewRootChoice;
     };
     res: ClonedRepo;
   };
@@ -1231,6 +1260,8 @@ export interface Commands {
       defaultBranchOnly: boolean;
       /** `owner/name` for the `upstream` remote, or null to add none. */
       upstream: string | null;
+      /** As `repo:clone`'s: the folder to create and add when it starts. */
+      newRoot?: NewRootChoice;
     };
     res: Repo;
   };
@@ -2726,6 +2757,9 @@ export interface Events {
    * scan, clone, removal, hide, pin or reorder).
    */
   "repo:changed": { profileId: ProfileId; repoIds?: RepoId[] };
+  /** Find my repositories, while it walks: folders opened, repositories so
+   *  far. Throttled in main; correlated by `searchId`. */
+  "repo:searchProgress": RepoSearchProgress;
   /** Each step of a running `repo:remove`, as the whole step list. */
   "repo:removalProgress": RepoRemovalProgress;
   /** Live Git progress for one clone command, correlated by operation id. */

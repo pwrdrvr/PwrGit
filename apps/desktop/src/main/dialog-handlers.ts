@@ -3,7 +3,14 @@ import { app, BrowserWindow, dialog } from "electron";
 import { ok } from "@pwrgit/shared";
 import type { CommandBus } from "./command-bus";
 
-export function registerDialogHandlers(bus: CommandBus): void {
+export function registerDialogHandlers(
+  bus: CommandBus,
+  hooks: {
+    /** Every folder the picker returned: the only arbitrary paths main will
+     *  later create-and-register as a repository folder (`new-root.ts`). */
+    onPicked?: (paths: readonly string[]) => void;
+  } = {}
+): void {
   // Since Electron 43 a dialog without `defaultPath` opens in Downloads every
   // time, and the OS stops restoring the folder the user last browsed. Repos
   // rarely live in Downloads, so start from home and then reopen beside the
@@ -27,6 +34,7 @@ export function registerDialogHandlers(bus: CommandBus): void {
         : await dialog.showOpenDialog(options);
     if (result.canceled || result.filePaths.length === 0) return [];
     lastParent = dirname(result.filePaths[0]);
+    hooks.onPicked?.(result.filePaths);
     return result.filePaths;
   };
 

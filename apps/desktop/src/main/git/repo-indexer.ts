@@ -81,6 +81,16 @@ const SKIP_DIRS = new Set([
   "Library"
 ]);
 
+/**
+ * The never-opened rule every walk for repositories shares: dot folders
+ * (`.ssh`, `.aws`, `.git` itself) and the build and cache folders in
+ * `SKIP_DIRS`. The profile scan and the home-folder search (`repo-search.ts`)
+ * both ask this, so they cannot disagree about which folders they open.
+ */
+export function isScanSkippedDir(name: string): boolean {
+  return SKIP_DIRS.has(name) || name.startsWith(".");
+}
+
 export function hashId(path: string): string {
   return createHash("sha1").update(path).digest("hex").slice(0, 12);
 }
@@ -2048,7 +2058,7 @@ export function findRepoDirs(
     if (depth >= maxDepth) return;
     for (const entry of entries) {
       if (!entry.isDirectory()) continue;
-      if (SKIP_DIRS.has(entry.name) || entry.name.startsWith(".")) continue;
+      if (isScanSkippedDir(entry.name)) continue;
       walk(join(dir, entry.name), depth + 1);
     }
   };
@@ -2114,7 +2124,7 @@ export async function scanRepoRoot(
       } else if (current.depth < maxDepth) {
         for (const entry of entries) {
           if (!entry.isDirectory()) continue;
-          if (SKIP_DIRS.has(entry.name) || entry.name.startsWith(".")) continue;
+          if (isScanSkippedDir(entry.name)) continue;
           pending.push({
             dir: join(current.dir, entry.name),
             depth: current.depth + 1

@@ -1,0 +1,916 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>New User Journey</title>
+    <script src="./support.js"></script>
+  </head>
+  <body>
+    <x-dc>
+      <helmet data-dc-atomics>
+        <meta name="design_doc_mode" content="canvas" />
+        <link href="https://fonts.googleapis.com/css2?family=Geist:wght@400..700&amp;family=Geist+Mono:wght@400..700&amp;display=swap" rel="stylesheet" />
+        <style>
+          :root {
+            --bg-app: #000000; --bg-panel: #0a0a0a; --bg-input: #080808;
+            --bg-elev: #101010; --bg-side: #050505; --bg-row-active: #120800;
+            --active-strong: #241000;
+            --line-faint: rgba(247, 243, 235, 0.06);
+            --line: rgba(247, 243, 235, 0.1);
+            --line-def: rgba(247, 243, 235, 0.14);
+            --t1: #f7f3eb; --t2: #b8b0a5; --t3: #8c857a;
+            --tsub: rgba(247, 243, 235, 0.54);
+            --acc: #ff8a1f; --accb: #ffb35c; --accon: #160a00;
+            --asoft: rgba(255, 138, 31, 0.12); --atint: rgba(255, 138, 31, 0.08);
+            --abord: rgba(255, 138, 31, 0.42);
+            --ok: #5fa969; --okt: #9ce5b3; --oksoft: rgba(74, 148, 92, 0.18);
+            --warn: #d99a3d; --warnsoft: rgba(217, 154, 61, 0.14);
+            --bad: #b94232; --badt: #ffb0a1; --badsoft: rgba(185, 66, 50, 0.24);
+            --sans: "Geist", "SF Pro Text", "Inter", system-ui, sans-serif;
+            --mono: "Geist Mono", "SF Mono", "JetBrains Mono", Consolas, monospace;
+          }
+          * { box-sizing: border-box; }
+          body { margin: 0; background: #050505; font-family: var(--sans); color: var(--t1); }
+          a { color: var(--accb); } a:hover { color: var(--acc); }
+          button { font: inherit; color: inherit; }
+          button:focus-visible, a:focus-visible, input:focus-visible { outline: 2px solid var(--accb); outline-offset: 2px; }
+
+          /* ---- House canvas chrome (matches the other PwrGit boards) ---- */
+          .dv-turn { padding: 40px 44px 32px; background: #050505; border-bottom: 1px solid var(--line-faint); }
+          .dv-thd { display: flex; align-items: baseline; gap: 10px; margin: 0 0 6px; }
+          .dv-tid { font: 600 10px var(--mono); padding: 3px 7px; background: var(--t1); color: #050505; border-radius: 4px; }
+          .dv-tname { font: 600 13px/1.2 var(--sans); color: var(--t1); margin: 0; }
+          .dv-sub { margin: 0 0 22px; font: 400 11.5px/1.6 var(--sans); color: var(--t3); max-width: 780px; text-wrap: pretty; }
+          .dv-sub code, .dv-note code, .dv-olabel code, .dv-tbl code, .dv-list code { font: 500 10.5px var(--mono); color: var(--accb); }
+          .dv-sub b { color: var(--t2); font-weight: 600; }
+          .dv-opts { display: flex; flex-wrap: wrap; gap: 28px; align-items: flex-start; }
+          .dv-opt { flex: none; display: flex; flex-direction: column; gap: 9px; scroll-margin-top: 16px; }
+          .dv-oid { font: 600 10.5px var(--mono); padding: 3px 7px; background: rgba(247, 243, 235, 0.08); color: var(--t1); border-radius: 5px; text-decoration: none; }
+          .dv-opt:target .dv-oid { background: var(--acc); color: var(--accon); }
+          .dv-olabel { display: flex; align-items: baseline; gap: 8px; font: 400 11px/1.4 var(--sans); color: var(--tsub); max-width: 680px; margin: 0; }
+          .dv-note { margin: 0; padding: 12px 15px; border: 1px solid var(--line); border-radius: 8px; background: var(--bg-panel); font: 400 11.5px/1.7 var(--sans); color: var(--t2); max-width: 820px; text-wrap: pretty; }
+          .dv-note b { color: var(--t1); font-weight: 600; }
+          .dv-next { margin: 22px 0 0; font: 12px/1.5 var(--sans); color: var(--t3); }
+          .dv-list { margin: 0; padding: 0 0 0 18px; font: 400 11.5px/1.75 var(--sans); color: var(--t2); max-width: 820px; }
+          .dv-list b { color: var(--t1); font-weight: 600; }
+          .dv-list li { margin-bottom: 5px; text-wrap: pretty; }
+          .dv-tbl { border-collapse: collapse; font: 400 11px/1.5 var(--sans); color: var(--t2); }
+          .dv-tbl th { text-align: left; font: 600 9.5px/1 var(--sans); letter-spacing: 0.09em; text-transform: uppercase; color: var(--t3); padding: 0 22px 8px 0; }
+          .dv-tbl td { padding: 6px 22px 6px 0; border-top: 1px solid var(--line-faint); vertical-align: top; max-width: 330px; }
+          .dv-tbl td b { color: var(--t1); font-weight: 600; }
+          .dv-tbl .num { font: 500 11px var(--mono); color: var(--t1); text-align: right; white-space: nowrap; }
+          .dv-tbl .bad { color: var(--badt); } .dv-tbl .good { color: var(--okt); }
+          .pin { display: inline-flex; align-items: center; justify-content: center; flex: none; width: 16px; height: 16px; border-radius: 999px; background: var(--bad); color: #fff; font: 700 9.5px/1 var(--mono); }
+          .pin.fix { background: #2f7a45; }
+          .finding { display: flex; gap: 8px; align-items: baseline; margin: 0; font: 400 11px/1.6 var(--sans); color: var(--t2); max-width: 760px; text-wrap: pretty; }
+          .finding b { color: var(--t1); font-weight: 600; }
+          .finding code { font: 500 10.5px var(--mono); color: var(--accb); }
+          .ic { width: 14px; height: 14px; flex: none; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+
+          /* ---- Journey map ---- */
+          .jm { display: grid; grid-template-columns: repeat(8, minmax(0, 1fr)); gap: 6px; width: 1120px; }
+          .jm-step { padding: 9px 10px; border: 1px solid var(--line-def); border-radius: 8px; background: var(--bg-panel); display: flex; flex-direction: column; gap: 5px; }
+          .jm-n { font: 600 9px/1 var(--mono); letter-spacing: 0.08em; text-transform: uppercase; color: var(--t3); }
+          .jm-t { font: 600 12px/1.25 var(--sans); color: var(--t1); }
+          .jm-d { font: 400 10.5px/1.5 var(--sans); color: var(--t3); }
+          .jm-exit { padding: 8px 10px; border: 1px solid var(--bad); border-radius: 8px; background: var(--badsoft); font: 400 10.5px/1.5 var(--sans); color: #ffd7cd; }
+          .jm-exit b { display: block; font: 600 9.5px/1.4 var(--mono); color: #fff; margin-bottom: 2px; }
+          .jm-none { border: 1px dashed var(--line); border-radius: 8px; }
+          .jm-land { grid-column: 1 / -1; padding: 10px 12px; border: 1px solid var(--bad); border-radius: 8px; font: 400 11.5px/1.6 var(--sans); color: var(--t2); background: var(--bg-panel); }
+          .jm-land b { color: var(--t1); }
+
+          /* ---- App window ---- */
+          .win { width: 940px; height: 500px; display: flex; border: 1px solid var(--line-def); border-radius: 12px; overflow: hidden; background: var(--bg-app); }
+          .side { width: 290px; flex: none; background: var(--bg-side); border-right: 1px solid var(--line); display: flex; flex-direction: column; }
+          .prof { display: flex; align-items: center; gap: 9px; padding: 12px 12px 10px; }
+          .prof-m { width: 28px; height: 28px; border-radius: 8px; display: flex; align-items: center; justify-content: center; font: 700 12px/1 var(--mono); background: var(--asoft); color: var(--accb); border: 1px solid var(--abord); }
+          .prof-n { font: 700 13px/1 var(--sans); color: var(--t1); }
+          .prof-e { font: 500 10.5px/1 var(--mono); color: var(--t3); margin-top: 3px; }
+          .tb { display: flex; gap: 6px; padding: 0 12px 10px; }
+          .tb-b { height: 28px; padding: 0 10px; border-radius: 7px; border: 1px solid var(--line-def); background: var(--bg-elev); color: var(--t2); font: 600 11.5px/1 var(--sans); display: inline-flex; align-items: center; gap: 6px; }
+          .tb-b[disabled] { opacity: 0.45; }
+          .lens { display: grid; grid-template-columns: repeat(5, 1fr); gap: 3px; padding: 3px; margin: 0 12px 10px; border: 1px solid var(--line); border-radius: 9px; background: var(--bg-panel); }
+          .lens span { display: flex; align-items: center; justify-content: center; height: 24px; border-radius: 6px; border: 1px solid transparent; color: var(--t3); font: 500 10.5px/1 var(--sans); }
+          .lens .on { border-color: var(--abord); background: var(--active-strong); color: var(--accb); }
+          .side-empty { padding: 22px 16px; text-align: center; display: flex; flex-direction: column; align-items: center; gap: 10px; }
+          .side-empty p { margin: 0; font: 400 11.5px/1.6 var(--sans); color: var(--t3); }
+          .side-empty small { font: 400 10.5px/1.5 var(--sans); color: var(--tsub); }
+          .main { flex: 1; min-width: 0; display: flex; align-items: center; justify-content: center; padding: 24px; position: relative; }
+          .main-empty { font: 400 12.5px/1.5 var(--sans); color: var(--t3); }
+          .sb-grp { height: 26px; display: flex; align-items: center; gap: 7px; padding: 0 14px; }
+          .sb-grp-l { font: 600 9.5px/1 var(--sans); color: var(--tsub); letter-spacing: 0.08em; text-transform: uppercase; }
+          .sb-grp-c { font: 500 9.5px/1 var(--mono); color: var(--tsub); }
+          .sb-rule { flex: 1; height: 1px; background: var(--line-faint); }
+          .sb-repo { display: flex; align-items: center; gap: 7px; height: 25px; padding: 0 16px; font: 600 12.5px/1 var(--sans); color: var(--t1); }
+          .sb-repo .ic { color: var(--t3); width: 12px; height: 12px; }
+
+          /* ---- Buttons and the start screen ---- */
+          .btn { display: inline-flex; align-items: center; justify-content: center; gap: 6px; white-space: nowrap; height: 30px; padding: 0 14px; border-radius: 7px; font: 600 12px/1 var(--sans); border: 1px solid var(--line-def); background: var(--bg-elev); color: var(--t2); cursor: pointer; }
+          .btn.pri { background: var(--acc); border-color: var(--acc); color: var(--accon); }
+          .btn.ghost { background: transparent; }
+          .btn.link { border-color: transparent; background: transparent; color: var(--t3); font-weight: 500; padding: 0 6px; }
+          .start { width: 540px; display: flex; flex-direction: column; gap: 14px; }
+          .start-h { margin: 0; font: 650 20px/1.25 var(--sans); color: var(--t1); letter-spacing: -0.005em; }
+          .start-p { margin: -6px 0 0; font: 400 12.5px/1.6 var(--sans); color: var(--t3); text-wrap: pretty; }
+          .start-p code { font: 500 11.5px var(--mono); color: var(--accb); }
+          .doors { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+          .door { text-align: left; padding: 13px 14px; border-radius: 9px; border: 1px solid var(--line-def); background: var(--bg-panel); cursor: pointer; display: flex; gap: 11px; align-items: flex-start; min-height: 78px; }
+          .door:hover { border-color: var(--abord); }
+          .door.pri { border-color: var(--acc); background: var(--atint); }
+          .door .ic { width: 17px; height: 17px; margin-top: 1px; color: var(--accb); }
+          .door-t { display: block; font: 600 13px/1.25 var(--sans); color: var(--t1); }
+          .door-d { display: block; font: 400 11px/1.5 var(--sans); color: var(--t3); margin-top: 4px; }
+          .door-d code { font: 500 10.5px var(--mono); color: var(--t2); }
+          .start-foot { display: flex; align-items: center; gap: 10px; padding-top: 10px; border-top: 1px solid var(--line-faint); font: 400 11.5px/1.5 var(--sans); color: var(--t3); }
+          .start-foot span { flex: 1; }
+
+          /* ---- Wizard frame. Same chrome as the Onboarding Wizard board. ---- */
+          .wz { width: 820px; background: var(--bg-app); border: 1px solid var(--line-def); border-radius: 12px; overflow: hidden; display: flex; flex-direction: column; }
+          .wz-bar { display: flex; align-items: center; gap: 12px; padding: 13px 16px 11px; border-bottom: 1px solid var(--line); background: var(--bg-panel); }
+          .wz-eye { font: 600 10px/1 var(--sans); color: var(--acc); text-transform: uppercase; letter-spacing: 0.1em; }
+          .wz-crumb { font: 600 13px/1 var(--sans); color: var(--t1); flex: 1; }
+          .wz-x { width: 26px; height: 26px; display: inline-flex; align-items: center; justify-content: center; color: var(--t3); border: 1px solid var(--line); background: var(--bg-elev); border-radius: 6px; padding: 0; }
+          .wz-rail { display: flex; gap: 6px; padding: 11px 16px 0; border-bottom: 1px solid var(--line); background: var(--bg-panel); }
+          .wz-rs { flex: 1; padding: 5px 10px 11px; position: relative; }
+          .wz-rn { font: 600 10px/1 var(--mono); color: var(--t3); letter-spacing: 0.08em; text-transform: uppercase; }
+          .wz-rl { font: 600 12.5px/1 var(--sans); color: var(--t2); margin-top: 6px; }
+          .wz-rs::after { content: ""; position: absolute; left: 8px; right: 8px; bottom: -1px; height: 2px; border-radius: 1px; }
+          .wz-rs.done::after { background: var(--abord); }
+          .wz-rs.cur::after { background: var(--acc); }
+          .wz-rs.cur .wz-rn { color: var(--acc); } .wz-rs.cur .wz-rl { color: var(--t1); }
+          .wz-body { padding: 22px 28px 18px; display: flex; flex-direction: column; gap: 14px; }
+          .wz-h { font: 650 21px/1.25 var(--sans); color: var(--t1); margin: 0; letter-spacing: -0.005em; }
+          .wz-p { font: 400 12.5px/1.65 var(--sans); color: var(--t3); margin: -6px 0 0; max-width: 68ch; text-wrap: pretty; }
+          .wz-p code, .wz-hint code { font: 500 11.5px var(--mono); color: var(--accb); }
+          .wz-hint { font: 400 11px/1.6 var(--sans); color: var(--tsub); margin: 0; }
+          .wz-foot { display: flex; align-items: center; gap: 8px; padding: 12px 16px; border-top: 1px solid var(--line); background: var(--bg-panel); }
+          .wz-foot .sp { flex: 1; }
+          .choices { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
+          .choice { text-align: left; padding: 14px; border-radius: 9px; border: 1px solid var(--line-def); background: var(--bg-panel); cursor: pointer; display: flex; flex-direction: column; gap: 6px; }
+          .choice.on { border-color: var(--acc); background: var(--atint); }
+          .choice-e { font: 600 9px/1 var(--mono); text-transform: uppercase; letter-spacing: 0.08em; color: var(--t3); }
+          .choice.on .choice-e { color: var(--accb); }
+          .choice-t { font: 600 13.5px/1.25 var(--sans); color: var(--t1); }
+          .choice-d { font: 400 11px/1.55 var(--sans); color: var(--t3); }
+          .chips { display: flex; flex-wrap: wrap; gap: 8px; }
+          .chip { height: 30px; padding: 0 12px; border-radius: 7px; border: 1px solid var(--line-def); background: var(--bg-panel); color: var(--t1); font: 500 12px/1 var(--mono); cursor: pointer; }
+          .chip.on { border-color: var(--acc); background: var(--atint); color: var(--accb); }
+
+          /* ---- Found-folder checklist ---- */
+          .cands { display: flex; flex-direction: column; gap: 6px; }
+          .cand { display: flex; align-items: center; gap: 11px; padding: 9px 12px; border-radius: 8px; border: 1px solid var(--line); background: var(--bg-panel); cursor: pointer; }
+          .cand.off { opacity: 0.62; }
+          .cand input { width: 15px; height: 15px; margin: 0; accent-color: #ff8a1f; flex: none; }
+          .cand-p { font: 500 12.5px/1.2 var(--mono); color: var(--t1); width: 150px; flex: none; }
+          .cand-m { font: 600 11px/1.2 var(--sans); color: var(--okt); width: 168px; flex: none; }
+          .cand.off .cand-m { color: var(--t2); }
+          .cand-s { font: 400 11px/1.4 var(--sans); color: var(--t3); flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+          .after { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+          .notice { display: flex; gap: 9px; padding: 10px 13px; border-radius: 8px; border: 1px solid var(--abord); background: var(--atint); font: 400 11.5px/1.6 var(--sans); color: var(--t2); }
+          .notice.warn { border-color: var(--warn); background: var(--warnsoft); }
+          .notice b { color: var(--t1); font-weight: 600; }
+          .notice code { font: 500 10.5px var(--mono); color: var(--accb); }
+          .notice .ic { margin-top: 2px; color: var(--accb); }
+          .prog { height: 3px; border-radius: 2px; background: var(--line); overflow: hidden; }
+          .prog i { display: block; height: 100%; width: 42%; background: var(--acc); }
+          .mini { width: 400px; padding: 16px 18px; border: 1px solid var(--line-def); border-radius: 10px; background: var(--bg-app); display: flex; flex-direction: column; gap: 10px; }
+          .mini h3 { margin: 0; font: 650 15px/1.3 var(--sans); color: var(--t1); }
+          .mini p { margin: 0; font: 400 11.5px/1.6 var(--sans); color: var(--t3); text-wrap: pretty; }
+          .mini p code { font: 500 10.5px var(--mono); color: var(--accb); }
+          .mini-e { font: 600 9px/1 var(--mono); text-transform: uppercase; letter-spacing: 0.08em; color: var(--t3); }
+
+          .tree { margin: 0; font: 500 11.5px/1.85 var(--mono); color: var(--t2); white-space: pre; padding: 14px 16px; background: var(--bg-input); border: 1px solid var(--line); border-radius: 8px; }
+          .tree .dim { color: var(--tsub); } .tree .repo { color: var(--accb); }
+          .tree .skip { color: var(--badt); } .tree .hit { color: var(--okt); }
+
+          .menu { width: 230px; padding: 5px; border: 1px solid var(--line-def); border-radius: 9px; background: var(--bg-elev); display: flex; flex-direction: column; }
+          .menu-i { height: 28px; padding: 0 9px; border-radius: 6px; display: flex; align-items: center; gap: 8px; font: 500 12px/1 var(--sans); color: var(--t1); }
+          .menu-i.dis { color: var(--tsub); }
+          .menu-i.new { background: var(--atint); }
+          .menu-i small { margin-left: auto; font: 600 8.5px/1 var(--mono); letter-spacing: 0.06em; text-transform: uppercase; color: var(--accb); }
+          .menu-i.dis small { color: var(--badt); }
+          .menu-sep { height: 1px; background: var(--line); margin: 4px 6px; }
+          .radio { display: flex; align-items: center; gap: 10px; padding: 9px 12px; border-radius: 8px; border: 1px solid var(--line); background: var(--bg-panel); font: 500 12.5px/1.2 var(--mono); color: var(--t1); cursor: pointer; }
+          .radio.on { border-color: var(--acc); background: var(--atint); }
+          .radio input { margin: 0; accent-color: #ff8a1f; }
+          .radio span { font: 400 11px/1.3 var(--sans); color: var(--t3); margin-left: auto; }
+          .proto-bar { display: flex; align-items: center; gap: 12px; width: 940px; font: 400 11.5px/1.5 var(--sans); color: var(--t2); }
+        </style>
+      </helmet>
+
+      <svg width="0" height="0" style="position:absolute" aria-hidden="true">
+        <defs>
+          <symbol id="i-search" viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.6-3.6"/></symbol>
+          <symbol id="i-folder" viewBox="0 0 24 24"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></symbol>
+          <symbol id="i-clone" viewBox="0 0 24 24"><path d="M12 4v11"/><path d="M7.5 11l4.5 4.5 4.5-4.5"/><path d="M5 20h14"/></symbol>
+          <symbol id="i-new" viewBox="0 0 24 24"><path d="M12 5v14"/><path d="M5 12h14"/></symbol>
+          <symbol id="i-x" viewBox="0 0 24 24"><path d="M6 6l12 12"/><path d="M18 6L6 18"/></symbol>
+          <symbol id="i-info" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 11v6"/><path d="M12 7.5v.5"/></symbol>
+          <symbol id="i-repo" viewBox="0 0 24 24"><path d="M6 3v12"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="6" r="3"/><path d="M18 9c0 6-6 6-6 12"/></symbol>
+        </defs>
+      </svg>
+
+      <!-- ==================== TURN 0 ==================== -->
+      <section class="dv-turn" id="t0">
+        <div class="dv-thd"><span class="dv-tid">0</span><h2 class="dv-tname">Brief, and the six decisions this board needs</h2></div>
+        <p class="dv-sub">
+          <b>The brief (Harold, 2026-11-13).</b> Onboarding is rough for someone who does not know how to get their repositories in. Offer to find them, looking a level or two deep.
+          If they leave the wizard, the empty window should give them buttons that get them going again: add folders, find my repositories, clone from my account.
+          Creating a new repository, on a forge or locally, is not possible in the UI today; that is a separate board and thread, and this one only reserves its place.
+          Everything here was checked against <code>main @ 34068a8f</code> (0.58.0). Names and paths are contrived.
+        </p>
+        <ol class="dv-list">
+          <li><b>Three levels, not two. Decided 2026-11-13.</b> The search costs nothing measurable at either depth, and two levels misses the <code>~/github/owner/repo</code> layout the wizard itself calls expected. Evidence in <a href="#2a">2a</a>.</li>
+          <li><b>Documents, Desktop and Downloads are asked for, not assumed.</b> macOS shows a permission prompt the first time an app opens each one. Recommended: leave them out of the first search and offer them as one button on the results. <a href="#2b">2b</a>.</li>
+          <li><b>The search is a button, never automatic.</b> Reading the home folder is something the user says yes to. One click, and nothing is added until they confirm the list. <a href="#3a">3a</a>.</li>
+          <li><b>Closing the wizard still means "do not show this again".</b> That rule was deliberate and stays. The start screen in turn 4 is the safety net, and it holds every door the wizard had. <a href="#4a">4a</a>.</li>
+          <li><b>The search never looks inside a repository. Added 2026-11-13.</b> Submodules and worktrees checked out inside a repository, such as <code>.claude/worktrees</code>, are not reached, not counted and not proposed. The rule, the edge cases and what it was measured against are in <a href="#2e">2e</a>.</li>
+          <li><b>Clone, Fork and New repository stop requiring a folder first.</b> Each one can create the folder it lands in. This is also the seam the New repository board plugs into. <a href="#5a">5a</a>.</li>
+        </ol>
+      </section>
+
+      <!-- ==================== TURN 1 ==================== -->
+      <section class="dv-turn" id="t1">
+        <div class="dv-thd"><span class="dv-tid">1</span><h2 class="dv-tname">Findings: three ways out of the wizard, and all of them land on a blank window</h2></div>
+        <p class="dv-sub">
+          The wizard works for one person: someone who has repositories on this computer and can name the folder they are in. Everyone else leaves through one of three exits,
+          and each exit ends on the same window, which tells them to select a worktree from a sidebar that has none.
+        </p>
+        <div class="dv-opts">
+          <div class="dv-opt" id="1a">
+            <p class="dv-olabel"><a class="dv-oid" href="#1a">1a</a>The first run as shipped, step by step, with where people leave it</p>
+            <div class="jm">
+              <div class="jm-step"><span class="jm-n">Pre</span><span class="jm-t">Welcome</span><span class="jm-d">Says what the three steps are.</span></div>
+              <div class="jm-step"><span class="jm-n">Step 1</span><span class="jm-t">Identity</span><span class="jm-d">Author name and e-mail.</span></div>
+              <div class="jm-step"><span class="jm-n">Step 2</span><span class="jm-t">Forges</span><span class="jm-d">GitHub and GitLab sign-in state.</span></div>
+              <div class="jm-step"><span class="jm-n">Step 3</span><span class="jm-t">How the scan works</span><span class="jm-d">A page of rules, before any action.</span></div>
+              <div class="jm-step"><span class="jm-n">Step 3</span><span class="jm-t">Pick folders</span><span class="jm-d">The system folder picker, and nothing else.</span></div>
+              <div class="jm-step"><span class="jm-n">Step 3</span><span class="jm-t">Scan result</span><span class="jm-d">A count per folder.</span></div>
+              <div class="jm-step"><span class="jm-n">Done</span><span class="jm-t">Review</span><span class="jm-d">What the five lens chips mean.</span></div>
+              <div class="jm-step" style="border-color:var(--bad)"><span class="jm-n">After</span><span class="jm-t">The app</span><span class="jm-d">Drawn in 1b.</span></div>
+
+              <div class="jm-exit"><b>Exit A · any step</b>Esc, the close button and Skip setup all mark setup finished. It never opens again.</div>
+              <div class="jm-exit"><b>Blocked</b>Continue is disabled until both fields are filled. The only other way on is Skip setup, which also drops steps 2 and 3.</div>
+              <div class="jm-none"></div>
+              <div class="jm-none"></div>
+              <div class="jm-exit"><b>Exit B</b>"Continue without folders" is offered to anyone who cannot answer. No search, no suggestion, no way to make a folder.</div>
+              <div class="jm-exit"><b>Exit C</b>"Nothing found yet." reads the same while scanning and after finding none. The only button goes forward.</div>
+              <div class="jm-exit"><b>Dead end</b>"No repositories yet.", then a key to five chips over an empty list, then Start working.</div>
+              <div class="jm-none"></div>
+              <div class="jm-land"><b>All three exits arrive at the same place:</b> a profile with no folders, a wizard that will not return, and the window in 1b. Help &#8250; Replay Onboarding&#8230; is the only way back, and nothing on screen says so.</div>
+            </div>
+          </div>
+
+          <div class="dv-opt" id="1b">
+            <p class="dv-olabel"><a class="dv-oid" href="#1b">1b</a>Where they land: the window as shipped, with no folders</p>
+            <div class="win">
+              <div class="side">
+                <div class="prof"><span class="prof-m">P</span><div><div class="prof-n">Personal</div><div class="prof-e">dana@example.com</div></div></div>
+                <div class="tb"><button type="button" class="tb-b">Add &#9662;</button><button type="button" class="tb-b" disabled>Fetch all</button><span class="pin" aria-label="Finding 2">2</span></div>
+                <div class="lens" aria-hidden="true"><span>Focused</span><span>Pinned</span><span>Behind</span><span>Stale</span><span class="on">All</span></div>
+                <div class="side-empty">
+                  <p>No repos yet — add a folder and PwrGit will scan it for repositories.</p>
+                  <button type="button" class="btn"><svg class="ic" aria-hidden="true"><use href="#i-new"/></svg>Add folders&#8230;</button>
+                  <small>Clone and Fork, under Add, open once a folder exists.</small>
+                </div>
+              </div>
+              <div class="main"><span class="main-empty">Select a worktree from the sidebar</span><span class="pin" style="margin-left:8px" aria-label="Finding 1">1</span></div>
+            </div>
+            <p class="finding"><span class="pin">1</span><span><b>An instruction that cannot be followed.</b> Two thirds of the window is one grey sentence about a list that is empty. The one useful control is a small button in the sidebar.</span></p>
+            <p class="finding"><span class="pin">2</span><span><b>Clone and Fork are switched off.</b> Both are disabled with "Add a repo folder before cloning". Someone on a new laptop, whose repositories all live on GitHub, has to invent an empty folder in the system picker before PwrGit will fetch anything.</span></p>
+            <p class="finding"><span class="pin">3</span><span><b>Nothing creates a repository.</b> No <code>git init</code>, no forge create, in any menu. Someone starting a project has no first move.</span></p>
+          </div>
+
+          <div class="dv-opt" id="1c">
+            <p class="dv-olabel"><a class="dv-oid" href="#1c">1c</a>Who arrives, and what today does for each</p>
+            <table class="dv-tbl">
+              <thead><tr><th>Who</th><th>What they need</th><th>Today</th><th>After this board</th></tr></thead>
+              <tbody>
+                <tr><td><b>Knows the folder.</b> Repositories in <code>~/code</code>.</td><td>Point at it.</td><td class="good">Works.</td><td>Unchanged, one page shorter.</td></tr>
+                <tr><td><b>Has repositories, cannot name the folder.</b> An IDE or another git client chose where they went.</td><td>Have them found.</td><td class="bad">Stuck at the system picker. Exit B.</td><td>Find my repositories. Turn 2.</td></tr>
+                <tr><td><b>New computer.</b> Everything is on a forge.</td><td>Clone from their account.</td><td class="bad">Clone is disabled until a folder exists.</td><td>Clone makes its folder. 5a.</td></tr>
+                <tr><td><b>Starting from nothing.</b></td><td>Create a repository.</td><td class="bad">No path anywhere.</td><td>A reserved door. 5b, own board.</td></tr>
+                <tr><td><b>Closed the wizard.</b> By Esc, on the first screen.</td><td>A second chance.</td><td class="bad">The window in 1b, for good.</td><td>The start screen. Turn 4.</td></tr>
+              </tbody>
+            </table>
+            <p class="dv-note"><b>Already drawn once, never built.</b> The Onboarding Wizard board's 4b drew "No such folder yet?" with three create-and-add choices, and its follow-up lines asked for the zero-result screens. Neither shipped. The built picker has the folder list, Add a folder&#8230; and the home-folder warning.</p>
+          </div>
+        </div>
+      </section>
+
+      <!-- ==================== TURN 2 ==================== -->
+      <section class="dv-turn" id="t2">
+        <div class="dv-thd"><span class="dv-tid">2</span><h2 class="dv-tname">Find my repositories: a shallow search that proposes folders</h2></div>
+        <p class="dv-sub">
+          PwrGit's model is folders, not single repositories: you add a folder and it finds what is inside, now and later. So the search does not add repositories.
+          It looks through the home folder, works out <b>which folders hold them</b>, and offers those as a checklist. Nothing is added until the user confirms it.
+        </p>
+        <div class="dv-opts">
+          <div class="dv-opt" id="2a">
+            <p class="dv-olabel"><a class="dv-oid" href="#2a">2a</a>What the search opens, and what it never does</p>
+            <pre class="tree"><span class="dim">~                                    listed, never proposed</span>
+├─ code/                             <span class="dim">level 1</span>
+│  ├─ <span class="repo">ledger-api/</span>  .git               <span class="hit">level 2 · found, propose ~/code</span>
+│  │  ├─ <span class="dim">.claude/worktrees/fix-1/     not opened: inside a repository</span>
+│  │  └─ <span class="dim">vendor/parser/  (submodule)  not opened: inside a repository</span>
+│  └─ <span class="repo">ledger-web/</span>  .git               <span class="hit">level 2</span>
+├─ github/
+│  └─ acme/                          <span class="dim">level 2</span>
+│     └─ <span class="repo">atlas/</span>  .git                 <span class="hit">level 3 · found, propose ~/github</span>
+│        └─ <span class="dim">packages/ …              not opened: it stops at .git</span>
+├─ <span class="repo">dotfiles/</span>  .git                    <span class="hit">level 1 · found, propose ~/dotfiles</span>
+├─ <span class="skip">Documents/  Desktop/  Downloads/</span>   <span class="dim">not opened until asked (2b)</span>
+├─ <span class="skip">Library/  .ssh/  node_modules/</span>     <span class="dim">never opened, same list as the scan</span>
+└─ archive/2019/clients/<span class="dim">acme/ …       level 4 · not reached</span></pre>
+            <ol class="dv-list">
+              <li><b>Home folder, three levels down.</b> It reads folder names and checks for <code>.git</code>. It never opens your files. The one thing it reads is git's own one-line <code>.git</code> pointer in a linked worktree (2e).</li>
+              <li><b>It stops at the first <code>.git</code> on the way down.</b> Nothing inside a repository is opened, so nothing inside one can be counted or proposed.</li>
+              <li><b>The same never-opened list as the real scan:</b> dot folders, <code>Library</code>, <code>node_modules</code>, <code>dist</code>, <code>out</code>, <code>build</code>, <code>target</code>, <code>vendor</code>.</li>
+              <li><b>It proposes, the user adds.</b> The home folder itself is never proposed; the wizard already warns against adding it.</li>
+              <li><b>It has a budget.</b> Proposed, not measured: stop after 20,000 folders or 3 seconds, and say that it stopped early.</li>
+            </ol>
+            <table class="dv-tbl">
+              <thead><tr><th>Levels below home</th><th>Folders opened</th><th>Checkouts found</th><th>Top folders holding them</th><th>Time</th></tr></thead>
+              <tbody>
+                <tr><td>1</td><td class="num">45</td><td class="num">1</td><td class="num">1</td><td class="num">2 ms</td></tr>
+                <tr><td>2 (the brief)</td><td class="num">369</td><td class="num">189</td><td class="num">11</td><td class="num">41 ms</td></tr>
+                <tr><td><b>3 (recommended)</b></td><td class="num">717</td><td class="num">240</td><td class="num">12</td><td class="num">32 ms</td></tr>
+              </tbody>
+            </table>
+            <p class="dv-note"><b>What was measured.</b> A names-only walk on the Mac this board was written on, 2026-11-13, one run each with a warm cache, with Documents, Desktop, Downloads and the media folders left out. "Checkouts" counts linked worktrees too; 2e splits them out. Two levels missed 51 checkouts and one whole folder. This is one developer's machine, so it shows the cost is small; it does not show what a typical home folder holds.</p>
+          </div>
+
+          <div class="dv-opt" id="2b">
+            <p class="dv-olabel"><a class="dv-oid" href="#2b">2b</a>The result: a checklist of folders, inside wizard step 3</p>
+            <div class="wz">
+              <div class="wz-bar"><span class="wz-eye">Setup</span><span class="wz-crumb">Step 3 — Repositories</span><button type="button" class="wz-x" aria-label="Close setup"><svg class="ic" aria-hidden="true"><use href="#i-x"/></svg></button></div>
+              <div class="wz-rail">
+                <div class="wz-rs done"><div class="wz-rn">Step 1 ✓</div><div class="wz-rl">Dana Whitfield</div></div>
+                <div class="wz-rs done"><div class="wz-rn">Step 2 ✓</div><div class="wz-rl">GitHub</div></div>
+                <div class="wz-rs cur"><div class="wz-rn">Step 3</div><div class="wz-rl">Repositories</div></div>
+                <div class="wz-rs"><div class="wz-rn">Done</div><div class="wz-rl">Review</div></div>
+              </div>
+              <div class="wz-body">
+                <h1 class="wz-h">Found 17 repositories in 4 folders.</h1>
+                <p class="wz-p">Nothing is added until you say so. Each folder you add becomes a heading in the sidebar, and PwrGit keeps looking in it for new repositories.</p>
+                <div class="cands">
+                  <label class="cand"><input type="checkbox" defaultChecked="{{ true }}" /><span class="cand-p">~/code</span><span class="cand-m">5 repositories</span><span class="cand-s">ledger-api, ledger-web, telemetry and 2 more</span></label>
+                  <label class="cand"><input type="checkbox" defaultChecked="{{ true }}" /><span class="cand-p">~/github</span><span class="cand-m">9 repositories</span><span class="cand-s">in 3 owner folders: acme/atlas, acme/harbor and 7 more</span></label>
+                  <label class="cand"><input type="checkbox" defaultChecked="{{ true }}" /><span class="cand-p">~/work</span><span class="cand-m">2 repositories</span><span class="cand-s">billing, pipeline</span></label>
+                  <label class="cand"><input type="checkbox" defaultChecked="{{ true }}" /><span class="cand-p">~/dotfiles</span><span class="cand-m">1 repository</span><span class="cand-s">this folder is the repository</span></label>
+                  <label class="cand off"><input type="checkbox" /><span class="cand-p">~/trees</span><span class="cand-m">4 worktrees</span><span class="cand-s">of repositories in ~/code, which already brings them in</span></label>
+                </div>
+                <div class="after">
+                  <button type="button" class="btn ghost"><svg class="ic" aria-hidden="true"><use href="#i-search"/></svg>Also look in Documents, Desktop and Downloads</button>
+                  <button type="button" class="btn ghost"><svg class="ic" aria-hidden="true"><use href="#i-folder"/></svg>Choose folders myself&#8230;</button>
+                </div>
+                <p class="wz-hint">macOS asks before PwrGit may open Documents, Desktop or Downloads, once for each. That is why they were not searched yet.</p>
+              </div>
+              <div class="wz-foot"><button type="button" class="btn link">Skip setup</button><span class="sp"></span><button type="button" class="btn ghost">Back</button><button type="button" class="btn pri">Add 4 folders →</button></div>
+            </div>
+            <p class="dv-olabel" style="max-width:820px">Everything with a repository in it starts checked. A folder holding only linked worktrees starts unchecked and says why. The primary button counts what is checked.</p>
+          </div>
+
+          <div class="dv-opt" id="2c">
+            <p class="dv-olabel"><a class="dv-oid" href="#2c">2c</a>The other three things the search can say</p>
+            <div style="display:flex; flex-direction:column; gap:12px;">
+              <div class="mini">
+                <span class="mini-e">While it runs</span>
+                <h3>Looking in your home folder&#8230;</h3>
+                <div class="prog" aria-hidden="true"><i></i></div>
+                <p>212 folders opened, 14 repositories so far.</p>
+                <div><button type="button" class="btn ghost">Stop and show what was found</button></div>
+              </div>
+              <div class="mini">
+                <span class="mini-e">Found nothing</span>
+                <h3>No repositories within three folders of home.</h3>
+                <p>Documents, Desktop and Downloads were not searched. If your code is somewhere else, choose the folder.</p>
+                <div class="after"><button type="button" class="btn pri">Look in Documents, Desktop and Downloads</button><button type="button" class="btn ghost">Choose folders myself&#8230;</button><button type="button" class="btn ghost">I do not have any yet</button></div>
+              </div>
+              <div class="mini">
+                <span class="mini-e">Stopped early, or refused</span>
+                <h3>Found 6 repositories in 2 folders.</h3>
+                <p>The search stopped after 20,000 folders, so there may be more. macOS did not allow <code>Documents</code>; allow PwrGit under Privacy and Security, Files and Folders, to search it.</p>
+              </div>
+            </div>
+          </div>
+
+          <div class="dv-opt" id="2d">
+            <p class="dv-olabel"><a class="dv-oid" href="#2d">2d</a>The rule that turns a found checkout into a proposed folder</p>
+            <table class="dv-tbl">
+              <thead><tr><th>Found at</th><th>Proposed folder</th><th>Why</th></tr></thead>
+              <tbody>
+                <tr><td><code>~/code/api</code></td><td><code>~/code</code></td><td>The level-1 folder. One heading in the sidebar.</td></tr>
+                <tr><td><code>~/github/acme/atlas</code></td><td><code>~/github</code></td><td>Still the level-1 folder, not <code>~/github/acme</code>. The real scan goes five levels down from it.</td></tr>
+                <tr><td><code>~/dotfiles</code></td><td><code>~/dotfiles</code></td><td>A repository directly under home is proposed as itself. A folder with <code>.git</code> at its root already scans as one repository.</td></tr>
+                <tr><td><code>~/Documents/GitHub/api</code></td><td><code>~/Documents/GitHub</code></td><td>Under a protected folder, propose the level-2 folder. Never all of Documents.</td></tr>
+                <tr><td>A folder of linked worktrees</td><td>Depends on where their repository is</td><td>Three cases, in 2e.</td></tr>
+                <tr><td>Anything</td><td>Never <code>~</code></td><td>The home folder walks thousands of folders that are not code on every rescan.</td></tr>
+              </tbody>
+            </table>
+            <p class="dv-note"><b>Not checked yet.</b> Cloud-synced folders (iCloud Drive, OneDrive, Dropbox) may fetch folder listings from the network when they are opened. Until that is measured, leave them out of the first search the same way as Documents. On Windows and Linux there is no permission prompt, so the Documents button is macOS only.</p>
+          </div>
+          <div class="dv-opt" id="2e">
+            <p class="dv-olabel"><a class="dv-oid" href="#2e">2e</a>Submodules and worktrees: what counts as a repository, and what is never reached</p>
+            <table class="dv-tbl">
+              <thead><tr><th>What the search meets</th><th>What it does</th><th>Counted as</th></tr></thead>
+              <tbody>
+                <tr><td><b>A folder with a <code>.git</code> directory</b><br /><code>~/code/ledger-api</code></td><td>Records it and goes no deeper.</td><td class="good">1 repository</td></tr>
+                <tr><td><b>A worktree inside a repository</b><br /><code>~/code/ledger-api/.claude/worktrees/fix-1</code></td><td>Never reached. The search stopped at <code>ledger-api</code>, and <code>.claude</code> is a hidden folder besides.</td><td>Nothing</td></tr>
+                <tr><td><b>A submodule, or a clone inside a repository</b><br /><code>~/code/ledger-api/vendor/parser</code></td><td>Never reached, for the same reason.</td><td>Nothing</td></tr>
+                <tr><td><b>A linked worktree outside its repository</b>, and the repository was also found<br /><code>~/trees/fix-1</code> of <code>~/code/ledger-api</code></td><td>Reads the one-line <code>.git</code> pointer to learn whose it is. Listed under its repository.</td><td>Nothing more: the repository is already counted</td></tr>
+                <tr><td><b>A linked worktree whose repository was not found</b><br />it lives in a hidden folder, or deeper than level 3</td><td>The folder is proposed, checked. Adding it brings the repository in, because the real scan resolves every checkout to its repository.</td><td class="good">1 repository, once, however many worktrees</td></tr>
+                <tr><td><b>A linked worktree whose repository is gone</b></td><td>Left out of the list.</td><td>Nothing</td></tr>
+                <tr><td><b>The home folder is itself a repository</b><br />dotfiles kept in <code>~</code></td><td>Its <code>.git</code> does not stop the search and <code>~</code> is still never proposed. Its submodules show unchecked, as part of that repository.</td><td>Nothing</td></tr>
+              </tbody>
+            </table>
+            <table class="dv-tbl">
+              <thead><tr><th>Measured on this Mac, three levels</th><th>Count</th></tr></thead>
+              <tbody>
+                <tr><td>Found, stopping at <code>.git</code></td><td class="num">240</td></tr>
+                <tr><td>of which repositories (<code>.git</code> is a directory)</td><td class="num">198</td></tr>
+                <tr><td>of which linked worktrees (<code>.git</code> is a file)</td><td class="num">42</td></tr>
+                <tr><td>worktrees whose repository was also found</td><td class="num">41</td></tr>
+                <tr><td>worktrees whose repository no longer exists</td><td class="num">1</td></tr>
+                <tr><td>Top folders holding only worktrees</td><td class="num">0</td></tr>
+                <tr><td><b>Hidden by stopping:</b> checkouts inside those 198 repositories, up to four levels in</td><td class="num">58</td></tr>
+                <tr><td>21 worktrees, 18 submodules, 17 separate clones, 2 other, spread over 13 repositories</td><td class="num"></td></tr>
+              </tbody>
+            </table>
+            <ul class="dv-list">
+              <li><b>So the headline here is 198 repositories, not 240.</b> The count is repositories after each worktree is folded into its own. It must equal what the sidebar shows once the folders are added.</li>
+              <li><b>Not stopping would have been wrong and slow.</b> It adds 58 rows that are not the user's repositories, a quarter again on top, and the walk took 1.3 seconds against about 40 milliseconds.</li>
+              <li><b>The rule to hold with a property test,</b> using the real scan as the oracle: for any generated tree, no proposed folder lies inside a repository, no directory inside a found checkout is ever listed, and the repository count for the checked folders equals what <code>rescanProfile</code> indexes after adding them.</li>
+            </ul>
+            <p class="dv-note"><b>Two limits that exist today and stay.</b> A separate clone kept inside another repository is invisible to the real scan too, since it also stops at <code>.git</code>; here that is 17 clones. And a bare repository with worktrees beside it (<code>proj/.bare</code>, <code>proj/main</code>) is skipped by the scan, which drops a repository whose main entry is bare. That one is read from <code>repo-indexer.ts</code>, not run. The search should show such a folder unchecked and say PwrGit cannot show it yet, rather than promise it.</p>
+          </div>
+        </div>
+        <p class="dv-next">Try next: "draw the checklist with 14 proposed folders" · "what does the search say on Windows, where Documents needs no prompt?"</p>
+      </section>
+
+      <!-- ==================== TURN 3 ==================== -->
+      <section class="dv-turn" id="t3">
+        <div class="dv-thd"><span class="dv-tid">3</span><h2 class="dv-tname">Wizard step 3, rebuilt around three honest answers</h2></div>
+        <p class="dv-sub">
+          Step 3 asks "Which folders hold your repositories?" and accepts one kind of answer. There are three, and the wizard should take each of them somewhere.
+          The rules page stops being a step of its own: the same three rules sit behind a link on the choice.
+        </p>
+        <div class="dv-opts">
+          <div class="dv-opt" id="3a">
+            <p class="dv-olabel"><a class="dv-oid" href="#3a">3a</a>Step 3 opens on a choice, with the search as the default</p>
+            <div class="wz">
+              <div class="wz-bar"><span class="wz-eye">Setup</span><span class="wz-crumb">Step 3 — Repositories</span><button type="button" class="wz-x" aria-label="Close setup"><svg class="ic" aria-hidden="true"><use href="#i-x"/></svg></button></div>
+              <div class="wz-rail">
+                <div class="wz-rs done"><div class="wz-rn">Step 1 ✓</div><div class="wz-rl">Dana Whitfield</div></div>
+                <div class="wz-rs done"><div class="wz-rn">Step 2 ✓</div><div class="wz-rl">GitHub</div></div>
+                <div class="wz-rs cur"><div class="wz-rn">Step 3</div><div class="wz-rl">Repositories</div></div>
+                <div class="wz-rs"><div class="wz-rn">Done</div><div class="wz-rl">Review</div></div>
+              </div>
+              <div class="wz-body">
+                <h1 class="wz-h">Where are your repositories?</h1>
+                <p class="wz-p">PwrGit works from folders. You name the folders your code lives in, and it finds every repository and worktree inside them, now and whenever one is added.</p>
+                <div class="choices">
+                  <button type="button" class="choice on"><span class="choice-e">Recommended</span><span class="choice-t">Find them for me</span><span class="choice-d">Looks through your home folder, three levels down, and shows you the folders that hold repositories. You pick which to add.</span></button>
+                  <button type="button" class="choice"><span class="choice-e">I know where</span><span class="choice-t">I will choose the folders</span><span class="choice-d">Opens the folder picker. Add as many as you like.</span></button>
+                  <button type="button" class="choice"><span class="choice-e">New here</span><span class="choice-t">I do not have any on this computer</span><span class="choice-d">Pick a folder for them to live in. Then clone from your account or start a new one.</span></button>
+                </div>
+                <div class="notice"><svg class="ic" aria-hidden="true"><use href="#i-info"/></svg><div><b>The search reads folder names, not your files.</b> It skips hidden folders, so it cannot reach <code>.ssh</code> or <code>.aws</code>, and it asks before opening Documents, Desktop or Downloads. <a href="#2a">What it opens and what it never does</a></div></div>
+              </div>
+              <div class="wz-foot"><button type="button" class="btn link">Skip setup</button><span class="sp"></span><button type="button" class="btn ghost">Back</button><button type="button" class="btn pri">Find my repositories →</button></div>
+            </div>
+            <p class="dv-olabel" style="max-width:820px">The primary button names the selected choice: "Find my repositories", "Choose folders&#8230;" or "Pick a folder". The search leads to 2b; the picker leads to today's folder list.</p>
+          </div>
+
+          <div class="dv-opt" id="3b">
+            <p class="dv-olabel"><a class="dv-oid" href="#3b">3b</a>"I do not have any": pick where they will live</p>
+            <div class="wz">
+              <div class="wz-bar"><span class="wz-eye">Setup</span><span class="wz-crumb">Step 3 — Repositories</span><button type="button" class="wz-x" aria-label="Close setup"><svg class="ic" aria-hidden="true"><use href="#i-x"/></svg></button></div>
+              <div class="wz-body">
+                <h1 class="wz-h">Pick a folder for your repositories.</h1>
+                <p class="wz-p">PwrGit creates it and watches it. Everything you clone or create goes in here unless you say otherwise.</p>
+                <div class="chips">
+                  <button type="button" class="chip on">~/projects</button>
+                  <button type="button" class="chip">~/github</button>
+                  <button type="button" class="chip">~/git</button>
+                  <button type="button" class="btn ghost"><svg class="ic" aria-hidden="true"><use href="#i-folder"/></svg>Choose another folder&#8230;</button>
+                </div>
+                <p class="wz-hint"><code>~/projects</code> does not exist yet. PwrGit will create it when you continue.</p>
+              </div>
+              <div class="wz-foot"><button type="button" class="btn link">Skip setup</button><span class="sp"></span><button type="button" class="btn ghost">Back</button><button type="button" class="btn pri">Create ~/projects →</button></div>
+            </div>
+            <p class="dv-olabel" style="max-width:820px">This is the unbuilt half of the earlier board's 4b, moved onto its own answer. The three names are the ones <code>SUGGESTED_ROOTS</code> already holds.</p>
+          </div>
+
+          <div class="dv-opt" id="3c">
+            <p class="dv-olabel"><a class="dv-oid" href="#3c">3c</a>Done, when there are no repositories: next moves, not a key to empty chips</p>
+            <div class="wz">
+              <div class="wz-bar"><span class="wz-eye">Setup</span><span class="wz-crumb">Done</span><button type="button" class="wz-x" aria-label="Close setup"><svg class="ic" aria-hidden="true"><use href="#i-x"/></svg></button></div>
+              <div class="wz-body">
+                <h1 class="wz-h">~/projects is ready. Put a repository in it.</h1>
+                <p class="wz-p">Whatever lands in this folder shows up in the sidebar on its own.</p>
+                <div class="doors">
+                  <button type="button" class="door pri"><svg class="ic" aria-hidden="true"><use href="#i-clone"/></svg><span><span class="door-t">Clone a repository&#8230;</span><span class="door-d">Signed in to GitHub as <code>dana-w</code>. Search your repositories or paste a URL.</span></span></button>
+                  <button type="button" class="door"><svg class="ic" aria-hidden="true"><use href="#i-new"/></svg><span><span class="door-t">New repository&#8230;</span><span class="door-d">Start one here, and publish it when you are ready.</span></span></button>
+                </div>
+              </div>
+              <div class="wz-foot"><button type="button" class="btn link">Replay this later from Help</button><span class="sp"></span><button type="button" class="btn ghost">Back</button><button type="button" class="btn">Close</button></div>
+            </div>
+            <p class="dv-olabel" style="max-width:820px">With repositories found, Done keeps today's lens key. With none, the lens key is noise; these two buttons close the wizard and open their dialog.</p>
+          </div>
+
+          <div class="dv-opt" id="3d">
+            <p class="dv-olabel"><a class="dv-oid" href="#3d">3d</a>The step model, before and after</p>
+            <table class="dv-tbl">
+              <thead><tr><th>Today (<code>steps.ts</code>)</th><th>Proposed</th><th>Change</th></tr></thead>
+              <tbody>
+                <tr><td><code>welcome</code>, <code>identity</code>, <code>forges</code></td><td>The same three</td><td>Identity lets Continue through with a blank field; see the list below.</td></tr>
+                <tr><td><code>folders-explain</code></td><td><code>repos-choose</code> (3a)</td><td>The rules move behind a link. One page fewer for everyone.</td></tr>
+                <tr><td><code>folders-pick</code></td><td><code>repos-find</code> (2b), <code>repos-pick</code>, or <code>repos-home</code> (3b)</td><td>One of three, by the choice made.</td></tr>
+                <tr><td><code>folders-scan</code></td><td><code>repos-scan</code></td><td>Says "Scanning&#8230;" until the scan reports, then a count. Zero offers the search.</td></tr>
+                <tr><td><code>done</code></td><td><code>done</code> (today's, or 3c)</td><td>By whether anything was found.</td></tr>
+              </tbody>
+            </table>
+            <ul class="dv-list">
+              <li><b>Identity no longer blocks.</b> A blank name or e-mail lets Continue through, and the start screen names what is still missing (4a).</li>
+              <li><b>Skip, Esc and the close button keep their meaning.</b> They mark setup finished. What changes is where they land.</li>
+              <li><b>The rail's third label</b> changes from "Repo folders" to "Repositories", and still shows the folders once answered.</li>
+            </ul>
+          </div>
+        </div>
+        <p class="dv-next">Try next: "draw the forge step feeding 3c when no forge is connected" · "should a second profile's first run skip the search and go to the picker?"</p>
+      </section>
+
+      <!-- ==================== TURN 4 ==================== -->
+      <section class="dv-turn" id="t4">
+        <div class="dv-thd"><span class="dv-tid">4</span><h2 class="dv-tname">The start screen: what the empty window says instead</h2></div>
+        <p class="dv-sub">
+          Whenever a profile has no repositories, the main pane stops asking for a selection and offers the ways to get one.
+          It is a state of the window, not part of the wizard, so it is there after a skip, after removing the last folder, and on a second profile.
+        </p>
+        <div class="dv-opts">
+          <div class="dv-opt" id="4a">
+            <p class="dv-olabel"><a class="dv-oid" href="#4a">4a</a>No folders yet: four doors, and a line about what setup left unanswered</p>
+            <div class="win">
+              <div class="side">
+                <div class="prof"><span class="prof-m">P</span><div><div class="prof-n">Personal</div><div class="prof-e">no commit author yet</div></div></div>
+                <div class="tb"><button type="button" class="tb-b">Add &#9662;</button><button type="button" class="tb-b" disabled>Fetch all</button></div>
+                <div class="lens" aria-hidden="true"><span>Focused</span><span>Pinned</span><span>Behind</span><span>Stale</span><span class="on">All</span></div>
+                <div class="side-empty"><p>No repositories yet.</p></div>
+              </div>
+              <div class="main">
+                <div class="start">
+                  <h1 class="start-h">Add your repositories</h1>
+                  <p class="start-p">PwrGit shows the repositories in the folders you give it. Start with whichever of these fits.</p>
+                  <div class="doors">
+                    <button type="button" class="door pri"><svg class="ic" aria-hidden="true"><use href="#i-search"/></svg><span><span class="door-t">Find my repositories</span><span class="door-d">Search your home folder and choose which folders to add.</span></span></button>
+                    <button type="button" class="door"><svg class="ic" aria-hidden="true"><use href="#i-folder"/></svg><span><span class="door-t">Add folders&#8230;</span><span class="door-d">Choose the folders that hold your repositories.</span></span></button>
+                    <button type="button" class="door"><svg class="ic" aria-hidden="true"><use href="#i-clone"/></svg><span><span class="door-t">Clone a repository&#8230;</span><span class="door-d">From GitHub, GitLab, or any URL.</span></span></button>
+                    <button type="button" class="door"><svg class="ic" aria-hidden="true"><use href="#i-new"/></svg><span><span class="door-t">New repository&#8230;</span><span class="door-d">Start one on this computer.</span></span></button>
+                  </div>
+                  <div class="start-foot"><span>Setup was closed early. No commit author and no forge sign-in yet.</span><button type="button" class="btn ghost">Finish setup</button></div>
+                </div>
+              </div>
+            </div>
+            <p class="finding"><span class="pin fix">1</span><span><b>The same four doors as the wizard,</b> in the same order, so closing the wizard loses nothing. Find my repositories is primary because it needs no knowledge.</span></p>
+            <p class="finding"><span class="pin fix">2</span><span><b>The sidebar steps back.</b> It keeps one line. Its Add folders&#8230; button and the "open once a folder exists" hint go: the main pane carries the actions, and Add &#9662; still holds them all.</span></p>
+            <p class="finding"><span class="pin fix">3</span><span><b>Finish setup shows only when something was skipped,</b> and names it. It reopens the wizard at the first unanswered step.</span></p>
+          </div>
+
+          <div class="dv-opt" id="4b">
+            <p class="dv-olabel"><a class="dv-oid" href="#4b">4b</a>Folders, but nothing in them: the same screen, aimed at the folder</p>
+            <div class="win" style="height:440px">
+              <div class="side">
+                <div class="prof"><span class="prof-m">P</span><div><div class="prof-n">Personal</div><div class="prof-e">dana@example.com</div></div></div>
+                <div class="tb"><button type="button" class="tb-b">Add &#9662;</button><button type="button" class="tb-b" disabled>Fetch all</button></div>
+                <div class="lens" aria-hidden="true"><span>Focused</span><span>Pinned</span><span>Behind</span><span>Stale</span><span class="on">All</span></div>
+                <div class="sb-grp"><span class="sb-grp-l">projects</span><span class="sb-grp-c">0</span><span class="sb-rule"></span></div>
+              </div>
+              <div class="main">
+                <div class="start">
+                  <h1 class="start-h">Nothing in ~/projects yet</h1>
+                  <p class="start-p">PwrGit looked five levels into <code>~/projects</code> and found no repositories. Anything added there appears on its own.</p>
+                  <div class="doors">
+                    <button type="button" class="door pri"><svg class="ic" aria-hidden="true"><use href="#i-clone"/></svg><span><span class="door-t">Clone into ~/projects&#8230;</span><span class="door-d">From GitHub, GitLab, or any URL.</span></span></button>
+                    <button type="button" class="door"><svg class="ic" aria-hidden="true"><use href="#i-new"/></svg><span><span class="door-t">New repository&#8230;</span><span class="door-d">Start one in <code>~/projects</code>.</span></span></button>
+                    <button type="button" class="door"><svg class="ic" aria-hidden="true"><use href="#i-search"/></svg><span><span class="door-t">Find my repositories</span><span class="door-d">They may be in another folder.</span></span></button>
+                    <button type="button" class="door"><svg class="ic" aria-hidden="true"><use href="#i-folder"/></svg><span><span class="door-t">Add folders&#8230;</span><span class="door-d">Choose another folder.</span></span></button>
+                  </div>
+                </div>
+              </div>
+            </div>
+            <p class="dv-olabel" style="max-width:940px">Same four doors, reordered: with a folder in place, putting something in it comes first. With two or more empty folders the heading reads "Nothing in your 2 folders yet".</p>
+          </div>
+
+          <div class="dv-opt" id="4c">
+            <p class="dv-olabel"><a class="dv-oid" href="#4c">4c</a>What the main pane says in every empty state</p>
+            <table class="dv-tbl">
+              <thead><tr><th>State</th><th>Today</th><th>Proposed</th></tr></thead>
+              <tbody>
+                <tr><td>Profiles loading</td><td>Loading profiles&#8230;</td><td>Unchanged</td></tr>
+                <tr><td>No profile</td><td>Select a worktree from the sidebar</td><td>"Create a profile to begin", with the button the sidebar already has</td></tr>
+                <tr><td>Profile, no folders</td><td class="bad">Select a worktree from the sidebar</td><td><b>Start screen, 4a</b></td></tr>
+                <tr><td>Folders, scan running, none yet</td><td>Scanning repos&#8230;</td><td>"Looking in 2 folders&#8230;"</td></tr>
+                <tr><td>Folders, scan finished, none</td><td class="bad">Select a worktree from the sidebar</td><td><b>Start screen, 4b</b></td></tr>
+                <tr><td>Repositories, none selected</td><td>Select a worktree from the sidebar</td><td>Unchanged; out of scope here</td></tr>
+                <tr><td>Load error</td><td>Repositories couldn't be loaded&#8230;</td><td>Unchanged</td></tr>
+              </tbody>
+            </table>
+            <p class="dv-note"><b>Which lens is showing does not matter.</b> The start screen is drawn from the profile having no repositories, not from the current lens being empty. Focused with nothing in it, on a profile that has repositories, keeps today's sidebar copy.</p>
+          </div>
+
+          <div class="dv-opt" id="4d">
+            <p class="dv-olabel"><a class="dv-oid" href="#4d">4d</a>The Add menu, on a profile with no folders</p>
+            <div style="display:flex; gap:22px; align-items:flex-start;">
+              <div style="display:flex; flex-direction:column; gap:7px;">
+                <span class="mini-e">Today</span>
+                <div class="menu">
+                  <div class="menu-i">Add folders&#8230;</div>
+                  <div class="menu-i dis">Rescan folders</div>
+                  <div class="menu-i dis">Clone&#8230;<small>needs a folder</small></div>
+                  <div class="menu-i dis">Fork&#8230;<small>needs a folder</small></div>
+                </div>
+              </div>
+              <div style="display:flex; flex-direction:column; gap:7px;">
+                <span class="mini-e">Proposed</span>
+                <div class="menu">
+                  <div class="menu-i new">Find repositories&#8230;<small>new</small></div>
+                  <div class="menu-i">Add folders&#8230;</div>
+                  <div class="menu-i dis">Rescan folders</div>
+                  <div class="menu-sep"></div>
+                  <div class="menu-i">Clone&#8230;</div>
+                  <div class="menu-i">Fork&#8230;</div>
+                  <div class="menu-i new">New repository&#8230;<small>new</small></div>
+                </div>
+              </div>
+            </div>
+            <p class="dv-olabel" style="max-width:480px">Find repositories&#8230; stays in the menu for good: it is also how someone with twelve folders finds the thirteenth. Rescan still needs a folder to rescan.</p>
+          </div>
+        </div>
+        <p class="dv-next">Try next: "draw the start screen at 400px, with the sidebar collapsed" · "what should Repositories, none selected show?"</p>
+      </section>
+
+      <!-- ==================== TURN 5 ==================== -->
+      <section class="dv-turn" id="t5">
+        <div class="dv-thd"><span class="dv-tid">5</span><h2 class="dv-tname">Clone without a folder, and the seam New repository plugs into</h2></div>
+        <p class="dv-sub">
+          Clone, Fork and New repository all end with a repository on disk, and all three need to know where. That question is one component.
+          Today it only lists folders that already exist, which is why Clone is disabled on day one.
+        </p>
+        <div class="dv-opts">
+          <div class="dv-opt" id="5a">
+            <p class="dv-olabel"><a class="dv-oid" href="#5a">5a</a>The destination step when the profile has no folder</p>
+            <div class="mini" style="width:480px">
+              <span class="mini-e">Clone acme/atlas · Destination</span>
+              <h3>Where should it go?</h3>
+              <p>You have no repository folder yet. Pick one, and PwrGit will create it and keep watching it.</p>
+              <label class="radio on"><input type="radio" name="dest" defaultChecked="{{ true }}" />~/projects<span>create and add to Personal</span></label>
+              <label class="radio"><input type="radio" name="dest" />~/github<span>create and add</span></label>
+              <label class="radio"><input type="radio" name="dest" />~/git<span>create and add</span></label>
+              <div><button type="button" class="btn ghost"><svg class="ic" aria-hidden="true"><use href="#i-folder"/></svg>Choose another folder&#8230;</button></div>
+              <p>Clones to <code>~/projects/atlas</code></p>
+            </div>
+            <p class="dv-olabel" style="max-width:480px">Once a folder exists this section is today's destination list, unchanged. The folder is created and registered only when the clone starts, so cancelling leaves nothing behind.</p>
+          </div>
+
+          <div class="dv-opt" id="5b">
+            <p class="dv-olabel"><a class="dv-oid" href="#5b">5b</a>What the New repository board inherits from this one</p>
+            <table class="dv-tbl">
+              <thead><tr><th>Settled here</th><th>Left to that board</th></tr></thead>
+              <tbody>
+                <tr><td><b>Four entry points:</b> the start screen door (4a, 4b), Add &#9662; (4d), wizard Done (3c), and the app menu beside Clone.</td><td>What the dialog asks: name, default branch, README, <code>.gitignore</code>, licence.</td></tr>
+                <tr><td><b>The destination step in 5a,</b> shared with Clone and Fork, including the no-folder case.</td><td>Local only, or published to a forge: which account, public or private, and what happens when the forge refuses.</td></tr>
+                <tr><td><b>It lands in a registered folder,</b> so the index picks it up without a rescan, and it is selected when the dialog closes.</td><td>Publishing later: a repository with no remote needs a "Publish to GitHub&#8230;" move of its own.</td></tr>
+                <tr><td><b>It works with no forge connected.</b> A local repository must never wait on a sign-in.</td><td>Turning an existing folder of files into a repository.</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+
+      <!-- ==================== TURN 6 ==================== -->
+      <section class="dv-turn" id="t6">
+        <div class="dv-thd"><span class="dv-tid">6</span><h2 class="dv-tname">Live: from the empty window to a full sidebar</h2></div>
+        <p class="dv-sub">The start screen with its doors wired up. Find runs the search and shows the checklist; Clone, with no folder, asks where first. Start over resets it.</p>
+        <div class="dv-opts">
+          <div class="dv-opt" id="6a">
+            <p class="dv-olabel"><a class="dv-oid" href="#6a">6a</a>Prototype</p>
+            <div class="win">
+              <div class="side">
+                <div class="prof"><span class="prof-m">P</span><div><div class="prof-n">Personal</div><div class="prof-e">dana@example.com</div></div></div>
+                <div class="tb"><button type="button" class="tb-b">Add &#9662;</button><button type="button" class="tb-b" disabled>Fetch all</button></div>
+                <div class="lens" aria-hidden="true"><span>Focused</span><span>Pinned</span><span>Behind</span><span>Stale</span><span class="on">All</span></div>
+                <sc-if value="{{ sideEmpty }}" hint-placeholder-val="{{ true }}">
+                  <div class="side-empty"><p>No repositories yet.</p></div>
+                </sc-if>
+                <sc-for list="{{ groups }}" as="g" hint-placeholder-count="0">
+                  <div class="sb-grp"><span class="sb-grp-l">{{ g.label }}</span><span class="sb-grp-c">{{ g.count }}</span><span class="sb-rule"></span></div>
+                  <sc-for list="{{ g.repos }}" as="r" hint-placeholder-count="0">
+                    <div class="sb-repo"><svg class="ic" aria-hidden="true"><use href="#i-repo"/></svg>{{ r.name }}</div>
+                  </sc-for>
+                </sc-for>
+              </div>
+              <div class="main">
+                <sc-if value="{{ isStart }}" hint-placeholder-val="{{ true }}">
+                  <div class="start">
+                    <h1 class="start-h">Add your repositories</h1>
+                    <p class="start-p">PwrGit shows the repositories in the folders you give it. Start with whichever of these fits.</p>
+                    <div class="doors">
+                      <button type="button" class="door pri" onClick="{{ find }}"><svg class="ic" aria-hidden="true"><use href="#i-search"/></svg><span><span class="door-t">Find my repositories</span><span class="door-d">Search your home folder and choose which folders to add.</span></span></button>
+                      <button type="button" class="door" onClick="{{ addFolders }}"><svg class="ic" aria-hidden="true"><use href="#i-folder"/></svg><span><span class="door-t">Add folders&#8230;</span><span class="door-d">Choose the folders that hold your repositories.</span></span></button>
+                      <button type="button" class="door" onClick="{{ clone }}"><svg class="ic" aria-hidden="true"><use href="#i-clone"/></svg><span><span class="door-t">Clone a repository&#8230;</span><span class="door-d">From GitHub, GitLab, or any URL.</span></span></button>
+                      <button type="button" class="door" onClick="{{ newRepo }}"><svg class="ic" aria-hidden="true"><use href="#i-new"/></svg><span><span class="door-t">New repository&#8230;</span><span class="door-d">Start one on this computer.</span></span></button>
+                    </div>
+                  </div>
+                </sc-if>
+                <sc-if value="{{ isSearching }}" hint-placeholder-val="{{ false }}">
+                  <div class="start">
+                    <h1 class="start-h">Looking in your home folder&#8230;</h1>
+                    <div class="prog" aria-hidden="true"><i></i></div>
+                    <p class="start-p">Folder names only, three levels down.</p>
+                  </div>
+                </sc-if>
+                <sc-if value="{{ isResults }}" hint-placeholder-val="{{ false }}">
+                  <div class="start">
+                    <h1 class="start-h">{{ foundTitle }}</h1>
+                    <p class="start-p">Nothing is added until you say so.</p>
+                    <div class="cands">
+                      <sc-for list="{{ cands }}" as="c" hint-placeholder-count="0">
+                        <label class="{{ c.cls }}"><input type="checkbox" checked="{{ c.on }}" onChange="{{ c.toggle }}" /><span class="cand-p">{{ c.path }}</span><span class="cand-m">{{ c.meta }}</span></label>
+                      </sc-for>
+                    </div>
+                    <div class="after"><button type="button" class="btn pri" onClick="{{ addPicked }}">{{ addLabel }}</button><button type="button" class="btn ghost" onClick="{{ reset }}">Cancel</button></div>
+                  </div>
+                </sc-if>
+                <sc-if value="{{ isHome }}" hint-placeholder-val="{{ false }}">
+                  <div class="start">
+                    <h1 class="start-h">Where should it go?</h1>
+                    <p class="start-p">You have no repository folder yet. Pick one, and PwrGit will create it and keep watching it.</p>
+                    <div class="chips">
+                      <sc-for list="{{ homes }}" as="h" hint-placeholder-count="0">
+                        <button type="button" class="chip" onClick="{{ h.pick }}">{{ h.path }}</button>
+                      </sc-for>
+                    </div>
+                    <div><button type="button" class="btn ghost" onClick="{{ reset }}">Cancel</button></div>
+                  </div>
+                </sc-if>
+                <sc-if value="{{ isEmptyFolder }}" hint-placeholder-val="{{ false }}">
+                  <div class="start">
+                    <h1 class="start-h">{{ emptyTitle }}</h1>
+                    <p class="start-p">Anything added there appears on its own. The clone dialog would open here, already aimed at this folder.</p>
+                    <div class="doors">
+                      <button type="button" class="door pri" onClick="{{ cloneInto }}"><svg class="ic" aria-hidden="true"><use href="#i-clone"/></svg><span><span class="door-t">Clone into this folder&#8230;</span><span class="door-d">Stands in for the clone dialog: adds acme/atlas.</span></span></button>
+                      <button type="button" class="door" onClick="{{ find }}"><svg class="ic" aria-hidden="true"><use href="#i-search"/></svg><span><span class="door-t">Find my repositories</span><span class="door-d">They may be in another folder.</span></span></button>
+                    </div>
+                  </div>
+                </sc-if>
+                <sc-if value="{{ isFilled }}" hint-placeholder-val="{{ false }}">
+                  <span class="main-empty">Select a worktree from the sidebar</span>
+                </sc-if>
+              </div>
+            </div>
+            <div class="proto-bar"><button type="button" class="btn" onClick="{{ reset }}">Start over</button><span>{{ trail }}</span></div>
+          </div>
+        </div>
+        <p class="dv-next">Try next: "build turn 4 first, as its own PR" · "start the New repository board from 5b" · "draw the search results on a machine with 14 folders"</p>
+      </section>
+    </x-dc>
+    <script type="text/x-dc" data-dc-script data-props='{}'>
+      /* Contrived fixture. Invented folders and repositories. */
+      const CANDS = [
+        { id: 'code', path: '~/code', n: 5, meta: '5 repositories', repos: ['ledger-api', 'ledger-web', 'telemetry', 'notes', 'infra'] },
+        { id: 'github', path: '~/github', n: 9, meta: '9 repositories', repos: ['atlas', 'harbor', 'beacon', 'quill', 'tessera', 'lumen', 'osprey', 'marrow', 'fathom'] },
+        { id: 'work', path: '~/work', n: 2, meta: '2 repositories', repos: ['billing', 'pipeline'] },
+        { id: 'dotfiles', path: '~/dotfiles', n: 1, meta: '1 repository', repos: ['dotfiles'] }
+      ];
+      const HOMES = ['~/projects', '~/github', '~/git'];
+      const START_TRAIL = 'A profile with no folders. Pick a door.';
+
+      class Component extends DCLogic {
+        constructor(props) {
+          super(props);
+          this.state = this.fresh();
+        }
+
+        fresh() {
+          return {
+            screen: 'start',
+            picked: { code: true, github: true, work: true, dotfiles: true },
+            groups: [],
+            emptyRoot: '',
+            trail: START_TRAIL
+          };
+        }
+
+        componentWillUnmount() { clearTimeout(this.timer); }
+
+        groupFor(cand) {
+          return {
+            label: cand.path.slice(2),
+            count: String(cand.repos.length),
+            repos: cand.repos.map(function (name) { return { name: name }; })
+          };
+        }
+
+        renderVals() {
+          const self = this;
+          const s = this.state;
+          const chosen = CANDS.filter(function (c) { return s.picked[c.id]; });
+          const total = chosen.reduce(function (n, c) { return n + c.n; }, 0);
+
+          return {
+            isStart: s.screen === 'start',
+            isSearching: s.screen === 'searching',
+            isResults: s.screen === 'results',
+            isHome: s.screen === 'home',
+            isEmptyFolder: s.screen === 'emptyFolder',
+            isFilled: s.screen === 'filled',
+            sideEmpty: s.groups.length === 0,
+            groups: s.groups,
+            trail: s.trail,
+            foundTitle: 'Found 17 repositories in 4 folders.',
+            emptyTitle: 'Nothing in ' + s.emptyRoot + ' yet',
+            addLabel: chosen.length === 0
+              ? 'Nothing selected'
+              : 'Add ' + chosen.length + (chosen.length === 1 ? ' folder' : ' folders') + ' · ' + total + (total === 1 ? ' repository' : ' repositories'),
+
+            cands: CANDS.map(function (c) {
+              const on = !!s.picked[c.id];
+              return {
+                path: c.path,
+                meta: c.meta,
+                on: on,
+                cls: on ? 'cand' : 'cand off',
+                toggle: function () {
+                  const next = Object.assign({}, self.state.picked);
+                  next[c.id] = !on;
+                  self.setState({ picked: next });
+                }
+              };
+            }),
+
+            homes: HOMES.map(function (path) {
+              return {
+                path: path,
+                pick: function () {
+                  self.setState({
+                    screen: 'emptyFolder',
+                    emptyRoot: path,
+                    groups: [{ label: path.slice(2), count: '0', repos: [] }],
+                    trail: path + ' was created and added. Clone no longer needed a folder first.'
+                  });
+                }
+              };
+            }),
+
+            find: function () {
+              self.setState({ screen: 'searching', trail: 'Searching. On the Mac this was measured on it took under 50 ms; the pause here is for show.' });
+              clearTimeout(self.timer);
+              self.timer = setTimeout(function () {
+                self.setState({ screen: 'results', trail: 'The search proposes folders. Untick any you do not want.' });
+              }, 900);
+            },
+
+            addPicked: function () {
+              if (chosen.length === 0) return;
+              self.setState({
+                screen: 'filled',
+                groups: chosen.map(function (c) { return self.groupFor(c); }),
+                trail: chosen.length + (chosen.length === 1 ? ' folder' : ' folders') + ' added. The window is back to its ordinary state.'
+              });
+            },
+
+            addFolders: function () {
+              self.setState({
+                screen: 'filled',
+                groups: [self.groupFor(CANDS[0])],
+                trail: 'The system folder picker stands in here; ~/code was chosen.'
+              });
+            },
+
+            clone: function () {
+              self.setState({ screen: 'home', trail: 'Clone opens. With no folder yet, its destination step asks where first (5a).' });
+            },
+
+            cloneInto: function () {
+              self.setState({
+                screen: 'filled',
+                groups: [{ label: self.state.emptyRoot.slice(2), count: '1', repos: [{ name: 'atlas' }] }],
+                trail: 'acme/atlas cloned into ' + self.state.emptyRoot + ' and appeared on its own.'
+              });
+            },
+
+            newRepo: function () {
+              self.setState({ trail: 'New repository has its own board. It uses the same destination step as Clone (5b).' });
+            },
+
+            reset: function () {
+              clearTimeout(self.timer);
+              self.setState(self.fresh());
+            }
+          };
+        }
+      }
+    </script>
+  </body>
+</html>

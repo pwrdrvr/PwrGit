@@ -27,27 +27,29 @@ test("the toolbar is one row and stays put above a long scrolling repo list", as
   const toolbar = window.getByRole("group", { name: "Repositories", exact: true });
   const add = toolbar.getByRole("button", { name: "Add repositories" });
 
-  // Day one: the empty list carries Add folders, and Clone stays discoverable
-  // in the Add menu with its prerequisite spelled out rather than hidden.
+  // Day one: the main pane's start screen carries the doors, and the empty
+  // list steps back to one line (design/New User Journey - UX Review, 4a).
+  // Clone needs no folder first: its destination step can create one (5a).
+  // Only Rescan still waits for a folder, with the reason spelled out.
   await expect(toolbar).toBeVisible();
-  await expect(
-    window.locator(".sidebar__start").getByRole("button", { name: "Add folders…" })
-  ).toBeEnabled();
-  await expect(
-    window.getByText("Clone and Fork, under Add, open once a folder exists.")
-  ).toBeVisible();
+  const start = window.getByTestId("start-screen");
+  await expect(start.getByRole("button", { name: /^Add folders…/ })).toBeEnabled();
+  await expect(start.getByRole("button", { name: /^Find my repositories/ })).toBeEnabled();
+  await expect(window.locator(".sidebar__empty")).toHaveText("No repositories yet.");
   await add.click();
-  const clone = window.getByRole("menuitem", { name: /^Clone…/ });
-  await expect(clone).toBeDisabled();
+  await expect(window.getByRole("menuitem", { name: /^Find repositories…/ })).toBeEnabled();
+  await expect(window.getByRole("menuitem", { name: /^Clone…/ })).toBeEnabled();
+  const rescan = window.getByRole("menuitem", { name: /^Rescan folders/ });
+  await expect(rescan).toBeDisabled();
   // The reason is the menu's own hint line, so it is part of the item's
   // name as well as on screen.
-  await expect(clone).toContainText("Add a repo folder before cloning");
+  await expect(rescan).toContainText("Add a repo folder first");
   await window.keyboard.press("Escape");
   await expect(window.getByRole("menu")).toHaveCount(0);
 
   await addRootAndExpand(window, handle, sandbox, repo.name);
-  // The day-one card leaves once a folder exists.
-  await expect(window.locator(".sidebar__start")).toHaveCount(0);
+  // The start screen leaves once the profile has a repository.
+  await expect(window.getByTestId("start-screen")).toHaveCount(0);
   await app.evaluate(({ BrowserWindow }) => {
     BrowserWindow.getAllWindows()[0]?.setSize(1360, 620);
   });

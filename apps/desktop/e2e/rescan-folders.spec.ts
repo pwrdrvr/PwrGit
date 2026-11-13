@@ -78,7 +78,7 @@ test("Rescan folders in the Add menu, and what it says", async () => {
           clip: { x: 0, y: 0, width: 340, height: Math.ceil(menuBox.y + menuBox.height + 12) }
         });
       }
-      expect(labels).toEqual(["Add folders…", "Rescan folders", "Clone…", "Fork…"]);
+      expect(labels).toEqual(["Find repositories…", "Add folders…", "Rescan folders", "Clone…", "Fork…"]);
       await page.getByRole("menuitem", { name: "Rescan folders" }).click();
       expect(await calls(page)).toEqual(["rescanFolders"]);
 

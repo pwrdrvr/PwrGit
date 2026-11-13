@@ -20,7 +20,8 @@ test("failed boot reads explain the problem and recover without relaunching", as
     hasText: "Profiles couldn’t be loaded"
   });
   await expect(profileError).toBeVisible();
-  await expect(window.getByRole("button", { name: "Add folders…" })).toBeDisabled();
+  // No profile, so no start screen offering to add to one.
+  await expect(window.getByTestId("start-screen")).toHaveCount(0);
 
   await profileError.getByRole("button", { name: "Try again" }).click();
   await expect(window.locator(".profile-chip__name")).toHaveText("Personal");
@@ -32,10 +33,11 @@ test("failed boot reads explain the problem and recover without relaunching", as
   await repoError.getByRole("button", { name: "Try again" }).click();
 
   // The successful retry resolves to a real empty list, not another error and
-  // not an indefinite scanner. A window with no remembered lens lands in All,
-  // so recovery returns to the one empty state that says what to do next and
-  // leaves the ordinary add action usable.
-  await expect(window.getByText("No repos yet")).toBeVisible();
+  // not an indefinite scanner: the sidebar says so in one line, and the main
+  // pane's start screen says what to do next with the add actions usable.
+  await expect(window.locator(".sidebar__empty")).toHaveText("No repositories yet.");
   await expect(window.getByRole("alert")).toHaveCount(0);
-  await expect(window.getByRole("button", { name: "Add folders…" })).toBeEnabled();
+  await expect(
+    window.getByTestId("start-screen").getByRole("button", { name: /^Add folders…/ })
+  ).toBeEnabled();
 });

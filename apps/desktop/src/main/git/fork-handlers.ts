@@ -6,6 +6,7 @@ import type { IdentityService } from "../forge/identity-service";
 import type { RepoIndexer } from "./repo-indexer";
 import type { ForkService } from "./fork-service";
 import type { WorktreeRefresher } from "./worktree-handlers";
+import { runInNewRoot, type NewRootService } from "../profiles/new-root";
 
 export function registerForkHandlers(
   bus: CommandBus,
@@ -15,7 +16,13 @@ export function registerForkHandlers(
   /** Re-reads one repository's worktree rows. Only the checkout-rewiring path
    *  needs it: that one changes a repository that is already on screen, where
    *  `repo:fork` produces a new row the tree reload picks up. */
-  refresher?: Pick<WorktreeRefresher, "refreshRepoWorktrees">
+  refresher?: Pick<WorktreeRefresher, "refreshRepoWorktrees">,
+  /** Fork into a folder the profile does not have yet (card 5a). */
+  newRoots?: {
+    service: NewRootService;
+    rootsChanged: () => void;
+    scanExisting: (profileId: string) => void;
+  }
 ): void {
   const active = new Map<string, AbortController>();
 
@@ -57,16 +64,27 @@ export function registerForkHandlers(
     const controller = new AbortController();
     active.set(req.operationId, controller);
     try {
-      const result = await forks.fork(
-        req,
-        (progress) => {
-          emitEvent("repo:forkProgress", {
-            operationId: req.operationId,
-            profileId: req.profileId,
-            progress
-          });
-        },
-        controller.signal
+      const result = await runInNewRoot(
+        newRoots?.service,
+        req.profileId,
+        req.newRoot,
+        req.parentPath,
+        (parentPath) =>
+          forks.fork(
+            { ...req, parentPath },
+            (progress) => {
+              emitEvent("repo:forkProgress", {
+                operationId: req.operationId,
+                profileId: req.profileId,
+                progress
+              });
+            },
+            controller.signal
+          ),
+        {
+          rootsChanged: () => newRoots?.rootsChanged(),
+          scanExisting: () => newRoots?.scanExisting(req.profileId)
+        }
       );
       if (result.ok) {
         emitEvent("repo:changed", { profileId: req.profileId });

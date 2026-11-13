@@ -2,13 +2,20 @@ import { err, ok } from "@pwrgit/shared";
 import type { CommandBus } from "../command-bus";
 import { emitEvent } from "../ipc";
 import type { CloneService } from "./clone-service";
+import { runInNewRoot, type NewRootService } from "../profiles/new-root";
 
 export function registerCloneHandlers(
   bus: CommandBus,
   clones: CloneService,
   /** Ask the forge about the new checkout, as a fetch does. The sidebar's
    *  reload would only ask from a window that is open on this profile. */
-  refreshIdentity?: (repoId: string) => void
+  refreshIdentity?: (repoId: string) => void,
+  /** Clone into a folder the profile does not have yet (card 5a). */
+  newRoots?: {
+    service: NewRootService;
+    rootsChanged: () => void;
+    scanExisting: (profileId: string) => void;
+  }
 ): void {
   const active = new Map<string, AbortController>();
   bus.register("repo:cloneCatalog", (req) => clones.catalog(req.profileId));
@@ -35,16 +42,27 @@ export function registerCloneHandlers(
     const controller = new AbortController();
     active.set(req.operationId, controller);
     try {
-      const result = await clones.clone(
-        req,
-        (progress) => {
-          emitEvent("repo:cloneProgress", {
-            operationId: req.operationId,
-            profileId: req.profileId,
-            progress
-          });
-        },
-        controller.signal
+      const result = await runInNewRoot(
+        newRoots?.service,
+        req.profileId,
+        req.newRoot,
+        req.parentPath,
+        (parentPath) =>
+          clones.clone(
+            { ...req, parentPath },
+            (progress) => {
+              emitEvent("repo:cloneProgress", {
+                operationId: req.operationId,
+                profileId: req.profileId,
+                progress
+              });
+            },
+            controller.signal
+          ),
+        {
+          rootsChanged: () => newRoots?.rootsChanged(),
+          scanExisting: () => newRoots?.scanExisting(req.profileId)
+        }
       );
       if (result.ok) {
         emitEvent("repo:changed", { profileId: req.profileId });

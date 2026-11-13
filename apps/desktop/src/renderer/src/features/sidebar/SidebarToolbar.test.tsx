@@ -34,6 +34,7 @@ afterEach(() => {
 function handlers() {
   return {
     onAddFolder: vi.fn(),
+    onFindRepositories: vi.fn(),
     onRescanFolders: vi.fn(),
     onClone: vi.fn(),
     onFork: vi.fn(),
@@ -75,6 +76,7 @@ const menuItem = (label: string): HTMLButtonElement => {
 describe("addMenuReasons", () => {
   it("names a reason for every entry until a profile has loaded", () => {
     expect(addMenuReasons({ hasProfile: false, rootCount: 0 })).toEqual({
+      find: "Load or create a profile first",
       addFolders: "Load or create a profile first",
       rescan: "Load or create a profile first",
       clone: "Load or create a profile first",
@@ -82,11 +84,12 @@ describe("addMenuReasons", () => {
     });
   });
 
-  it("leaves Add folders available and explains Rescan, Clone and Fork with no folder", () => {
+  // Clone and Fork create the folder they land in (design/New User Journey -
+  // UX Review, card 5a), so with no folder only Rescan, which has nothing to
+  // rescan, explains itself.
+  it("explains only Rescan with no folder; Find, Add folders, Clone and Fork all work", () => {
     expect(addMenuReasons({ hasProfile: true, rootCount: 0 })).toEqual({
-      rescan: "Add a repo folder first",
-      clone: "Add a repo folder before cloning",
-      fork: "Add a repo folder before forking"
+      rescan: "Add a repo folder first"
     });
   });
 
@@ -171,7 +174,10 @@ describe("SidebarToolbar", () => {
     expect(add.getAttribute("aria-expanded")).toBe("true");
     expect(
       [...document.querySelectorAll('[role="menuitem"]')].map((el) => el.textContent)
-    ).toEqual(["Add folders…", "Rescan folders", "Clone…", "Fork…"]);
+    ).toEqual(["Find repositories…", "Add folders…", "Rescan folders", "Clone…", "Fork…"]);
+    act(() => menuItem("Find repositories…").click());
+    expect(h.onFindRepositories).toHaveBeenCalledTimes(1);
+    act(() => add.click());
     act(() => menuItem("Rescan folders").click());
     expect(h.onRescanFolders).toHaveBeenCalledTimes(1);
     act(() => add.click());
@@ -184,13 +190,12 @@ describe("SidebarToolbar", () => {
     expect(h.onFork).toHaveBeenCalledTimes(1);
   });
 
-  it("keeps Clone and Fork in the menu, disabled with the reason, before any folder", () => {
+  it("opens Find, Clone and Fork before any folder, and explains Rescan", () => {
     const h = render({ hasProfile: true, rootCount: 0, repoCount: 0 });
     act(() => button("Add repositories").click());
-    const clone = menuItem("Clone…");
-    expect(clone.disabled).toBe(true);
-    expect(clone.textContent).toContain("Add a repo folder before cloning");
-    expect(menuItem("Fork…").disabled).toBe(true);
+    expect(menuItem("Find repositories…").disabled).toBe(false);
+    expect(menuItem("Clone…").disabled).toBe(false);
+    expect(menuItem("Fork…").disabled).toBe(false);
     const rescan = menuItem("Rescan folders");
     expect(rescan.disabled).toBe(true);
     expect(rescan.textContent).toContain("Add a repo folder first");
