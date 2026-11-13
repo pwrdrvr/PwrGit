@@ -1,9 +1,12 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState, type ReactElement } from "react";
 import {
+  SUGGESTED_ROOTS,
   forgeProduct,
   type GitIdentityRead,
+  type NewRootChoice,
   type Profile,
-  type Repo
+  type Repo,
+  type SuggestedRoot
 } from "@pwrgit/shared";
 import { dispatch } from "../../lib/pwrgit";
 import { pathLeaf } from "../../lib/platform";
@@ -19,13 +22,17 @@ import {
   previousStep,
   railIndexForStep,
   railLabel,
+  type RepoChoice,
   type WizardStep
 } from "./steps";
 import { ForgesStep } from "./ForgesStep";
 import { CloseGlyph } from "../../lib/CloseGlyph";
 import { CheckGlyph } from "../../lib/CheckGlyph";
+import { CloneGlyph } from "../../lib/CloneGlyph";
 import { InfoGlyph } from "../../lib/InfoGlyph";
 import { WarningGlyph } from "../../lib/WarningGlyph";
+import { RepoSearchView, addFoldersLabel, useRepoSearch } from "./RepoSearch";
+import { NewRootPicker, tildeFor, useSuggestedRoots } from "./NewRootPicker";
 
 export type OnboardingWizardProps = {
   profile: Profile;
@@ -33,6 +40,8 @@ export type OnboardingWizardProps = {
   repos: Repo[];
   /** Help-menu replay: show the wizard without persisting completion. */
   isReplay: boolean;
+  /** Where to open: Welcome, or the first step "Finish setup" named. */
+  initialStep?: WizardStep;
   pickDirectories: () => Promise<string[]>;
   onSetRoots: (profileId: string, roots: string[]) => Promise<unknown>;
   onSetIdentity: (
@@ -41,21 +50,30 @@ export type OnboardingWizardProps = {
   ) => Promise<void>;
   /** Clear the overlay. `persistCompleted` is false only for a replay. */
   onDismiss: (persistCompleted: boolean) => void;
+  /** Done with no repositories: close and open the clone dialog (card 3c). */
+  onOpenClone?: () => void;
 };
-
-/** Folder names offered when the user has nowhere to point PwrGit yet. The
- *  three spellings people actually use; see the design bundle's turn 4. */
-const SUGGESTED_ROOTS = ["projects", "github", "git"] as const;
 
 export function OnboardingWizard(props: OnboardingWizardProps) {
   const { profile, repos, isReplay, onDismiss } = props;
-  const [step, setStep] = useState<WizardStep>("welcome");
+  const [step, setStep] = useState<WizardStep>(props.initialStep ?? "welcome");
+  const [choice, setChoice] = useState<RepoChoice>("find");
   const [identity, setIdentity] = useState<GitIdentityRead | null>(null);
   const [authorName, setAuthorName] = useState(profile.authorName ?? "");
   const [email, setEmail] = useState(profile.email);
   const [roots, setRoots] = useState<string[]>(profile.roots);
   const [busy, setBusy] = useState(false);
+  /** Scans started by this wizard that have not reported yet. */
+  const [scansPending, setScansPending] = useState(0);
+  const [homeChoice, setHomeChoice] = useState<NewRootChoice>({
+    kind: "suggested",
+    name: SUGGESTED_ROOTS[0]
+  });
+  const [homeError, setHomeError] = useState<string | null>(null);
   const forges = useForgeStatuses();
+  const search = useRepoSearch(profile.id);
+  const suggested = useSuggestedRoots();
+  const tilde = useMemo(() => tildeFor(suggested), [suggested]);
 
   // Asked of git, not parsed out of ~/.gitconfig — the seed that filled this
   // profile is not section-aware and does not follow `include`, so it can hold
@@ -97,9 +115,26 @@ export function OnboardingWizard(props: OnboardingWizardProps) {
     [authorName, forgeSummary, roots]
   );
 
+  /** Save the folders and scan them. The scan step says it is scanning until
+   *  this reports. */
+  const saveRoots = useCallback(
+    async (next: string[]) => {
+      setRoots(next);
+      setScansPending((n) => n + 1);
+      try {
+        await props.onSetRoots(profile.id, next);
+      } finally {
+        setScansPending((n) => n - 1);
+      }
+    },
+    [profile.id, props]
+  );
+
   const finish = useCallback(async () => {
     setBusy(true);
     try {
+      // Identity no longer blocks Continue (card 3d), so a half-filled pair is
+      // not written: the start screen names what is still missing instead.
       if (identityComplete) {
         await props.onSetIdentity(profile.id, {
           authorName: authorName.trim(),
@@ -120,19 +155,88 @@ export function OnboardingWizard(props: OnboardingWizardProps) {
     props
   ]);
 
+  const addFolders = useCallback(async () => {
+    const picked = await props.pickDirectories();
+    if (picked.length === 0) return;
+    const merged = [...roots];
+    for (const p of picked) if (!merged.includes(p)) merged.push(p);
+    await saveRoots(merged);
+  }, [props, roots, saveRoots]);
+
+  const removeRoot = useCallback(
+    async (root: string) => {
+      await saveRoots(roots.filter((r) => r !== root));
+    },
+    [roots, saveRoots]
+  );
+
+  /** Go to one of step 3's answers, doing what its button promised. */
+  const enterChoice = useCallback(
+    (picked: RepoChoice) => {
+      setChoice(picked);
+      if (picked === "find") {
+        setStep("repos-find");
+        search.start(false);
+      } else if (picked === "pick") {
+        setStep("repos-pick");
+        void addFolders();
+      } else {
+        setStep("repos-home");
+      }
+    },
+    [addFolders, search]
+  );
+
+  const createHomeFolder = useCallback(async () => {
+    setBusy(true);
+    setHomeError(null);
+    try {
+      const result = await dispatch("profile:createRoot", {
+        profileId: profile.id,
+        root: homeChoice
+      });
+      if (!result.ok) {
+        setHomeError(result.error.message);
+        return;
+      }
+      setRoots((prev) => (prev.includes(result.value.path) ? prev : [...prev, result.value.path]));
+      setStep("done");
+    } finally {
+      setBusy(false);
+    }
+  }, [homeChoice, profile.id]);
+
   const advance = useCallback(() => {
-    const next = nextStep(step);
+    if (step === "repos-choose") {
+      enterChoice(choice);
+      return;
+    }
+    if (step === "repos-find") {
+      const add = search.checkedPaths();
+      const merged = [...roots];
+      for (const p of add) if (!merged.includes(p)) merged.push(p);
+      setStep("repos-scan");
+      void saveRoots(merged);
+      return;
+    }
+    if (step === "repos-home") {
+      void createHomeFolder();
+      return;
+    }
+    const next = nextStep(step, choice);
     if (next === null) {
       void finish();
       return;
     }
     setStep(next);
-  }, [finish, step]);
+  }, [choice, createHomeFolder, enterChoice, finish, roots, saveRoots, search, step]);
 
   const goBack = useCallback(() => {
-    const prev = previousStep(step);
-    if (prev !== null) setStep(prev);
-  }, [step]);
+    const prev = previousStep(step, choice);
+    if (prev === null) return;
+    if (step === "repos-find") search.reset();
+    setStep(prev);
+  }, [choice, search, step]);
 
   // Close and Skip are the same act. A wizard that re-fires because you closed
   // it is a wizard you close harder — so both persist completion, except on a
@@ -154,38 +258,38 @@ export function OnboardingWizard(props: OnboardingWizardProps) {
     };
   }, [skip]);
 
-  const addFolders = useCallback(async () => {
-    const picked = await props.pickDirectories();
-    if (picked.length === 0) return;
-    const merged = [...roots];
-    for (const p of picked) if (!merged.includes(p)) merged.push(p);
-    setRoots(merged);
-    await props.onSetRoots(profile.id, merged);
-  }, [profile.id, props, roots]);
-
-  const removeRoot = useCallback(
-    async (root: string) => {
-      const next = roots.filter((r) => r !== root);
-      setRoots(next);
-      await props.onSetRoots(profile.id, next);
-    },
-    [profile.id, props, roots]
-  );
-
-  const nextLabel =
-    step === "welcome"
-      ? "Start"
-      : step === "folders-explain"
-        ? "Choose folders"
-        : step === "folders-pick"
-          ? roots.length === 0
-            ? "Continue without folders"
-            : `Scan ${roots.length} ${roots.length === 1 ? "folder" : "folders"}`
-          : step === "folders-scan"
-            ? "See the result"
-            : step === "done"
-              ? "Start working"
-              : "Continue";
+  const scanning = scansPending > 0;
+  const noRepos = repos.length === 0 && !scanning;
+  const nextLabel = (() => {
+    switch (step) {
+      case "welcome":
+        return "Start";
+      case "repos-choose":
+        return choice === "find"
+          ? "Find my repositories"
+          : choice === "pick"
+            ? "Choose folders…"
+            : "Pick a folder";
+      case "repos-find":
+        return addFoldersLabel(search.state);
+      case "repos-pick":
+        return roots.length === 0
+          ? "Continue without folders"
+          : `Scan ${roots.length} ${roots.length === 1 ? "folder" : "folders"}`;
+      case "repos-home":
+        return homeActionLabel(homeChoice, suggested, tilde);
+      case "repos-scan":
+        return "See the result";
+      case "done":
+        return noRepos ? "Close" : "Start working";
+      default:
+        return "Continue";
+    }
+  })();
+  const nextDisabled =
+    busy ||
+    (step === "repos-find" &&
+      (search.state.status !== "done" || search.state.checked.size === 0));
 
   return (
     <div
@@ -256,18 +360,61 @@ export function OnboardingWizard(props: OnboardingWizardProps) {
             />
           )}
           {step === "forges" && <ForgesStep forges={forges} />}
-          {step === "folders-explain" && <ScanExplainerStep />}
-          {step === "folders-pick" && (
+          {step === "repos-choose" && (
+            <RepoChoiceStep choice={choice} onChoice={setChoice} onPick={enterChoice} />
+          )}
+          {step === "repos-find" && (
+            <RepoSearchView
+              search={search}
+              onChooseMyself={() => enterChoice("pick")}
+              onNoneYet={() => enterChoice("home")}
+            />
+          )}
+          {step === "repos-pick" && (
             <FolderPickStep
               roots={roots}
               onAdd={() => void addFolders()}
               onRemove={(r) => void removeRoot(r)}
             />
           )}
-          {step === "folders-scan" && (
-            <ScanResultStep roots={roots} repos={repos} />
+          {step === "repos-home" && (
+            <HomeFolderStep
+              suggested={suggested}
+              tilde={tilde}
+              choice={homeChoice}
+              onChoice={(c) => {
+                setHomeChoice(c);
+                setHomeError(null);
+              }}
+              pickDirectories={props.pickDirectories}
+              error={homeError}
+            />
           )}
-          {step === "done" && <DoneStep roots={roots} repos={repos} />}
+          {step === "repos-scan" && (
+            <ScanResultStep
+              roots={roots}
+              repos={repos}
+              scanning={scanning}
+              onFind={() => enterChoice("find")}
+            />
+          )}
+          {step === "done" &&
+            (noRepos ? (
+              <NoRepositoriesDone
+                roots={roots}
+                tilde={tilde}
+                forgeSummary={forgeSummary}
+                {...(props.onOpenClone === undefined
+                  ? {}
+                  : {
+                      onClone: () => {
+                        void finish().then(() => props.onOpenClone?.());
+                      }
+                    })}
+              />
+            ) : (
+              <DoneStep roots={roots} repos={repos} />
+            ))}
         </div>
 
         <footer className="onboarding-wizard__footer">
@@ -291,7 +438,7 @@ export function OnboardingWizard(props: OnboardingWizardProps) {
           <button
             type="button"
             className="onboarding-wizard__btn onboarding-wizard__btn--primary"
-            disabled={busy || (step === "identity" && !identityComplete)}
+            disabled={nextDisabled}
             onClick={() => void advance()}
           >
             {nextLabel} →
@@ -307,7 +454,19 @@ function crumbFor(step: WizardStep): string {
   if (step === "identity") return "Step 1 — Identity";
   if (step === "forges") return "Step 2 — Forges";
   if (step === "done") return "Done";
-  return "Step 3 — Repo folders";
+  return "Step 3 — Repositories";
+}
+
+/** "Create ~/projects" for a folder that is not there yet, else "Use …". */
+function homeActionLabel(
+  choice: NewRootChoice,
+  suggested: SuggestedRoot[] | null,
+  tilde: (path: string) => string
+): string {
+  if (choice.kind === "picked") return `Use ${tilde(choice.path)}`;
+  const root = suggested?.find((s) => s.name === choice.name);
+  const display = root?.display ?? `~/${choice.name}`;
+  return root !== undefined && root.exists ? `Use ${display}` : `Create ${display}`;
 }
 
 function WelcomeStep() {
@@ -402,57 +561,129 @@ function IdentityStep(props: {
       )}
       <p className="onboarding-wizard__hint">
         Changing these here writes them to this PwrGit profile only. Your global{" "}
-        <code>~/.gitconfig</code> is not edited.
+        <code>~/.gitconfig</code> is not edited. Leave either blank to set it
+        later; the start screen will remind you.
       </p>
     </div>
   );
 }
 
-function ScanExplainerStep() {
+const CHOICES: ReadonlyArray<{
+  value: RepoChoice;
+  eyebrow: string;
+  title: string;
+  body: string;
+}> = [
+  {
+    value: "find",
+    eyebrow: "Recommended",
+    title: "Find them for me",
+    body: "Looks through your home folder, three levels down, and shows you the folders that hold repositories. You pick which to add."
+  },
+  {
+    value: "pick",
+    eyebrow: "I know where",
+    title: "I will choose the folders",
+    body: "Opens the folder picker. Add as many as you like."
+  },
+  {
+    value: "home",
+    eyebrow: "New here",
+    title: "I do not have any on this computer",
+    body: "Pick a folder for them to live in. Then clone from your account."
+  }
+];
+
+/** Step 3 opens on a choice, with the search as the default (card 3a). The
+ *  scan's rules, once a page of their own, sit behind a link. */
+function RepoChoiceStep(props: {
+  choice: RepoChoice;
+  onChoice: (choice: RepoChoice) => void;
+  onPick: (choice: RepoChoice) => void;
+}): ReactElement {
+  const [rulesOpen, setRulesOpen] = useState(false);
   return (
     <div>
       <div className="onboarding-wizard__head">
-        <h1 className="onboarding-wizard__title">
-          You name folders. PwrGit does the finding.
-        </h1>
+        <h1 className="onboarding-wizard__title">Where are your repositories?</h1>
         <p className="onboarding-wizard__sub">
-          You will not add repositories one at a time. Point PwrGit at the
-          folder your code already lives in and it walks it, indexing every git
-          checkout it meets — and every worktree each one owns.
+          PwrGit works from folders. You name the folders your code lives in,
+          and it finds every repository and worktree inside them, now and
+          whenever one is added.
         </p>
       </div>
-      <ol className="onboarding-wizard__rules">
-        <li>
-          <b>It looks five levels down.</b> From the folder you add, PwrGit
-          descends up to five levels looking for a <code>.git</code> entry. Once
-          it finds one it stops there — it does not walk around inside your
-          repositories.
-        </li>
-        <li>
-          <b>Hidden folders are never opened.</b> Anything whose name starts
-          with a dot is skipped outright — <code>.ssh</code>,{" "}
-          <code>.config</code>, <code>.aws</code>, <code>.gnupg</code>. PwrGit
-          does not look in them, so adding your home folder cannot reach your
-          keys.
-        </li>
-        <li>
-          <b>It reads folder names, not files.</b> The scan lists directory
-          entries and checks for <code>.git</code>. It never opens, reads,
-          copies or sends the contents of anything.
-        </li>
-      </ol>
+      <div className="repo-choice" role="radiogroup" aria-label="Where are your repositories?">
+        {CHOICES.map((c) => (
+          <label
+            key={c.value}
+            className={`repo-choice__card${props.choice === c.value ? " is-selected" : ""}`}
+            onDoubleClick={() => props.onPick(c.value)}
+          >
+            <input
+              type="radio"
+              name="repo-choice"
+              className="repo-choice__input"
+              value={c.value}
+              checked={props.choice === c.value}
+              onChange={() => props.onChoice(c.value)}
+            />
+            <span className="repo-choice__eyebrow">{c.eyebrow}</span>
+            <span className="repo-choice__title">{c.title}</span>
+            <span className="repo-choice__body">{c.body}</span>
+          </label>
+        ))}
+      </div>
       <div className="onboarding-wizard__notice">
         <span className="onboarding-wizard__notice-icon" aria-hidden="true">
           <InfoGlyph />
         </span>
         <div>
-          Also skipped, at every level: <code>node_modules</code>,{" "}
-          <code>dist</code>, <code>out</code>, <code>build</code>,{" "}
-          <code>target</code>, <code>vendor</code>, <code>.cache</code> and
-          macOS <code>Library</code>.
+          <b>The search reads folder names, not your files.</b> It skips hidden
+          folders, so it cannot reach <code>.ssh</code> or <code>.aws</code>,
+          and it asks before opening Documents, Desktop or Downloads.{" "}
+          <button
+            type="button"
+            className="onboarding-wizard__inline-link"
+            aria-expanded={rulesOpen}
+            onClick={() => setRulesOpen((open) => !open)}
+          >
+            What it opens and what it never does
+          </button>
         </div>
       </div>
+      {rulesOpen && <ScanRules />}
     </div>
+  );
+}
+
+/** The rules page that used to be a step of its own. */
+function ScanRules(): ReactElement {
+  return (
+    <ol className="onboarding-wizard__rules">
+      <li>
+        <b>The search looks three levels into your home folder.</b> It lists
+        folder names and checks for <code>.git</code>. It proposes the folders
+        that hold repositories and adds nothing until you say so.
+      </li>
+      <li>
+        <b>Neither the search nor the scan looks inside a repository.</b> Once
+        either finds a <code>.git</code> it stops there, so worktrees and
+        submodules kept inside a repository are never opened.
+      </li>
+      <li>
+        <b>Hidden folders are never opened.</b> Anything whose name starts with
+        a dot is skipped outright — <code>.ssh</code>, <code>.config</code>,{" "}
+        <code>.aws</code>, <code>.gnupg</code> — and so are{" "}
+        <code>node_modules</code>, <code>dist</code>, <code>out</code>,{" "}
+        <code>build</code>, <code>target</code>, <code>vendor</code> and macOS{" "}
+        <code>Library</code>.
+      </li>
+      <li>
+        <b>A folder you add is scanned five levels down</b>, now and whenever
+        something is added to it. It reads folder names, not files: it never
+        opens, reads, copies or sends the contents of anything.
+      </li>
+    </ol>
   );
 }
 
@@ -532,20 +763,84 @@ function FolderPickStep(props: {
   );
 }
 
-function ScanResultStep(props: { roots: string[]; repos: Repo[] }) {
-  const { roots, repos } = props;
+/** "I do not have any": pick where they will live (card 3b). */
+function HomeFolderStep(props: {
+  suggested: SuggestedRoot[] | null;
+  tilde: (path: string) => string;
+  choice: NewRootChoice;
+  onChoice: (choice: NewRootChoice) => void;
+  pickDirectories: () => Promise<string[]>;
+  error: string | null;
+}): ReactElement {
+  const { choice, suggested, tilde } = props;
+  const chosen =
+    choice.kind === "suggested"
+      ? suggested?.find((s) => s.name === choice.name)
+      : undefined;
   return (
     <div>
       <div className="onboarding-wizard__head">
-        <h1 className="onboarding-wizard__title">
-          {repos.length === 0
-            ? "Nothing found yet."
-            : `Found ${repos.length} ${repos.length === 1 ? "repository" : "repositories"}.`}
+        <h1 className="onboarding-wizard__title">Pick a folder for your repositories.</h1>
+        <p className="onboarding-wizard__sub">
+          PwrGit creates it if it is not there yet, and watches it. Everything
+          you clone goes in here unless you say otherwise.
+        </p>
+      </div>
+      <NewRootPicker
+        choice={choice}
+        onChoice={props.onChoice}
+        pickDirectories={props.pickDirectories}
+        suggested={suggested}
+        tilde={tilde}
+        name="home-root"
+      />
+      <p className="onboarding-wizard__hint" role="status">
+        {props.error !== null ? (
+          <span className="new-root__error">{props.error}</span>
+        ) : choice.kind === "picked" ? (
+          <>
+            <code>{tilde(choice.path)}</code> will be added to this profile.
+          </>
+        ) : chosen === undefined ? null : chosen.exists ? (
+          <>
+            <code>{chosen.display}</code> already exists. PwrGit will add it and
+            look inside.
+          </>
+        ) : (
+          <>
+            <code>{chosen.display}</code> does not exist yet. PwrGit will create
+            it when you continue.
+          </>
+        )}
+      </p>
+    </div>
+  );
+}
+
+function ScanResultStep(props: {
+  roots: string[];
+  repos: Repo[];
+  scanning: boolean;
+  onFind: () => void;
+}) {
+  const { roots, repos, scanning } = props;
+  const folders = `${roots.length} ${roots.length === 1 ? "folder" : "folders"}`;
+  return (
+    <div>
+      <div className="onboarding-wizard__head">
+        <h1 className="onboarding-wizard__title" role="status">
+          {scanning
+            ? `Scanning ${folders}…`
+            : roots.length === 0
+              ? "No folders added."
+              : repos.length === 0
+                ? `Nothing found in ${roots.length === 1 ? "that folder" : `those ${folders}`}.`
+                : `Found ${repos.length} ${repos.length === 1 ? "repository" : "repositories"}.`}
         </h1>
         <p className="onboarding-wizard__sub">
-          Per-repository git state — ahead, behind, uncommitted — is read when
-          you first open a repo, not now. That is why the Focused, Behind and
-          Stale lenses stay empty until you have looked around.
+          {scanning
+            ? "PwrGit is looking five levels into each folder for repositories and their worktrees."
+            : "Per-repository git state — ahead, behind, uncommitted — is read when you first open a repo, not now. That is why the Focused, Behind and Stale lenses stay empty until you have looked around."}
         </p>
       </div>
       <ul className="onboarding-wizard__roots">
@@ -555,12 +850,60 @@ function ScanResultStep(props: { roots: string[]; repos: Repo[] }) {
             <li key={root} className="onboarding-wizard__root">
               <span className="onboarding-wizard__root-path">{root}</span>
               <span className="onboarding-wizard__root-count">
-                {count} {count === 1 ? "repo" : "repos"}
+                {scanning ? "scanning…" : `${count} ${count === 1 ? "repo" : "repos"}`}
               </span>
             </li>
           );
         })}
       </ul>
+      {!scanning && repos.length === 0 && (
+        <button type="button" className="onboarding-wizard__btn" onClick={props.onFind}>
+          Find my repositories instead
+        </button>
+      )}
+    </div>
+  );
+}
+
+/** Done, when there are no repositories: next moves, not a key to empty
+ *  chips (card 3c). New repository… joins here once it exists. */
+function NoRepositoriesDone(props: {
+  roots: string[];
+  tilde: (path: string) => string;
+  forgeSummary: string | null;
+  onClone?: () => void;
+}): ReactElement {
+  const { roots } = props;
+  const only = roots.length === 1 ? roots[0]! : null;
+  const signedIn =
+    props.forgeSummary !== null && props.forgeSummary !== "None"
+      ? `Signed in to ${props.forgeSummary}. Search your repositories or paste a URL.`
+      : "From GitHub, GitLab, or any URL.";
+  return (
+    <div>
+      <div className="onboarding-wizard__head">
+        <h1 className="onboarding-wizard__title">
+          {only !== null
+            ? `${props.tilde(only)} is ready. Put a repository in it.`
+            : roots.length > 1
+              ? `Nothing in your ${roots.length} folders yet.`
+              : "No repositories yet."}
+        </h1>
+        <p className="onboarding-wizard__sub">
+          {roots.length > 0
+            ? `Whatever lands in ${roots.length === 1 ? "this folder" : "these folders"} shows up in the sidebar on its own.`
+            : "The start screen keeps every way to add them, whenever you are ready."}
+        </p>
+      </div>
+      {props.onClone !== undefined && (
+        <div className="start-doors">
+          <button type="button" className="start-door is-primary" onClick={props.onClone}>
+            <span className="start-door__icon"><CloneGlyph size={15} /></span>
+            <span className="start-door__title">Clone a repository…</span>
+            <span className="start-door__body">{signedIn}</span>
+          </button>
+        </div>
+      )}
     </div>
   );
 }
@@ -572,9 +915,7 @@ function DoneStep(props: { roots: string[]; repos: Repo[] }) {
     <div>
       <div className="onboarding-wizard__head">
         <h1 className="onboarding-wizard__title">
-          {repos.length === 0
-            ? "No repositories yet."
-            : `${repos.length} ${repos.length === 1 ? "repository" : "repositories"}, ${worktrees} ${worktrees === 1 ? "worktree" : "worktrees"}, ${roots.length} ${roots.length === 1 ? "folder" : "folders"}.`}
+          {`${repos.length} ${repos.length === 1 ? "repository" : "repositories"}, ${worktrees} ${worktrees === 1 ? "worktree" : "worktrees"}, ${roots.length} ${roots.length === 1 ? "folder" : "folders"}.`}
         </h1>
         <p className="onboarding-wizard__sub">
           This is your sidebar. A repository added to these folders shows up

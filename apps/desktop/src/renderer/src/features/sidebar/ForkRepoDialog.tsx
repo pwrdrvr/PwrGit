@@ -1,4 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { SUGGESTED_ROOTS, type NewRootChoice } from "@pwrgit/shared";
+import { tildeFor, useSuggestedRoots } from "../onboarding/NewRootPicker";
+import { NoFolderDestination, useNoFolderDestination } from "./NoFolderDestination";
 import {
   forgeLabel,
   forgeProductOrAssumed,
@@ -89,6 +92,18 @@ export function ForkRepoDialog({
   onReveal: (path: string) => void;
   onClose: () => void;
 }) {
+  // Card 5a: with no repository folder yet, the destination step offers to
+  // create one; main creates and adds it only when the operation starts.
+  // Decided at open: the folder joins the profile while the clone runs, and
+  // the step must not turn into the destination list under the user.
+  const [noFolder] = useState(() => profile.roots.length === 0);
+  const [newRoot, setNewRoot] = useState<NewRootChoice>({
+    kind: "suggested",
+    name: SUGGESTED_ROOTS[0]
+  });
+  const suggestedRoots = useSuggestedRoots(noFolder);
+  const tilde = useMemo(() => tildeFor(suggestedRoots), [suggestedRoots]);
+  const noFolderDestination = useNoFolderDestination(newRoot, suggestedRoots);
   const tip = useViewportTooltip();
   /** The card for one destination row. Named so the row's own `onMouseEnter`
    *  can call it rather than overwrite it — see the call site. */
@@ -481,8 +496,9 @@ export function ForkRepoDialog({
     destinationResults,
     destinationSelectionPath
   );
-  const activeDestination =
-    selectedDestination ?? destinationResults[destinationSelection] ?? null;
+  const activeDestination = noFolder
+    ? noFolderDestination
+    : selectedDestination ?? destinationResults[destinationSelection] ?? null;
 
   // In place, the button flips to the in-place verb — except when your fork
   // is already checked out somewhere: re-pointing this checkout too would
@@ -603,7 +619,8 @@ export function ForkRepoDialog({
       protocol,
       parentPath: activeDestination.path,
       defaultBranchOnly: defaultBranchOnly && defaultBranchOnlySupported,
-      upstream: addUpstream ? upstream : null
+      upstream: addUpstream ? upstream : null,
+      ...(noFolder ? { newRoot } : {})
     });
     activeForkIdRef.current = null;
     setBusy(false);
@@ -1107,6 +1124,21 @@ export function ForkRepoDialog({
           {/* ── Destination ────────────────────────────────────── */}
           {cloning && (
             <section className="clone-section">
+              {noFolder ? (
+                <NoFolderDestination
+                  name="fork-new-root"
+                  profileName={profile.name}
+                  choice={newRoot}
+                  onChoice={setNewRoot}
+                  suggested={suggestedRoots}
+                  tilde={tilde}
+                  pickDirectories={() =>
+                    dispatch("dialog:pickDirectories", undefined).then((r) =>
+                      r.ok ? r.value : []
+                    )}
+                />
+              ) : (
+                <>
               <label className="clone-label" htmlFor="fork-destination">
                 Check out to
                 <span className="clone-label__hint">
@@ -1210,12 +1242,9 @@ export function ForkRepoDialog({
                     </span>
                   </button>
                 ))}
-                {!destinationsLoading && destinations.length === 0 && (
-                  <div className="clone-empty">
-                    Add a repo folder to this profile before forking.
-                  </div>
-                )}
               </div>
+                </>
+              )}
             </section>
           )}
 

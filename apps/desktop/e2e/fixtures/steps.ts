@@ -175,18 +175,15 @@ export const lensChip = (window: Page, lens: string): Locator =>
  */
 export async function clickAddFolders(window: Page): Promise<void> {
   await window.locator(".profile-chip").first().waitFor();
-  const start = window.locator(".sidebar__start-add");
-  if (await start.isVisible()) {
-    await start.click();
-    return;
-  }
+  // Add ▾ holds it on every profile; the start screen's door is a second way
+  // in, only while the profile has no repositories.
   await openAddMenuItem(window, "Add folders…");
 }
 
-/** Pick one entry of the sidebar toolbar's Add menu: Add folders, Clone or Fork. */
+/** Pick one entry of the sidebar toolbar's Add menu. */
 export async function openAddMenuItem(
   window: Page,
-  item: "Add folders…" | "Clone…" | "Fork…"
+  item: "Find repositories…" | "Add folders…" | "Clone…" | "Fork…"
 ): Promise<void> {
   await window.getByRole("button", { name: "Add repositories" }).click();
   await window.getByRole("menuitem", { name: item }).click();

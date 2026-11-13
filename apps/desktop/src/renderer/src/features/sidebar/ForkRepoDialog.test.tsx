@@ -30,7 +30,7 @@ it("preserves a search typed before the catalog chooses the usable forge", async
       <ForkRepoDialog
         profile={{
           id: "p", name: "Test", email: "test@example.com", mono: "T",
-          roots: [], onboardingCompleted: true,
+          roots: ["/src"], onboardingCompleted: true,
           showInMenu: true
         }}
         onForked={() => undefined}
@@ -123,7 +123,7 @@ it("forks the seeded checkout in place, and only while it is the source", async 
       <ForkRepoDialog
         profile={{
           id: "p", name: "Test", email: "test@example.com", mono: "T",
-          roots: [], onboardingCompleted: true,
+          roots: ["/src"], onboardingCompleted: true,
           showInMenu: true
         }}
         initialSource={source}
@@ -188,7 +188,7 @@ it("forks the seeded checkout in place, and only while it is the source", async 
       <ForkRepoDialog
         profile={{
           id: "p", name: "Test", email: "test@example.com", mono: "T",
-          roots: [], onboardingCompleted: true,
+          roots: ["/src"], onboardingCompleted: true,
           showInMenu: true
         }}
         initialSource={source}

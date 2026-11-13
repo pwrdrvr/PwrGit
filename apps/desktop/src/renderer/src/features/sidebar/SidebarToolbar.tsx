@@ -28,22 +28,28 @@ export const SIDEBAR_TOOLBAR_FIT_STEPS = [
   "sidebar-toolbar--icons"
 ] as const;
 
-/** Why each Add menu entry is unavailable, or nothing when it is available. */
+/**
+ * Why each Add menu entry is unavailable, or nothing when it is available.
+ *
+ * Clone and Fork no longer wait for a folder: with none, their destination
+ * step offers to create one (design/New User Journey - UX Review, card 5a).
+ * Only Rescan still needs a folder to rescan.
+ */
 export function addMenuReasons(input: {
   hasProfile: boolean;
   rootCount: number;
-}): { addFolders?: string; rescan?: string; clone?: string; fork?: string } {
+}): {
+  find?: string;
+  addFolders?: string;
+  rescan?: string;
+  clone?: string;
+  fork?: string;
+} {
   if (!input.hasProfile) {
     const reason = "Load or create a profile first";
-    return { addFolders: reason, rescan: reason, clone: reason, fork: reason };
+    return { find: reason, addFolders: reason, rescan: reason, clone: reason, fork: reason };
   }
-  if (input.rootCount === 0) {
-    return {
-      rescan: "Add a repo folder first",
-      clone: "Add a repo folder before cloning",
-      fork: "Add a repo folder before forking"
-    };
-  }
+  if (input.rootCount === 0) return { rescan: "Add a repo folder first" };
   return {};
 }
 
@@ -127,8 +133,9 @@ export function lastRunHint(last: LastBulkSyncRun): string {
 }
 
 /**
- * The one row of profile-wide actions above the lens row: Add ▾ (Add folders,
- * Rescan folders, Clone, Fork), the sync button, and Repository maintenance as a wrench.
+ * The one row of profile-wide actions above the lens row: Add ▾ (Find
+ * repositories, Add folders, Rescan folders, Clone, Fork), the sync button,
+ * and Repository maintenance as a wrench.
  *
  * The sync button is one split button for Fetch and Try pull: Try pull
  * already fetches every repository before it fast-forwards, so two buttons
@@ -152,6 +159,7 @@ export function SidebarToolbar({
   tagCheckAfterSync = null,
   onToggleTagCheck,
   onAddFolder,
+  onFindRepositories,
   onRescanFolders,
   onClone,
   onFork,
@@ -180,6 +188,8 @@ export function SidebarToolbar({
   tagCheckAfterSync?: boolean | null;
   onToggleTagCheck?: (on: boolean) => void;
   onAddFolder: () => void;
+  /** Find my repositories: search the home folder for folders to add. */
+  onFindRepositories?: (() => void) | undefined;
   /** Look through the profile's folders again now, past the daily scan. */
   onRescanFolders?: (() => void) | undefined;
   onClone: () => void;
@@ -422,6 +432,9 @@ export function SidebarToolbar({
           label="Add repositories"
           triggerRef={addRef}
           items={[
+            // Stays for good: it is also how someone with twelve folders
+            // finds the thirteenth (card 4d).
+            item("Find repositories…", reasons.find, () => onFindRepositories?.()),
             item("Add folders…", reasons.addFolders, onAddFolder),
             item("Rescan folders", reasons.rescan, () => onRescanFolders?.()),
             item("Clone…", reasons.clone, onClone),

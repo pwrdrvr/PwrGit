@@ -6,32 +6,39 @@
  * separate rail that several surfaces can share, and a `-1` for the screens
  * that come before the rail starts. PwrGit has four rail steps where PwrAgnt
  * has five.
+ *
+ * Step 3 is not a line (design/New User Journey - UX Review, card 3d). It
+ * opens on a choice of three honest answers, and the next surface depends on
+ * which was chosen: the search (`repos-find`), the folder picker's list
+ * (`repos-pick`), or "I do not have any" (`repos-home`). The scan result
+ * follows the first two; a folder just made has nothing to scan.
  */
 export type WizardStep =
   | "welcome"
   | "identity"
   | "forges"
-  | "folders-explain"
-  | "folders-pick"
-  | "folders-scan"
+  | "repos-choose"
+  | "repos-find"
+  | "repos-pick"
+  | "repos-home"
+  | "repos-scan"
   | "done";
 
-export const STEP_ORDER: readonly WizardStep[] = [
-  "welcome",
-  "identity",
-  "forges",
-  "folders-explain",
-  "folders-pick",
-  "folders-scan",
-  "done"
-];
+/** The answer chosen on `repos-choose` (card 3a). */
+export type RepoChoice = "find" | "pick" | "home";
+
+export const CHOICE_STEP: Record<RepoChoice, WizardStep> = {
+  find: "repos-find",
+  pick: "repos-pick",
+  home: "repos-home"
+};
 
 export type RailIndex = 0 | 1 | 2 | 3;
 
 export const RAIL_LABELS: readonly string[] = [
   "Identity",
   "Forges",
-  "Repo folders",
+  "Repositories",
   "Review"
 ];
 
@@ -40,23 +47,77 @@ export function railIndexForStep(step: WizardStep): RailIndex | -1 {
   if (step === "welcome") return -1;
   if (step === "identity") return 0;
   if (step === "forges") return 1;
-  if (
-    step === "folders-explain" ||
-    step === "folders-pick" ||
-    step === "folders-scan"
-  )
-    return 2;
-  return 3;
+  if (step === "done") return 3;
+  return 2;
 }
 
-export function nextStep(step: WizardStep): WizardStep | null {
-  const i = STEP_ORDER.indexOf(step);
-  return i < 0 || i === STEP_ORDER.length - 1 ? null : STEP_ORDER[i + 1]!;
+/** The surface after `step`, given the choice made on `repos-choose`. */
+export function nextStep(step: WizardStep, choice: RepoChoice): WizardStep | null {
+  switch (step) {
+    case "welcome":
+      return "identity";
+    case "identity":
+      return "forges";
+    case "forges":
+      return "repos-choose";
+    case "repos-choose":
+      return CHOICE_STEP[choice];
+    case "repos-find":
+    case "repos-pick":
+      return "repos-scan";
+    case "repos-home":
+    case "repos-scan":
+      return "done";
+    case "done":
+      return null;
+  }
 }
 
-export function previousStep(step: WizardStep): WizardStep | null {
-  const i = STEP_ORDER.indexOf(step);
-  return i <= 0 ? null : STEP_ORDER[i - 1]!;
+/** The surface Back returns to: always the one that led here. */
+export function previousStep(step: WizardStep, choice: RepoChoice): WizardStep | null {
+  switch (step) {
+    case "welcome":
+      return null;
+    case "identity":
+      return "welcome";
+    case "forges":
+      return "identity";
+    case "repos-choose":
+      return "forges";
+    case "repos-find":
+    case "repos-pick":
+    case "repos-home":
+      return "repos-choose";
+    case "repos-scan":
+      return CHOICE_STEP[choice];
+    case "done":
+      return choice === "home" ? "repos-home" : "repos-scan";
+  }
+}
+
+/** What setup left unanswered, in step order: what "Finish setup" names
+ *  and where it reopens the wizard (card 4a). Folders are not listed: the
+ *  start screen that carries the button is itself about folders. */
+export type Unanswered = { step: WizardStep; label: string };
+
+export function unansweredSteps(input: {
+  authorName: string | null;
+  email: string;
+  forgeConnected: boolean | null;
+}): Unanswered[] {
+  const out: Unanswered[] = [];
+  const noName = (input.authorName ?? "").trim() === "";
+  const noEmail = input.email.trim() === "";
+  if (noName || noEmail) {
+    out.push({
+      step: "identity",
+      label: noName && noEmail ? "no commit author" : noName ? "no author name" : "no author e-mail"
+    });
+  }
+  // Unknown (statuses not read yet) is not "unanswered": say nothing rather
+  // than flash a claim the next frame takes back.
+  if (input.forgeConnected === false) out.push({ step: "forges", label: "no forge sign-in" });
+  return out;
 }
 
 /**

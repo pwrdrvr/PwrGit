@@ -1,4 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { SUGGESTED_ROOTS, type NewRootChoice } from "@pwrgit/shared";
+import { tildeFor, useSuggestedRoots } from "../onboarding/NewRootPicker";
+import { NoFolderDestination, useNoFolderDestination } from "./NoFolderDestination";
 import {
   forgeLabel,
   isForgeKind,
@@ -167,6 +170,18 @@ export function CloneRepoDialog({
   onReveal: (path: string) => void;
   onClose: () => void;
 }) {
+  // Card 5a: with no repository folder yet, the destination step offers to
+  // create one; main creates and adds it only when the operation starts.
+  // Decided at open: the folder joins the profile while the clone runs, and
+  // the step must not turn into the destination list under the user.
+  const [noFolder] = useState(() => profile.roots.length === 0);
+  const [newRoot, setNewRoot] = useState<NewRootChoice>({
+    kind: "suggested",
+    name: SUGGESTED_ROOTS[0]
+  });
+  const suggestedRoots = useSuggestedRoots(noFolder);
+  const tilde = useMemo(() => tildeFor(suggestedRoots), [suggestedRoots]);
+  const noFolderDestination = useNoFolderDestination(newRoot, suggestedRoots);
   const tip = useViewportTooltip();
   /** The card for one destination row. Named so the row's own `onMouseEnter`
    *  can call it rather than overwrite it — see the call site. */
@@ -790,8 +805,9 @@ export function CloneRepoDialog({
     window.requestAnimationFrame(() => destinationInputRef.current?.focus());
   };
 
-  const activeDestination =
-    selectedDestination ?? destinationResults[destinationSelection] ?? null;
+  const activeDestination = noFolder
+    ? noFolderDestination
+    : selectedDestination ?? destinationResults[destinationSelection] ?? null;
 
   const submit = async (destination = activeDestination): Promise<void> => {
     if (clonedRepo !== null) {
@@ -834,7 +850,8 @@ export function CloneRepoDialog({
             protocol,
             parentPath: destination.path,
             defaultBranchOnly: false,
-            upstream: forkUpstream
+            upstream: forkUpstream,
+            ...(noFolder ? { newRoot } : {})
           })
         : await dispatch("repo:clone", {
             operationId,
@@ -847,7 +864,8 @@ export function CloneRepoDialog({
             parentPath: destination.path,
             host: selectedRepository.host,
             hostname: selectedRepository.hostname,
-            ...(cloneUpstreamSlug === null ? {} : { upstream: cloneUpstreamSlug })
+            ...(cloneUpstreamSlug === null ? {} : { upstream: cloneUpstreamSlug }),
+            ...(noFolder ? { newRoot } : {})
           });
     activeCloneIdRef.current = null;
     setBusy(false);
@@ -1327,6 +1345,21 @@ export function CloneRepoDialog({
 
           {!revealing && (
             <section className="clone-section">
+              {noFolder ? (
+                <NoFolderDestination
+                  name="clone-new-root"
+                  profileName={profile.name}
+                  choice={newRoot}
+                  onChoice={setNewRoot}
+                  suggested={suggestedRoots}
+                  tilde={tilde}
+                  pickDirectories={() =>
+                    dispatch("dialog:pickDirectories", undefined).then((r) =>
+                      r.ok ? r.value : []
+                    )}
+                />
+              ) : (
+                <>
               <label className="clone-label" htmlFor="clone-destination">
                 Check out to
                 <span className="clone-label__hint">
@@ -1469,6 +1502,8 @@ export function CloneRepoDialog({
                   </div>
                 )}
               </div>
+                </>
+              )}
               {activeDestination !== null && originRepository !== null && (
                 <div
                   id="clone-destination-choice"

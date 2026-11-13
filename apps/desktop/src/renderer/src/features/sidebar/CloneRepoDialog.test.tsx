@@ -102,7 +102,7 @@ async function openAndPick(onReveal = vi.fn()): Promise<void> {
     <CloneRepoDialog
       profile={{
         id: "p", name: "Test", email: "test@example.com", mono: "T",
-        roots: [], onboardingCompleted: true,
+        roots: ["/src"], onboardingCompleted: true,
         showInMenu: true
       }}
       onCloned={() => undefined}
@@ -429,7 +429,7 @@ it("asks for your accounts while you type, so the pair is drawn with the pick", 
     <CloneRepoDialog
       profile={{
         id: "p", name: "Test", email: "test@example.com", mono: "T",
-        roots: [], onboardingCompleted: true, showInMenu: true
+        roots: ["/src"], onboardingCompleted: true, showInMenu: true
       }}
       onCloned={() => undefined}
       onReveal={() => undefined}
@@ -470,7 +470,7 @@ it("keeps an accounts lookup in flight when the query is edited away and back", 
     <CloneRepoDialog
       profile={{
         id: "p", name: "Test", email: "test@example.com", mono: "T",
-        roots: [], onboardingCompleted: true, showInMenu: true
+        roots: ["/src"], onboardingCompleted: true, showInMenu: true
       }}
       onCloned={() => undefined}
       onReveal={() => undefined}
@@ -530,7 +530,7 @@ it("shows the checkout instead of retrying when only the upstream remote failed"
     <CloneRepoDialog
       profile={{
         id: "p", name: "Test", email: "test@example.com", mono: "T",
-        roots: [], onboardingCompleted: true, showInMenu: true
+        roots: ["/src"], onboardingCompleted: true, showInMenu: true
       }}
       onCloned={onCloned}
       onReveal={() => undefined}

@@ -30,7 +30,6 @@ import {
   currentPlatform,
   hasPrimaryModifier
 } from "../../lib/platform";
-import { PlusGlyph } from "../../lib/PlusGlyph";
 import {
   hoverTooltip,
   useViewportTooltip
@@ -197,6 +196,7 @@ export function Sidebar({
   onForkCheckout,
   onOpenRepoSetup,
   onAddFolder,
+  onFindRepositories,
   onRescanFolders,
   onExpandRepo,
   onNewProfile,
@@ -247,6 +247,8 @@ export function Sidebar({
   onForkCheckout: (repo: Repo) => void;
   onOpenRepoSetup?: (repo: Repo) => void;
   onAddFolder: () => void;
+  /** Add ▾ → Find repositories…. */
+  onFindRepositories?: () => void;
   onRescanFolders?: () => void;
   onExpandRepo: (repoId: string) => void;
   onNewProfile: () => void;
@@ -1254,14 +1256,17 @@ export function Sidebar({
 
       {/* One row of profile-wide actions. The jump field that used to lead
           this block lives in the title strip now (TitleBar's .titlebar-jump);
-          Add folders, Clone and Fork sit behind Add ▾, and on a profile with
-          no folder yet the empty list carries Add folders itself. Design:
-          design/Sidebar Header Toolbar - UX Review.dc.html, 2b and 3. */}
+          Find repositories, Add folders, Clone and Fork sit behind Add ▾. A
+          profile with no repositories gets its doors in the main pane (the
+          start screen), so the empty list here keeps one line. Design:
+          design/Sidebar Header Toolbar - UX Review.dc.html, 2b and 3;
+          design/New User Journey - UX Review.dc.html, 4a. */}
       <SidebarToolbar
         hasProfile={activeProfile !== null}
         rootCount={activeProfile?.roots.length ?? 0}
         repoCount={repos.length}
         onAddFolder={onAddFolder}
+        onFindRepositories={onFindRepositories}
         onRescanFolders={onRescanFolders}
         onClone={onCloneRepo}
         onFork={() => void openFork()}
@@ -1425,44 +1430,13 @@ export function Sidebar({
                     ? "Scanning…"
                     : repoLoadState.status === "error"
                       ? "The last repository list is still shown above, if one was available."
-                      : LENS_EMPTY_COPY[lens]}
+                      : repos.length === 0
+                        ? // The profile has none at all, whatever the lens: the
+                          // main pane's start screen carries the ways to get
+                          // some, so the list steps back to one line (card 4a).
+                          "No repositories yet."
+                        : LENS_EMPTY_COPY[lens]}
                 </p>
-                {/* Day one. Add folders is the prerequisite for everything else
-                    and, with no folder yet, the only action that works — so while
-                    the profile has none, the empty list carries it rather than
-                    leaving it inside Add ▾. Disabled, with its reason in the name
-                    and the card, while no profile has loaded. */}
-                {(activeProfile === null || activeProfile.roots.length === 0) && (
-                  <div className="sidebar__start">
-                    <button
-                      type="button"
-                      className="sidebar__start-add"
-                      onClick={onAddFolder}
-                      disabled={activeProfile === null}
-                      /* The visible label is repeated verbatim, ellipsis and all:
-                         an aria-label replaces the button's contents, so dropping
-                         a character would break SC 2.5.3 and voice control. */
-                      aria-label={
-                        activeProfile === null
-                          ? "Add folders… — unavailable, load or create a profile first"
-                          : undefined
-                      }
-                      {...hoverTooltip(
-                        tip,
-                        activeProfile === null
-                          ? "Load or create a profile before adding folders"
-                          : undefined
-                      )}
-                    >
-                      <PlusGlyph /> Add folders…
-                    </button>
-                    {activeProfile !== null && (
-                      <span className="sidebar__start-hint">
-                        Clone and Fork, under Add, open once a folder exists.
-                      </span>
-                    )}
-                  </div>
-                )}
               </div>
             )}
             <div ref={spacerRef} className="sidebar__jump-room" aria-hidden="true" />

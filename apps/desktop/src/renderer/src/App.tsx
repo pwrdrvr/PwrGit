@@ -50,6 +50,10 @@ import { ToastHost } from "./features/shell/ToastHost";
 import { Rail } from "./features/rail/Rail";
 import { ProfileModal } from "./features/sidebar/ProfileModal";
 import { OnboardingWizard } from "./features/onboarding/OnboardingWizard";
+import { FindRepositoriesDialog, StartScreen } from "./features/onboarding/StartScreen";
+import { unansweredSteps, type WizardStep } from "./features/onboarding/steps";
+import { forgeProductState } from "./features/settings/ForgeProductSection";
+import { useForgeStatuses } from "./features/settings/useForgeStatuses";
 import { CloneRepoDialog } from "./features/sidebar/CloneRepoDialog";
 import { ForkRepoDialog } from "./features/sidebar/ForkRepoDialog";
 import { ForkCheckoutDialog } from "./features/sidebar/ForkCheckoutDialog";
@@ -245,6 +249,33 @@ export function App() {
   // which shows the wizard without ever clearing the completion flag.
   const [onboardingReplay, setOnboardingReplay] = useState(false);
   const [onboardingDone, setOnboardingDone] = useState(false);
+  /** Where a replay opens: Welcome from Help, or the first step "Finish
+   *  setup" named. */
+  const [onboardingStep, setOnboardingStep] = useState<WizardStep | undefined>();
+  /** Find my repositories: inline on the start screen, else a dialog. */
+  const [findOpen, setFindOpen] = useState(false);
+  const forgeStatuses = useForgeStatuses();
+  const unanswered = useMemo(
+    () =>
+      activeProfile === null
+        ? []
+        : unansweredSteps({
+            authorName: activeProfile.authorName ?? null,
+            email: activeProfile.email,
+            forgeConnected:
+              forgeStatuses === undefined
+                ? null
+                : forgeStatuses.some((f) => forgeProductState(f) === "connected")
+          }),
+    [activeProfile, forgeStatuses]
+  );
+  // "Finish setup" reopens the wizard at the first unanswered step. Like
+  // Help's replay it never touches the completion flag.
+  const finishSetup = useCallback((step: WizardStep) => {
+    setOnboardingStep(step);
+    setOnboardingDone(false);
+    setOnboardingReplay(true);
+  }, []);
   const showOnboarding =
     activeProfile !== null &&
     (onboardingReplay ||
@@ -516,6 +547,7 @@ export function App() {
     // clearing `onboardingCompleted`, so the next launch stays quiet.
     const offReplay = subscribe("ui:replayOnboarding", () => {
       if (document.hasFocus()) {
+        setOnboardingStep(undefined);
         setOnboardingDone(false);
         setOnboardingReplay(true);
       }
@@ -1012,6 +1044,14 @@ export function App() {
       })
   };
 
+  // The start screen is drawn from the profile having no repositories, never
+  // from the current lens being empty (card 4c). `repos` is the whole
+  // profile; the lens filters only inside the sidebar.
+  const showStartScreen =
+    activeProfile !== null &&
+    repos.length === 0 &&
+    repoLoadState.status !== "error";
+
   const gridTemplateColumns = `${sidebar.width}px minmax(0, 1fr) ${
     railCollapsed ? "0px" : `${rail.width}px`
   }`;
@@ -1109,6 +1149,7 @@ export function App() {
           onForkCheckout={openForkCheckout}
           onOpenRepoSetup={(repo) => { setSetupPage("hooks"); setSetupRepo(repo); }}
           onAddFolder={() => void addFolders()}
+          onFindRepositories={() => setFindOpen(true)}
           onRescanFolders={() => void rescanFolders()}
           onNewProfile={() => setProfileModal({ mode: "create" })}
           onManageProfile={() =>
@@ -1284,7 +1325,35 @@ export function App() {
                 </ErrorBoundary>
               )}
             </div>
-          ) : shownChangeRequest !== null ? null : (
+          ) : shownChangeRequest !== null ? null : showStartScreen &&
+            activeProfile !== null ? (
+            // design/New User Journey - UX Review, card 4c: a profile with no
+            // repositories gets the ways to get one, not a selection prompt.
+            <StartScreen
+              profile={activeProfile}
+              scanning={repoLoadState.status === "loading"}
+              searching={findOpen}
+              onSearchingChange={setFindOpen}
+              onAddFolders={() => void addFolders()}
+              onClone={() => setCloneOpen(true)}
+              onSetRoots={setRoots}
+              unanswered={unanswered}
+              onFinishSetup={finishSetup}
+            />
+          ) : profileLoadState.status !== "loading" &&
+            profileLoadState.status !== "error" &&
+            activeProfile === null ? (
+            <div className="main-empty main-empty--action">
+              Create a profile to begin.
+              <button
+                type="button"
+                className="onboarding-wizard__btn"
+                onClick={() => setProfileModal({ mode: "create" })}
+              >
+                New profile…
+              </button>
+            </div>
+          ) : (
             <div className="main-empty">
               {profileLoadState.status === "loading"
                 ? "Loading profiles…"
@@ -1506,10 +1575,20 @@ export function App() {
           profile={activeProfile}
           repos={repos}
           isReplay={onboardingReplay}
+          {...(onboardingStep === undefined ? {} : { initialStep: onboardingStep })}
+          onOpenClone={() => setCloneOpen(true)}
           pickDirectories={pickDirectories}
           onSetRoots={setRoots}
           onSetIdentity={setOnboardingIdentity}
           onDismiss={dismissOnboarding}
+        />
+      )}
+      {findOpen && !showStartScreen && activeProfile !== null && (
+        <FindRepositoriesDialog
+          profile={activeProfile}
+          onSetRoots={setRoots}
+          onChooseMyself={() => void addFolders()}
+          onClose={() => setFindOpen(false)}
         />
       )}
       {profileModal !== null && (
