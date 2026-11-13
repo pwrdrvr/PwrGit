@@ -49,6 +49,7 @@ import { TagRemoteDialog } from "./TagRemoteDialog";
 import { TagDetailsDialog } from "./TagDetailsDialog";
 import { TagSourceStrip, TagStatusFilters } from "./TagSourceStrip";
 import { TagStatusTableRow } from "./TagStatusTableRow";
+import { takePublishedTag } from "./take-published-tag";
 import { PrChip } from "./PrChip";
 import { RefRowActions, RefRowMenu } from "./RefRowMenu";
 import { PinIcon } from "./WorktreeRow";
@@ -953,59 +954,15 @@ export function RepoRefsModal({
   const adoptTag = async (row: TagStatusRow): Promise<void> => {
     const published = row.published;
     if (published === null || adoptingTag !== null) return;
-    const local = row.local;
-    const remote = published.remote;
-    if (local !== null) {
-      const confirmed = await confirmDialog({
-        title: `Replace local tag ${row.name} with ${remote}'s?`,
-        message:
-          `Local ${row.name} points at ${local.targetId.slice(0, 12)} (${local.kind}). ` +
-          `${remote}'s points at ${published.targetId.slice(0, 12)} (${published.kind}). ` +
-          `PwrGit fetches only this tag from ${remote}. Your current tag is kept as ` +
-          `refs/pwrgit/replaced-tags/…/${row.name}, and Restore in the tag's details puts it back.`,
-        confirmLabel: `Take ${remote}'s`
-      });
-      if (!confirmed) return;
-    } else if (published.available !== true) {
-      const confirmed = await confirmDialog({
-        title: `Download ${remote}'s ${row.name}?`,
-        message:
-          `Its commit ${published.targetId.slice(0, 12)} is not in this repository. Downloading fetches ` +
-          "this one tag and the history it points at — nothing else. That history may be large or unrelated to your branches.",
-        confirmLabel: "Download tag"
-      });
-      if (!confirmed) return;
-    }
-    setAdoptingTag(row.name);
-    const result = await dispatch("tag:adoptRemote", {
+    const outcome = await takePublishedTag({
       repoId: repo.id,
       name: row.name,
-      remote,
-      expectedRemoteObjectId: published.objectId,
-      expectedLocalObjectId: local?.objectId ?? null
+      local: row.local,
+      published,
+      onConfirmed: () => setAdoptingTag(row.name)
     });
-    if (!mounted.current) return;
+    if (outcome === "cancelled" || !mounted.current) return;
     setAdoptingTag(null);
-    if (!result.ok) {
-      if (result.error.code !== "canceled") {
-        showErrorToast({
-          title: local === null ? "Download tag failed" : "Take tag failed",
-          message: result.error.message.split("\n")[0],
-          detail: result.error.message,
-          subject: { repoId: repo.id, remote: { name: remote } }
-        });
-      }
-      tagsChanged();
-      return;
-    }
-    showInfoToast({
-      title: local === null ? `Downloaded ${row.name}` : `Took ${remote}'s ${row.name}`,
-      message:
-        result.value.replacedRef === null
-          ? result.value.targetId.slice(0, 12)
-          : `${result.value.targetId.slice(0, 12)} · previous value kept as ${result.value.replacedRef}`,
-      subject: { repoId: repo.id, remote: { name: remote } }
-    });
     tagsChanged();
   };
 

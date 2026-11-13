@@ -15,6 +15,11 @@ vi.mock("../../lib/pwrgit", () => ({
   subscribe: () => () => undefined
 }));
 vi.mock("../../lib/toast", () => toastMocks);
+const confirmMock = vi.hoisted(() => vi.fn(async () => true));
+vi.mock("../shell/dialogs", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../shell/dialogs")>()),
+  confirmDialog: confirmMock
+}));
 
 import { RepoRefsSections } from "./RepoRefsSections";
 import { requestSidebarReveal, settleSidebarReveal } from "./sidebar-reveal";
@@ -466,6 +471,64 @@ describe("published tags in the sidebar", () => {
     await render(primary);
     await act(async () => tagsHead()?.click());
     expect(container.querySelector(".ref-tag-attention")).toBeNull();
+  });
+
+  // Moved Tags 2a. Before this, a re-cut tag's row read exactly as a current
+  // one: the only signal was the count line under the list.
+  it("marks a preview row whose tag moved on the publisher, and its chip takes the published value", async () => {
+    const tag = (name: string, objectId: string, targetId: string) => ({
+      name,
+      fullName: `refs/tags/${name}`,
+      kind: "annotated" as const,
+      objectId,
+      objectType: "tag" as const,
+      targetId,
+      targetType: "commit" as const
+    });
+    const moved = { remote: "origin", objectId: "e".repeat(40), targetId: "0e7e3db".padEnd(40, "0"), kind: "annotated" as const };
+    const original = dispatchMock.getMockImplementation()!;
+    dispatchMock.mockImplementation((channel: string) => {
+      if (channel === "repo:refs") {
+        return Promise.resolve(ok({
+          ...refs,
+          tagCount: 2,
+          previewTags: [tag("v1.4.1", "3".repeat(40), "10f7471".padEnd(40, "0")), tag("v1.4.0", "5".repeat(40), "afb18d4".padEnd(40, "0"))],
+          tagAttention: { remote: "origin", differs: 1 },
+          tagMoves: { "v1.4.1": moved }
+        }));
+      }
+      if (channel === "tag:adoptRemote") {
+        return Promise.resolve(ok({ name: "v1.4.1", objectId: moved.objectId, targetId: moved.targetId, replacedRef: "refs/pwrgit/replaced-tags/1/v1.4.1" }));
+      }
+      if (channel === "pr:openList") {
+        return Promise.resolve(ok({ forge: null, fetchedAt: null, truncated: false, entries: [], remotes: [] }));
+      }
+      return original(channel);
+    });
+    await render(primary);
+    await act(async () => tagsHead()?.click());
+
+    const rows = [...container.querySelectorAll<HTMLElement>(".ref-tag-row")];
+    expect(rows.map((row) => row.classList.contains("is-moved"))).toEqual([true, false]);
+    const chip = rows[0]!.querySelector<HTMLButtonElement>(".ref-tag-moved");
+    expect(chip?.textContent).toBe("origin 0e7e3db");
+    expect(chip?.getAttribute("aria-label")).toBe("v1.4.1 moved on origin to 0e7e3db. Take origin's…");
+    expect(rows[1]!.querySelector(".ref-tag-moved")).toBeNull();
+
+    await act(async () => chip?.click());
+    expect(confirmMock).toHaveBeenCalledWith(expect.objectContaining({
+      title: "Replace local tag v1.4.1 with origin's?",
+      confirmLabel: "Take origin's"
+    }));
+    // Leased on both reviewed objects, exactly as the Tags tab's Take.
+    expect(dispatchMock).toHaveBeenCalledWith("tag:adoptRemote", {
+      repoId: repo.id,
+      name: "v1.4.1",
+      remote: "origin",
+      expectedRemoteObjectId: moved.objectId,
+      expectedLocalObjectId: "3".repeat(40)
+    });
+    expect(toastMocks.showInfoToast).toHaveBeenCalledWith(expect.objectContaining({ title: "Took origin's v1.4.1" }));
   });
 });
 

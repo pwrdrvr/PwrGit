@@ -168,12 +168,17 @@ export function registerBranchHandlers(
     }
     const listed = await listRepoRefs(execGit, repo.path, checkedOut);
     if (!listed.ok) return listed;
-    // The stored comparison count only: the sidebar runs no extra Git for it.
-    const tagAttention = tagSourcesFor(db).store.attention(
-      req.repoId,
-      listed.value.remotes.map((remote) => remote.name)
-    );
-    const refs = tagAttention === undefined ? listed : ok({ ...listed.value, tagAttention });
+    // The stored comparison only: the sidebar runs no extra Git for the count
+    // or for which preview rows moved on the publisher.
+    const store = tagSourcesFor(db).store;
+    const remoteNames = listed.value.remotes.map((remote) => remote.name);
+    const tagAttention = store.attention(req.repoId, remoteNames);
+    const moves = store.moves(req.repoId, remoteNames, listed.value.previewTags);
+    const refs = ok({
+      ...listed.value,
+      ...(tagAttention === undefined ? {} : { tagAttention }),
+      ...(moves.size === 0 ? {} : { tagMoves: Object.fromEntries(moves) })
+    });
     const prs = localBranchPrs(req.repoId);
     const pinned = indexer.pinnedBranchNames(req.repoId);
     if (prs.size === 0 && pinned.size === 0) return refs;

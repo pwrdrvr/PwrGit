@@ -8668,6 +8668,42 @@ button.agent-menu__item:hover {
   white-space: nowrap;
 }
 
+/* Sidebar: a preview tag whose published value differs (Moved Tags 2a).
+   The wash and the struck hash say the row is stale; the chip is the fix. */
+.ref-tag-row.is-moved {
+  background: var(--warn-soft);
+}
+.ref-tag-row.is-moved small {
+  text-decoration: line-through;
+  text-decoration-color: color-mix(in srgb, var(--status-warning) 55%, transparent);
+}
+.ref-tag-moved {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  height: 18px;
+  padding: 0 6px;
+  border: 1px solid color-mix(in srgb, var(--status-warning) 45%, transparent);
+  border-radius: 999px;
+  background: var(--bg-panel-elevated);
+  color: var(--status-warning);
+  font: 600 9.5px/1 var(--font-mono);
+  white-space: nowrap;
+  cursor: pointer;
+}
+.ref-tag-moved:hover:not([aria-disabled="true"]) {
+  border-color: var(--status-warning);
+  background: var(--status-warning);
+  color: var(--bg-panel-elevated);
+}
+.ref-tag-moved[aria-disabled="true"] {
+  cursor: default;
+}
+.ref-tag-moved:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 1px;
+}
+
 /* Sidebar: one line, only while a tag needs a decision (3d). */
 .ref-tag-attention {
   display: flex;
@@ -20543,6 +20579,41 @@ button.agent-auth-node:focus-visible,
    named one emptied out. */
 .commit-tag--tag.is-glyph {
   padding: 0 4px;
+}
+
+/* A tag whose published value differs (Moved Tags 3a). Both chips are
+   buttons that take the published value. They keep the opaque surface above,
+   so the contrast it buys holds on selected rows; the warning sits on the
+   border and the mark. The local one is solid where it stands, the published
+   one dashed where it points, as the graph dashes fetched work not applied. */
+.commit-tag--tag.is-moved,
+.commit-tag--tag.is-published {
+  border-color: color-mix(in srgb, var(--status-warning) 55%, transparent);
+  cursor: pointer;
+}
+.commit-tag--tag.is-published {
+  border-style: dashed;
+}
+.commit-tag--tag.is-moved .tag-glyph,
+.commit-tag--tag.is-published .tag-glyph,
+.commit-tag__moved,
+.commit-tag__remote {
+  color: var(--status-warning);
+}
+.commit-tag__moved,
+.commit-tag__remote {
+  flex: 0 0 auto;
+  white-space: nowrap;
+}
+.commit-tag--tag.is-moved:hover,
+.commit-tag--tag.is-published:hover {
+  border-color: var(--status-warning);
+  background: var(--warn-soft);
+}
+.commit-tag--tag.is-moved:focus-visible,
+.commit-tag--tag.is-published:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 1px;
 }
 
 /* ---- First-run onboarding wizard ----

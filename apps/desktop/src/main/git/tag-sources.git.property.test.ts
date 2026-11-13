@@ -8,7 +8,12 @@ import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { CommandBus } from "../command-bus";
 import { openDatabase, type DB } from "../persistence/db";
 import { fetchRemote, pullFastForward } from "./git-service";
+import type { RepoIndexer } from "./repo-indexer";
+import type { SettingsService } from "../settings/settings-service";
+import { registerBranchHandlers } from "./branch-handlers";
+import { registerGraphHandlers } from "./graph-handlers";
 import { registerRemoteHandlers } from "./remote-handlers";
+import { WorktreeStateService } from "./worktree-state";
 import { registerTagHandlers } from "./tag-handlers";
 import { tagSourcesFor } from "./tag-sources";
 import { createSystemGit } from "./test-support/system-git";
@@ -30,7 +35,11 @@ vi.mock("../logs", () => ({ logMain: vi.fn() }));
  *  - the sidebar's stored count equals that comparison after anything that
  *    changes local tags or decisions (a sync never compares: design 1c);
  *  - Take / Download succeeds exactly when origin still has the reviewed
- *    object, and a replaced value stays reachable through `git gc`.
+ *    object, and a replaced value stays reachable through `git gc`;
+ *  - the surfaces that draw a tag by name mark exactly the tags that differ
+ *    (Moved Tags 2a, 3a): the sidebar's preview rows, and the lineage where
+ *    either the local or the published commit is drawn. Before this, both
+ *    drew a re-cut tag as if it were current.
  */
 
 const env = { ...process.env, GIT_CONFIG_GLOBAL: "/dev/null", GIT_CONFIG_SYSTEM: "/dev/null" };
@@ -61,6 +70,18 @@ function tagsOf(listing: string): Map<string, string> {
   }
   return tags;
 }
+/** name -> peeled commit, from `git ls-remote` (a `^{}` line peels a tag object). */
+function originPeeled(origin: string): Map<string, string> {
+  const listing = execFileSync("git", ["ls-remote", "--tags", origin], { cwd: tmpdir(), env, encoding: "utf8" });
+  const peeled = new Map<string, string>();
+  for (const line of listing.split("\n")) {
+    const [objectId = "", ref = ""] = line.split(/\s+/);
+    if (!ref.startsWith("refs/tags/")) continue;
+    if (ref.endsWith("^{}")) peeled.set(ref.slice(10, -3), objectId);
+    else if (!peeled.has(ref.slice(10))) peeled.set(ref.slice(10), objectId);
+  }
+  return peeled;
+}
 const localTags = (repo: string) => tagsOf(git(repo, "for-each-ref", "--format=%(objectname) %(refname)", "refs/tags"));
 const originTags = (origin: string) => tagsOf(execFileSync("git", ["ls-remote", "--tags", origin], { cwd: tmpdir(), env, encoding: "utf8" }));
 
@@ -68,6 +89,8 @@ type Model = {
   local: Map<string, string>;
   /** origin's tags at the last check, as git listed them; null before one. */
   listed: Map<string, string> | null;
+  /** The commits those tags peel to, at the same check. */
+  listedTargets: Map<string, string> | null;
   keeps: Map<string, { local: string; remote: string }>;
   /** Every value a Take replaced: each must stay reachable. */
   replaced: string[];
@@ -112,6 +135,39 @@ async function check(model: Model, real: Real, compared: boolean): Promise<void>
   expect(new Map(page.value.rows.map((row) => [row.name, row.status]))).toEqual(
     new Map([...names].map((name) => [name, oracleStatus(model, name)]))
   );
+  await checkMarks(model, real);
+}
+
+/**
+ * The tags drawn as moved are the tags git says differ: in the sidebar's
+ * preview, and in the lineage wherever the local or the published commit is
+ * drawn. Both compare live local refs with the stored listing, so this holds
+ * after a sync too, when only the stored count may lag.
+ */
+async function checkMarks(model: Model, real: Real): Promise<void> {
+  const differing = [...model.local.keys()].filter((name) => oracleStatus(model, name) === "differs").sort();
+  const localTarget = (name: string) => git(real.local, "rev-parse", `refs/tags/${name}^{commit}`);
+
+  const refs = await real.bus.dispatch("repo:refs", { repoId: "repo-1" });
+  if (!refs.ok) throw new Error(refs.error.message);
+  const preview = new Set(refs.value.previewTags.map((tag) => tag.name));
+  const rowMarks = refs.value.tagMoves ?? {};
+  expect(Object.keys(rowMarks).sort(), "sidebar rows marked moved").toEqual(differing.filter((name) => preview.has(name)));
+  for (const [name, published] of Object.entries(rowMarks)) {
+    expect(published).toMatchObject({ remote: "origin", objectId: model.listed!.get(name), targetId: model.listedTargets!.get(name) });
+  }
+
+  const graph = await real.bus.dispatch("graph:lanes", { worktreeId: "wt-1", scope: "all", force: true });
+  if (!graph.ok) throw new Error(graph.error.message);
+  const drawn = new Set(graph.value.commits.map((commit) => commit.hash));
+  const chips = graph.value.movedTags ?? [];
+  expect(chips.map((chip) => chip.name).sort(), "lineage chips marked moved").toEqual(
+    differing.filter((name) => drawn.has(localTarget(name)) || drawn.has(model.listedTargets!.get(name)!))
+  );
+  for (const chip of chips) {
+    expect(chip.local).toMatchObject({ objectId: model.local.get(chip.name), targetId: localTarget(chip.name) });
+    expect(chip.published).toMatchObject({ objectId: model.listed!.get(chip.name), targetId: model.listedTargets!.get(chip.name) });
+  }
 }
 
 type Command = fc.AsyncCommand<Model, Real>;
@@ -167,6 +223,7 @@ class Refresh implements Command {
     const result = await real.bus.dispatch("tag:refreshRemote", { repoId: "repo-1", mode: "explicit" });
     expect(result.ok).toBe(true);
     model.listed = originTags(real.origin);
+    model.listedTargets = originPeeled(real.origin);
     await check(model, real, true);
   }
   toString = () => "refresh";
@@ -345,12 +402,19 @@ function start(): { model: Model; real: Real } {
   const db = openDatabase(":memory:");
   db.prepare("INSERT INTO profiles (id, name, email) VALUES ('p1', 'P', 'p@example.com')").run();
   db.prepare("INSERT INTO repos (id, profile_id, name, path) VALUES ('repo-1', 'p1', 'proj', ?)").run(local);
+  db.prepare("INSERT INTO worktrees (id, repo_id, branch, path, is_primary) VALUES ('wt-1', 'repo-1', 'main', ?, 1)").run(local);
   const bus = new CommandBus();
   const refresher = { refreshWorktree: vi.fn(async () => undefined), refreshRepoWorktrees: vi.fn() } satisfies WorktreeRefresher;
-  registerRemoteHandlers(bus, db, refresher, new WorktreeOperationQueue());
+  const operations = new WorktreeOperationQueue();
+  registerRemoteHandlers(bus, db, refresher, operations);
   registerTagHandlers(bus, db);
+  // The sidebar's repo:refs and the lineage's graph:lanes, as the app wires them.
+  const indexer = { pinnedBranchNames: () => new Set<string>() } as unknown as RepoIndexer;
+  const settings = { get: () => ({ worktreeRoot: root }) } as unknown as SettingsService;
+  registerBranchHandlers(bus, db, indexer, refresher, operations, settings);
+  registerGraphHandlers(bus, db, new WorktreeStateService(db, systemGit));
   return {
-    model: { local: localTags(local), listed: null, keeps: new Map(), replaced: [] },
+    model: { local: localTags(local), listed: null, listedTargets: null, keeps: new Map(), replaced: [] },
     real: { bus, db, root, local, publisher, origin }
   };
 }

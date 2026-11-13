@@ -142,6 +142,82 @@ describe("the sidebar and the Tags tab agree on the publisher", () => {
   });
 });
 
+describe("rows drawn as moved are the rows counted as differing", () => {
+  const localTags = fc.uniqueArray(fc.record({ name, objectId: id }), { selector: (tag) => tag.name, maxLength: NAMES.length });
+  const keepRecord = fc.dictionary(name, fc.record({ localObjectId: id, remoteObjectId: id }), { maxKeys: 4 });
+  const REMOTES = ["origin", "upstream"];
+
+  it("moves() names exactly the publisher's differing tags, each with the publisher's value", () => {
+    fc.assert(
+      fc.property(
+        localTags,
+        fc.dictionary(fc.constantFrom(...REMOTES), listing),
+        keepRecord,
+        fc.subarray(REMOTES),
+        fc.option(fc.constantFrom(...REMOTES), { nil: null }),
+        (local, listings, keeps, configured, chosen) => {
+          resetStore();
+          const sources = new TagSources(db);
+          for (const [remote, listed] of Object.entries(listings)) {
+            sources.store.recordListing("repo-1", remote, `/${remote}.git`, listed, 1);
+            for (const [tagName, keep] of Object.entries(keeps)) sources.store.setKeep("repo-1", remote, tagName, keep, 1);
+          }
+          if (chosen !== null) sources.setPrimary("repo-1", chosen);
+          const configs = configured.map((remote): RemoteConfig => ({ name: remote, url: `/${remote}.git`, tagOpt: null }));
+          const publisher = sources.resolve("repo-1", configs).state.primary;
+          const listed = publisher === null ? undefined : listings[publisher];
+          const published = listed === undefined ? null : new Map(listed.map((tag) => [tag.name, tag]));
+
+          const moves = sources.store.moves("repo-1", configured, local);
+          const expected = local.filter(
+            (tag) => expectedStatus(tag, published, keeps[tag.name], tag.name) === "differs"
+          );
+          expect([...moves.keys()].sort()).toEqual(expected.map((tag) => tag.name).sort());
+          for (const tag of expected) {
+            const value = published!.get(tag.name)!;
+            expect(moves.get(tag.name)).toEqual({
+              remote: publisher,
+              objectId: value.objectId,
+              targetId: value.targetId,
+              kind: value.annotated ? "annotated" : "lightweight"
+            });
+          }
+          // The count line and the marks come from one comparison.
+          sources.store.setDiffers("repo-1", publisher ?? "none", expected.length);
+          expect(sources.store.attention("repo-1", configured)?.differs ?? 0).toBe(publisher === null || listed === undefined ? 0 : expected.length);
+        }
+      )
+    );
+  });
+
+  it("a re-count reports a redraw whenever the differing set changes, also at the same count", async () => {
+    // The lineage redraws only when told, and a count alone missed a tag that
+    // moved while another was taken: 10 differ before, 10 after.
+    const state = fc.record({ local: localTags, listed: listing });
+    await fc.assert(
+      fc.asyncProperty(fc.array(state, { minLength: 1, maxLength: 6 }), async (states) => {
+        resetStore();
+        const sources = new TagSources(db);
+        let previous: { count: number; set: string } = { count: 0, set: "" };
+        for (const { local, listed } of states) {
+          const git: GitExec = async () =>
+            ok({ stdout: local.map((tag) => `${tag.objectId} refs/tags/${tag.name}\n`).join(""), stderr: "", exitCode: 0 });
+          sources.store.recordListing("repo-1", "origin", "/origin.git", listed, 1);
+          const published = new Map(listed.map((tag) => [tag.name, tag]));
+          const differing = local
+            .filter((tag) => expectedStatus(tag, published, undefined, tag.name) === "differs")
+            .map((tag) => `${tag.name}:${tag.objectId}:${published.get(tag.name)!.objectId}`)
+            .sort();
+          const next = { count: differing.length, set: differing.join(",") };
+          const moved = await sources.recount(git, "repo-1", "/repo", "origin");
+          expect(moved).toEqual(ok(next.count !== previous.count || next.set !== previous.set));
+          previous = next;
+        }
+      })
+    );
+  });
+});
+
 describe("concurrent listings", () => {
   /**
    * Git as the scheduler resolves it: each call settles when the scheduler
@@ -180,7 +256,7 @@ describe("concurrent listings", () => {
         const results = await s.waitFor(Promise.all(callers.map((caller) => caller.result)));
 
         callers.forEach((caller, index) => {
-          if (!caller.stop) expect(results[index]).toEqual(ok(undefined));
+          if (!caller.stop) expect(results[index]?.ok).toBe(true);
         });
         const snapshot = sources.store.snapshot("repo-1", "origin");
         // The fake remote never refuses: any recorded error is a stop mis-read.

@@ -531,9 +531,13 @@ export function registerRemoteHandlers(
   tagChecks.pauseWhile(
     (repoId) => Date.now() < networkPausedUntil || activities.list().some((activity) => activity.repoId === repoId)
   );
-  const announceTags = (repoId: string): void => {
+  /** Refusals of a Take whose reviewed values are no longer current. */
+  const STALE_TAKE_CODES = new Set(["local_tag_changed", "remote_tag_changed", "remote_tag_missing"]);
+  /** A listing landed. The lineage redraws only when a moved tag came or went. */
+  const announceTags = (repoId: string, movedSetChanged: boolean): void => {
     const repo = repoOf(repoId);
     if (repo !== null) emitEvent("repo:changed", { profileId: repo.profileId, repoIds: [repoId] });
+    if (movedSetChanged) emitEvent("graph:changed", { repoId });
   };
 
   bus.register("tag:refreshRemote", async (req) => {
@@ -565,7 +569,7 @@ export function registerRemoteHandlers(
     if (!result.ok) return err(classifyAuthFailure(result.error));
     logMain("info", "tag", `listed ${remote}'s tags for ${repo.path} (${seconds(startedAt)})`);
     tagChecks.clearFailure(req.repoId, remote);
-    announceTags(req.repoId);
+    announceTags(req.repoId, result.value);
     const source = await tagSources.source(execGit, req.repoId, repo.path);
     return source.ok ? ok({ checked: true, source: source.value.state }) : source;
   });
@@ -590,14 +594,18 @@ export function registerRemoteHandlers(
           expectedLocalObjectId: req.expectedLocalObjectId
         })
     );
-    if (!result.ok) return err(classifyAuthFailure(result.error));
+    if (!result.ok) {
+      // A value moved since the marks were drawn. Without a re-read, the
+      // sidebar and lineage chips keep offering the Take that just failed.
+      if (STALE_TAKE_CODES.has(result.error.code)) announceTags(req.repoId, true);
+      return err(classifyAuthFailure(result.error));
+    }
     logMain(
       "info",
       "tag",
       `adopted ${req.remote}'s ${req.name} ${result.value.objectId}${result.value.replacedRef === null ? "" : `; previous value kept as ${result.value.replacedRef}`}`
     );
-    announceTags(req.repoId);
-    emitEvent("graph:changed", { repoId: req.repoId });
+    announceTags(req.repoId, true);
     return result;
   });
 

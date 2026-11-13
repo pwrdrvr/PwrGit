@@ -1,5 +1,5 @@
 import { useMemo, useRef, type MouseEvent } from "react";
-import type { Commit, LaneBranchInfo, PrSummary } from "@pwrgit/shared";
+import type { Commit, LaneBranchInfo, MovedTag, PrSummary } from "@pwrgit/shared";
 import { BranchGlyph } from "../../lib/BranchGlyph";
 import { CheckoutGlyph } from "../../lib/CheckoutGlyph";
 import { AuthorAvatar } from "./AuthorAvatar";
@@ -70,6 +70,11 @@ export type GraphRowVM = {
   row: LaneRow;
   refs: string[];
   tag?: { name: string; kind: "annotated" | "lightweight" } | undefined;
+  /** `tag` differs from the published remote's value (Moved Tags 3a). */
+  tagMoved?: MovedTag | undefined;
+  /** Published values of local tags that sit elsewhere: drawn as dashed chips
+   *  where the publisher now points (Moved Tags 3a). */
+  publishedTags?: MovedTag[] | undefined;
   /** Remote-tracking refs to chip here — full ("origin/main") when the remote
    *  sits away from its local branch, collapsed ("origin") when synced. */
   remoteRefs: string[];
@@ -105,7 +110,8 @@ export function GraphRow({
   onFocusPerson,
   onOpenContextMenu,
   onOpenBranchMenu,
-  onRevealWorktree
+  onRevealWorktree,
+  onTakeTag
 }: {
   vm: GraphRowVM;
   laneCount: number;
@@ -150,6 +156,8 @@ export function GraphRow({
   onOpenBranchMenu?: (target: BranchChipTarget) => void;
   /** Jump to the worktree a tip branch is checked out in. */
   onRevealWorktree?: (worktreeId: string) => void;
+  /** Take the published value of a moved tag. Omitted, its chips are marks. */
+  onTakeTag?: (moved: MovedTag) => void;
 }) {
   const {
     commit,
@@ -464,7 +472,36 @@ export function GraphRow({
           {/* Fitted with the branch chips, and last to give way: its name
               ellipsizes to a floor, then leaves the mark alone. The tooltip
               and the hidden name still say which tag it is. */}
-          {vm.tag !== undefined && (
+          {vm.tag !== undefined && vm.tagMoved !== undefined && onTakeTag !== undefined ? (
+            // Moved on the publisher: the chip says so and is the way to fix it.
+            <button
+              type="button"
+              className={`commit-tag commit-tag--tag is-moved${
+                tagFit === "whole" ? "" : ` is-${tagFit}`
+              }`}
+              aria-label={`${vm.tag.kind === "annotated" ? "Annotated tag" : "Tag"} ${vm.tag.name}, moved on ${vm.tagMoved.published.remote} to ${vm.tagMoved.published.targetId.slice(0, 7)}. Take ${vm.tagMoved.published.remote}'s…`}
+              {...hoverTooltip(
+                tip,
+                `${vm.tagMoved.published.remote}'s ${vm.tag.name} is at ${vm.tagMoved.published.targetId.slice(0, 12)}\n` +
+                  `Click to take ${vm.tagMoved.published.remote}'s.`
+              )}
+              onClick={(event) => {
+                event.stopPropagation();
+                tip.hide();
+                onTakeTag(vm.tagMoved!);
+              }}
+            >
+              <TagGlyph />
+              <span
+                className={`commit-tag__name${
+                  tagFit === "glyph" ? " a11y-sr-only" : ""
+                }`}
+              >
+                {vm.tag.name}
+              </span>
+              <span className="commit-tag__moved" aria-hidden="true">· moved</span>
+            </button>
+          ) : vm.tag !== undefined && (
             <span
               className={`commit-tag commit-tag--tag${
                 tagFit === "whole" ? "" : ` is-${tagFit}`
@@ -489,6 +526,31 @@ export function GraphRow({
               </span>
             </span>
           )}
+          {onTakeTag !== undefined &&
+            vm.publishedTags?.map((moved) => (
+              // Where the publisher's value of a local tag now points.
+              <button
+                type="button"
+                key={`published:${moved.name}`}
+                className="commit-tag commit-tag--tag is-published"
+                aria-label={`${moved.published.remote}'s ${moved.name} points here; local ${moved.name} is at ${moved.local.targetId.slice(0, 7)}. Take ${moved.published.remote}'s…`}
+                {...hoverTooltip(
+                  tip,
+                  `${moved.published.remote}'s ${moved.name} points here\n` +
+                    `Local ${moved.name} is at ${moved.local.targetId.slice(0, 12)}\n` +
+                    `Click to take ${moved.published.remote}'s.`
+                )}
+                onClick={(event) => {
+                  event.stopPropagation();
+                  tip.hide();
+                  onTakeTag(moved);
+                }}
+              >
+                <TagGlyph />
+                <span className="commit-tag__remote">{moved.published.remote}</span>
+                <span className="commit-tag__name">{moved.name}</span>
+              </button>
+            ))}
           {isHead && <span className="commit-tag commit-tag--head">HEAD</span>}
           {/* Chips are capped — a commit tipped by dozens of stale branches
               must not flood the row — and fitted: a chip the row has no room

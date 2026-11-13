@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import type { Commit } from "@pwrgit/shared";
+import type { Commit, MovedTag } from "@pwrgit/shared";
 import { act, type ComponentProps } from "react";
 import { createRoot } from "react-dom/client";
 import { renderToStaticMarkup } from "react-dom/server";
@@ -477,5 +477,62 @@ describe("GraphRow ref chips", () => {
     await expect(
       tagged(vm({ tag: { name: "v0.20.3", kind: "lightweight" } }))
     ).resolves.toMatchObject({ step, spoken: "Tag v0.20.3" });
+  });
+});
+
+// Moved Tags 3a. Before this, a re-cut tag's chip looked current where it
+// stood, and nothing marked the commit the publisher's tag now names.
+describe("GraphRow moved tags", () => {
+  const moved: MovedTag = {
+    name: "v1.4.1",
+    local: { objectId: "3".repeat(40), targetId: commit.hash.padEnd(40, "0"), kind: "annotated" as const },
+    published: { remote: "origin", objectId: "e".repeat(40), targetId: "0e7e3db".padEnd(40, "0"), kind: "annotated" as const }
+  };
+
+  async function rendered(row: GraphRowVM, onTakeTag: (m: MovedTag) => void) {
+    const container = document.createElement("div");
+    document.body.append(container);
+    const root = createRoot(container);
+    await act(async () => root.render(<GraphRow {...props(row)} onTakeTag={onTakeTag} />));
+    return {
+      container,
+      done: async () => {
+        await act(async () => root.unmount());
+        container.remove();
+      }
+    };
+  }
+
+  it("draws the local tag as moved and takes the published value on click", async () => {
+    const take = vi.fn();
+    const { container, done } = await rendered(
+      vm({ tag: { name: "v1.4.1", kind: "annotated" }, tagMoved: moved }),
+      take
+    );
+    const chip = container.querySelector<HTMLButtonElement>("button.commit-tag--tag.is-moved");
+    expect(chip?.getAttribute("aria-label")).toBe(
+      "Annotated tag v1.4.1, moved on origin to 0e7e3db. Take origin's…"
+    );
+    await act(async () => chip?.click());
+    expect(take).toHaveBeenCalledWith(moved);
+    await done();
+  });
+
+  it("draws the publisher's value where it points, dashed, with the same action", async () => {
+    const take = vi.fn();
+    const { container, done } = await rendered(vm({ publishedTags: [moved] }), take);
+    const ghost = container.querySelector<HTMLButtonElement>("button.commit-tag--tag.is-published");
+    expect(ghost?.textContent).toBe("originv1.4.1");
+    expect(ghost?.getAttribute("aria-label")).toContain("origin's v1.4.1 points here");
+    await act(async () => ghost?.click());
+    expect(take).toHaveBeenCalledWith(moved);
+    await done();
+  });
+
+  it("keeps an unmoved tag a plain mark", async () => {
+    const { container, done } = await rendered(vm({ tag: { name: "v1.4.0", kind: "annotated" } }), vi.fn());
+    expect(container.querySelector("button.commit-tag--tag")).toBeNull();
+    expect(container.querySelector("span.commit-tag--tag")).not.toBeNull();
+    await done();
   });
 });

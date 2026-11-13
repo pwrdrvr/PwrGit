@@ -617,6 +617,14 @@ export type RemoteTagValue = {
   available?: boolean;
 };
 
+/** A local tag whose published remote has another value for the same name. */
+export type MovedTag = {
+  name: string;
+  /** The local tag: its own object (the Take lease) and its peeled commit. */
+  local: { objectId: string; targetId: string; kind: "lightweight" | "annotated" };
+  published: RemoteTagValue;
+};
+
 /**
  * A tag name compared against the repository's published remote.
  *
@@ -821,6 +829,10 @@ export type RepoRefs = {
    *  read from the database (no Git, no network). Absent when there are none or
    *  nothing was checked. */
   tagAttention?: { remote: string; differs: number };
+  /** Preview tags whose published value differs from the local one, by name:
+   *  the published remote's value. From the same stored comparison as
+   *  `tagAttention` (no Git, no network); "Keep local" tags are left out. */
+  tagMoves?: Record<string, RemoteTagValue>;
   remotes: RemoteSummary[];
 };
 
@@ -2532,6 +2544,10 @@ export type LaneGraph = {
   remoteTips: Record<string, string[]>;
   /** branch name → PR / worktree adornments for the tip chips. */
   branches: Record<string, LaneBranchInfo>;
+  /** Local tags that differ from the published remote, limited to tags whose
+   *  local or published commit is drawn. From the stored comparison; computed
+   *  per request, never cached with the lanes. */
+  movedTags?: MovedTag[];
   /** Current HEAD commit, to highlight where you are. */
   head: string;
   /** Commits reachable from this worktree's HEAD but not its default ref.
