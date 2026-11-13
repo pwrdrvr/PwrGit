@@ -85,6 +85,17 @@ A glyph that is not a circular arrow (Pull's ↓, Push's ↑) swaps to
   focused, it paints subtle border, transparent fill and `--text-subtle` text
   at full opacity.
 
+## An idle window draws nothing
+
+- **`infinite` animations only on in-flight state**: a spinner, a busy
+  attribute, an indeterminate bar. Anything on screen at rest pulses a
+  finite number of times, then holds its last keyframe's value.
+- Why: a running animation repaints every frame (an SVG child's opacity is
+  not composited). HEAD's endless ring held an idle one-repo window at ~7%
+  renderer + GPU CPU.
+- `idle-animation.test.ts` lists each `infinite` selector with its gate. Add
+  yours there with what mounts it, or make it finite.
+
 ## No raw color literals outside `tokens.css`
 
 - **Only `tokens.css` may contain a hex, `rgb()`, `rgba()` or `hsl()`
