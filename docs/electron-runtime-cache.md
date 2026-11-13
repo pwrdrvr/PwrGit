@@ -77,7 +77,10 @@ Concurrent publishers converge on a fully verified winning entry. Corrupt
 entries are preserved for diagnosis and bypassed; unavailable caches cause
 local extraction. Cache failure never makes installation depend on cache
 availability. Installs are serialized per Electron package using a lock with
-OS-confirmed dead-owner recovery; `path.txt` and the installation manifest are
+OS-confirmed dead-owner recovery. An empty lock directory is free: Windows
+refuses `rmdir` while a waiter's `readdir` holds it open, so `EPERM`, `EACCES`
+and `EBUSY` from that `rmdir` mean "busy", and a waiter reclaims the leftover
+directory. `path.txt` and the installation manifest are
 published only after verifying the staged runtime. Legacy or damaged installs
 are replaced from a verified source.
 
