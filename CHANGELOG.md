@@ -1,5 +1,14 @@
 # Changelog
 
+## v0.59.0 - 2026-11-13
+
+- Getting started - Added Find my repositories, an empty-profile start screen, and a guided repository-selection step. The bounded, cancellable search looks near your home folder without descending into existing checkouts or cloud folders; protected macOS folders are searched only when requested. Clone and Fork can now offer a destination even before a profile has a repository folder.
+- Repository discovery - Added Rescan folders and automatic checks for repositories added inside a profile's configured folders while PwrGit is running. Fetch and Pull check for additions, with a periodic fallback when automatic sync is off; unreadable folders do not replace the saved discovery snapshot.
+- Merge queues - Added GitHub merge-queue and GitLab merge-train status, including queue progress and removal reasons when available. Eligible pull requests offer Add to merge queue after rechecking the current head, without falling back to a direct merge. GitHub's internal queue remote branches no longer clutter branch navigation; local branches are unchanged.
+- Published tags - Marked moved tags directly in sidebar rows and on both local and published graph positions. Either marker opens the same explicit review before taking the published value; Fetch and Pull do not rewrite the tag automatically.
+- People - Replaced account-match claims of proof with a clear matched, not verified state. GitHub's verified state now requires a valid signature by the linked account, not GitHub's merge signer or another person. Batched checks cover up to three displayed commits per author; GitLab remains matched rather than signature-verified.
+- Source installs - Fixed a busy Windows Electron runtime-cache lock preventing concurrent dependency installation from completing.
+
 ## v0.58.0 - 2026-11-13
 
 - Commit graph - Reduced idle CPU use when HEAD is visible by stopping its highlight ring after three pulses instead of animating forever. The current commit stays highlighted without the animation continuously repainting the window.
