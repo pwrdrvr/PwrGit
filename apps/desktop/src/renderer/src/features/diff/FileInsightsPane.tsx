@@ -192,7 +192,7 @@ function useAuthorIdentities(
       // A proven person carries the freshest login and face. Anything short of
       // that is about the author's other commits, and must not hide this
       // commit's own exact proof.
-      const identity = person?.state === "proven"
+      const identity = person?.state === "linked"
         ? person.identity
         : lookups[candidate.hash]?.identity;
       if (identity !== undefined) identities[candidate.hash] = identity;

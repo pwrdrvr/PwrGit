@@ -64,7 +64,7 @@ export function mergeCommitAuthorPeople(
 }
 
 function isOlderPerson(incoming: CommitAuthorPerson, held: CommitAuthorPerson): boolean {
-  if (incoming.state === "pending" && (held.state === "proven" || held.state === "none")) {
+  if (incoming.state === "pending" && (held.state === "linked" || held.state === "none")) {
     return true;
   }
   return (incoming.checkedAt ?? Number.NEGATIVE_INFINITY) <

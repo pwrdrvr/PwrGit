@@ -36,8 +36,33 @@ export type CommitAuthorRemoteCommit = {
     name?: string | null;
     email?: string | null;
   } | null;
+  /** Who committed it. A forge verifies a signature against the committer. */
+  committer?: {
+    email?: string | null;
+  } | null;
   account?: ForgeAccountProfile | null;
+  /**
+   * The forge's own verdict on this commit's signature (GitHub:
+   * `commit.verification.verified`). Absent when the forge did not say, and
+   * dropped when `account` came from a fallback rather than the commit.
+   */
+  signatureVerified?: boolean;
 };
+
+/**
+ * Whether a forge answer lets PwrGit call the commit's author verified: the
+ * forge verified the signature, and the committer it verified is the author
+ * (same normalized email). A commit GitHub signed as the committer of a
+ * squash merge, or a reviewer's signed cherry-pick, verifies someone else.
+ */
+export function signedByAuthor(
+  response: Pick<CommitAuthorRemoteCommit, "author" | "committer" | "signatureVerified">
+): boolean {
+  if (response.signatureVerified !== true) return false;
+  const authorEmail = safeLower(response.author?.email);
+  const committerEmail = safeLower(response.committer?.email);
+  return authorEmail !== undefined && authorEmail === committerEmail;
+}
 
 /** Credential-opaque seam for fetching one exact commit from a forge. */
 export type CommitAuthorIdentityTransport = {

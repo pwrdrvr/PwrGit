@@ -10,7 +10,8 @@ import {
   PEOPLE_RETRY_BASE_MS,
   PEOPLE_SETTLE_MS,
   PEOPLE_TICK_SPACING_MS,
-  PEOPLE_VISITS_PER_TICK
+  PEOPLE_VISITS_PER_TICK,
+  signedByLinkedAccount
 } from "./commit-author-people";
 
 const GITHUB: ForgeRepo = { kind: "github", host: "github.com", path: "octo-org/example" };
@@ -90,7 +91,7 @@ describe("CommitAuthorPeopleStore", () => {
 
     await expect(store.replace("window:1", "wt-1", [ADA, GRACE])).resolves.toEqual({
       "ada@example.test": {
-        state: "proven",
+        state: "linked",
         identity: PROVEN.identity,
         profileUrl: "https://github.com/ada",
         forge: "github",
@@ -122,7 +123,7 @@ describe("CommitAuthorPeopleStore", () => {
       worktreeId: "wt-1",
       people: {
         "grace@example.test": {
-          state: "proven",
+          state: "linked",
           identity: { login: "grace" },
           profileUrl: "https://github.com/grace",
           forge: "github",
@@ -130,6 +131,27 @@ describe("CommitAuthorPeopleStore", () => {
         }
       }
     }]);
+  });
+
+  it("calls a person verified only when a commit linked to their shown account is", async () => {
+    // ADA_1 is linked to someone else and verified; ADA_2 is Ada, unsigned.
+    cached.set(ADA_1, {
+      identity: { login: "not-ada" },
+      cacheState: "fresh",
+      refreshState: "idle",
+      refreshedAt: 400,
+      signatureVerified: true
+    });
+    cached.set(ADA_2, PROVEN);
+    const unsigned = await store.replace("window:1", "wt-1", [{ ...ADA, commitHashes: [ADA_2, ADA_1] }]);
+    expect(unsigned["ada@example.test"]).toMatchObject({ state: "linked", identity: { login: "ada" } });
+    expect(unsigned["ada@example.test"]).not.toHaveProperty("signatureVerified");
+
+    cached.set(ADA_1, { ...PROVEN, identity: { login: "ADA" }, signatureVerified: true });
+    // A fresh store: one that already holds Ada answers from what it holds.
+    store = createStore();
+    const signed = await store.replace("window:2", "wt-1", [ADA]);
+    expect(signed["ada@example.test"]).toMatchObject({ state: "linked", signatureVerified: true });
   });
 
   it("leaves an author the cache already answers for until the recheck", async () => {
@@ -180,7 +202,7 @@ describe("CommitAuthorPeopleStore", () => {
     now += 1;
     await store.tick();
     expect(networkCalls().map((call) => call.commitHash)).toEqual([ADA_1, ADA_2]);
-    expect(published.at(-1)?.people["ada@example.test"]?.state).toBe("proven");
+    expect(published.at(-1)?.people["ada@example.test"]?.state).toBe("linked");
   });
 
   it("doubles the wait after each unsettled visit, up to the recheck", async () => {
@@ -284,5 +306,17 @@ describe("CommitAuthorPeopleStore", () => {
       GRACE
     ]);
     expect(Object.keys(known)).toEqual(["grace@example.test"]);
+  });
+});
+
+describe("signedByLinkedAccount", () => {
+  it("needs a shown account, and a verified lookup for that same account", () => {
+    const verified = { ...PROVEN, signatureVerified: true as const };
+    expect(signedByLinkedAccount(MISS, [verified])).toBe(false);
+    expect(signedByLinkedAccount(PROVEN, [PROVEN])).toBe(false);
+    expect(signedByLinkedAccount(PROVEN, [PROVEN, verified])).toBe(true);
+    expect(signedByLinkedAccount(PROVEN, [
+      { ...verified, identity: { login: "someone-else" } }
+    ])).toBe(false);
   });
 });

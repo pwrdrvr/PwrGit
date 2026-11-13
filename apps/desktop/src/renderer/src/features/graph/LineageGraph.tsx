@@ -195,7 +195,7 @@ async function warmPeopleAvatars(
 
 /** Only a proven identity is ever shown; the rest are initials. */
 function provenIdentity(person: CommitAuthorPerson | undefined) {
-  return person?.state === "proven" ? person.identity : undefined;
+  return person?.state === "linked" ? person.identity : undefined;
 }
 
 type CommitMenuState = { hash: string; x: number; y: number };

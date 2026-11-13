@@ -399,6 +399,10 @@ Identity is forge-wide (`commit-author.ts`, `commit-author-transport.ts`).
 - The tri-state matches GitHub: an account object resolves; `null` is an
   authoritative "no linked account"; an absent/unreadable commit is
   inconclusive and caches nothing.
+- **Only GitHub reports a signature** (`signatureVerified`). GitLab's GraphQL
+  `commit.signature` differs across self-managed versions, and one unknown
+  field fails the whole query, so GitLab authors read "matched", never
+  "verified", until that is asked for safely.
 - **Account ids are GIDs** (`gid://gitlab/User/35145513`). Parse; do not cast.
 - **Cache keys are per forge instance:** identity key = kind+host+path;
   email→account key = kind+host. One email is a different person on each

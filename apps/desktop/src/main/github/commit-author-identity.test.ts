@@ -705,6 +705,61 @@ describe("GitHubCommitAuthorIdentityService", () => {
   });
 });
 
+describe("GitHubCommitAuthorIdentityService signatures", () => {
+  it("marks a lookup verified only for the exact commit its author signed", async () => {
+    fetchImpl = async () => ({
+      ...resolvedRemoteCommit(),
+      committer: { email: AUTHOR.email.toUpperCase() },
+      signatureVerified: true
+    });
+    const exact = await requireCompletion(service.request(INPUT).completion);
+    expect(exact).toMatchObject({ identity: { login: "ada" }, signatureVerified: true });
+
+    // The same author's other commit paints from the reusable email -> account
+    // row. That row is about an email, so it can never carry a signature.
+    const unseen = await requireCompletion(service.request({
+      ...INPUT,
+      commitHash: "1111111111111111111111111111111111111111",
+      cacheOnly: true
+    }).completion);
+    expect(unseen).toMatchObject({ identity: { login: "ada" } });
+    expect(unseen).not.toHaveProperty("signatureVerified");
+
+    // And it survives a reload from SQLite.
+    service = createService();
+    expect(
+      await requireCompletion(service.request({ ...INPUT, cacheOnly: true }).completion)
+    ).toMatchObject({ signatureVerified: true });
+  });
+
+  it("does not call a commit GitHub signed as committer verified for its author", async () => {
+    fetchImpl = async () => ({
+      ...resolvedRemoteCommit(),
+      committer: { email: "noreply@github.com" },
+      signatureVerified: true
+    });
+    const lookup = await requireCompletion(service.request(INPUT).completion);
+    expect(lookup).toMatchObject({ identity: { login: "ada" } });
+    expect(lookup).not.toHaveProperty("signatureVerified");
+  });
+
+  it("drops a verified signature when the commit later answers unverified", async () => {
+    fetchImpl = async () => ({
+      ...resolvedRemoteCommit(),
+      committer: { email: AUTHOR.email },
+      signatureVerified: true
+    });
+    await requireCompletion(service.request(INPUT).completion);
+    expect(cachedRow().signature_verified).toBe(1);
+
+    now += 8 * 24 * 60 * 60 * 1000;
+    fetchImpl = async () => ({ ...resolvedRemoteCommit(), committer: { email: AUTHOR.email } });
+    const lookup = await requireCompletion(service.request(INPUT).completion);
+    expect(lookup).not.toHaveProperty("signatureVerified");
+    expect(cachedRow().signature_verified).toBe(0);
+  });
+});
+
 describe("GhCliCommitAuthorIdentityTransport", () => {
   it("uses gh api without token extraction or a credential parameter", async () => {
     const calls: string[][] = [];
@@ -744,6 +799,28 @@ describe("GhCliCommitAuthorIdentityTransport", () => {
     expect(calls[0]).not.toContain("token");
   });
 
+  it("reads GitHub's signature verdict and the committer it verified", async () => {
+    const transport = new GhCliCommitAuthorIdentityTransport({
+      run: async () => JSON.stringify({
+        sha: COMMIT_SHA,
+        commit: {
+          author: AUTHOR,
+          committer: { name: "GitHub", email: "noreply@github.com" },
+          verification: { verified: true, reason: "valid" }
+        },
+        author: { id: 1, login: "ada", avatar_url: "https://avatars.githubusercontent.com/u/1?v=4" }
+      })
+    });
+    await expect(
+      transport.fetchCommit({ repo: GITHUB_REPO, commitSha: COMMIT_SHA })
+    ).resolves.toEqual({
+      ...resolvedRemoteCommit(),
+      committer: { email: "noreply@github.com" },
+      signatureVerified: true
+    });
+  });
+
+
   it("corroborates a unique associated-PR author when GitHub leaves author null", async () => {
     const calls: string[][] = [];
     const transport = new GhCliCommitAuthorIdentityTransport({
@@ -754,7 +831,11 @@ describe("GhCliCommitAuthorIdentityTransport", () => {
           return JSON.stringify({
             sha: COMMIT_SHA,
             commit: {
-              author: { name: "Peter Steinberger", email: "steipete@macos.shared" }
+              author: { name: "Peter Steinberger", email: "steipete@macos.shared" },
+              committer: { email: "steipete@macos.shared" },
+              // A signature vouches for the commit's own (empty) link, never
+              // for the account a pull request supplies.
+              verification: { verified: true }
             },
             author: null
           });
@@ -776,6 +857,7 @@ describe("GhCliCommitAuthorIdentityTransport", () => {
     })).resolves.toEqual({
       sha: COMMIT_SHA,
       author: { name: "Peter Steinberger", email: "steipete@macos.shared" },
+      committer: { email: "steipete@macos.shared" },
       account: {
         id: 58493,
         login: "steipete",

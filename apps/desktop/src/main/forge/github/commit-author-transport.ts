@@ -33,7 +33,12 @@ export class GhCliCommitAuthorIdentityTransport
     if (commit.account !== null || commit.author == null) return commit;
 
     const fallback = await this.fetchAssociatedPullAuthor(proof, commit.author);
-    return fallback === undefined ? commit : { ...commit, account: fallback };
+    if (fallback === undefined) return commit;
+    // The signature vouches for the commit's own link, which was empty; it
+    // says nothing about an account a pull request supplied.
+    const matched: CommitAuthorRemoteCommit = { ...commit, account: fallback };
+    delete matched.signatureVerified;
+    return matched;
   }
 
   /**
@@ -77,10 +82,14 @@ export function parseGitHubCommitResponse(
   value: unknown
 ): CommitAuthorRemoteCommit {
   const response = asRecord(value);
-  const commitAuthor = asRecord(asRecord(response?.commit)?.author);
+  const commit = asRecord(response?.commit);
+  const commitAuthor = asRecord(commit?.author);
+  const commitCommitter = asRecord(commit?.committer);
   const sha = readString(response?.sha);
   const name = readString(commitAuthor?.name);
   const email = readString(commitAuthor?.email);
+  const committerEmail = readString(commitCommitter?.email);
+  const verified = asRecord(commit?.verification)?.verified;
   const account =
     response?.author === null ? null : toAccountProfile(asRecord(response?.author));
 
@@ -94,7 +103,9 @@ export function parseGitHubCommitResponse(
             ...(email === undefined ? {} : { email })
           }
         }),
-    ...(account === undefined ? {} : { account })
+    ...(committerEmail === undefined ? {} : { committer: { email: committerEmail } }),
+    ...(account === undefined ? {} : { account }),
+    ...(typeof verified === "boolean" ? { signatureVerified: verified } : {})
   };
 }
 
