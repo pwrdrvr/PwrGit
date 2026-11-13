@@ -21,7 +21,8 @@ import {
   parseOpenPrPage,
   parsePrNumberResponse,
   parsePrResponse,
-  repositoryResolved
+  repositoryResolved,
+  type PrQueryOptions
 } from "./pr-query";
 async function gh(args: string[]): Promise<string> {
   return runGh(args);
@@ -202,7 +203,9 @@ async function runQuery(
   token: string,
   repo: Pick<ForgeRepo, "host" | "port">,
   query: string,
-  variables: Record<string, string | number>
+  variables: Record<string, string | number>,
+  resolved: (data: unknown) => boolean = repositoryResolved,
+  maxRetries: number = MAX_RETRIES
 ): Promise<unknown> {
   const base = githubGraphqlBaseUrl(repo);
   const client = graphql.defaults({
@@ -219,7 +222,7 @@ async function runQuery(
       // or GitHub's secondary rate limit — which it documents as a 200 — all
       // resolve here as a shape with no repository in it, and the parsers would
       // read that as "no PR" on every branch.
-      if (!repositoryResolved(data)) {
+      if (!resolved(data)) {
         throw new ForgeResponseError(
           "GitHub answered without the repository this query asked for."
         );
@@ -236,15 +239,75 @@ async function runQuery(
         // absence, and returning it would map *every* branch in the batch to
         // "no PR" and negative-cache that for the whole refresh TTL, where
         // throwing lets `PrService` keep what it already had.
-        if (repositoryResolved(error.data)) return error.data;
+        if (resolved(error.data)) return error.data;
         throw error;
       }
       attempt += 1;
       const wait = retryDelayMs(error, attempt);
-      if (wait === null || attempt > MAX_RETRIES) throw error;
+      if (wait === null || attempt > maxRetries) throw error;
       await delay(wait);
     }
   }
+}
+
+/**
+ * Hosts that refused the merge-queue fields (GHES before 3.8). Remembered for
+ * the session, so each later query goes straight to the older shape instead
+ * of being refused first. Keyed by host and port: one Enterprise instance's
+ * age says nothing about github.com's.
+ */
+const noMergeQueueFields = new Set<string>();
+
+function hostKey(repo: Pick<ForgeRepo, "host" | "port">): string {
+  return `${repo.host.toLowerCase()}:${repo.port ?? ""}`;
+}
+
+/** For tests: forget which hosts refused the queue fields. */
+export function resetMergeQueueFieldSupport(): void {
+  noMergeQueueFields.clear();
+}
+
+/**
+ * A schema refusal of the queue fields: GraphQL validation answers with no
+ * `data` and an error naming a field or enum value the server does not know.
+ * Anything else (a refused repository, a rate limit) is not this, and retrying
+ * without the fields would only spend a second request on the same refusal.
+ */
+export function refusedMergeQueueFields(error: unknown): boolean {
+  if (!(error instanceof GraphqlResponseError)) return false;
+  if (repositoryResolved(error.data)) return false;
+  const errors: unknown = error.errors;
+  if (!Array.isArray(errors)) return false;
+  return errors.some((entry: { message?: unknown; extensions?: { code?: unknown } } | null) => {
+    const code = entry?.extensions?.code;
+    const message = typeof entry?.message === "string" ? entry.message : "";
+    const schema = code === "undefinedField" || code === "argumentLiteralsIncompatible" ||
+      /doesn't exist on type|has an invalid value|isn't a defined input type|undefined type/i.test(message);
+    return schema && /MergeQueue|mergeQueue|isInMergeQueue|MERGE_QUEUE|mergeStateStatus|queueEvents/.test(message);
+  });
+}
+
+/**
+ * Run a PR query with the merge-queue fields, or without them on a host that
+ * has none. The fallback only drops fields: every other refusal still throws.
+ */
+async function runPrQuery(
+  token: string,
+  repo: Pick<ForgeRepo, "host" | "port">,
+  build: (options: PrQueryOptions) => { query: string; variables: Record<string, string | number> }
+): Promise<unknown> {
+  const key = hostKey(repo);
+  if (!noMergeQueueFields.has(key)) {
+    try {
+      const { query, variables } = build({ mergeQueue: true });
+      return await runQuery(token, repo, query, variables);
+    } catch (error) {
+      if (!refusedMergeQueueFields(error)) throw error;
+      noMergeQueueFields.add(key);
+    }
+  }
+  const { query, variables } = build({ mergeQueue: false });
+  return await runQuery(token, repo, query, variables);
 }
 
 /** Fetch the most-recent PR for each branch in one repo (batched + backed off). */
@@ -285,10 +348,10 @@ async function newestPrsForSources(
   let after = new Map<string, string>();
   const visited = new Map<string, Set<string>>();
   for (let page = 0; page < BRANCH_PR_MAX_PAGES && remaining.length > 0; page += 1) {
-    const { query, variables } = buildPrQuery(owner, name, remaining, after);
     let data: unknown;
     try {
-      data = await runQuery(token, repo, query, variables);
+      data = await runPrQuery(token, repo,
+        (options) => buildPrQuery(owner, name, remaining, after, options));
     } catch (error) {
       // Keep completed branches, and tell the outer walk to stop too: a
       // refusal must not spend another request budget on subsequent chunks.
@@ -328,8 +391,8 @@ export async function fetchPrsForCommits(
     commitHashes,
     BATCH,
     async (chunk) => {
-      const { query, variables } = buildCommitPrQuery(owner, name, chunk);
-      return await runQuery(token, repo, query, variables);
+      return await runPrQuery(token, repo,
+        (options) => buildCommitPrQuery(owner, name, chunk, options));
     },
     parseCommitPrResponse
   );
@@ -347,8 +410,8 @@ export async function fetchPrsByNumbers(
     numbers,
     BATCH,
     async (chunk) => {
-      const { query, variables } = buildPrNumberQuery(owner, name, chunk);
-      return await runQuery(token, repo, query, variables);
+      return await runPrQuery(token, repo,
+        (options) => buildPrNumberQuery(owner, name, chunk, options));
     },
     parsePrNumberResponse
   );
@@ -371,9 +434,9 @@ export async function fetchOpenPrs(
   const seen = new Set<string>();
   let after: string | null = null;
   for (;;) {
-    const { query, variables } = buildOpenPrQuery(owner, name, after);
+    const cursor = after;
     const page = parseOpenPrPage(
-      await runQuery(token, repo, query, variables)
+      await runPrQuery(token, repo, (options) => buildOpenPrQuery(owner, name, cursor, options))
     );
     items.push(...page.items);
     if (!page.hasNextPage || page.endCursor === null) {
@@ -388,4 +451,89 @@ export async function fetchOpenPrs(
     seen.add(page.endCursor);
     after = page.endCursor;
   }
+}
+
+/** Why `enqueuePullRequest` declined before GitHub was asked to change anything. */
+export type EnqueueRefusal =
+  | "not_found"
+  | "not_open"
+  | "no_merge_queue"
+  | "head_moved"
+  | "already_queued";
+
+export class EnqueueRefusedError extends Error {
+  constructor(readonly code: EnqueueRefusal, message: string) {
+    super(message);
+    this.name = "EnqueueRefusedError";
+  }
+}
+
+/**
+ * Add a pull request to its base branch's merge queue.
+ *
+ * Never a merge: GitHub's `enqueuePullRequest` only queues, and this first
+ * reads the PR to refuse when its base has no queue (where the only way in
+ * would be a direct merge, which PwrGit does not offer). `expectedHeadOid`
+ * pins the head the user looked at; a push since then is refused by GitHub
+ * and by the read here.
+ */
+export async function enqueuePullRequest(
+  token: string,
+  repo: Pick<ForgeRepo, "host" | "port">,
+  owner: string,
+  name: string,
+  number: number,
+  expectedHeadOid?: string
+): Promise<{ position?: number; state?: string }> {
+  const read = await runQuery(token, repo,
+    `query ($owner: String!, $name: String!, $number: Int!) {
+  repository(owner: $owner, name: $name) {
+    pullRequest(number: $number) { id state headRefOid isMergeQueueEnabled isInMergeQueue }
+  }
+}`, { owner, name, number }) as {
+    repository?: { pullRequest?: {
+      id?: string; state?: string; headRefOid?: string;
+      isMergeQueueEnabled?: boolean; isInMergeQueue?: boolean;
+    } | null };
+  };
+  const pr = read.repository?.pullRequest;
+  if (pr == null || typeof pr.id !== "string") {
+    throw new EnqueueRefusedError("not_found", `GitHub has no pull request #${number} here.`);
+  }
+  if (pr.state !== "OPEN") {
+    throw new EnqueueRefusedError("not_open", `Pull request #${number} is not open.`);
+  }
+  if (pr.isInMergeQueue === true) {
+    throw new EnqueueRefusedError("already_queued", `Pull request #${number} is already in the merge queue.`);
+  }
+  if (pr.isMergeQueueEnabled !== true) {
+    throw new EnqueueRefusedError("no_merge_queue",
+      `The base branch of #${number} has no merge queue, so there is nothing to add it to.`);
+  }
+  if (expectedHeadOid !== undefined && pr.headRefOid !== undefined &&
+    pr.headRefOid.toLowerCase() !== expectedHeadOid.toLowerCase()) {
+    throw new EnqueueRefusedError("head_moved",
+      `Pull request #${number} has new commits since PwrGit last read it.`);
+  }
+  const variables: Record<string, string | number> = {
+    id: pr.id,
+    ...(expectedHeadOid === undefined ? {} : { head: expectedHeadOid })
+  };
+  const data = await runQuery(token, repo,
+    `mutation ($id: ID!${expectedHeadOid === undefined ? "" : ", $head: GitObjectID"}) {
+  enqueuePullRequest(input: { pullRequestId: $id${expectedHeadOid === undefined ? "" : ", expectedHeadOid: $head"} }) {
+    mergeQueueEntry { position state }
+  }
+}`, variables, (answer) => typeof (answer as { enqueuePullRequest?: unknown } | null)?.enqueuePullRequest === "object" &&
+    (answer as { enqueuePullRequest?: unknown }).enqueuePullRequest !== null,
+  // A write is never sent twice: a lost answer to an enqueue that landed
+  // would come back as "already queued", an error for a success.
+  0) as {
+    enqueuePullRequest?: { mergeQueueEntry?: { position?: number; state?: string } | null };
+  };
+  const entry = data.enqueuePullRequest?.mergeQueueEntry;
+  return {
+    ...(typeof entry?.position === "number" ? { position: entry.position } : {}),
+    ...(typeof entry?.state === "string" ? { state: entry.state } : {})
+  };
 }

@@ -1,6 +1,8 @@
 import {
   isForgeKind,
+  MERGE_QUEUE_ENTRY_STATES,
   type ForgeKind,
+  type PrMergeQueue,
   type OpenChangeRequest,
   type PrSummary
 } from "@pwrgit/shared";
@@ -38,7 +40,8 @@ export const PR_DETAIL_COLUMNS = [
   "commit_count",
   "opened_at",
   "merged_at",
-  "closed_at"
+  "closed_at",
+  "merge_queue"
 ] as const;
 
 export const PR_SUMMARY_COLUMNS = [
@@ -89,7 +92,78 @@ export function prSummaryFromRow(
     ...optional("commitCount", count(row[`${prefix}commit_count`])),
     ...optional("createdAt", count(row[`${prefix}opened_at`])),
     ...optional("mergedAt", count(row[`${prefix}merged_at`])),
-    ...optional("closedAt", count(row[`${prefix}closed_at`]))
+    ...optional("closedAt", count(row[`${prefix}closed_at`])),
+    ...optional("mergeQueue", parseMergeQueue(row[`${prefix}merge_queue`]))
+  };
+}
+
+/**
+ * `PrMergeQueue` → the `merge_queue` column. Keys are written in one fixed
+ * order, so an unchanged queue serialises to the same string and the diff
+ * writers (`sameCachedPr`, `sameRow`) see no change.
+ */
+export function serializeMergeQueue(queue: PrMergeQueue | undefined): string | null {
+  if (queue === undefined) return null;
+  const entry = queue.entry === undefined ? undefined : {
+    state: queue.entry.state,
+    position: queue.entry.position,
+    etaSeconds: queue.entry.etaSeconds,
+    enqueuedAt: queue.entry.enqueuedAt
+  };
+  const lastEvent = queue.lastEvent === undefined ? undefined : {
+    kind: queue.lastEvent.kind,
+    at: queue.lastEvent.at,
+    reason: queue.lastEvent.reason
+  };
+  return JSON.stringify({
+    required: queue.required,
+    entry,
+    lastEvent,
+    blocked: queue.blocked,
+    method: queue.method
+  });
+}
+
+/**
+ * The `merge_queue` column back to a `PrMergeQueue`, validating every field:
+ * a stale or hand-edited row may hold anything, and an unreadable one is "not
+ * known", never "no queue".
+ */
+export function parseMergeQueue(value: unknown): PrMergeQueue | undefined {
+  if (typeof value !== "string" || value === "") return undefined;
+  let raw: unknown;
+  try {
+    raw = JSON.parse(value);
+  } catch {
+    return undefined;
+  }
+  if (typeof raw !== "object" || raw === null) return undefined;
+  const record = raw as Record<string, unknown>;
+  if (typeof record.required !== "boolean") return undefined;
+  const entryRaw = record.entry as Record<string, unknown> | undefined;
+  const state = enumValue(entryRaw?.state, MERGE_QUEUE_ENTRY_STATES);
+  const eventRaw = record.lastEvent as Record<string, unknown> | undefined;
+  const kind = enumValue(eventRaw?.kind, ["added", "removed"] as const);
+  const method = enumValue(record.method, ["merge", "squash", "rebase"] as const);
+  return {
+    required: record.required,
+    ...(state === undefined ? {} : {
+      entry: {
+        state,
+        ...optional("position", count(entryRaw?.position)),
+        ...optional("etaSeconds", count(entryRaw?.etaSeconds)),
+        ...optional("enqueuedAt", count(entryRaw?.enqueuedAt))
+      }
+    }),
+    ...(kind === undefined ? {} : {
+      lastEvent: {
+        kind,
+        ...optional("at", count(eventRaw?.at)),
+        ...optional("reason", text(eventRaw?.reason))
+      }
+    }),
+    ...(typeof record.blocked === "boolean" ? { blocked: record.blocked } : {}),
+    ...optional("method", method)
   };
 }
 

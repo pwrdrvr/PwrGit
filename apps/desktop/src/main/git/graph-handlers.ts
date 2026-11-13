@@ -3,6 +3,7 @@ import {
   type Commit,
   type LaneGraph,
   err,
+  isMergeQueueRemoteRef,
   type LaneBranchInfo,
   type MovedTag,
   ok
@@ -86,7 +87,13 @@ async function readRefsStamp(git: GitExec, cwd: string): Promise<string | null> 
     cwd
   );
   if (!raw.ok || raw.value.exitCode !== 0) return null;
-  return createHash("sha1").update(raw.value.stdout).digest("hex");
+  // GitHub's merge-group refs come and go with every queue run and are never
+  // drawn, so they must not invalidate the lanes either.
+  const drawn = raw.value.stdout.split("\n").filter((line) => {
+    const space = line.indexOf(" ");
+    return space < 0 || !isMergeQueueRemoteRef(line.slice(space + 1));
+  });
+  return createHash("sha1").update(drawn.join("\n")).digest("hex");
 }
 
 /**

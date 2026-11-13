@@ -53,6 +53,9 @@ export type ForgeProduct = {
   readonly saasHost: string;
   /** What this product calls a change request, capitalized as a UI noun. */
   readonly changeRequestLabel: string;
+  /** What the forge calls a required merge queue: "merge queue" (GitHub),
+   *  "merge train" (GitLab). Lower case, as it sits mid-sentence. */
+  readonly mergeQueueNoun: string;
   /** The product's own reference sigil — `owner/repo#4` vs `owner/repo!4`. */
   readonly changeRequestSigil: string;
   /**
@@ -211,6 +214,7 @@ export const FORGE_PRODUCTS: Readonly<Record<ForgeKind, ForgeProduct>> = freeze(
     signInHost: { flag: "--host", apiPath: "/api" },
     saasHost: "git.cafe",
     changeRequestLabel: "Pull request",
+    mergeQueueNoun: "merge queue",
     changeRequestSigil: "#",
     // cafe 0.5.0 documents no pull-request ref; do not guess GitHub's.
     changeRequestBranchPrefix: "pr",
@@ -225,7 +229,8 @@ export const FORGE_PRODUCTS: Readonly<Record<ForgeKind, ForgeProduct>> = freeze(
       changeSizeAndTimeline: false,
       commitAuthorIdentity: false,
       commitSignatures: false,
-      forkDefaultBranchOnly: false
+      forkDefaultBranchOnly: false,
+      addToMergeQueue: false
     }
   },
   github: {
@@ -253,6 +258,7 @@ export const FORGE_PRODUCTS: Readonly<Record<ForgeKind, ForgeProduct>> = freeze(
     signInHost: { flag: "--hostname" },
     saasHost: "github.com",
     changeRequestLabel: "Pull request",
+    mergeQueueNoun: "merge queue",
     changeRequestSigil: "#",
     changeRequestHeadRef: "refs/pull/{n}/head",
     changeRequestBranchPrefix: "pr",
@@ -274,7 +280,9 @@ export const FORGE_PRODUCTS: Readonly<Record<ForgeKind, ForgeProduct>> = freeze(
       commitAuthorIdentity: true,
       // GraphQL names the signer and whether GitHub signed it itself.
       commitSignatures: true,
-      forkDefaultBranchOnly: true
+      forkDefaultBranchOnly: true,
+      // `enqueuePullRequest`.
+      addToMergeQueue: true
     }
   },
   gitlab: {
@@ -301,6 +309,7 @@ export const FORGE_PRODUCTS: Readonly<Record<ForgeKind, ForgeProduct>> = freeze(
     signInHost: { flag: "--hostname" },
     saasHost: "gitlab.com",
     changeRequestLabel: "Merge request",
+    mergeQueueNoun: "merge train",
     changeRequestSigil: "!",
     changeRequestHeadRef: "refs/merge-requests/{n}/head",
     changeRequestBranchPrefix: "mr",
@@ -329,7 +338,9 @@ export const FORGE_PRODUCTS: Readonly<Record<ForgeKind, ForgeProduct>> = freeze(
       commitSignatures: false,
       // GitLab's fork API takes no branch filter; offering the switch would be
       // offering a control that does nothing.
-      forkDefaultBranchOnly: false
+      forkDefaultBranchOnly: false,
+      // `POST /projects/:id/merge_trains/merge_requests/:iid` (Premium).
+      addToMergeQueue: true
     }
   }
 });
@@ -421,6 +432,10 @@ export function changeRequestLabel(kind: ForgeKind): string {
 }
 
 /** The same word lowercased, for use inside a sentence. */
+export function mergeQueueNoun(kind: ForgeKind): string {
+  return FORGE_PRODUCTS[kind].mergeQueueNoun;
+}
+
 export function changeRequestNoun(kind: ForgeKind): string {
   return changeRequestLabel(kind).toLowerCase();
 }

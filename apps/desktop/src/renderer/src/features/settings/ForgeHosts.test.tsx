@@ -63,7 +63,8 @@ function statuses(loggedIn = true): ForgeStatus[] {
       changeSizeAndTimeline: true,
       commitAuthorIdentity: true,
       commitSignatures: true,
-      forkDefaultBranchOnly: true
+      forkDefaultBranchOnly: true,
+      addToMergeQueue: false
     },
     hosts: []
   }));

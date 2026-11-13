@@ -108,7 +108,22 @@ export type TokenForgeProvider = {
   ): Promise<Map<number, PrSummary | null>>;
   /** Every open change request, newest update first — see `OpenPrList`. */
   fetchOpenPrs(token: string, repo: ForgeRepo): Promise<OpenPrList>;
+  /**
+   * Add a change request to its base branch's merge queue (merge train).
+   * Must never merge: a base without a queue is a refusal, not a direct
+   * merge. Present exactly when `FORGE_PRODUCTS[kind].capabilities
+   * .addToMergeQueue` is true.
+   */
+  enqueueChangeRequest?(
+    token: string,
+    repo: ForgeRepo,
+    number: number,
+    expectedHeadOid?: string
+  ): Promise<EnqueueResult>;
 };
+
+/** What the forge said after accepting a change request into its queue. */
+export type EnqueueResult = { position?: number; state?: string };
 
 /**
  * Normalize a forge's own state vocabulary onto `PrLifecycle`.
@@ -173,6 +188,11 @@ export type ForgeConnection = {
     numbers: number[]
   ): Promise<Map<number, PrSummary | null>>;
   fetchOpenPrs(repo: ForgeRepo): Promise<OpenPrList>;
+  enqueueChangeRequest?(
+    repo: ForgeRepo,
+    number: number,
+    expectedHeadOid?: string
+  ): Promise<EnqueueResult>;
 };
 export type CliForgeProvider = ForgeConnection & {
   kind: ForgeKind;
@@ -195,7 +215,11 @@ export async function connectForge(
       provider.fetchPrsForCommits(token, repo, commits),
     fetchPrsByNumbers: (repo, numbers) =>
       provider.fetchPrsByNumbers(token, repo, numbers),
-    fetchOpenPrs: (repo) => provider.fetchOpenPrs(token, repo)
+    fetchOpenPrs: (repo) => provider.fetchOpenPrs(token, repo),
+    ...(provider.enqueueChangeRequest === undefined ? {} : {
+      enqueueChangeRequest: (repo: ForgeRepo, number: number, expectedHeadOid?: string) =>
+        provider.enqueueChangeRequest!(token, repo, number, expectedHeadOid)
+    })
   };
 }
 

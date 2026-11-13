@@ -21,7 +21,8 @@ import {
   pickBestByBranch,
   toSummary,
   type MrNode,
-  type MrPage
+  type MrPage,
+  type MrQueryOptions
 } from "./mr-query";
 
 /** Branches per GraphQL request; keeps one query's complexity bounded. */
@@ -125,6 +126,9 @@ async function graphql(
   // project we cannot see is answered as a null `project` *inside* `data`, so
   // it still lands here and still negative-caches, which is intended.
   const data = (body as { data?: unknown } | null)?.data ?? null;
+  if (data === null && refusedTrainFields(body)) {
+    throw new MergeTrainFieldsRefused();
+  }
   // `data` itself being absent is a different thing: nothing resolved, and
   // reporting that as an empty page would negative-cache every branch in the
   // batch as "no MR". `PrService` keeps what it had cached when this throws.
@@ -134,6 +138,53 @@ async function graphql(
     );
   }
   return data;
+}
+
+/** The instance refused the merge-train fields; ask again without them. */
+class MergeTrainFieldsRefused extends Error {
+  constructor() {
+    super("GitLab does not know the merge-train fields.");
+    this.name = "MergeTrainFieldsRefused";
+  }
+}
+
+/** A validation refusal naming one of `MR_TRAIN_FIELDS`. */
+export function refusedTrainFields(body: unknown): boolean {
+  const errors = (body as { errors?: unknown } | null)?.errors;
+  if (!Array.isArray(errors)) return false;
+  return errors.some((entry: { message?: unknown } | null) => {
+    const message = typeof entry?.message === "string" ? entry.message : "";
+    return /doesn't exist on type/i.test(message) &&
+      /mergeTrainCar|availableAutoMergeStrategies|autoMergeStrategy|autoMergeEnabled|detailedMergeStatus/.test(message);
+  });
+}
+
+/** Instances (host and port) without merge-train fields, for the session. */
+const noTrainFields = new Set<string>();
+
+/** For tests. */
+export function resetMergeTrainFieldSupport(): void {
+  noTrainFields.clear();
+}
+
+/** `graphql` with the train fields, or without them where they were refused. */
+async function mrGraphql(
+  repo: ForgeRepo,
+  token: string,
+  build: (options: MrQueryOptions) => { query: string; variables: Record<string, unknown> }
+): Promise<unknown> {
+  const key = `${repo.host.toLowerCase()}:${repo.port ?? ""}`;
+  if (!noTrainFields.has(key)) {
+    try {
+      const { query, variables } = build({ mergeTrain: true });
+      return await graphql(repo, token, query, variables);
+    } catch (error) {
+      if (!(error instanceof MergeTrainFieldsRefused)) throw error;
+      noTrainFields.add(key);
+    }
+  }
+  const { query, variables } = build({ mergeTrain: false });
+  return await graphql(repo, token, query, variables);
 }
 
 /**
@@ -153,8 +204,9 @@ async function newestMrPerBranch(
   const found = new Map<string, PrSummary>();
   let after: string | null = null;
   for (let page = 0; page < MAX_PAGES; page += 1) {
-    const { query, variables } = buildMrBranchQuery(repo.path, chunk, after);
-    const parsed = parseMrPage(await graphql(repo, token, query, variables));
+    const cursor = after;
+    const parsed = parseMrPage(await mrGraphql(repo, token,
+      (options) => buildMrBranchQuery(repo.path, chunk, cursor, options)));
     for (const [branch, best] of pickBestByBranch(parsed.nodes)) {
       // Ignore anything outside the requested set: counting a stray node
       // toward the early exit below would stop paging while a branch we did
@@ -212,8 +264,8 @@ export async function fetchMrsByNumbers(
     numbers,
     BRANCH_BATCH,
     async (chunk) => {
-      const { query, variables } = buildMrNumberQuery(repo.path, chunk);
-      return parseMrPage(await graphql(repo, token, query, variables));
+      return parseMrPage(await mrGraphql(repo, token,
+        (options) => buildMrNumberQuery(repo.path, chunk, options)));
     },
     (chunk, parsed: MrPage) => {
       const found = new Map<number, PrSummary>();
@@ -289,9 +341,9 @@ export async function fetchOpenMrs(
   const seen = new Set<string>();
   let after: string | null = null;
   for (;;) {
-    const { query, variables } = buildOpenMrQuery(repo.path, after);
+    const cursor = after;
     const page = parseOpenMrPage(
-      await graphql(repo, token, query, variables),
+      await mrGraphql(repo, token, (options) => buildOpenMrQuery(repo.path, cursor, options)),
       repo.path
     );
     if (page === null) {
@@ -312,4 +364,35 @@ export async function fetchOpenMrs(
     seen.add(page.endCursor);
     after = page.endCursor;
   }
+}
+
+/**
+ * Add a merge request to its target branch's merge train
+ * (`POST /projects/:id/merge_trains/merge_requests/:iid`, Premium).
+ *
+ * Never a merge: this endpoint only boards the train, and it fails on a
+ * project without merge trains rather than merging. `sha` pins the head the
+ * user looked at.
+ */
+export async function addMergeRequestToTrain(
+  token: string,
+  repo: ForgeRepo,
+  iid: number,
+  expectedHeadOid?: string
+): Promise<{ position?: number; state?: string }> {
+  const project = encodeURIComponent(repo.path);
+  const body = await request(
+    `${forgeOrigin(repo)}/api/v4/projects/${project}/merge_trains/merge_requests/${iid}`,
+    token,
+    {
+      method: "POST",
+      body: JSON.stringify(expectedHeadOid === undefined ? {} : { sha: expectedHeadOid })
+    },
+    // A POST is not retried: a lost answer to a write that landed would
+    // otherwise be sent again.
+    0
+  );
+  const car = Array.isArray(body) ? body[0] : body;
+  const status = (car as { status?: unknown } | null)?.status;
+  return typeof status === "string" ? { state: status } : {};
 }

@@ -1,9 +1,13 @@
+import { useState } from "react";
 import {
   ASSUMED_FORGE_KIND,
   changeRequestLabel,
   changeRequestSigil,
+  forgeCapabilities,
+  mergeQueueNoun,
   type PrSummary
 } from "@pwrgit/shared";
+import { dispatch } from "../../lib/pwrgit";
 import { prPresentation } from "./pr-status";
 import { DiffStat } from "../diff/DiffStat";
 import { longWhen } from "../graph/graph-view";
@@ -24,9 +28,12 @@ import { longWhen } from "../graph/graph-view";
  */
 export function PrStatusCard({
   pr,
+  repoId,
   now = Date.now()
 }: {
   pr: PrSummary;
+  /** Present where the card may act: "Add to merge queue". */
+  repoId?: string | undefined;
   /** Injected by tests so age rows are deterministic. */
   now?: number;
 }) {
@@ -68,6 +75,16 @@ export function PrStatusCard({
         />
         <span>{status.label}</span>
       </div>
+      {(status.queue?.kind === "ready_to_queue" ||
+        (status.queue?.kind === "removed" && status.queue.canRequeue)) &&
+      repoId !== undefined &&
+      forgeCapabilities(pr.forge ?? ASSUMED_FORGE_KIND).addToMergeQueue ? (
+        <EnqueueAction
+          pr={pr}
+          repoId={repoId}
+          method={status.queue.kind === "ready_to_queue" ? status.queue.method : pr.mergeQueue?.method}
+        />
+      ) : null}
       {changes !== undefined ? (
         <div className="pr-status-card__section">
           <span className="pr-status-card__section-title">Changes</span>
@@ -113,6 +130,61 @@ export function PrStatusCard({
         </div>
       ) : null}
     </>
+  );
+}
+
+/**
+ * "Add to merge queue": the only merge verb PwrGit offers, and only where the
+ * base branch requires a queue. It is never a direct merge — main refuses a
+ * base without one — and it names the method only when the queue imposes it,
+ * because the queue, not the user, chooses.
+ */
+function EnqueueAction({
+  pr,
+  repoId,
+  method
+}: {
+  pr: PrSummary;
+  repoId: string;
+  method?: "merge" | "squash" | "rebase" | undefined;
+}) {
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const noun = mergeQueueNoun(pr.forge ?? ASSUMED_FORGE_KIND);
+  const enqueue = (): void => {
+    if (busy) return;
+    setBusy(true);
+    setError(null);
+    void dispatch("pr:enqueue", {
+      repoId,
+      number: pr.number,
+      ...(pr.repoPath === undefined ? {} : { repoPath: pr.repoPath }),
+      ...(pr.headOid === undefined ? {} : { headOid: pr.headOid })
+    }).then((result) => {
+      setBusy(false);
+      if (!result.ok) setError(result.error.message);
+    });
+  };
+  return (
+    <div className="pr-status-card__queue">
+      <button
+        type="button"
+        className="pr-status-card__queue-action"
+        aria-disabled={busy ? "true" : undefined}
+        aria-busy={busy ? "true" : undefined}
+        onClick={enqueue}
+      >
+        {busy ? "Adding…" : `Add to ${noun}`}
+      </button>
+      {method !== undefined ? (
+        <span className="pr-status-card__queue-method">
+          The queue {method === "merge" ? "merges" : method === "squash" ? "squashes" : "rebases"}
+        </span>
+      ) : null}
+      {error !== null ? (
+        <div className="pr-status-card__queue-error" role="alert">{error}</div>
+      ) : null}
+    </div>
   );
 }
 

@@ -20,6 +20,7 @@ export * from "./appearance";
 export * from "./mcp-policy";
 export * from "./prunable";
 export * from "./landed";
+export * from "./merge-queue";
 export * from "./repo-removal";
 export * from "./people";
 export * from "./reclaim";

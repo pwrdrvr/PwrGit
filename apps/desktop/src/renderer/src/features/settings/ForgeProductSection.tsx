@@ -29,7 +29,8 @@ const CAPABILITY_LABELS: Record<keyof ForgeCapabilities, string> = {
   changeSizeAndTimeline: "Diff size and timeline",
   forkDefaultBranchOnly: "Fork just the default branch",
   commitAuthorIdentity: "Commit author avatars",
-  commitSignatures: "Verified commit signatures"
+  commitSignatures: "Verified commit signatures",
+  addToMergeQueue: "Add to merge queue"
 };
 
 /**

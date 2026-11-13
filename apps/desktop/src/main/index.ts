@@ -1438,7 +1438,8 @@ if (!gotSingleInstanceLock) {
       commitAuthorIdentityService,
       forgeStatus,
       forgeHostsView,
-      (repoId) => changeRequestHandlers.refreshInBackground(repoId, "scheduled")
+      (repoId) => changeRequestHandlers.refreshInBackground(repoId, "scheduled"),
+      (repoId) => changeRequestHandlers.refreshInBackground(repoId, "user", true)
     );
     // A branch whose upstream is gone almost always had its PR merged; ask
     // again now rather than leave an open chip beside "gone" until the repo

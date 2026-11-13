@@ -1,9 +1,9 @@
-import { connectForge, type ForgeRepo } from "../forge/types";
-import type { PrSummary } from "@pwrgit/shared";
+import { connectForge, type EnqueueResult, type ForgeRepo } from "../forge/types";
+import { err, ok, pwrGitError, type PrSummary, type Result } from "@pwrgit/shared";
 import type { GitExec } from "../git/dugite";
 import type { DB } from "../persistence/db";
 import { resolveForge, type ResolvedForge } from "../forge/providers";
-import { PR_DETAIL_COLUMNS, prSummaryFromRow } from "../forge/pr-row";
+import { PR_DETAIL_COLUMNS, prSummaryFromRow, serializeMergeQueue } from "../forge/pr-row";
 import { parseRemoteRows } from "../git/remote-list";
 
 const REPO_REFRESH_TTL_MS = 10 * 60_000;
@@ -61,6 +61,7 @@ type CachedPr = {
   opened_at: number | null;
   merged_at: number | null;
   closed_at: number | null;
+  merge_queue: string | null;
 };
 
 // Derived from the single column list in ../forge/pr-row, so a new column
@@ -288,6 +289,69 @@ export class PrService {
         "SELECT 1 FROM worktrees WHERE id = ? AND repo_id = ? AND branch = ?"
       )
       .get(worktreeId, repoId, branch) !== undefined;
+  }
+
+  /**
+   * Add one change request to its merge queue, then re-read it so the new
+   * state is cached and announced. The forge repository is `origin`'s, or a
+   * repository on the same instance this checkout already cached that number
+   * from — never a path the caller made up, because origin's credentials go
+   * with the request.
+   */
+  async enqueue(
+    repoId: string,
+    request: { number: number; repoPath?: string; headOid?: string }
+  ): Promise<Result<{ result: EnqueueResult; deltas: PrStatusDeltas }>> {
+    const repo = this.db
+      .prepare("SELECT path FROM repos WHERE id = ?")
+      .get(repoId) as { path: string } | undefined;
+    if (repo === undefined) {
+      return err(pwrGitError("repo", "not_found", "PwrGit does not know this repository."));
+    }
+    const forge = await this.originForge(repo.path);
+    if (forge === null) {
+      return err(pwrGitError("remote", "no_forge", "This repository's origin is not on a forge PwrGit is signed in to."));
+    }
+    const path = request.repoPath ?? forge.repo.path;
+    if (path !== forge.repo.path && !this.knowsPrIn(repoId, request.number, forge.repo, path)) {
+      return err(pwrGitError("validation", "unknown_change_request",
+        `This checkout has not seen ${path}#${request.number}.`));
+    }
+    const connection = await connectForge(forge.provider, forge.repo.host);
+    if (connection === null) {
+      return err(pwrGitError("remote", "signed_out", `Sign in to ${forge.repo.host} to add to its merge queue.`));
+    }
+    if (connection.enqueueChangeRequest === undefined) {
+      return err(pwrGitError("remote", "unsupported", "PwrGit cannot add to this forge's merge queue."));
+    }
+    const target = { ...forge.repo, path };
+    let result: EnqueueResult;
+    try {
+      result = await connection.enqueueChangeRequest(target, request.number, request.headOid);
+    } catch (error) {
+      const code = (error as { code?: unknown } | null)?.code;
+      return err(pwrGitError("remote", typeof code === "string" ? code : "enqueue_failed",
+        error instanceof Error ? error.message : "The forge refused to add it to the merge queue.", error));
+    }
+    const deltas = await this.refreshPrNumbers(repoId, [request.number]);
+    return ok({ result, deltas });
+  }
+
+  /** A cached row says this checkout knows `number` from `path` on this instance. */
+  private knowsPrIn(repoId: string, number: number, origin: ForgeRepo, path: string): boolean {
+    const rows = this.db.prepare(`
+      SELECT forge, host, repo_path FROM branch_pr WHERE repo_id = ? AND number = ?
+      UNION
+      SELECT forge, host, repo_path FROM commit_pr WHERE repo_id = ? AND number = ?
+      UNION
+      SELECT forge, host, repo_path FROM repo_open_pr WHERE repo_id = ? AND number = ?
+    `).all(repoId, number, repoId, number, repoId, number) as {
+      forge: string | null; host: string | null; repo_path: string | null;
+    }[];
+    return rows.some((row) =>
+      row.repo_path === path &&
+      (row.forge ?? origin.kind) === origin.kind &&
+      (row.host ?? origin.host).toLowerCase() === origin.host.toLowerCase());
   }
 
   /** Refresh each discovered PR once, then fan its status out to every cache key. */
@@ -1091,7 +1155,8 @@ function cachedFromSummary(pr: PrSummary | null): CachedPr {
     commit_count: pr?.commitCount ?? null,
     opened_at: pr?.createdAt ?? null,
     merged_at: pr?.mergedAt ?? null,
-    closed_at: pr?.closedAt ?? null
+    closed_at: pr?.closedAt ?? null,
+    merge_queue: serializeMergeQueue(pr?.mergeQueue)
   };
 }
 

@@ -250,7 +250,7 @@ export function RepoWorktreeTable({
                     <strong>{worktree.branch}</strong>
                   </CopyTarget>
                   {worktree.pr !== undefined && !worktree.isDefaultBranch && (
-                    <PrChip pr={worktree.pr} />
+                    <PrChip pr={worktree.pr} repoId={worktree.repoId} />
                   )}
                 </span>
                 {worktree.pr !== undefined && <small>{worktree.pr.title}</small>}
