@@ -25,10 +25,19 @@ export type AttachedRoot = {
   path: string;
   created: boolean;
   added: boolean;
-  /** Remove the folder from the profile if `attach` added it, and delete it
-   *  if `attach` created it and it is still empty. */
-  undo: () => Promise<void>;
+  /** This use of the folder succeeded: it stays, whatever the others do. */
+  keep: () => void;
+  /** This use failed. When it was the last one still running and none
+   *  succeeded, remove the folder from the profile if an `attach` added it,
+   *  and delete it if an `attach` created it and it is still empty. Answers
+   *  whether the profile's folders changed. */
+  undo: () => Promise<boolean>;
 };
+
+/** A new folder that clones, forks or the wizard are using right now. Two
+ *  of them can land in one folder (two windows, Clone then Fork); the first
+ *  to fail must not take it away from the one still writing into it. */
+type InFlightRoot = { holders: number; kept: boolean; added: boolean; created: boolean };
 
 /**
  * Repository folders that may not exist yet: the wizard's "I do not have any"
@@ -42,6 +51,7 @@ export type AttachedRoot = {
  */
 export class NewRootService {
   private readonly picked: string[] = [];
+  private readonly inFlight = new Map<string, InFlightRoot>();
 
   constructor(
     private readonly profiles: Pick<ProfileService, "get" | "setRoots" | "addedRootOverlaps">,
@@ -121,6 +131,12 @@ export class NewRootService {
         await mkdir(path);
         created = true;
       } catch (cause) {
+        // Another operation created it a moment ago: use it, as if it had
+        // been there (not ours to delete).
+        const now = (cause as NodeJS.ErrnoException).code === "EEXIST"
+          ? await stat(path).catch(() => null)
+          : null;
+        if (now?.isDirectory() === true) return this.attachExisting(profileId, path, false);
         return err({
           kind: "profile",
           code: "create_failed",
@@ -129,27 +145,65 @@ export class NewRootService {
       }
     }
 
-    const before = profile.roots;
+    return this.attachExisting(profileId, path, created);
+  }
+
+  private attachExisting(profileId: ProfileId, path: string, created: boolean): Result<AttachedRoot> {
+    // Read now, after the awaits above: another attach may have written the
+    // profile's folders since, and setRoots replaces the whole list.
+    const before = this.profiles.get(profileId)?.roots ?? [];
     const already = before.some((r) => this.key(r) === this.key(path));
     if (!already) this.profiles.setRoots(profileId, [...before, path]);
+
+    // Joined, the folder's fate is the group's: whichever attach added or
+    // created it (they can finish their awaits in any order), only the last
+    // use to finish acts on that.
+    const flightKey = `${profileId}\u0000${this.key(path)}`;
+    const flight = this.inFlight.get(flightKey) ?? {
+      holders: 0,
+      kept: false,
+      added: false,
+      created: false
+    };
+    flight.added ||= !already;
+    flight.created ||= created;
+    flight.holders += 1;
+    this.inFlight.set(flightKey, flight);
+    let released = false;
+    const release = (): boolean => {
+      if (released) return false;
+      released = true;
+      flight.holders -= 1;
+      if (flight.holders > 0) return false;
+      this.inFlight.delete(flightKey);
+      return true;
+    };
 
     return ok({
       path,
       created,
       added: !already,
+      keep: () => {
+        flight.kept = true;
+        release();
+      },
       undo: async () => {
-        if (!already) {
+        if (!release() || flight.kept) return false;
+        let changed = false;
+        if (flight.added) {
           const now = this.profiles.get(profileId);
           if (now !== null) {
             this.profiles.setRoots(
               profileId,
               now.roots.filter((r) => this.key(r) !== this.key(path))
             );
+            changed = true;
           }
         }
         // `rmdir` removes only an empty folder: anything put in it since
         // (a partial clone the clone itself failed to clean) stays.
-        if (created) await rmdir(path).catch(() => undefined);
+        if (flight.created) await rmdir(path).catch(() => undefined);
+        return changed;
       }
     });
   }
@@ -190,15 +244,14 @@ export async function runInNewRoot<T>(
   try {
     result = await run(attached.value.path);
   } catch (cause) {
-    await attached.value.undo();
-    if (attached.value.added) hooks.rootsChanged();
+    if (await attached.value.undo()) hooks.rootsChanged();
     throw cause;
   }
   if (!result.ok) {
-    await attached.value.undo();
-    if (attached.value.added) hooks.rootsChanged();
-  } else if (!attached.value.created && attached.value.added) {
-    hooks.scanExisting();
+    if (await attached.value.undo()) hooks.rootsChanged();
+  } else {
+    attached.value.keep();
+    if (!attached.value.created && attached.value.added) hooks.scanExisting();
   }
   return result;
 }

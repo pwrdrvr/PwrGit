@@ -283,6 +283,32 @@ describe("OnboardingWizard", () => {
     expect(railLabels()[2]).toBe("Repositories");
   });
 
+  it("keeps the boxes the user changed when Also look in searches again", async () => {
+    search = {
+      ...EMPTY_SEARCH,
+      folders: [folder("/Users/dana/code", ["api"]), folder("/Users/dana/work", ["billing"])]
+    };
+    const onSetRoots = vi.fn(async () => undefined);
+    await mount({ onSetRoots });
+    await toStep3();
+    await click("Find my repositories");
+    const work = container.querySelector<HTMLInputElement>('input[id="repo-search-/Users/dana/work"]')!;
+    await act(async () => work.click());
+    expect(work.checked).toBe(false);
+    // The second answer proposes ~/work checked again, plus a new folder.
+    search = {
+      ...search,
+      includedProtected: true,
+      folders: [...search.folders, folder("/Users/dana/Documents/site", ["site"])]
+    };
+    await click("Also look in Documents, Desktop and Downloads");
+    expect(
+      container.querySelector<HTMLInputElement>('input[id="repo-search-/Users/dana/work"]')!.checked
+    ).toBe(false);
+    await click("Add 2 folders");
+    expect(onSetRoots).toHaveBeenCalledWith("personal", ["/Users/dana/code", "/Users/dana/Documents/site"]);
+  });
+
   it("offers the protected folders, the picker and I do not have any when the search finds nothing", async () => {
     await mount();
     await toStep3();

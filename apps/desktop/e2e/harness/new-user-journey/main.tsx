@@ -181,7 +181,8 @@ function Window(props: { profile: Profile; searching: boolean; width: number }) 
   const unanswered = unansweredSteps({
     authorName: profile.authorName ?? null,
     email: profile.email,
-    forgeConnected: profile.email === "" ? false : true
+    forgeConnected: profile.email === "" ? false : true,
+    gitIdentity: { name: null, email: null }
   });
   return (
     <div className="app" style={{ width: props.width, height: 640 }}>
@@ -273,7 +274,7 @@ const harness = {
               onAddFolders={noop}
               onClone={noop}
               onSetRoots={async () => undefined}
-              unanswered={unansweredSteps({ authorName: null, email: "", forgeConnected: false })}
+              unanswered={unansweredSteps({ authorName: null, email: "", forgeConnected: false, gitIdentity: { name: null, email: null } })}
               onFinishSetup={noop}
             />
           </main>

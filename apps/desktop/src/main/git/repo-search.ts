@@ -81,8 +81,12 @@ const NOT_CODE_AT_HOME: Partial<Record<NodeJS.Platform, ReadonlySet<string>>> = 
  *  listings from the network; nobody has measured what that costs, so the
  *  search leaves them out. (macOS's File Provider folders live in
  *  `~/Library/CloudStorage`, which the skip rule already never opens, and the
- *  `~/Dropbox`-style links to them are symlinks, which no walk follows.) */
-const CLOUD_FOLDER = /^(Dropbox|OneDrive|Google Drive|iCloud ?Drive|Box|Box Sync|pCloud Drive|MEGA)( |-|$)/i;
+ *  `~/Dropbox`-style links to them are symlinks, which no walk follows.)
+ *
+ *  The clients' own spellings only: case-sensitive, and a suffix only after a
+ *  space ("OneDrive - Acme", "Dropbox (Personal)"), so a code folder named
+ *  `box-tools` or `mega-monorepo` is still searched. */
+const CLOUD_FOLDER = /^(Dropbox|OneDrive|Google Drive|iCloud ?Drive|Box|Box Sync|pCloud Drive|MEGA)( |$)/;
 
 const READ_CONCURRENCY = 4;
 const YIELD_EVERY = 32;
@@ -154,6 +158,7 @@ export async function searchHomeForRepositories(
   let repositoriesSoFar = 0;
   let stoppedEarly: RepoSearchStop | null = null;
   let lastProgress = -Infinity;
+  let lastYield = 0;
 
   const report = (force: boolean): void => {
     if (options.onProgress === undefined) return;
@@ -220,10 +225,11 @@ export async function searchHomeForRepositories(
     });
     for (const { current, entries, code } of reads) {
       if (entries === null) {
-        // Only a folder the OS guards is worth telling the user about; the
-        // rest (a Windows junction, a folder deleted mid-walk) are not theirs
-        // to fix.
+        // Only a folder macOS guards is worth telling the user about (the
+        // renderer's note points at Privacy & Security); the rest (a Windows
+        // junction, a folder deleted mid-walk) are not theirs to fix.
         if (
+          askFirst &&
           current.depth === 1 &&
           (code === "EPERM" || code === "EACCES") &&
           isPersonalFolder(basename(current.dir))
@@ -245,10 +251,14 @@ export async function searchHomeForRepositories(
         if (!entry.isDirectory() || isScanSkippedDir(entry.name)) continue;
         queue.push({ dir: join(current.dir, entry.name), depth: current.depth + 1 });
       }
-      if (foldersOpened % yieldEvery === 0) {
-        report(false);
-        await yieldToEventLoop();
-      }
+    }
+    // Per batch, not per folder: most folders opened are leaves (the deepest
+    // level, a checkout, a bare repository), and a per-folder check placed
+    // after their `continue` froze the running count for most of the walk.
+    report(false);
+    if (foldersOpened - lastYield >= yieldEvery) {
+      lastYield = foldersOpened;
+      await yieldToEventLoop();
     }
   }
   signal?.throwIfAborted();
@@ -257,11 +267,11 @@ export async function searchHomeForRepositories(
   const homeGitDir = homeIsRepository
     ? await realpath(join(home, ".git")).catch(() => null)
     : null;
-  const resolved: ResolvedCheckout[] = [];
-  for (const checkout of found) {
-    const r = await resolveCheckout(checkout, homeGitDir);
-    if (r !== null) resolved.push(r);
-  }
+  // Each checkout costs a few small reads; run them side by side, as the walk
+  // reads folders, rather than one after another once the walk has ended.
+  const resolved = (
+    await mapLimit(found, READ_CONCURRENCY, (checkout) => resolveCheckout(checkout, homeGitDir))
+  ).filter((r): r is ResolvedCheckout => r !== null);
   signal?.throwIfAborted();
 
   return {
@@ -360,7 +370,7 @@ async function isBareConfig(gitDir: string): Promise<boolean> {
  * then walks five levels into. Under Documents, Desktop or Downloads it is the
  * level-2 folder: never the whole of Documents.
  */
-export function proposedFolderFor(home: string, checkout: string): string | null {
+function proposedFolderFor(home: string, checkout: string): string | null {
   const rel = relative(home, checkout);
   if (rel === "" || rel.startsWith("..") || isAbsolute(rel)) return null;
   const parts = rel.split(sep);

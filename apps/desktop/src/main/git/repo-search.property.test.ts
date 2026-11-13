@@ -479,3 +479,65 @@ describe("Find my repositories, the cases on card 2e", () => {
     expect(result.foldersOpened).toBe(2);
   });
 });
+
+describe("Find my repositories, what it skips and what it says", () => {
+  it("skips the cloud clients' own folders, not code folders that share a word", async () => {
+    const built = build(
+      [
+        { kind: "repo", at: ["box-tools"] },
+        { kind: "repo", at: ["mega-monorepo"] },
+        { kind: "repo", at: ["dropbox-sdk"] },
+        { kind: "repo", at: ["Dropbox"] },
+        { kind: "repo", at: ["OneDrive - Acme"] }
+      ],
+      false
+    );
+    const result = await search(built.home, false);
+    expect(result.folders.map((f) => relative(built.home, f.path)).sort()).toEqual(
+      ["box-tools", "dropbox-sdk", "mega-monorepo"]
+    );
+    expect(result.cloudSkipped.map((p) => relative(built.home, p)).sort()).toEqual(
+      ["Dropbox", "OneDrive - Acme"]
+    );
+  });
+
+  it("keeps the running count moving while it reads the deepest level", async () => {
+    // Every folder past the first two is a leaf at the search's last level,
+    // where most of a real walk's folders are.
+    const home = realpathSync(mkdtempSync(join(scratch, "deep-")));
+    for (let i = 0; i < 120; i += 1) mkdirSync(join(home, "a", "b", `c${i}`), { recursive: true });
+    let clock = 0;
+    const seen: number[] = [];
+    await searchHomeForRepositories({
+      home,
+      platform: process.platform,
+      includeProtected: false,
+      // Each reading of the clock is a second later, so the throttle never
+      // holds a report back.
+      now: () => (clock += 1000),
+      maxMs: Number.MAX_SAFE_INTEGER,
+      onProgress: (p) => seen.push(p.foldersOpened)
+    });
+    // The last report is the forced one at the end; the walk reported on the
+    // way there too, and the count only grew.
+    expect(seen.slice(0, -1).filter((n) => n > 3).length).toBeGreaterThan(1);
+    expect([...seen].sort((x, y) => x - y)).toEqual(seen);
+  });
+
+  it("names a refused folder only where the OS asks first", async () => {
+    // Root ignores directory permissions, so the refusal cannot be made there.
+    if (process.platform === "win32" || process.getuid?.() === 0) return;
+    const home = realpathSync(mkdtempSync(join(scratch, "refused-")));
+    mkdirSync(join(home, "Documents"), { mode: 0o000 });
+    try {
+      for (const platform of ["darwin", "linux"] as const) {
+        const result = await searchHomeForRepositories({ home, platform, includeProtected: true });
+        expect(result.refused.map((p) => relative(home, p))).toEqual(
+          platform === "darwin" ? ["Documents"] : []
+        );
+      }
+    } finally {
+      execFileSync("chmod", ["755", join(home, "Documents")]);
+    }
+  });
+});

@@ -48,6 +48,9 @@ export type RepoSearch = {
 export function useRepoSearch(profileId: string): RepoSearch {
   const [state, setState] = useState<RepoSearchState>({ status: "idle" });
   const current = useRef<string | null>(null);
+  /** Boxes the user ticked or unticked. A second search (Also look in
+   *  Documents…) answers the same folders again; it must not undo them. */
+  const decided = useRef(new Map<string, boolean>());
 
   useEffect(
     () =>
@@ -88,6 +91,12 @@ export function useRepoSearch(profileId: string): RepoSearch {
           current.current = null;
           if (answer.ok) {
             const checked = initiallyChecked(answer.value.folders);
+            for (const folder of answer.value.folders) {
+              const choice = decided.current.get(folder.path);
+              if (choice === undefined || !folder.selectable) continue;
+              if (choice) checked.add(folder.path);
+              else checked.delete(folder.path);
+            }
             setState({
               status: "done",
               result: answer.value,
@@ -119,6 +128,7 @@ export function useRepoSearch(profileId: string): RepoSearch {
       const checked = new Set(prev.checked);
       if (checked.has(path)) checked.delete(path);
       else checked.add(path);
+      decided.current.set(path, checked.has(path));
       return { ...prev, checked };
     });
   }, []);
@@ -135,6 +145,7 @@ export function useRepoSearch(profileId: string): RepoSearch {
     const id = current.current;
     current.current = null;
     if (id !== null) void dispatch("repo:stopSearch", { searchId: id });
+    decided.current.clear();
     setState({ status: "idle" });
   }, []);
 

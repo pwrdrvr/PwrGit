@@ -104,10 +104,17 @@ export function unansweredSteps(input: {
   authorName: string | null;
   email: string;
   forgeConnected: boolean | null;
+  /** What Git itself would write (`git:readIdentity`); null until read. A
+   *  profile without its own name or e-mail commits with Git's, so only a
+   *  field neither has is unanswered. */
+  gitIdentity: { name: string | null; email: string | null } | null;
 }): Unanswered[] {
   const out: Unanswered[] = [];
-  const noName = (input.authorName ?? "").trim() === "";
-  const noEmail = input.email.trim() === "";
+  const blank = (v: string | null | undefined): boolean => (v ?? "").trim() === "";
+  // Unknown (Git not asked yet): claim nothing, as for the forges below.
+  const git = input.gitIdentity;
+  const noName = git !== null && blank(input.authorName) && blank(git.name);
+  const noEmail = git !== null && blank(input.email) && blank(git.email);
   if (noName || noEmail) {
     out.push({
       step: "identity",

@@ -168,12 +168,3 @@ export function initiallyChecked(
     folders.filter((f) => f.checked && f.selectable).map((f) => f.path)
   );
 }
-
-/** Repositories across every proposed folder that the scan would index,
- *  each once: the "N repositories so far" and "Found N" figure. */
-export function repositoriesFound(folders: readonly ProposedFolder[]): number {
-  return repositoriesInFolders(
-    folders,
-    new Set(folders.map((f) => f.path))
-  );
-}

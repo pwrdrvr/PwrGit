@@ -114,6 +114,9 @@ export function registerRepoSearchHandlers(
       await attached.value.undo();
       return err({ kind: "profile", code: "not_found", message: `No profile "${req.profileId}"` });
     }
+    // The wizard's folder stays: a clone that later fails into it must not
+    // take it back out.
+    attached.value.keep();
     const repos = await indexer.rescanProfile(profile);
     emitEvent("profile:changed", profiles.snapshot());
     emitEvent("repo:changed", { profileId: profile.id });

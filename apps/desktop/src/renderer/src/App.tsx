@@ -255,6 +255,21 @@ export function App() {
   /** Find my repositories: inline on the start screen, else a dialog. */
   const [findOpen, setFindOpen] = useState(false);
   const forgeStatuses = useForgeStatuses();
+  // What Git itself would write: a profile with no name or e-mail of its own
+  // commits with these, so Finish setup does not call them missing.
+  const [gitIdentity, setGitIdentity] = useState<{
+    name: string | null;
+    email: string | null;
+  } | null>(null);
+  useEffect(() => {
+    let live = true;
+    void dispatch("git:readIdentity", undefined).then((result) => {
+      if (live && result.ok) setGitIdentity({ name: result.value.name, email: result.value.email });
+    });
+    return () => {
+      live = false;
+    };
+  }, []);
   const unanswered = useMemo(
     () =>
       activeProfile === null
@@ -265,9 +280,10 @@ export function App() {
             forgeConnected:
               forgeStatuses === undefined
                 ? null
-                : forgeStatuses.some((f) => forgeProductState(f) === "connected")
+                : forgeStatuses.some((f) => forgeProductState(f) === "connected"),
+            gitIdentity
           }),
-    [activeProfile, forgeStatuses]
+    [activeProfile, forgeStatuses, gitIdentity]
   );
   // "Finish setup" reopens the wizard at the first unanswered step. Like
   // Help's replay it never touches the completion flag.

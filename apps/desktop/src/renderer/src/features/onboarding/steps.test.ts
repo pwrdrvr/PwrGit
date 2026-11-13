@@ -79,16 +79,25 @@ describe("the step model", () => {
 // Card 4a: Finish setup shows only when something is unanswered, names it,
 // and reopens the wizard at the first unanswered step.
 describe("unansweredSteps", () => {
+  const value = fc.option(fc.constantFrom("", " ", "Dana"), { nil: null });
   const input = fc.record({
-    authorName: fc.option(fc.constantFrom("", " ", "Dana"), { nil: null }),
+    authorName: value,
     email: fc.constantFrom("", "  ", "dana@example.com"),
-    forgeConnected: fc.option(fc.boolean(), { nil: null })
+    forgeConnected: fc.option(fc.boolean(), { nil: null }),
+    // null: Git not asked yet.
+    gitIdentity: fc.option(fc.record({ name: value, email: value }), { nil: null })
   });
+  const has = (v: string | null): boolean => (v ?? "").trim() !== "";
 
-  it("is empty exactly when identity is filled and a forge is (or may be) connected", () => {
+  it("is empty exactly when the commit identity is complete and a forge is (or may be) connected", () => {
     fc.assert(
       fc.property(input, (i) => {
-        const filled = (i.authorName ?? "").trim() !== "" && i.email.trim() !== "";
+        // What a commit records: the profile's value, else Git's own. Before
+        // Git has answered, identity is not claimed missing.
+        const filled =
+          i.gitIdentity === null ||
+          ((has(i.authorName) || has(i.gitIdentity.name)) &&
+            (has(i.email) || has(i.gitIdentity.email)));
         const out = unansweredSteps(i);
         expect(out.length === 0).toBe(filled && i.forgeConnected !== false);
       })
