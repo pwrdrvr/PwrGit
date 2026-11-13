@@ -14,6 +14,10 @@ import type {
   Worktree
 } from "@pwrgit/shared";
 import { showErrorToast, showInfoToast } from "./lib/toast";
+import {
+  RESCAN_FOLDERS_TOAST_KEY,
+  rescanFoldersToast
+} from "./features/sidebar/rescan-folders";
 import { diagnosticsCopiedToast, diagnosticsRepository } from "./lib/diagnosticsCopy";
 import { useAgentOffered } from "./features/agent/agent-store";
 import { ChangeRequestRail } from "./features/change-request/ChangeRequestRail";
@@ -213,6 +217,29 @@ export function App() {
     if (picked.length === 0) return;
     await setRoots(activeProfile.id, [...activeProfile.roots, ...picked]);
   }, [activeProfile, pickDirectories, setRoots]);
+  // Add ▾ → Rescan folders: look through the profile's folders now rather
+  // than waiting for main's next walk, and say what turned up.
+  const rescanFolders = useCallback(async () => {
+    if (activeProfile === null) return;
+    const rootCount = activeProfile.roots.length;
+    showInfoToast({
+      key: RESCAN_FOLDERS_TOAST_KEY,
+      title: "Rescanning folders…",
+      message: `Looking through ${rootCount} ${rootCount === 1 ? "folder" : "folders"} for repositories.`,
+      showCopyAction: false,
+      sticky: true
+    });
+    const r = await dispatch("profile:rescan", { profileId: activeProfile.id });
+    if (r.ok) {
+      showInfoToast(rescanFoldersToast(r.value.added, rootCount));
+    } else {
+      showErrorToast({
+        key: RESCAN_FOLDERS_TOAST_KEY,
+        title: "Couldn't rescan folders",
+        message: r.error.message
+      });
+    }
+  }, [activeProfile]);
   // First-run setup. Per profile, because PwrGit is one window per profile — a
   // second profile is a second first run. `replay` is the Help-menu re-entry,
   // which shows the wizard without ever clearing the completion flag.
@@ -1082,6 +1109,7 @@ export function App() {
           onForkCheckout={openForkCheckout}
           onOpenRepoSetup={(repo) => { setSetupPage("hooks"); setSetupRepo(repo); }}
           onAddFolder={() => void addFolders()}
+          onRescanFolders={() => void rescanFolders()}
           onNewProfile={() => setProfileModal({ mode: "create" })}
           onManageProfile={() =>
             activeProfile !== null &&

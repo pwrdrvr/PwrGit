@@ -139,8 +139,8 @@ unless widened. The search line's This profile / All profiles control
 
 ## The sidebar's actions are one toolbar row; search is in the title strip
 
-`SidebarToolbar` holds Add ▾ (Add folders, Clone, Fork through
-`ContextMenu`), the one sync button (Fetch ▾ / Pull ▾, below), and the
+`SidebarToolbar` holds Add ▾ (Add folders, Rescan folders, Clone, Fork
+through `ContextMenu`), the one sync button (Fetch ▾ / Pull ▾, below), and the
 maintenance wrench. The jump field is in the title strip (`TitleBar`'s
 `.titlebar-jump`, `onOpenSearch`).
 

@@ -197,6 +197,7 @@ export function Sidebar({
   onForkCheckout,
   onOpenRepoSetup,
   onAddFolder,
+  onRescanFolders,
   onExpandRepo,
   onNewProfile,
   onManageProfile,
@@ -246,6 +247,7 @@ export function Sidebar({
   onForkCheckout: (repo: Repo) => void;
   onOpenRepoSetup?: (repo: Repo) => void;
   onAddFolder: () => void;
+  onRescanFolders?: () => void;
   onExpandRepo: (repoId: string) => void;
   onNewProfile: () => void;
   onManageProfile: () => void;
@@ -1260,6 +1262,7 @@ export function Sidebar({
         rootCount={activeProfile?.roots.length ?? 0}
         repoCount={repos.length}
         onAddFolder={onAddFolder}
+        onRescanFolders={onRescanFolders}
         onClone={onCloneRepo}
         onFork={() => void openFork()}
         recentCount={recentRepos.length}

@@ -76,7 +76,9 @@ export function registerBulkSyncHandlers(
   refresher: WorktreeRefresher,
   operations: WorktreeOperationQueue,
   indexer?: Pick<RepoIndexer, "refreshRepoRemoteBranches">,
-  refreshIdentity?: (repoId: string) => void
+  refreshIdentity?: (repoId: string) => void,
+  /** A run is starting: look at the roots for new repositories too. */
+  onRunStart?: (profileId: string) => void
 ): BulkSyncHandlers {
   const active = new Map<
     string,
@@ -124,6 +126,8 @@ export function registerBulkSyncHandlers(
         message: `No profile "${req.profileId}"`
       });
     }
+
+    onRunStart?.(req.profileId);
 
     const controller = new AbortController();
     const abortFromContext = (): void => controller.abort(ctx.signal?.reason);

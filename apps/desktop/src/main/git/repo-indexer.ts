@@ -355,18 +355,7 @@ export class RepoIndexer {
     options: RepoRescanOptions = {}
   ): Promise<Repo[]> {
     const { signal } = options;
-    const found = new Set<string>();
-    let everyRootReadable = true;
-    const scans = await mapLimit(profile.roots, DISCOVERY_CONCURRENCY, (root) =>
-      scanRepoRoot(root, MAX_SCAN_DEPTH, {
-        yieldEvery: this.discoveryYieldEvery,
-        yieldToEventLoop: this.yieldToEventLoop
-      })
-    );
-    for (const scan of scans) {
-      if (!scan.rootReadable) everyRootReadable = false;
-      for (const dir of scan.dirs) found.add(dir);
-    }
+    const { found, everyRootReadable } = await this.walkRoots(profile);
     signal?.throwIfAborted();
 
     // Resolve each found dir to its canonical (primary worktree) path via git,
@@ -379,11 +368,15 @@ export class RepoIndexer {
         indexedBranches: IndexedBranches | null;
       }
     >();
+    // Folders Git could not read this pass: recorded as unseen, so the next
+    // look asks again instead of treating a clone caught mid-write as known.
+    const unread = new Set<string>();
     await mapLimit([...found], GIT_CONCURRENCY, async (dir) => {
       const [listed, listedBranches] = await Promise.all([
         listWorktrees(this.git, dir),
         listIndexedBranches(this.git, dir)
       ]);
+      if (!listed.ok) unread.add(dir);
       if (!listed.ok || listed.value.length === 0) return;
       const primary = listed.value[0];
       if (primary === undefined || primary.bare) return;
@@ -449,9 +442,58 @@ export class RepoIndexer {
       // scan that saw nothing — leaving the volume undiscovered for a day after
       // it mounts, with no manual rescan to reach for.
       if (everyRootReadable) this.markProfileScanned(profile.id);
+      // What this pass's walk saw and Git could read, for `unscannedRepoDirs`.
+      // Recorded readable roots or not: an unreadable root adds nothing here,
+      // so its folders read as new, and ask for a scan, once it mounts.
+      this.recordScannedDirs(
+        profile.id,
+        [...found].filter((dir) => !unread.has(dir))
+      );
     })();
 
     return this.listRepos(profile.id);
+  }
+
+  /**
+   * Repository folders under the profile's roots that its last scan did not
+   * see: a clone, a `git init`, a worktree added by another tool, a volume
+   * that mounted. Non-empty means "rescan now", past the daily throttle.
+   *
+   * This is the walk alone (no Git process; ~260 directory reads for ~135
+   * repositories), compared with the walk recorded by the last scan, so
+   * paths are spelled the same way on both sides. A folder that is gone is
+   * not reported: a removal is the missing-repo probe's to notice, and only
+   * a scan may prune.
+   */
+  async unscannedRepoDirs(profile: Profile): Promise<string[]> {
+    const { found } = await this.walkRoots(profile);
+    if (found.size === 0) return [];
+    const seen = new Set(
+      (
+        this.db
+          .prepare("SELECT dir FROM profile_scan_dirs WHERE profile_id = ?")
+          .all(profile.id) as { dir: string }[]
+      ).map((row) => row.dir)
+    );
+    return [...found].filter((dir) => !seen.has(dir)).sort();
+  }
+
+  private async walkRoots(
+    profile: Profile
+  ): Promise<{ found: Set<string>; everyRootReadable: boolean }> {
+    const found = new Set<string>();
+    let everyRootReadable = true;
+    const scans = await mapLimit(profile.roots, DISCOVERY_CONCURRENCY, (root) =>
+      scanRepoRoot(root, MAX_SCAN_DEPTH, {
+        yieldEvery: this.discoveryYieldEvery,
+        yieldToEventLoop: this.yieldToEventLoop
+      })
+    );
+    for (const scan of scans) {
+      if (!scan.rootReadable) everyRootReadable = false;
+      for (const dir of scan.dirs) found.add(dir);
+    }
+    return { found, everyRootReadable };
   }
 
   /** Index a single repo path (manual add) under the given profile. */
@@ -1880,6 +1922,16 @@ export class RepoIndexer {
            scanned_at_ms = excluded.scanned_at_ms`
       )
       .run(profileId, this.now());
+  }
+
+  private recordScannedDirs(profileId: ProfileId, dirs: readonly string[]): void {
+    this.db
+      .prepare("DELETE FROM profile_scan_dirs WHERE profile_id = ?")
+      .run(profileId);
+    const insert = this.db.prepare(
+      "INSERT INTO profile_scan_dirs (profile_id, dir) VALUES (?, ?)"
+    );
+    for (const dir of dirs) insert.run(profileId, dir);
   }
 
   private pruneScannedRepos(profileId: string, keepIds: string[]): void {

@@ -954,6 +954,15 @@ export interface Commands {
     req: { profileId: ProfileId; roots: string[] };
     res: Repo[];
   };
+  /**
+   * Look through a profile's roots again now, past the daily throttle (Add ▾
+   * → Rescan folders). `added` names the repositories this scan listed that
+   * were not listed before it, so the answer can say what it found.
+   */
+  "profile:rescan": {
+    req: { profileId: ProfileId };
+    res: { repos: Repo[]; added: Repo[] };
+  };
   /** Mark a profile's first-run setup finished. Sent on Finish and on Skip;
    *  a Help-menu replay does not send it, so the flag stays true once set. */
   "profile:completeOnboarding": {

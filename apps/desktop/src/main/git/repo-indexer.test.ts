@@ -4,6 +4,7 @@ import {
   mkdtempSync,
   renameSync,
   rmSync,
+  symlinkSync,
   writeFileSync
 } from "node:fs";
 import { tmpdir } from "node:os";
@@ -139,6 +140,102 @@ describe("RepoIndexer", () => {
     expect(isolatedIndexer.shouldRescanProfile(profile.id)).toBe(false);
     now += 1;
     expect(isolatedIndexer.shouldRescanProfile(profile.id)).toBe(true);
+  });
+
+  it("reports only folders the last scan did not walk, spelled as the walk spells them", async () => {
+    // The root is reached through a symlink, so Git's paths (resolved) and the
+    // walk's (as configured) differ. Comparing walk with walk keeps a quiet
+    // root quiet; comparing with Git's paths would rescan every tick.
+    const real = mkdtempSync(join(tmpdir(), "pwrgit-unscanned-"));
+    const linked = `${real}-link`;
+    // A junction needs no privilege on Windows; a directory symlink does.
+    symlinkSync(real, linked, process.platform === "win32" ? "junction" : "dir");
+    initRepo(join(real, "kept"));
+    initRepo(join(real, "doomed"));
+    const isolatedDb = openDatabase(":memory:");
+    const profile = new ProfileService(isolatedDb).create({
+      name: "Unscanned",
+      email: "u@example.com",
+      roots: [linked]
+    });
+    const isolatedIndexer = new RepoIndexer(isolatedDb, systemGit);
+
+    // Never scanned: everything is new.
+    expect(await isolatedIndexer.unscannedRepoDirs(profile)).toEqual([
+      join(linked, "doomed"),
+      join(linked, "kept")
+    ]);
+    await isolatedIndexer.rescanProfile(profile);
+    expect(await isolatedIndexer.unscannedRepoDirs(profile)).toEqual([]);
+
+    // A removal is not news (the missing-repo probe owns it), and a plain
+    // folder never is.
+    rmSync(join(real, "doomed"), { recursive: true, force: true });
+    mkdirSync(join(real, "notes"));
+    expect(await isolatedIndexer.unscannedRepoDirs(profile)).toEqual([]);
+
+    initRepo(join(real, "group", "rgit"));
+    expect(await isolatedIndexer.unscannedRepoDirs(profile)).toEqual([
+      join(linked, "group", "rgit")
+    ]);
+    isolatedDb.close();
+  });
+
+  it("keeps reporting a folder Git could not read during the scan", async () => {
+    // A clone caught mid-write (or any folder Git refuses) was recorded as
+    // seen, so the walk never reported it again and the repository stayed
+    // out of the sidebar until the daily scan.
+    const root = mkdtempSync(join(tmpdir(), "pwrgit-unscanned-unread-"));
+    initRepo(join(root, "fine"));
+    mkdirSync(join(root, "half-cloned", ".git"), { recursive: true });
+    const isolatedDb = openDatabase(":memory:");
+    const profile = new ProfileService(isolatedDb).create({
+      name: "Unread",
+      email: "r@example.com",
+      roots: [root]
+    });
+    const isolatedIndexer = new RepoIndexer(isolatedDb, systemGit);
+    await isolatedIndexer.rescanProfile(profile);
+    expect(await isolatedIndexer.unscannedRepoDirs(profile)).toEqual([
+      join(root, "half-cloned")
+    ]);
+
+    // Once Git can read it, the next scan lists it and the walk goes quiet.
+    rmSync(join(root, "half-cloned"), { recursive: true, force: true });
+    initRepo(join(root, "half-cloned"));
+    await isolatedIndexer.rescanProfile(profile);
+    expect(isolatedIndexer.listRepos(profile.id).map((r) => r.name).sort()).toEqual([
+      "fine",
+      "half-cloned"
+    ]);
+    expect(await isolatedIndexer.unscannedRepoDirs(profile)).toEqual([]);
+    isolatedDb.close();
+  });
+
+  it("reports a root's folders once the root can be read", async () => {
+    // A volume not mounted at scan time recorded nothing, so its folders
+    // ask for a scan when it mounts, not a day later.
+    const parent = mkdtempSync(join(tmpdir(), "pwrgit-unscanned-mount-"));
+    const present = join(parent, "present");
+    const volume = join(parent, "volume");
+    initRepo(join(present, "here"));
+    const isolatedDb = openDatabase(":memory:");
+    const profile = new ProfileService(isolatedDb).create({
+      name: "Mount",
+      email: "m@example.com",
+      roots: [present, volume]
+    });
+    const isolatedIndexer = new RepoIndexer(isolatedDb, systemGit);
+    await isolatedIndexer.rescanProfile(profile);
+    expect(await isolatedIndexer.unscannedRepoDirs(profile)).toEqual([]);
+
+    initRepo(join(volume, "there"));
+    expect(await isolatedIndexer.unscannedRepoDirs(profile)).toEqual([
+      join(volume, "there")
+    ]);
+    await isolatedIndexer.rescanProfile(profile);
+    expect(await isolatedIndexer.unscannedRepoDirs(profile)).toEqual([]);
+    isolatedDb.close();
   });
 
   it("stops a deleted profile's scan before reused ids can be written", async () => {

@@ -73,6 +73,10 @@ describe("profile deletion persistence", () => {
          VALUES (?, 123)`
       ).run(removed.id);
       db.prepare(
+        `INSERT INTO profile_scan_dirs (profile_id, dir)
+         VALUES (?, ?)`
+      ).run(removed.id, root);
+      db.prepare(
         `INSERT INTO remote_branch_index_state (repo_id)
          VALUES ('repo-removed')`
       ).run();
@@ -106,7 +110,8 @@ describe("profile deletion persistence", () => {
         ["remote_branch_index_state", "repo_id", "repo-removed"],
         ["repo_identity", "repo_id", "repo-removed"],
         ["clone_destinations", "profile_id", removed.id],
-        ["profile_scan_state", "profile_id", removed.id]
+        ["profile_scan_state", "profile_id", removed.id],
+        ["profile_scan_dirs", "profile_id", removed.id]
       ] as const) {
         const row = db
           .prepare(`SELECT 1 FROM ${table} WHERE ${column} = ?`)

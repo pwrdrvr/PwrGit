@@ -341,4 +341,51 @@ describe("repo handlers", () => {
       focusedRepoId: "repo-7"
     });
   });
+
+  it("rescans on request past the daily throttle and names what it added", async () => {
+    const root = realpathSync(mkdtempSync(join(tmpdir(), "pwrgit-rescan-")));
+    const db = openDatabase(":memory:");
+    const init = (dir: string) => {
+      execFileSync("git", ["init", "-q", "-b", "main", dir], { stdio: "ignore" });
+      execFileSync(
+        "git",
+        [
+          "-C", dir,
+          "-c", "user.name=Tester",
+          "-c", "user.email=test@example.com",
+          "-c", "commit.gpgsign=false",
+          "commit", "-q", "--allow-empty", "-m", "init"
+        ],
+        { stdio: "ignore" }
+      );
+    };
+    try {
+      init(join(root, "first"));
+      const profiles = new ProfileService(db);
+      const profile = profiles.create({
+        name: "Rescan", email: "test@example.com", roots: [root]
+      });
+      const indexer = new RepoIndexer(db, createSystemGit());
+      await indexer.rescanProfile(profile);
+      // The daily throttle says no; the user asked, so it does not apply.
+      expect(indexer.shouldRescanProfile(profile.id)).toBe(false);
+      init(join(root, "rgit"));
+      const bus = new CommandBus();
+      registerRepoHandlers(bus, indexer, profiles, refresher);
+
+      const result = await bus.dispatch("profile:rescan", { profileId: profile.id });
+      if (!result.ok) throw new Error(result.error.message);
+      expect(result.value.added.map((r) => r.name)).toEqual(["rgit"]);
+      expect(result.value.repos.map((r) => r.name).sort()).toEqual(["first", "rgit"]);
+      expect(emitEvent).toHaveBeenCalledWith("repo:changed", { profileId: profile.id });
+
+      const again = await bus.dispatch("profile:rescan", { profileId: profile.id });
+      expect(again.ok && again.value.added).toEqual([]);
+      const missing = await bus.dispatch("profile:rescan", { profileId: "nobody" });
+      expect(!missing.ok && missing.error.code).toBe("not_found");
+    } finally {
+      db.close();
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
 });

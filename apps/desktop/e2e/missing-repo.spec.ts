@@ -26,9 +26,10 @@ async function triggerActiveRefresh(app: AppHandle): Promise<void> {
   });
 }
 
-// The profile rescan is throttled to once a day and nothing watches the scan
-// roots, so a deleted repository used to stay in the sidebar, flagged
-// missing, with every command failing until the next day's scan.
+// The profile rescan is throttled to once a day, and the walk of the roots
+// looks only for new folders, so a deleted repository used to stay in the
+// sidebar, flagged missing, with every command failing until the next day's
+// scan.
 test("drops a repository from the sidebar when its folder is deleted", async () => {
   sandbox = createGitSandbox();
   const doomed = sandbox.makeRepo("doomed");
