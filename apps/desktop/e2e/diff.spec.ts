@@ -261,7 +261,11 @@ test("file history follows a rename and opens each commit's change in place", as
   const { window } = handle;
   await addRootAndExpand(window, handle, sandbox, "lineagefile");
 
-  const fileRow = window.locator(".file-row", { hasText: "docs/README.md" });
+  // The Changes rail is a tree: the row reads "README.md" under docs/, and
+  // only its buttons carry the full path.
+  const fileRow = window.locator(".file-row").filter({
+    has: window.getByRole("button", { name: "Stage docs/README.md", exact: true })
+  });
   await expect(fileRow).toBeVisible({ timeout: 20_000 });
   await fileRow.click();
   await expect(window.locator(".diff-pane")).toBeVisible();

@@ -1,0 +1,362 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <script src="./support.js"></script>
+  </head>
+  <body>
+    <x-dc>
+      <helmet data-dc-atomics>
+        <link href="https://fonts.googleapis.com/css2?family=Geist:wght@400..700&amp;family=Geist+Mono:wght@400..700&amp;display=swap" rel="stylesheet" />
+        <style>
+          :root {
+            --rv-bg: #050505; --rv-line: rgba(247, 243, 235, 0.1);
+            --rv-t1: #f7f3eb; --rv-t2: #b8b0a5; --rv-t3: #8c857a; --rv-tsub: rgba(247, 243, 235, 0.54);
+            --rv-acc: #ff8a1f; --rv-accb: #ffb35c; --rv-bad: #b94232; --rv-ok: #5fa969;
+            --font-sans: "Geist", "SF Pro Text", system-ui, sans-serif;
+            --font-mono: "Geist Mono", "SF Mono", "JetBrains Mono", Consolas, monospace;
+            /* PwrGit dark tokens, restated */
+            --bg-rail: #050505; --bg-panel: #0a0a0a; --bg-panel-elevated: #101010; --bg-panel-hover: #14110d; --bg-hover-strong: #1f1a12;
+            --bg-row-active: color-mix(in srgb, #ff8a1f 10%, transparent);
+            --border-faint: rgba(247, 243, 235, 0.06); --border-subtle: rgba(247, 243, 235, 0.1);
+            --text-primary: #f7f3eb; --text-secondary: #b8b0a5; --text-muted: #8c857a; --text-subtle: rgba(247, 243, 235, 0.54);
+            --accent: #ff8a1f; --accent-bright: #ffb35c; --accent-soft: color-mix(in srgb, #ff8a1f 12%, transparent);
+            --danger-soft: rgba(185, 66, 50, 0.24); --danger-text: #ffb0a1;
+            --success-soft: rgba(74, 148, 92, 0.18); --success-text: #9ce5b3;
+            --status-warning: #d99a3d; --warn-soft: color-mix(in srgb, #d99a3d 14%, transparent);
+            --radius-sm: 5px; --radius-md: 7px;
+            --tree-indent: 14px;
+          }
+          *, *::before, *::after { box-sizing: border-box; }
+          html { background: var(--rv-bg); }
+          body { margin: 0; background: var(--rv-bg); font-family: var(--font-sans); }
+          a { color: var(--rv-accb); text-decoration: none; }
+
+          .dv-turn { padding: 40px 44px 32px; background: var(--rv-bg); border-bottom: 1px solid var(--rv-line); }
+          .dv-thd { display: flex; align-items: baseline; gap: 10px; margin: 0 0 6px; }
+          .dv-tid { font: 600 10px var(--font-mono); padding: 3px 7px; background: var(--rv-t1); color: var(--rv-bg); border-radius: 4px; }
+          .dv-tname { font: 600 13px/1.2 var(--font-sans); color: var(--rv-t1); }
+          .dv-sub { margin: 0 0 22px; font: 400 11.5px/1.5 var(--font-sans); color: var(--rv-t3); max-width: 860px; text-wrap: pretty; }
+          .dv-sub b { color: var(--rv-t2); font-weight: 600; }
+          .dv-opts { display: flex; flex-wrap: wrap; gap: 28px; align-items: flex-start; }
+          .dv-opt { flex: 0 1 auto; min-width: 0; display: flex; flex-direction: column; gap: 9px; }
+          .dv-oid { font: 600 10.5px var(--font-mono); padding: 3px 7px; background: rgba(247, 243, 235, 0.08); color: var(--rv-t1); border-radius: 5px; }
+          .dv-olabel { display: flex; align-items: baseline; gap: 8px; font: 400 11px/1.3 var(--font-sans); color: var(--rv-tsub); max-width: 340px; }
+          .dv-olabel b { color: var(--rv-accb); font-weight: 600; }
+          .dv-next { margin: 22px 0 0; font: 12px/1.5 var(--font-sans); color: var(--rv-t3); }
+          .note { margin: 0; font: 400 10.5px/1.5 var(--font-sans); color: var(--rv-t3); text-wrap: pretty; max-width: 320px; }
+          .note b { color: var(--rv-t2); font-weight: 600; }
+          .find { max-width: 640px; display: flex; flex-direction: column; gap: 14px; padding: 16px; border: 1px solid var(--rv-line); border-radius: 9px; background: #0a0a0a; }
+          .fitem { display: grid; grid-template-columns: 15px minmax(0, 1fr); gap: 9px; align-items: start; }
+          .fitem h4 { margin: 0 0 3px; font: 650 11.5px/1.3 var(--font-sans); color: var(--rv-t1); }
+          .fitem p { margin: 0; font: 400 10.5px/1.5 var(--font-sans); color: var(--rv-t3); text-wrap: pretty; }
+          .fitem b { color: var(--rv-t2); font-weight: 600; }
+          .fitem code { font: 500 10px var(--font-mono); color: var(--rv-t2); }
+          .pin { display: inline-flex; align-items: center; justify-content: center; flex: none; width: 15px; height: 15px; border-radius: 999px; background: var(--rv-bad); color: #fff; font: 700 9px/1 var(--font-mono); }
+          .pin.ok { background: var(--rv-ok); }
+          .pin.q { background: #6a5a3a; }
+
+          /* ---- the rail ---- */
+          .rail { width: 300px; padding: 10px 8px 12px; background: var(--bg-rail); border: 1px solid var(--border-subtle); border-radius: 10px; }
+          .rail.narrow { width: 248px; }
+          .sec { display: flex; align-items: center; gap: 8px; margin: 2px 0 6px; padding: 0 4px; }
+          .sec + .sec, .rows + .sec { margin-top: 14px; }
+          .sec__l { flex: 1; font: 600 10px/1 var(--font-sans); color: var(--text-muted); letter-spacing: .08em; text-transform: uppercase; }
+          .sec__a { padding: 3px 8px; border-radius: 999px; color: var(--text-subtle); font: 600 9px/1 var(--font-sans); letter-spacing: .04em; text-transform: uppercase; }
+
+          .r { position: relative; display: flex; align-items: center; gap: 8px; min-height: 30px; padding: 4px 4px 4px 8px; border-radius: var(--radius-md); margin-bottom: 1px; cursor: pointer; }
+          .r:hover { background: var(--bg-panel-hover); }
+          .r.stg { background: var(--bg-panel); }
+          .r.sel { background: var(--bg-row-active); box-shadow: inset 0 0 0 1px var(--accent); }
+          .r.fo { gap: 6px; padding-left: 4px; }
+          /* as built: one flat indent under a group */
+          .r.nest { padding-left: 22px; }
+          /* proposed: depth-driven indent, guides on ::before */
+          .tree .r { padding-left: calc(26px + var(--d) * var(--tree-indent)); }
+          .tree .r.fo { padding-left: calc(4px + var(--d) * var(--tree-indent)); }
+          .tree .r::before { content: ""; position: absolute; left: 0; top: 0; bottom: -1px; width: calc(var(--d) * var(--tree-indent)); pointer-events: none;
+            background: repeating-linear-gradient(to right, transparent 0 12px, var(--border-subtle) 12px 13px, transparent 13px var(--tree-indent)); }
+          .d0 { --d: 0; } .d1 { --d: 1; } .d2 { --d: 2; } .d3 { --d: 3; } .d4 { --d: 4; }
+
+          .tw { flex: none; width: 16px; height: 24px; display: flex; align-items: center; justify-content: center; color: var(--text-muted); }
+          .tw svg { transition: transform 120ms ease; }
+          .tw.open svg { transform: rotate(90deg); }
+          .fi { flex: none; display: flex; color: var(--text-muted); }
+          .nm { flex: 1; min-width: 0; font: 500 11px/1.3 var(--font-mono); color: var(--text-secondary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+          .nm i { font-style: normal; color: var(--text-muted); }
+          .ct { flex: none; min-width: 16px; height: 15px; padding: 0 5px; display: inline-flex; align-items: center; justify-content: center; border-radius: 999px; background: var(--bg-panel-elevated); color: var(--text-muted); font: 600 9px/1 var(--font-mono); }
+          .st { flex: none; width: 18px; height: 18px; border-radius: 5px; display: flex; align-items: center; justify-content: center; font: 700 10px/1 var(--font-mono); }
+          .st.M { color: var(--status-warning); background: var(--warn-soft); }
+          .st.A { color: var(--success-text); background: var(--success-soft); }
+          .st.Q { color: var(--text-muted); background: var(--bg-panel-elevated); }
+          .split { flex: none; padding: 1px 5px; border-radius: 999px; background: var(--warn-soft); color: var(--status-warning); font: 600 8.5px/1.5 var(--font-sans); }
+          .acts { flex: none; display: flex; gap: 2px; }
+          .ab { width: 24px; height: 24px; display: flex; align-items: center; justify-content: center; border-radius: var(--radius-sm); color: var(--text-muted); opacity: .62; }
+          .ab.tr { opacity: 0; }
+          .r:hover .ab, .r.hov .ab { opacity: 1; }
+          .r.hov { background: var(--bg-panel-hover); }
+          .r.hov .ab.pl { color: var(--accent-bright); background: var(--accent-soft); }
+          .tip { position: absolute; right: 0; top: 33px; z-index: 2; padding: 5px 8px; border-radius: 6px; background: #1b1814; border: 1px solid var(--border-subtle); color: var(--text-primary); font: 500 10.5px/1.3 var(--font-sans); white-space: nowrap; box-shadow: 0 8px 24px rgba(0,0,0,.5); }
+          .bug { outline: 1.5px dashed var(--rv-bad); outline-offset: -1px; }
+          .tag { display: inline-block; margin-left: 6px; padding: 1px 6px; border-radius: 999px; background: color-mix(in srgb, var(--rv-bad) 30%, transparent); color: #ffb0a1; font: 600 9px/1.4 var(--font-sans); }
+          .pchips { display: flex; gap: 6px; flex-wrap: wrap; }
+          .pchips button { padding: 4px 9px; border-radius: 999px; border: 1px solid var(--rv-line); background: transparent; color: var(--rv-t2); font: 500 10.5px var(--font-sans); cursor: pointer; }
+          .pchips button:hover { color: var(--rv-accb); border-color: var(--rv-accb); }
+          .readout { font: 500 10.5px/1.5 var(--font-mono); color: var(--rv-t3); max-width: 300px; }
+        </style>
+      </helmet>
+
+      <section class="dv-turn" id="t0" data-screen-label="Turn 0 Brief">
+        <div class="dv-thd"><span class="dv-tid">0</span><span class="dv-tname">Brief — the Changes rail's folders are not a tree</span></div>
+        <p class="dv-sub">Operator, 2026-11-13: <b>“If you have foo/ and foo/bar/ and you collapse foo/ it leaves foo/bar/ expanded as a non-child of it. This really should be a tree like VS Code does.”</b> The rail's <b>groupChanges</b> groups each file by its <i>immediate</i> parent only, so <b>foo</b> and <b>foo/bar</b> are two sibling groups. Folding one says nothing about the other, and the folder's Stage/Discard reach only its direct files.</p>
+        <div class="find">
+          <div class="fitem"><span class="pin ok">1</span><div><h4>Build it ourselves</h4><p>VS Code's tree lives in its own <code>vs/base/browser/ui/tree</code> (not a published package), and the React tree libraries bring their own row model, focus model and styling. The rail already owns its rows, actions, context menu and selection. A <b>~100-line path tree</b> plus depth-driven indentation keeps all of that intact.</p></div></div>
+          <div class="fitem"><span class="pin ok">2</span><div><h4>VS Code's rules, decided here</h4><p><b>Compact folders</b> (a folder whose only child is a folder shares its row: <code>packages/shared/src</code>). <b>Folders before files</b>, each in Git's byte order. A folder's <b>count, Stage, Discard, Ignore and Copy path cover its whole subtree</b>, still sent as the listed files by name, never the directory. Indent guides always on, at border-subtle.</p></div></div>
+          <div class="fitem"><span class="pin ok">3</span><div><h4>Folding defaults</h4><p>Folders start open. A folder of <b>only new files</b> past 10 starts folded, which keeps today's untracked-dump protection without folding a root like <code>src/</code> just because a refactor touched 40 files. Opening a file from elsewhere (⌘K, history) unfolds the folders above it, like VS Code's <i>scm.autoReveal</i>.</p></div></div>
+          <div class="fitem"><span class="pin q">?</span><div><h4>Open, not in this round</h4><p>A List/Tree toggle, arrow-key tree navigation (roles tree/treeitem), and Collapse all. The rows are not focusable today, so roving focus is its own change.</p></div></div>
+        </div>
+      </section>
+
+      <section class="dv-turn" id="t1" data-screen-label="Turn 1 As built">
+        <div class="dv-thd"><span class="dv-tid">1</span><span class="dv-tname">As built — one group per parent directory</span></div>
+        <p class="dv-sub">Same ten unstaged files in every card. <b>Git's order</b>, groups of two or more files, a lone file shown by full path.</p>
+        <div class="dv-opts">
+          <div class="dv-opt" id="1a" data-screen-label="1a As built open">
+            <div class="dv-olabel"><a class="dv-oid" href="#1a">1a</a>Everything open</div>
+            <div class="rail">
+              <div class="sec"><span class="sec__l">Unstaged · 10</span><span class="sec__a">Stage all</span></div>
+              <div class="rows">
+                <sc-for list="{{old1}}" as="r" hint-placeholder-count="12">
+                  <sc-if value="{{r.folder}}" hint-placeholder-val="{{ false }}"><div class="{{r.cls}}"><span class="{{r.tw}}"><svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="m9 18 6-6-6-6"></path></svg></span><span class="fi"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z"></path></svg></span><span class="nm">{{r.name}}</span><span class="ct">{{r.count}}</span></div></sc-if>
+                  <sc-if value="{{r.file}}" hint-placeholder-val="{{ true }}"><div class="{{r.cls}}"><span class="{{r.stCls}}">{{r.st}}</span><span class="nm">{{r.name}}</span><span class="acts"><span class="ab pl">+</span></span></div></sc-if>
+                </sc-for>
+              </div>
+            </div>
+          </div>
+          <div class="dv-opt" id="1b" data-screen-label="1b As built folded">
+            <div class="dv-olabel"><a class="dv-oid" href="#1b">1b</a><b>The bug</b> — fold <code>design/handoff/</code></div>
+            <div class="rail">
+              <div class="sec"><span class="sec__l">Unstaged · 10</span><span class="sec__a">Stage all</span></div>
+              <div class="rows">
+                <sc-for list="{{old2}}" as="r" hint-placeholder-count="10">
+                  <sc-if value="{{r.folder}}" hint-placeholder-val="{{ false }}"><div class="{{r.cls}}"><span class="{{r.tw}}"><svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="m9 18 6-6-6-6"></path></svg></span><span class="fi"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z"></path></svg></span><span class="nm">{{r.name}}</span><span class="ct">{{r.count}}</span></div></sc-if>
+                  <sc-if value="{{r.file}}" hint-placeholder-val="{{ true }}"><div class="{{r.cls}}"><span class="{{r.stCls}}">{{r.st}}</span><span class="nm">{{r.name}}</span><span class="acts"><span class="ab pl">+</span></span></div></sc-if>
+                </sc-for>
+              </div>
+            </div>
+            <p class="note">The folded row says <b>2</b>, its Stage stages <b>2</b>, and its “child” <code>design/handoff/assets/</code> stays open as a sibling. <code>src/app.ts</code> sits outside <code>src/lib/</code> because it is alone in <code>src</code>.</p>
+          </div>
+        </div>
+      </section>
+
+      <section class="dv-turn" id="t2" data-screen-label="Turn 2 Proposed">
+        <div class="dv-thd"><span class="dv-tid">2</span><span class="dv-tname">Proposed — a real tree, VS Code rules</span></div>
+        <p class="dv-sub">Rows keep today's parts (status chip, mono name, count pill, hover Stage/Discard). Only the indentation is new: <b>14px per level</b>, a guide under each open folder's chevron, and file chips aligned past the chevron column. A section with no folders keeps today's flat padding.</p>
+        <div class="dv-opts">
+          <div class="dv-opt" id="2a" data-screen-label="2a Tree open">
+            <div class="dv-olabel"><a class="dv-oid" href="#2a">2a</a><b>Tree</b>, everything open</div>
+            <div class="rail tree">
+              <div class="sec"><span class="sec__l">Unstaged · 10</span><span class="sec__a">Stage all</span></div>
+              <div class="rows">
+                <sc-for list="{{t1}}" as="r" hint-placeholder-count="14">
+                  <sc-if value="{{r.folder}}" hint-placeholder-val="{{ false }}"><div class="{{r.cls}}"><span class="{{r.tw}}"><svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="m9 18 6-6-6-6"></path></svg></span><span class="fi"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z"></path></svg></span><span class="nm">{{r.name}}</span><span class="ct">{{r.count}}</span></div></sc-if>
+                  <sc-if value="{{r.file}}" hint-placeholder-val="{{ true }}"><div class="{{r.cls}}"><span class="{{r.stCls}}">{{r.st}}</span><span class="nm">{{r.name}}</span><span class="acts"><span class="ab pl">+</span></span></div></sc-if>
+                </sc-for>
+              </div>
+            </div>
+            <p class="note"><code>design/handoff</code> and <code>packages/shared/src</code> are compacted chains. <code>app.ts</code> now lives under <code>src/</code>.</p>
+          </div>
+          <div class="dv-opt" id="2b" data-screen-label="2b Tree folded">
+            <div class="dv-olabel"><a class="dv-oid" href="#2b">2b</a>Fold <code>design/handoff</code> — the subtree goes with it</div>
+            <div class="rail tree">
+              <div class="sec"><span class="sec__l">Unstaged · 10</span><span class="sec__a">Stage all</span></div>
+              <div class="rows">
+                <sc-for list="{{t2}}" as="r" hint-placeholder-count="10">
+                  <sc-if value="{{r.folder}}" hint-placeholder-val="{{ false }}"><div class="{{r.cls}}"><span class="{{r.tw}}"><svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="m9 18 6-6-6-6"></path></svg></span><span class="fi"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z"></path></svg></span><span class="nm">{{r.name}}</span><span class="ct">{{r.count}}</span><sc-if value="{{r.hov}}" hint-placeholder-val="{{ false }}"><span class="acts"><span class="ab">&#8722;</span><span class="ab pl">+</span></span><span class="tip">Stage all 4 files in design/handoff/</span></sc-if></div></sc-if>
+                  <sc-if value="{{r.file}}" hint-placeholder-val="{{ true }}"><div class="{{r.cls}}"><span class="{{r.stCls}}">{{r.st}}</span><span class="nm">{{r.name}}</span><span class="acts"><span class="ab pl">+</span></span></div></sc-if>
+                </sc-for>
+              </div>
+            </div>
+            <p class="note">Count <b>4</b> = every file beneath it. Stage on that row stages all four by name; Discard and Copy path agree. Ignore is offered because all four are new, and ignores <code>design/handoff/</code>.</p>
+          </div>
+          <div class="dv-opt" id="2c" data-screen-label="2c Narrow with staged">
+            <div class="dv-olabel"><a class="dv-oid" href="#2c">2c</a>Narrow rail (248px), both sections, active file</div>
+            <div class="rail tree narrow">
+              <div class="sec"><span class="sec__l">Staged · 2</span><span class="sec__a">Unstage all</span></div>
+              <div class="rows">
+                <sc-for list="{{s3}}" as="r" hint-placeholder-count="4">
+                  <sc-if value="{{r.folder}}" hint-placeholder-val="{{ false }}"><div class="{{r.cls}}"><span class="{{r.tw}}"><svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="m9 18 6-6-6-6"></path></svg></span><span class="fi"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z"></path></svg></span><span class="nm">{{r.name}}</span><span class="ct">{{r.count}}</span></div></sc-if>
+                  <sc-if value="{{r.file}}" hint-placeholder-val="{{ true }}"><div class="{{r.cls}}"><span class="{{r.stCls}}">{{r.st}}</span><span class="nm">{{r.name}}</span><sc-if value="{{r.split}}" hint-placeholder-val="{{ false }}"><span class="split">partial</span></sc-if><span class="acts"><span class="ab">&#8722;</span></span></div></sc-if>
+                </sc-for>
+              </div>
+              <div class="sec"><span class="sec__l">Unstaged · 10</span><span class="sec__a">Stage all</span></div>
+              <div class="rows">
+                <sc-for list="{{t3}}" as="r" hint-placeholder-count="14">
+                  <sc-if value="{{r.folder}}" hint-placeholder-val="{{ false }}"><div class="{{r.cls}}"><span class="{{r.tw}}"><svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="m9 18 6-6-6-6"></path></svg></span><span class="fi"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z"></path></svg></span><span class="nm">{{r.name}}</span><span class="ct">{{r.count}}</span></div></sc-if>
+                  <sc-if value="{{r.file}}" hint-placeholder-val="{{ true }}"><div class="{{r.cls}}"><span class="{{r.stCls}}">{{r.st}}</span><span class="nm">{{r.name}}</span><sc-if value="{{r.split}}" hint-placeholder-val="{{ false }}"><span class="split">partial</span></sc-if><span class="acts"><span class="ab pl">+</span></span></div></sc-if>
+                </sc-for>
+              </div>
+            </div>
+            <p class="note">Each section has its own tree and its own folds. The active row (<code>src/lib/tree.ts</code>, unstaged side) keeps today's accent ring. A long compacted name ellipsizes at the right, before the count.</p>
+          </div>
+          <div class="dv-opt" id="2d" data-screen-label="2d Untracked dump">
+            <div class="dv-olabel"><a class="dv-oid" href="#2d">2d</a>An untracked dump starts folded; the root does not</div>
+            <div class="rail tree">
+              <div class="sec"><span class="sec__l">Unstaged · 244</span><span class="sec__a">Stage all</span></div>
+              <div class="rows">
+                <sc-for list="{{t4}}" as="r" hint-placeholder-count="6">
+                  <sc-if value="{{r.folder}}" hint-placeholder-val="{{ false }}"><div class="{{r.cls}}"><span class="{{r.tw}}"><svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="m9 18 6-6-6-6"></path></svg></span><span class="fi"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z"></path></svg></span><span class="nm">{{r.name}}</span><span class="ct">{{r.count}}</span></div></sc-if>
+                  <sc-if value="{{r.file}}" hint-placeholder-val="{{ true }}"><div class="{{r.cls}}"><span class="{{r.stCls}}">{{r.st}}</span><span class="nm">{{r.name}}</span><span class="acts"><span class="ab pl">+</span></span></div></sc-if>
+                </sc-for>
+              </div>
+            </div>
+            <p class="note"><code>src/</code> holds 242 files but is not all new, so it stays open; <code>src/generated/</code> is 240 new files and starts folded. Opening it shows the next level, each folded by the same rule.</p>
+          </div>
+          <div class="dv-opt" id="2e" data-screen-label="2e Live">
+            <div class="dv-olabel"><a class="dv-oid" href="#2e">2e</a><b>Live</b> — click folders to fold, files to select</div>
+            <div class="pchips"><button onClick="{{reveal}}">Open tray@2x.png from ⌘K</button><button onClick="{{reset}}">reset</button></div>
+            <div class="rail tree">
+              <div class="sec"><span class="sec__l">Unstaged · 10</span><span class="sec__a">Stage all</span></div>
+              <div class="rows">
+                <sc-for list="{{live}}" as="r" hint-placeholder-count="14">
+                  <sc-if value="{{r.folder}}" hint-placeholder-val="{{ false }}"><div class="{{r.cls}}" onClick="{{r.on}}"><span class="{{r.tw}}"><svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="m9 18 6-6-6-6"></path></svg></span><span class="fi"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z"></path></svg></span><span class="nm">{{r.name}}</span><span class="ct">{{r.count}}</span><span class="acts"><span class="ab tr">&#8722;</span><span class="ab pl">+</span></span></div></sc-if>
+                  <sc-if value="{{r.file}}" hint-placeholder-val="{{ true }}"><div class="{{r.cls}}" onClick="{{r.on}}"><span class="{{r.stCls}}">{{r.st}}</span><span class="nm">{{r.name}}</span><span class="acts"><span class="ab pl">+</span></span></div></sc-if>
+                </sc-for>
+              </div>
+            </div>
+            <div class="readout">{{readout}}</div>
+          </div>
+        </div>
+        <p class="dv-next">Try next: “arrow keys walk the tree” &#183; “a List / Tree toggle in the section header” &#183; “Collapse all beside Stage all”</p>
+      </section>
+    </x-dc>
+    <script type="text/x-dc" data-dc-script data-props='{}'>
+      class Component extends DCLogic {
+        constructor(props) {
+          super(props);
+          this.state = { folded: {}, selected: null };
+          this.unstaged = [
+            ["README.md", "M"], ["packages/shared/src/index.ts", "M"], ["src/app.ts", "M"],
+            ["src/lib/format.ts", "M"], ["src/lib/tree.ts", "M"],
+            ["design/handoff/assets/menubar.png", "?"], ["design/handoff/assets/tray@2x.png", "?"],
+            ["design/handoff/icon.swift", "?"], ["design/handoff/tray.mjs", "?"], ["src/lib/tree.test.ts", "?"]
+          ];
+          this.staged = [["docs/changes-tree.md", "A"], ["src/lib/tree.ts", "M"]];
+          this.dump = [["src/app.ts", "M"], ["src/lib/tree.ts", "M"]];
+          for (let i = 0; i < 120; i++) { this.dump.push(["src/generated/api/f" + i + ".ts", "?"]); this.dump.push(["src/generated/types/t" + i + ".ts", "?"]); }
+          this.dump.push(["package.json", "M"], ["pnpm-lock.yaml", "M"]);
+        }
+        build(files) {
+          const root = { dir: "", kids: new Map(), files: [] };
+          for (const f of files) {
+            const parts = f[0].split("/");
+            let node = root;
+            for (let i = 0; i < parts.length - 1; i++) {
+              const dir = parts.slice(0, i + 1).join("/");
+              let next = node.kids.get(parts[i]);
+              if (!next) { next = { dir: dir, kids: new Map(), files: [] }; node.kids.set(parts[i], next); }
+              node = next;
+            }
+            node.files.push(f);
+          }
+          const all = (n) => n.files.concat([].concat(...[...n.kids.values()].map(all)));
+          const conv = (n, name) => {
+            let cur = n; let label = name;
+            while (cur.files.length === 0 && cur.kids.size === 1) {
+              const only = [...cur.kids.entries()][0];
+              label = label + "/" + only[0]; cur = only[1];
+            }
+            const kids = [...cur.kids.entries()].sort((a, b) => (a[0] < b[0] ? -1 : 1)).map((e) => conv(e[1], e[0]));
+            const files = cur.files.slice().sort((a, b) => (a[0] < b[0] ? -1 : 1));
+            return { dir: cur.dir, name: label, kids: kids, files: files, all: all(cur) };
+          };
+          const top = conv(root, "");
+          return { kids: top.kids, files: top.files };
+        }
+        rows(tree, isOpen, opts) {
+          const out = [];
+          const base = (p) => p.slice(p.lastIndexOf("/") + 1);
+          const file = (f, d) => {
+            const sel = opts && opts.sel === f[0];
+            out.push({ file: true, folder: false, name: base(f[0]), st: f[1], stCls: "st " + (f[1] === "?" ? "Q" : f[1]),
+              cls: "r d" + d + (opts && opts.staged ? " stg" : "") + (sel ? " sel" : ""),
+              split: Boolean(opts && opts.split && opts.split.indexOf(f[0]) >= 0),
+              on: opts && opts.onFile ? () => opts.onFile(f[0]) : undefined });
+          };
+          const walk = (nodes, files, d) => {
+            for (const n of nodes) {
+              const open = isOpen(n);
+              out.push({ folder: true, file: false, name: n.name, count: String(n.all.length), tw: "tw" + (open ? " open" : ""),
+                cls: "r fo d" + d + (opts && opts.hov === n.dir ? " hov" : ""), hov: Boolean(opts && opts.hov === n.dir),
+                on: opts && opts.onFolder ? () => opts.onFolder(n, open) : undefined });
+              if (open) walk(n.kids, n.files, d + 1);
+            }
+            for (const f of files) file(f, d);
+          };
+          walk(tree.kids, tree.files, 0);
+          return out;
+        }
+        dflt(n) { return !(n.all.length > 10 && n.all.every((f) => f[1] === "?")); }
+        oldRows(files, foldedDir) {
+          const groups = []; const by = new Map();
+          for (const f of files) {
+            const s = f[0].lastIndexOf("/");
+            if (s <= 0) { groups.push({ f: f }); continue; }
+            const dir = f[0].slice(0, s);
+            if (!by.has(dir)) { const g = { dir: dir, files: [] }; by.set(dir, g); groups.push(g); }
+            by.get(dir).files.push(f);
+          }
+          const order = [...files].sort((a, b) => (a[0] < b[0] ? -1 : 1));
+          const out = [];
+          const seen = new Set();
+          for (const f of order) {
+            const s = f[0].lastIndexOf("/");
+            const dir = s <= 0 ? null : f[0].slice(0, s);
+            const g = dir === null ? null : by.get(dir);
+            const st = { st: f[1], stCls: "st " + (f[1] === "?" ? "Q" : f[1]), file: true, folder: false };
+            if (g === null || g.files.length === 1) { out.push(Object.assign({ name: f[0], cls: "r" }, st)); continue; }
+            if (!seen.has(dir)) {
+              seen.add(dir);
+              const open = dir !== foldedDir;
+              out.push({ folder: true, file: false, name: dir + "/", count: String(g.files.length), tw: "tw" + (open ? " open" : ""),
+                cls: "r fo" + (dir === "design/handoff/assets" && foldedDir ? " bug" : "") });
+              if (open) for (const x of g.files.slice().sort((a, b) => (a[0] < b[0] ? -1 : 1))) out.push(Object.assign({ name: x[0].slice(dir.length + 1), cls: "r nest" + (dir === "design/handoff/assets" && foldedDir ? " bug" : "") }, st, { st: x[1], stCls: "st " + (x[1] === "?" ? "Q" : x[1]) }));
+            }
+          }
+          return out;
+        }
+        renderVals() {
+          const s = this.state;
+          const un = this.build(this.unstaged);
+          const isOpenLive = (n) => (s.folded[n.dir] === undefined ? this.dflt(n) : !s.folded[n.dir]);
+          const live = this.rows(un, isOpenLive, {
+            sel: s.selected,
+            onFolder: (n, open) => { const folded = Object.assign({}, this.state.folded); folded[n.dir] = open; this.setState({ folded: folded }); },
+            onFile: (p) => this.setState({ selected: p })
+          });
+          const folds = Object.keys(s.folded).filter((k) => s.folded[k]);
+          return {
+            old1: this.oldRows(this.unstaged, null),
+            old2: this.oldRows(this.unstaged, "design/handoff"),
+            t1: this.rows(un, () => true),
+            t2: this.rows(un, (n) => n.dir !== "design/handoff", { hov: "design/handoff" }),
+            s3: this.rows(this.build(this.staged), () => true, { staged: true, split: ["src/lib/tree.ts"] }),
+            t3: this.rows(un, (n) => n.dir !== "design/handoff", { sel: "src/lib/tree.ts", split: ["src/lib/tree.ts"] }),
+            t4: this.rows(this.build(this.dump), (n) => this.dflt(n)),
+            live: live,
+            readout: "folded: " + (folds.length ? folds.join(", ") : "none") + " · selected: " + (s.selected || "none"),
+            reveal: () => {
+              const p = "design/handoff/assets/tray@2x.png";
+              const folded = Object.assign({}, this.state.folded);
+              const parts = p.split("/");
+              for (let i = 1; i < parts.length; i++) folded[parts.slice(0, i).join("/")] = false;
+              this.setState({ folded: folded, selected: p });
+            },
+            reset: () => this.setState({ folded: {}, selected: null })
+          };
+        }
+      }
+    </script>
+  </body>
+</html>
