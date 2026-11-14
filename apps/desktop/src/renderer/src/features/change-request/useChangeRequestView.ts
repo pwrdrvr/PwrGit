@@ -42,6 +42,8 @@ export const KEYBOARD_FETCH_DWELL_MS = 600;
 /** A `pr:openChanged` this soon after our own fetch is our own echo. */
 const OWN_FETCH_ECHO_MS = 3_000;
 const ALL_CHANGES: ChangeRequestScope = { kind: "all" };
+/** One empty list, so the rail's file tree keeps its memo while the patch loads. */
+const NO_FILES: DiffFile[] = [];
 
 /**
  * The PR view's data: `pr:view`, asked first without leave to fetch (an
@@ -198,7 +200,7 @@ export function useChangeRequestView(
     () => (scope.kind === "all" || patch === null ? [] : parseUnifiedDiff(patch).files),
     [scope.kind, patch]
   );
-  const files = scope.kind === "all" ? (all?.files ?? []) : scopeFiles;
+  const files = scope.kind === "all" ? (all?.files ?? NO_FILES) : scopeFiles;
   const totals = useMemo(
     () =>
       all === null

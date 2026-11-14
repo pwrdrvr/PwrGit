@@ -1,41 +1,55 @@
-import type { FileChange } from "@pwrgit/shared";
-
 /**
- * The Changes rail's folder tree. Each section (staged, unstaged) builds its
- * own, the way VS Code's Source Control view does:
+ * The folder tree every file list in the rail draws: the Changes tab (one per
+ * section), a clicked commit's files, and a change request's files. It
+ * follows VS Code's Source Control view:
  *
  * - **Nested**: a folder's row stands for everything beneath it, so folding
- *   it hides the whole subtree and its count, Stage and Discard cover every
- *   file under it. The earlier grouping keyed on each file's immediate parent
- *   only, which made `foo/` and `foo/bar/` unrelated siblings.
+ *   it hides the whole subtree, and its count (and, in Changes, its Stage and
+ *   Discard) covers every file under it.
  * - **Compact**: a folder whose only content is one folder shares that
  *   folder's row (`packages/shared/src`), so a deep path costs one row and one
  *   indent level, not one per segment.
  * - **Folders first**, then files, each in code-unit order (Git's order for
  *   the ASCII paths it lists).
  */
-export type ChangeTreeFolder = {
+/** Anything with a repository-relative path. The tree reads `status` only
+ *  to tell a new file from the rest, for the fold default. */
+export type TreeFile = { path: string; status?: string };
+
+/**
+ * The statuses of a file that did not exist before, in each list's own
+ * vocabulary: untracked (`?`) and added (`A`) in Changes and a commit, and a
+ * change request's parsed diff (`added`).
+ */
+const NEW_FILE_STATUSES: ReadonlySet<string> = new Set(["?", "A", "added"]);
+
+function isNewFile(file: TreeFile): boolean {
+  return file.status !== undefined && NEW_FILE_STATUSES.has(file.status);
+}
+
+export type FileTreeFolder<F extends TreeFile> = {
   /** Full path of the deepest folder this row stands for, no trailing slash. */
   dir: string;
   /** What the row shows: one segment, or a compacted chain `a/b/c`. */
   label: string;
-  folders: ChangeTreeFolder[];
-  files: FileChange[];
+  folders: FileTreeFolder<F>[];
+  files: F[];
   /** Every file beneath this folder, at any depth, in the input's order. */
-  all: FileChange[];
+  all: F[];
 };
 
-export type ChangeTree = {
-  folders: ChangeTreeFolder[];
-  files: FileChange[];
+export type FileTree<F extends TreeFile> = {
+  folders: FileTreeFolder<F>[];
+  files: F[];
 };
 
-export type ChangeTreeRow =
-  | { kind: "folder"; folder: ChangeTreeFolder; depth: number; open: boolean }
-  | { kind: "file"; file: FileChange; depth: number };
+export type FileTreeRow<F extends TreeFile> =
+  | { kind: "folder"; folder: FileTreeFolder<F>; depth: number; open: boolean }
+  | { kind: "file"; file: F; depth: number };
 
-/** A folder of only new files this big starts folded: an untracked dump can
- *  be hundreds of files, and unfolding all of them buries the rest. */
+/** A folder of only new files this big starts folded: an untracked build
+ *  dump, or a commit that vendors a library, can be hundreds of files, and
+ *  unfolding all of them buries the rest. */
 export const FOLDER_AUTO_COLLAPSE = 10;
 
 /**
@@ -58,15 +72,15 @@ export function fileLabel(path: string): string {
 
 const byCodeUnit = (a: string, b: string): number => (a < b ? -1 : a > b ? 1 : 0);
 
-type Draft = {
+type Draft<F> = {
   dir: string;
-  folders: Map<string, Draft>;
-  files: FileChange[];
-  all: FileChange[];
+  folders: Map<string, Draft<F>>;
+  files: F[];
+  all: F[];
 };
 
-export function buildChangeTree(files: FileChange[]): ChangeTree {
-  const root: Draft = { dir: "", folders: new Map(), files: [], all: [] };
+export function buildFileTree<F extends TreeFile>(files: readonly F[]): FileTree<F> {
+  const root: Draft<F> = { dir: "", folders: new Map(), files: [], all: [] };
   for (const file of files) {
     const parts = segments(file.path);
     let node = root;
@@ -88,7 +102,7 @@ export function buildChangeTree(files: FileChange[]): ChangeTree {
     node.files.push(file);
   }
 
-  const finish = (draft: Draft, label: string): ChangeTreeFolder => {
+  const finish = (draft: Draft<F>, label: string): FileTreeFolder<F> => {
     let node = draft;
     let chain = label;
     // Compact: fold a lone child folder into this row.
@@ -106,12 +120,12 @@ export function buildChangeTree(files: FileChange[]): ChangeTree {
       all: node.all
     };
   };
-  const sortedFolders = (draft: Draft): ChangeTreeFolder[] =>
+  const sortedFolders = (draft: Draft<F>): FileTreeFolder<F>[] =>
     [...draft.folders.entries()]
       .sort(([a], [b]) => byCodeUnit(a, b))
       .map(([name, child]) => finish(child, name));
   // Labels computed once, not inside the comparator.
-  const sortedFiles = (list: FileChange[]): FileChange[] =>
+  const sortedFiles = (list: F[]): F[] =>
     list
       .map((file) => ({ file, label: fileLabel(file.path) }))
       .sort((a, b) => byCodeUnit(a.label, b.label))
@@ -125,20 +139,20 @@ export function buildChangeTree(files: FileChange[]): ChangeTree {
  * but new files past the threshold folds: folding on size alone would fold a
  * root like `src/` because a refactor touched forty files in it.
  */
-export function folderStartsOpen(folder: ChangeTreeFolder): boolean {
+export function folderStartsOpen<F extends TreeFile>(folder: FileTreeFolder<F>): boolean {
   return !(
     folder.all.length > FOLDER_AUTO_COLLAPSE &&
-    folder.all.every((file) => file.status === "?")
+    folder.all.every(isNewFile)
   );
 }
 
 /** The rows on screen: a folded folder hides every row beneath it. */
-export function visibleTreeRows(
-  tree: ChangeTree,
-  isOpen: (folder: ChangeTreeFolder) => boolean
-): ChangeTreeRow[] {
-  const rows: ChangeTreeRow[] = [];
-  const walk = (folders: ChangeTreeFolder[], files: FileChange[], depth: number): void => {
+export function visibleTreeRows<F extends TreeFile>(
+  tree: FileTree<F>,
+  isOpen: (folder: FileTreeFolder<F>) => boolean
+): FileTreeRow<F>[] {
+  const rows: FileTreeRow<F>[] = [];
+  const walk = (folders: FileTreeFolder<F>[], files: F[], depth: number): void => {
     for (const folder of folders) {
       const open = isOpen(folder);
       rows.push({ kind: "folder", folder, depth, open });
