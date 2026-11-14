@@ -92,12 +92,11 @@ export function buildChangeTree(files: FileChange[]): ChangeTree {
     let node = draft;
     let chain = label;
     // Compact: fold a lone child folder into this row.
-    for (;;) {
-      if (node.files.length > 0 || node.folders.size !== 1) break;
-      const [name, only] = [...node.folders.entries()][0] ?? [];
-      if (name === undefined || only === undefined) break;
-      chain = `${chain}/${name}`;
-      node = only;
+    while (node.files.length === 0 && node.folders.size === 1) {
+      const only = node.folders.entries().next().value;
+      if (only === undefined) break;
+      chain = `${chain}/${only[0]}`;
+      node = only[1];
     }
     return {
       dir: node.dir,
@@ -111,8 +110,12 @@ export function buildChangeTree(files: FileChange[]): ChangeTree {
     [...draft.folders.entries()]
       .sort(([a], [b]) => byCodeUnit(a, b))
       .map(([name, child]) => finish(child, name));
+  // Labels computed once, not inside the comparator.
   const sortedFiles = (list: FileChange[]): FileChange[] =>
-    [...list].sort((a, b) => byCodeUnit(fileLabel(a.path), fileLabel(b.path)));
+    list
+      .map((file) => ({ file, label: fileLabel(file.path) }))
+      .sort((a, b) => byCodeUnit(a.label, b.label))
+      .map(({ file }) => file);
 
   return { folders: sortedFolders(root), files: sortedFiles(root.files) };
 }

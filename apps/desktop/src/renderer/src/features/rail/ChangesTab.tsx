@@ -4,6 +4,7 @@ import {
   type ReactNode,
   useCallback,
   useEffect,
+  useMemo,
   useRef,
   useState
 } from "react";
@@ -42,7 +43,8 @@ import {
   buildChangeTree,
   fileLabel,
   folderStartsOpen,
-  visibleTreeRows
+  visibleTreeRows,
+  type ChangeTree
 } from "./changes-tree";
 const STAGED_SOURCE: DraftSource = { kind: "staged" };
 
@@ -270,6 +272,8 @@ function FolderRow({
 }) {
   const tip = useViewportTooltip();
   const verb = staged ? "Unstage" : "Stage";
+  // A one-file folder is an ordinary tree row now, so the count can be 1.
+  const scope = count === 1 ? "the file" : `all ${count} files`;
   return (
     <div
       className="folder-row"
@@ -298,7 +302,7 @@ function FolderRow({
       </span>
       <span
         className="folder-row__path"
-        {...hoverTooltip(tip, `${dir}/ — ${count} files`)}
+        {...hoverTooltip(tip, `${dir}/ — ${count} file${count === 1 ? "" : "s"}`)}
       >
         {label}
       </span>
@@ -310,8 +314,8 @@ function FolderRow({
             e.stopPropagation();
             onDiscard();
           }}
-          {...hoverTooltip(tip, `Discard all ${count} files in this folder`)}
-          aria-label={`Discard all ${count} files in ${dir}`}
+          {...hoverTooltip(tip, `Discard ${scope} in this folder`)}
+          aria-label={`Discard ${scope} in ${dir}`}
         >
           <TrashIcon />
         </button>
@@ -321,8 +325,8 @@ function FolderRow({
             e.stopPropagation();
             onToggle();
           }}
-          {...hoverTooltip(tip, `${verb} all ${count} files in this folder`)}
-          aria-label={`${verb} all ${count} files in ${dir}`}
+          {...hoverTooltip(tip, `${verb} ${scope} in this folder`)}
+          aria-label={`${verb} ${scope} in ${dir}`}
         >
           {staged ? <MinusIcon /> : <PlusIcon />}
         </button>
@@ -439,23 +443,42 @@ export function ChangesTab({
   }, [wtId]);
 
   // Opening a file from elsewhere (⌘K, history, the diff pane) unfolds the
-  // folders above it, so the marked row is on screen — VS Code's autoReveal.
-  // Keyed on the path alone: folding that folder again afterwards sticks.
+  // folders above its row, so the marked row is on screen — VS Code's
+  // autoReveal. Only a path this list actually holds, only in the section
+  // whose row is marked, and once per opening: folding that folder again
+  // afterwards sticks, and a file viewed from history writes no fold state
+  // that would later override the untracked-dump default.
   const activePath = activeFile?.path ?? null;
   const activeSide = activeFile?.staged ?? null;
+  const revealedRef = useRef<string | null>(null);
   useEffect(() => {
-    if (activePath === null) return;
+    if (activePath === null) {
+      revealedRef.current = null;
+      return;
+    }
+    if (changes === null) return;
+    // Same resolution as the row marking below: unstaged wins for `null`.
+    const staged =
+      activeSide ?? !changes.unstaged.some((file) => file.path === activePath);
+    const section = staged ? changes.staged : changes.unstaged;
+    if (!section.some((file) => file.path === activePath)) return;
+    const prefix = staged ? "s" : "u";
+    const reveal = `${wtId ?? ""}\0${prefix}\0${activePath}`;
+    if (revealedRef.current === reveal) return;
+    revealedRef.current = reveal;
     const dirs = ancestorDirs(activePath);
     if (dirs.length === 0) return;
-    const sections = activeSide === null ? ["s", "u"] : [activeSide ? "s" : "u"];
     setFolderOpen((prev) => {
       const next = { ...prev };
-      for (const section of sections) {
-        for (const dir of dirs) next[`${section}:${dir}`] = true;
-      }
+      for (const dir of dirs) next[`${prefix}:${dir}`] = true;
       return next;
     });
-  }, [activePath, activeSide, wtId]);
+  }, [activePath, activeSide, changes, wtId]);
+
+  // Built once per change set, not on every render (each keystroke in the
+  // commit message re-renders this component).
+  const stagedTree = useMemo(() => buildChangeTree(changes?.staged ?? []), [changes]);
+  const unstagedTree = useMemo(() => buildChangeTree(changes?.unstaged ?? []), [changes]);
 
   /**
    * Which of the paths about to be staged are conflicted. "." means "stage
@@ -683,7 +706,7 @@ export function ChangesTab({
           : !changes.unstaged.some((file) => file.path === activeFile.path);
 
   const renderEntries = (
-    files: FileChange[],
+    tree: ChangeTree,
     keyPrefix: string,
     stagedSection: boolean
   ): ReactNode[] => {
@@ -696,7 +719,6 @@ export function ChangesTab({
       event.stopPropagation();
       setMenu({ x: event.clientX, y: event.clientY, target });
     };
-    const tree = buildChangeTree(files);
     const isTree = tree.folders.length > 0;
     // Disclosure state is keyed per section: the same folder can hold both
     // staged and unstaged files, and they fold independently.
@@ -795,7 +817,7 @@ export function ChangesTab({
                 Unstage all
               </button>
             </div>
-            {renderEntries(staged, "s", true)}
+            {renderEntries(stagedTree, "s", true)}
             {stagedTotal > staged.length && (
               <TruncationNotice
                 shown={staged.length}
@@ -819,7 +841,7 @@ export function ChangesTab({
                 Stage all
               </button>
             </div>
-            {renderEntries(unstaged, "u", false)}
+            {renderEntries(unstagedTree, "u", false)}
             {unstagedTotal > unstaged.length && (
               <TruncationNotice
                 shown={unstaged.length}

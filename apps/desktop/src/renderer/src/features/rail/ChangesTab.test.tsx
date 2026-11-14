@@ -1082,6 +1082,26 @@ describe("ChangesTab tree folding", () => {
     ).toEqual(["Hide the files in src", "Show the files in src/gen"]);
   });
 
+  it("writes no fold state for a file this list does not hold", async () => {
+    // File history of an unchanged file in src/gen: the dump must stay folded.
+    await renderWith({ path: "src/gen/other.ts", staged: null });
+    expect(shownPaths()).toEqual(["src/app.ts"]);
+  });
+
+  it("names a one-file folder's actions in the singular", async () => {
+    mocks.dispatch.mockImplementation(async (command: string) =>
+      command === "changes:list"
+        ? ok({ staged: [], unstaged: [{ path: "docs/README.md", status: "M", staged: false }] })
+        : ok(null)
+    );
+    await renderWith(null);
+    const labels = [...container.querySelectorAll(".folder-row button")].map((b) =>
+      b.getAttribute("aria-label")
+    );
+    expect(labels).toContain("Stage the file in docs");
+    expect(labels).toContain("Discard the file in docs");
+  });
+
   it("unfolds the folders above a file opened from elsewhere, once", async () => {
     await renderWith({ path: "src/gen/f3.ts", staged: false });
     expect(shownPaths()).toContain("src/gen/f3.ts");

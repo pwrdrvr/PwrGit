@@ -11492,6 +11492,8 @@ button.ref-chip:focus-visible {
   min-height: 0;
   overflow-y: auto;
   padding: 12px;
+  /* One level of the Changes tree (see "Changes tree" below). */
+  --tree-indent: 14px;
 }
 .changes-section {
   display: flex;
@@ -11554,9 +11556,6 @@ button.ref-chip:focus-visible {
    above. One guide line per ancestor, centred under that ancestor's chevron
    (4px row padding + half the 16px twisty = 12px), drawn on ::before so the
    rows' own hover and selection backgrounds stay untouched. */
-.changes-list {
-  --tree-indent: 14px;
-}
 .file-row--tree,
 .folder-row {
   position: relative;
@@ -11753,7 +11752,7 @@ button.ref-chip:focus-visible {
   display: flex;
   align-items: center;
   gap: 6px;
-  padding: 4px 4px 4px calc(4px + var(--tree-depth, 0) * var(--tree-indent, 14px));
+  padding: 4px 4px 4px calc(4px + var(--tree-depth, 0) * var(--tree-indent));
   min-height: 30px;
   border-radius: var(--radius-md);
   margin-bottom: 1px;

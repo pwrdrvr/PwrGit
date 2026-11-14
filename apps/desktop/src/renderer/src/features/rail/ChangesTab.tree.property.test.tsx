@@ -59,14 +59,14 @@ async function renderRail(unstaged: string[]) {
       />
     );
   });
-  const labelled = (prefix: string): string[] =>
-    [...container.querySelectorAll("button")]
+  const labelled = (prefix: string, scope = "button"): string[] =>
+    [...container.querySelectorAll(scope)]
       .map((b) => b.getAttribute("aria-label") ?? "")
       .filter((label) => label.startsWith(prefix))
       .map((label) => label.slice(prefix.length));
   return {
     container,
-    visibleFiles: () => labelled("Stage ").filter((l) => !l.startsWith("all ")),
+    visibleFiles: () => labelled("Stage ", ".file-row button"),
     folderDirs: () => labelled("Hide the files in "),
     async cleanup() {
       await act(async () => root.unmount());
