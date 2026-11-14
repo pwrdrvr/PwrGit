@@ -1,5 +1,10 @@
 # Changelog
 
+## v0.59.2 - 2026-11-14
+
+- Changes - Improved the rail with a nested folder tree. Folder counts, folding, Stage/Unstage, and Discard now include files in subfolders instead of treating each directory as an unrelated group. Single-child folder chains share a compact row, with folders before files and guides showing the hierarchy.
+- Changes navigation - Added automatic expansion of parent folders when opening a file from elsewhere. Folding a folder again keeps it closed; only large folders containing entirely new files start collapsed, so a broad refactor does not hide modified files by default.
+
 ## v0.59.1 - 2026-11-13
 
 - Diffs - Fixed file headers sticking below the top of PR diffs, the diff pane, and file history, allowing scrolled rows to reappear above them. Headers now sit flush with the pane's edge without moving at rest. Keyboard hunk navigation also leaves clearance beneath a single-line file header so the first rows and hunk action remain visible.
