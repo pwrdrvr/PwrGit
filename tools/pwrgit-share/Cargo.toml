@@ -1,0 +1,18 @@
+[package]
+name = "pwrgit-share"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.94"
+license = "MIT"
+authors = ["PwrDrvr LLC"]
+description = "Copy-on-write Cargo target seeding for new Git worktrees, conservatively gated"
+publish = false
+
+[dependencies]
+libc = "0.2"
+memchr = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+[dev-dependencies]
+proptest = { version = "=1.9.0", default-features = false, features = ["std"] }
