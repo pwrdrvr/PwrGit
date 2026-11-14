@@ -7,10 +7,8 @@ import {
   useViewportTooltip
 } from "../../lib/useViewportTooltip";
 import { fileLabel } from "../file-tree/file-tree";
-import { TreeFolderRow, treeDepthStyle } from "../file-tree/TreeFolderRow";
+import { TreeFileDir, TreeFolderRow, treeDepthStyle } from "../file-tree/TreeFolderRow";
 import { useFileTree } from "../file-tree/useFileTree";
-
-const NO_FILES: CommitFileChange[] = [];
 
 /**
  * Commit-scoped file list in the rail — the mirror of the Changes tab for a
@@ -52,7 +50,7 @@ export function CommitTab({
 
   const openPath = view?.kind === "file" ? view.path : null;
   const { rows, nested, toggle } = useFileTree(
-    files ?? NO_FILES,
+    files,
     `${worktreeId}:${hash}`,
     openPath
   );
@@ -123,6 +121,7 @@ export function CommitTab({
                   {...hoverTooltip(tip, "View this file's changes in the commit")}
                 >
                   <span {...fileStatusChipProps(f.status)}>{f.status}</span>
+                  <TreeFileDir path={f.path} />
                   <span className="file-path" {...hoverTooltip(tip, f.path)}>
                     {fileLabel(f.path)}
                   </span>

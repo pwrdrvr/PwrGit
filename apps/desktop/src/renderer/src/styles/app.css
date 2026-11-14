@@ -11554,7 +11554,8 @@ button.ref-chip:focus-visible {
    steps each level in by --tree-indent, and a file's status chip sits past
    the chevron column so it lines up with its sibling folders' icons. A list
    without folders keeps its flat padding. `.tree-file` is any file row with
-   8px left padding and an 8px gap (`.file-row`, `.cr-rail__file`). One guide line per ancestor, centred under that ancestor's chevron
+   8px left padding and an 8px gap (`.file-row`, `.cr-rail__file`). One
+   guide line per ancestor, centred under that ancestor's chevron
    (4px row padding + half the 16px twisty = 12px), drawn on ::before so the
    rows' own hover and selection backgrounds stay untouched. */
 .tree-file,

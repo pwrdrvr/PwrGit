@@ -4,11 +4,22 @@ import {
   useViewportTooltip,
   type ViewportTooltip
 } from "../../lib/useViewportTooltip";
+import { fileLabel } from "./file-tree";
 
 /** Indent level for a tree row. The stylesheet turns it into padding and one
  *  guide line per ancestor folder ("File tree" in app.css). */
 export const treeDepthStyle = (depth: number): CSSProperties =>
   ({ "--tree-depth": depth }) as CSSProperties;
+
+/**
+ * The folders above a file, for screen readers: a tree row shows only the
+ * file's name, and the indent that places it is not read aloud. Put it just
+ * before the name, so the row reads as the full path (`src/a/` + `b.ts`).
+ */
+export function TreeFileDir({ path }: { path: string }) {
+  const dir = path.slice(0, path.length - fileLabel(path).length);
+  return dir === "" ? null : <span className="a11y-sr-only">{dir}</span>;
+}
 
 export function filesCount(count: number): string {
   return `${count} file${count === 1 ? "" : "s"}`;

@@ -7,7 +7,7 @@ import {
 } from "../../lib/useViewportTooltip";
 import type { DiffFileStatus } from "../diff/parse-diff";
 import { fileLabel } from "../file-tree/file-tree";
-import { TreeFolderRow, treeDepthStyle } from "../file-tree/TreeFolderRow";
+import { TreeFileDir, TreeFolderRow, treeDepthStyle } from "../file-tree/TreeFolderRow";
 import { useFileTree } from "../file-tree/useFileTree";
 import { shortWhen } from "../graph/graph-view";
 import type { ChangeRequestViewState } from "./useChangeRequestView";
@@ -126,6 +126,7 @@ export function ChangeRequestRail({
                     {...hoverTooltip(tip, file.oldPath === undefined ? file.path : `${file.oldPath} → ${file.path}`)}
                   >
                     <span {...fileStatusChipProps(letter)}>{letter}</span>
+                    <TreeFileDir path={file.path} />
                     <span className="cr-rail__path">{fileLabel(file.path)}</span>
                     {!file.binary && (
                       <span className="cr-rail__stat">

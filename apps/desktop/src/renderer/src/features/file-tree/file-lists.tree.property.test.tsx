@@ -21,8 +21,9 @@ import { buildFileTree, fileLabel, visibleTreeRows } from "./file-tree";
 /**
  * Every rail file list draws the same folder tree, not a flat list of full
  * paths: the rows on screen are the model's rows (label, depth, folders
- * first), and folding a folder hides exactly the files beneath it. Before
- * this, the Commit tab and the change-request rail listed full paths flat.
+ * first), each file row reads as its full path, and folding a folder hides
+ * exactly the files beneath it. Before this, the Commit tab and the
+ * change-request rail listed full paths flat.
  */
 const under = (path: string, dir: string): boolean => path.startsWith(`${dir}/`);
 
@@ -133,6 +134,15 @@ describe.each(surfaces)("$name draws a folder tree (property)", (surface) => {
                 : `${nested ? row.depth : 0}:f:${fileLabel(row.file.path)}`
             )
           );
+
+          // A row shows only the file's name, but reads as its full path (the
+          // folder part for screen readers), so `src/a.ts` and `lib/a.ts`
+          // stay two different rows to anyone who can't see the indent.
+          const read = [...list.container.querySelectorAll(surface.fileRowSelector)].map((el) => {
+            const text = el.textContent ?? "";
+            return paths.filter((p) => text.includes(p)).sort((a, b) => b.length - a.length)[0];
+          });
+          expect(read.sort()).toEqual([...paths].sort());
 
           const folders = [...list.container.querySelectorAll(".folder-row")];
           fc.pre(folders.length > 0);

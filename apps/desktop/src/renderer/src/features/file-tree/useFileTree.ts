@@ -13,6 +13,7 @@ import {
 type FoldState = { key: string; open: Readonly<Record<string, boolean>> };
 
 const NONE: Readonly<Record<string, boolean>> = {};
+const NO_FILES: readonly never[] = [];
 
 export type FileTreeView<F extends TreeFile> = {
   tree: FileTree<F>;
@@ -27,6 +28,8 @@ export type FileTreeView<F extends TreeFile> = {
 /**
  * One file list's tree and its fold state.
  *
+ * - `files` is `null` while the list loads. Pass the list itself, never a
+ *   fresh `[]`: the tree is rebuilt whenever the array's identity changes.
  * - `listKey` names the list (a worktree's staged side, one commit, one change
  *   request's scope). Fold state belongs to it: a new key starts from the
  *   defaults rather than carrying another list's folds.
@@ -36,10 +39,11 @@ export type FileTreeView<F extends TreeFile> = {
  *   writes nothing.
  */
 export function useFileTree<F extends TreeFile>(
-  files: readonly F[],
+  loaded: readonly F[] | null,
   listKey: string,
   revealPath: string | null
 ): FileTreeView<F> {
+  const files: readonly F[] = loaded ?? NO_FILES;
   const tree = useMemo(() => buildFileTree(files), [files]);
   const [fold, setFold] = useState<FoldState>({ key: listKey, open: NONE });
   const open = fold.key === listKey ? fold.open : NONE;

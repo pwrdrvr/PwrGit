@@ -37,10 +37,9 @@ import {
   type ChangesRowTarget
 } from "./changes-row-menu";
 import { fileLabel } from "../file-tree/file-tree";
-import { TreeFolderRow, treeDepthStyle } from "../file-tree/TreeFolderRow";
+import { TreeFileDir, TreeFolderRow, treeDepthStyle } from "../file-tree/TreeFolderRow";
 import { useFileTree, type FileTreeView } from "../file-tree/useFileTree";
 
-const NO_FILES: FileChange[] = [];
 const STAGED_SOURCE: DraftSource = { kind: "staged" };
 
 function PlusIcon() {
@@ -190,6 +189,7 @@ function FileRow({
       {...hoverTooltip(tip, split ? "Partly staged — view these changes" : "View changes")}
     >
       <span {...fileStatusChipProps(file.status)}>{file.status}</span>
+      <TreeFileDir path={file.path} />
       <span className="file-path" {...hoverTooltip(tip, file.path)}>
         {label}
       </span>
@@ -422,12 +422,12 @@ export function ChangesTab({
   // history) unfolds the folders above its row in the section that marks it.
   const activePath = activeFile?.path ?? null;
   const stagedTree = useFileTree(
-    changes?.staged ?? NO_FILES,
+    changes?.staged ?? null,
     `${wtId ?? ""}:staged`,
     effectiveActiveStaged === true ? activePath : null
   );
   const unstagedTree = useFileTree(
-    changes?.unstaged ?? NO_FILES,
+    changes?.unstaged ?? null,
     `${wtId ?? ""}:unstaged`,
     effectiveActiveStaged === false ? activePath : null
   );
