@@ -184,7 +184,8 @@ describe.each(surfaces)("$name draws a folder tree (property)", (surface) => {
           await list.cleanup();
         }
       }),
-      { numRuns: 30 }
+      // The rule flips between 10 and 11 files: always try both sides.
+      { numRuns: 30, examples: [[10, false], [11, false], [11, true]] }
     );
   });
 });

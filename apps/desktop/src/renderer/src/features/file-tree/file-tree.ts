@@ -23,7 +23,7 @@ export type TreeFile = { path: string; status?: string };
  */
 const NEW_FILE_STATUSES: ReadonlySet<string> = new Set(["?", "A", "added"]);
 
-export function isNewFile(file: TreeFile): boolean {
+function isNewFile(file: TreeFile): boolean {
   return file.status !== undefined && NEW_FILE_STATUSES.has(file.status);
 }
 

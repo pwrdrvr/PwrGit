@@ -36,9 +36,9 @@ const pathsArb = fc
     { minLength: 1, maxLength: 10 }
   );
 
-async function renderRail(unstaged: string[]) {
+async function renderRail(unstaged: string[], staged: ChangeSet["staged"] = []) {
   const listed: ChangeSet = {
-    staged: [],
+    staged,
     unstaged: unstaged.map((path) => ({ path, status: "M", staged: false }))
   };
   mocks.subscribe.mockReturnValue(() => undefined);
@@ -105,6 +105,36 @@ describe("ChangesTab tree (property)", () => {
         }
       }),
       { numRuns: 60 }
+    );
+  });
+
+  it("starts a staged folder of more than 10 added files folded, and no other", async () => {
+    // `git add vendor/` stages hundreds of new files; their folder starts as
+    // one row, like the same files untracked. One edited file keeps it open.
+    await fc.assert(
+      fc.asyncProperty(fc.integer({ min: 1, max: 16 }), fc.boolean(), async (count, edited) => {
+        const staged: ChangeSet["staged"] = [
+          ...Array.from({ length: count }, (_, i) => ({
+            path: `vendor/lib/f${i}.ts`,
+            status: "A" as const,
+            staged: true
+          })),
+          ...(edited ? [{ path: "vendor/lib/edited.ts", status: "M" as const, staged: true }] : [])
+        ];
+        const rail = await renderRail(["README.md"], staged);
+        try {
+          const twisty = rail.container.querySelector<HTMLButtonElement>(".folder-row__twisty");
+          const folds = count > 10 && !edited;
+          expect(twisty?.getAttribute("aria-expanded")).toBe(String(!folds));
+          expect(rail.container.querySelectorAll(".file-row").length).toBe(
+            1 + (folds ? 0 : staged.length)
+          );
+        } finally {
+          await rail.cleanup();
+        }
+      }),
+      // The rule flips between 10 and 11 files: always try both sides.
+      { numRuns: 30, examples: [[10, false], [11, false], [11, true]] }
     );
   });
 });
