@@ -95,9 +95,10 @@ describe("buildFileTree", () => {
       const tree = buildFileTree(Array.from({ length: 11 }, (_, i) => ({ path: `vendor/f${i}.ts`, status })));
       expect(folderStartsOpen(tree.folders[0]!), status).toBe(false);
     }
-    for (const status of ["M", "D", "modified", "renamed", undefined]) {
+    for (const status of ["M", "D", "modified", "renamed", null]) {
       const files = Array.from({ length: 11 }, (_, i) => ({ path: `vendor/f${i}.ts`, status: "A" }));
-      const tree = buildFileTree([...files, { path: "vendor/x.ts", status }]);
+      const other = status === null ? { path: "vendor/x.ts" } : { path: "vendor/x.ts", status };
+      const tree = buildFileTree<{ path: string; status?: string }>([...files, other]);
       expect(folderStartsOpen(tree.folders[0]!), String(status)).toBe(true);
     }
   });
