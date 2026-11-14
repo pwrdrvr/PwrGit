@@ -16562,6 +16562,15 @@ body.is-col-resizing {
   border-bottom: 1px solid var(--border-subtle);
   background: var(--bg-input);
 }
+/* j/k in the diff pane scroll a hunk into view with `block: "nearest"`. Going
+   up, that lands the hunk at the scrollport's top edge, where its own file's
+   head is stuck, so the hunk's first rows and its action sat under the head.
+   The margin keeps a hunk clear of a one-line head (~39px); a wrapped path
+   only makes the head taller in a pane too narrow to read code anyway.
+   e2e/sticky-heads.spec.ts measures it. */
+.diff-hunk {
+  scroll-margin-top: 44px;
+}
 .diff-file__status {
   flex: 0 0 auto;
   padding: 2px 6px;

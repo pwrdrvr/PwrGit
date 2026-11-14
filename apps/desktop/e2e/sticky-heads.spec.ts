@@ -84,10 +84,17 @@ for (const host of HOSTS) {
     }
   });
 
-  test(`${host}: at rest the first head still sits below the host's padding`, () => {
-    const r = reportFor(host);
-    // Never stuck at scrollTop 0, so the fix must not move it: it starts
-    // after the host's top padding (plus, in file history, the commit strip).
-    expect(r.restOffset).toBeGreaterThanOrEqual(r.paddingTop);
+  test(`${host}: at rest no head moves from the top of its file`, () => {
+    // Never stuck at scrollTop 0 (nor any head below the fold), so the fix
+    // must leave every one where layout put it.
+    for (const { what, shift } of reportFor(host).restShifts) {
+      expect(Math.abs(shift), `${what} shifted ${shift}px at rest`).toBeLessThanOrEqual(0.5);
+    }
+  });
+
+  test(`${host}: a hunk scrolled into view clears its file's stuck head`, () => {
+    const { hunkClearance } = reportFor(host);
+    expect(hunkClearance, "hunk not found").not.toBeNaN();
+    expect(hunkClearance, `hunk top sits ${-hunkClearance}px under the head`).toBeGreaterThanOrEqual(-0.5);
   });
 }

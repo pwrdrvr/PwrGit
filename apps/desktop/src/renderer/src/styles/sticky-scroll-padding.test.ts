@@ -52,16 +52,18 @@ function rules(css: string): Rule[] {
   return out;
 }
 
-function stylesheets(dir: string, acc: { file: string; css: string }[] = []) {
+function sources(dir: string, ext: RegExp, acc: { file: string; text: string }[] = []) {
   for (const entry of readdirSync(dir)) {
     const full = resolve(dir, entry);
-    if (statSync(full).isDirectory()) stylesheets(full, acc);
-    else if (entry.endsWith(".css")) acc.push({ file: full, css: readFileSync(full, "utf8") });
+    if (statSync(full).isDirectory()) sources(full, ext, acc);
+    else if (ext.test(entry) && !/\.test\.tsx?$/.test(entry)) {
+      acc.push({ file: full, text: readFileSync(full, "utf8") });
+    }
   }
   return acc;
 }
 
-const ALL = stylesheets(rendererRoot).flatMap(({ css }) => rules(css));
+const ALL = sources(rendererRoot, /\.css$/).flatMap(({ text }) => rules(text));
 
 const decl = (body: string, prop: string): string | undefined => {
   const m = new RegExp(`(?:^|;|\\s)${prop}\\s*:\\s*([^;]+)`).exec(body);
@@ -74,19 +76,51 @@ const rulesFor = (selector: string): Rule[] =>
 
 type Side = "top" | "left";
 
-/** The container's padding on one side, from its own rules (last wins). */
+/** Splits a shorthand's value on spaces outside parentheses. */
+const words = (v: string): string[] => v.split(/\s+(?![^(]*\))/);
+
+/**
+ * The container's padding on one side, from its own rules (last wins), read
+ * through the physical and the logical properties (horizontal LTR).
+ */
 function paddingOf(container: string, side: Side): string {
   let value = "0";
+  const axis = side === "top" ? "block" : "inline";
   for (const r of rulesFor(container)) {
-    const longhand = decl(r.body, `padding-${side}`);
+    // Declaration order within a rule is not tracked; one rule sets one form.
     const short = decl(r.body, "padding");
     if (short !== undefined) {
-      const parts = short.split(/\s+(?![^(]*\))/);
+      const parts = words(short);
       value = side === "top" ? parts[0]! : (parts[3] ?? parts[1] ?? parts[0])!;
     }
+    const logical = decl(r.body, `padding-${axis}`);
+    if (logical !== undefined) value = words(logical)[0]!;
+    const start = decl(r.body, `padding-${axis}-start`);
+    if (start !== undefined) value = start;
+    const longhand = decl(r.body, `padding-${side}`);
     if (longhand !== undefined) value = longhand;
   }
   return value;
+}
+
+/**
+ * The inset a sticky rule ends up with on one side: its own, unless a later
+ * rule that targets the same element (`.x .sticky`, `.sticky.is-y`) sets it.
+ * Each such override has to account for the padding too.
+ */
+function insetsOf(selector: string, side: Side): string[] {
+  // The element itself, under a context or in a state; never a ::pseudo
+  // element, which is a separate box with its own positioning.
+  const targets = (part: string): boolean =>
+    !part.includes("::") &&
+    (part === selector ||
+      part.endsWith(` ${selector}`) ||
+      part.endsWith(`>${selector}`) ||
+      part.startsWith(`${selector}.`) ||
+      part.startsWith(`${selector}:`));
+  return ALL.filter((r) => r.selector.split(",").map((p) => p.trim()).some(targets))
+    .map((r) => decl(r.body, side))
+    .filter((v): v is string => v !== undefined);
 }
 
 const isZero = (v: string): boolean => /^0(px)?$/.test(v);
@@ -118,6 +152,13 @@ describe("sticky elements vs their scroll container's padding", () => {
     expect(STICKY.length).toBeGreaterThanOrEqual(Object.keys(INVENTORY).length);
   });
 
+  it("sets sticky only in stylesheets, where this test can see it", () => {
+    const inline = sources(rendererRoot, /\.tsx?$/)
+      .filter(({ text }) => /position\s*:\s*["'`]sticky/.test(text))
+      .map(({ file }) => file);
+    expect(inline, "Move inline sticky positioning into app.css and INVENTORY").toEqual([]);
+  });
+
   it("lists every sticky rule with the container it sticks in", () => {
     const unlisted = STICKY.map((r) => r.selector).filter((s) => !(s in INVENTORY));
     expect(
@@ -132,20 +173,23 @@ describe("sticky elements vs their scroll container's padding", () => {
       const rule = STICKY.find((r) => r.selector === selector);
       expect(rule, `${selector} is no longer sticky; drop it from INVENTORY`).toBeDefined();
       for (const side of ["top", "left"] as const) {
-        const inset = decl(rule!.body, side);
-        if (inset === undefined) continue;
+        const insets = insetsOf(selector, side);
+        if (insets.length === 0) continue;
         for (const container of containers) {
           expect(rulesFor(container).length, `no rule for ${container}`).toBeGreaterThan(0);
           const pad = paddingOf(container, side);
           if (isZero(pad) || compensated !== undefined) continue;
           // Padded: the container must publish its padding through the
-          // shared property, and the sticky must pull itself back by it.
+          // shared property, and every inset the sticky can end up with must
+          // pull it back by that much.
           expect(pad, `${container} pads its ${side} with a literal`).toBe(
             "var(--sticky-scroll-pad-top)"
           );
-          expect(inset, `${selector} sticks ${pad} inside ${container}`).toMatch(
-            /calc\(\s*-1\s*\*\s*var\(--sticky-scroll-pad-top/
-          );
+          for (const inset of insets) {
+            expect(inset, `${selector} sticks ${pad} inside ${container}`).toMatch(
+              /calc\(\s*-1\s*\*\s*var\(--sticky-scroll-pad-top/
+            );
+          }
         }
       }
     });

@@ -44,9 +44,29 @@ function addedFile(path: string, lines: number): string {
   ].join("\n");
 }
 
+/** A modified file with two hunks, so one hunk sits mid-file below its head. */
+function modifiedFile(path: string, lines: number): string {
+  const hunk = (start: number): string[] => [
+    `@@ -${start},${lines} +${start},${lines} @@`,
+    ...Array.from({ length: lines }, (_, i) =>
+      i === 3 ? `+  tuned_${start + i}: true` : `   setting_${start + i}: true`
+    )
+  ];
+  return [
+    `diff --git a/${path} b/${path}`,
+    "index 2222222..3333333 100644",
+    `--- a/${path}`,
+    `+++ b/${path}`,
+    ...hunk(10),
+    ...hunk(200)
+  ].join("\n");
+}
+
 const PATCH = [
   addedFile(".ci/workflows/widget-share.yml", 60),
-  addedFile("tools/widget-share/Cargo.toml", 60),
+  // Short hunks: `block: "nearest"` aligns a hunk TALLER than the pane by
+  // its bottom edge, so only one that fits shows the top-edge case.
+  modifiedFile("tools/widget-share/Cargo.toml", 8),
   addedFile("tools/widget-share/README.md", 60)
 ].join("\n") + "\n";
 
@@ -101,11 +121,17 @@ export type StickyReport = {
    * of the host show through any gap, so it must be 0.
    */
   stuckGaps: { what: string; gap: number }[];
-  /** At rest (scrollTop 0), the first head's distance below the scrollport
-   *  top: the fix must not move anything that isn't stuck. */
-  restOffset: number;
-  /** The host's own top padding, for the rest check. */
+  /** At rest (scrollTop 0), how far each head sits from the top of its own
+   *  file block's content box. A head that isn't stuck must not move: 0. */
+  restShifts: { what: string; shift: number }[];
+  /** The host's own top padding, which is what opens the gap. */
   paddingTop: number;
+  /**
+   * A mid-file hunk scrolled into view from below with `block: "nearest"`, as
+   * the diff pane's j/k do: its top minus the bottom of its file's stuck head.
+   * Negative means rows hid under the head.
+   */
+  hunkClearance: number;
 };
 
 const frame = (): Promise<void> =>
@@ -129,8 +155,14 @@ async function report(): Promise<StickyReport[]> {
 
     scroller.scrollTop = 0;
     await frame();
-    const first = stickies[0];
-    const restOffset = first === undefined ? NaN : first.getBoundingClientRect().top - portTop();
+    const restShifts = stickies.map((sticky) => {
+      const block = sticky.parentElement!;
+      const contentTop = block.getBoundingClientRect().top + block.clientTop;
+      return {
+        what: `${sticky.className} @ ${block.getAttribute("data-path") ?? "?"}`,
+        shift: Math.round((sticky.getBoundingClientRect().top - contentTop) * 100) / 100
+      };
+    });
 
     const stuckGaps: StickyReport["stuckGaps"] = [];
     for (const sticky of stickies) {
@@ -147,12 +179,27 @@ async function report(): Promise<StickyReport[]> {
         gap: Math.round((sticky.getBoundingClientRect().top - portTop()) * 100) / 100
       });
     }
+    // The second hunk of the two-hunk file, reached from further down.
+    const hunk = scroller.querySelectorAll<HTMLElement>(".diff-file")[1]?.querySelectorAll<HTMLElement>(
+      ".diff-hunk"
+    )[1];
+    let hunkClearance = NaN;
+    if (hunk !== undefined) {
+      scroller.scrollTop = scroller.scrollHeight;
+      await frame();
+      hunk.scrollIntoView({ block: "nearest" });
+      await frame();
+      const head = hunk.closest(".diff-file")!.querySelector<HTMLElement>(".diff-file__head")!;
+      hunkClearance =
+        Math.round((hunk.getBoundingClientRect().top - head.getBoundingClientRect().bottom) * 100) / 100;
+    }
     out.push({
       host: scene.dataset["host"] ?? "?",
       stickies: stickies.length,
       stuckGaps,
-      restOffset: Math.round(restOffset * 100) / 100,
-      paddingTop: parseFloat(getComputedStyle(scroller).paddingTop)
+      restShifts,
+      paddingTop: parseFloat(getComputedStyle(scroller).paddingTop),
+      hunkClearance
     });
   }
   return out;
