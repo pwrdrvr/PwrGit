@@ -15510,7 +15510,11 @@ body.is-col-resizing {
   flex: 1;
   min-height: 0;
   overflow-y: auto;
-  padding: 14px 20px 20px;
+  /* Read by `.diff-file__head`'s sticky offset. A diff lives in here, and
+     a sticky head's `top` is measured from this box's PADDING edge — see
+     there. Change the padding through this, never as a literal. */
+  --sticky-scroll-pad-top: 14px;
+  padding: var(--sticky-scroll-pad-top) 20px 20px;
 }
 
 /* ---- File history + blame ---- */
@@ -15586,7 +15590,11 @@ body.is-col-resizing {
   flex: 1;
   min-height: 0;
   overflow: auto;
-  padding: 12px 16px 24px;
+  /* Read by `.diff-file__head`'s sticky offset. A diff lives in here, and
+     a sticky head's `top` is measured from this box's PADDING edge — see
+     there. Change the padding through this, never as a literal. */
+  --sticky-scroll-pad-top: 12px;
+  padding: var(--sticky-scroll-pad-top) 16px 24px;
 }
 /* Panels stay mounted across tab switches; `hidden` is what hides the
    inactive one, so nothing here may set `display` on it. */
@@ -16533,10 +16541,19 @@ body.is-col-resizing {
 }
 /* Pinned while its own file scrolls, pushed out by the next file's head — so
    the name, the stat and the file's menu stay reachable however far down you
-   are. Bounded by `.diff-file`, which is what makes the handoff happen. */
+   are. Bounded by `.diff-file`, which is what makes the handoff happen.
+
+   `top` is NOT 0. Chromium measures a sticky inset from the scroll
+   container's padding edge, and every diff host pads its top (12–14px), so
+   `top: 0` stuck the head that far down with rows scrolling past ABOVE it:
+   content slid under the head, then reappeared over it. The host publishes
+   its top padding as --sticky-scroll-pad-top; pulling the head up by that
+   much pins it to the scrollport's real edge. At rest nothing moves — the
+   head is only shifted once it would otherwise scroll away.
+   e2e/sticky-heads.spec.ts measures this in every host. */
 .diff-file__head {
   position: sticky;
-  top: 0;
+  top: calc(-1 * var(--sticky-scroll-pad-top, 0px));
   z-index: 1;
   display: flex;
   align-items: center;
@@ -16544,6 +16561,15 @@ body.is-col-resizing {
   padding: 8px 12px;
   border-bottom: 1px solid var(--border-subtle);
   background: var(--bg-input);
+}
+/* j/k in the diff pane scroll a hunk into view with `block: "nearest"`. Going
+   up, that lands the hunk at the scrollport's top edge, where its own file's
+   head is stuck, so the hunk's first rows and its action sat under the head.
+   The margin keeps a hunk clear of a one-line head (~39px); a wrapped path
+   only makes the head taller in a pane too narrow to read code anyway.
+   e2e/sticky-heads.spec.ts measures it. */
+.diff-hunk {
+  scroll-margin-top: 44px;
 }
 .diff-file__status {
   flex: 0 0 auto;
@@ -21939,7 +21965,11 @@ button.agent-auth-node:focus-visible,
   flex: 1;
   min-height: 0;
   overflow-y: auto;
-  padding: 14px 20px 20px;
+  /* Read by `.diff-file__head`'s sticky offset. A diff lives in here, and
+     a sticky head's `top` is measured from this box's PADDING edge — see
+     there. Change the padding through this, never as a literal. */
+  --sticky-scroll-pad-top: 14px;
+  padding: var(--sticky-scroll-pad-top) 20px 20px;
 }
 /* One commit picked in the rail: say so above its diff, with the way back. */
 .cr-view__scope {
