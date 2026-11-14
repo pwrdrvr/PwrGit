@@ -1,7 +1,7 @@
 {
   "name": "@pwrgit/desktop",
   "productName": "PwrGit",
-  "version": "0.59.0",
+  "version": "0.59.1",
   "private": true,
   "description": "Cross-platform desktop git client",
   "homepage": "https://github.com/pwrdrvr/PwrGit",

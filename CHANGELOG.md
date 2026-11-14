@@ -1,5 +1,9 @@
 # Changelog
 
+## v0.59.1 - 2026-11-13
+
+- Diffs - Fixed file headers sticking below the top of PR diffs, the diff pane, and file history, allowing scrolled rows to reappear above them. Headers now sit flush with the pane's edge without moving at rest. Keyboard hunk navigation also leaves clearance beneath a single-line file header so the first rows and hunk action remain visible.
+
 ## v0.59.0 - 2026-11-13
 
 - Getting started - Added Find my repositories, an empty-profile start screen, and a guided repository-selection step. The bounded, cancellable search looks near your home folder without descending into existing checkouts or cloud folders; protected macOS folders are searched only when requested. Clone and Fork can now offer a destination even before a profile has a repository folder.
