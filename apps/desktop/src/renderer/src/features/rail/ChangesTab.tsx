@@ -1,4 +1,5 @@
 import {
+  type CSSProperties,
   type MouseEvent as ReactMouseEvent,
   type ReactNode,
   useCallback,
@@ -36,10 +37,13 @@ import {
   targetPaths,
   type ChangesRowTarget
 } from "./changes-row-menu";
-
-/** A folder of new files this big starts collapsed — an untracked tree can be
- *  hundreds of files, and unfolding all of them buries the rest of the list. */
-const FOLDER_AUTO_COLLAPSE = 10;
+import {
+  ancestorDirs,
+  buildChangeTree,
+  fileLabel,
+  folderStartsOpen,
+  visibleTreeRows
+} from "./changes-tree";
 const STAGED_SOURCE: DraftSource = { kind: "staged" };
 
 function PlusIcon() {
@@ -109,46 +113,6 @@ export function commitFailureTitle(error: PwrGitError): string {
     : "Commit failed";
 }
 
-/**
- * One list entry: a single file, or a folder holding several of them. A folder
- * is the unit people actually think in — "stage the handoff scripts", "take
- * that whole directory back out" — so it gets one row that acts on every file
- * it lists, without hiding which files those are.
- */
-export type ChangeEntry =
-  | { kind: "file"; file: FileChange }
-  | { kind: "folder"; dir: string; files: FileChange[] };
-
-/** Group files by their parent folder, preserving git's order. */
-export function groupChanges(files: FileChange[]): ChangeEntry[] {
-  const entries: ChangeEntry[] = [];
-  const folders = new Map<string, { dir: string; files: FileChange[] }>();
-
-  for (const file of files) {
-    const slash = file.path.lastIndexOf("/");
-    if (slash <= 0) {
-      entries.push({ kind: "file", file });
-      continue;
-    }
-    const dir = file.path.slice(0, slash);
-    const open = folders.get(dir);
-    if (open === undefined) {
-      const folder = { dir, files: [file] };
-      folders.set(dir, folder);
-      entries.push({ kind: "folder", ...folder });
-    } else {
-      open.files.push(file);
-    }
-  }
-
-  // A "folder" holding one file is just that file with extra chrome.
-  return entries.flatMap((entry) => {
-    if (entry.kind === "file" || entry.files.length > 1) return [entry];
-    const only = entry.files[0];
-    return only === undefined ? [] : [{ kind: "file" as const, file: only }];
-  });
-}
-
 const countFormat = new Intl.NumberFormat();
 
 /**
@@ -189,11 +153,17 @@ function TruncationNotice({
   );
 }
 
+/** Indent level for a tree row; the stylesheet turns it into padding and
+ *  one guide line per ancestor folder. */
+const depthStyle = (depth: number): CSSProperties =>
+  ({ "--tree-depth": depth }) as CSSProperties;
+
 function FileRow({
   file,
   label,
   split,
-  nested,
+  depth,
+  tree,
   onToggle,
   onOpen,
   onDiscard,
@@ -201,13 +171,15 @@ function FileRow({
   selected
 }: {
   file: FileChange;
-  /** Text to show — the basename inside a folder group, the full path outside. */
+  /** Text to show: the last path segment. The full path is in the tooltip. */
   label: string;
   /** The same path is listed in the other section too: this file is partly
    *  staged. Without a marker the two rows are indistinguishable from two
    *  unrelated files that happen to share a name. */
   split: boolean;
-  nested: boolean;
+  depth: number;
+  /** The section has folders, so file rows sit in the tree's columns. */
+  tree: boolean;
   /** This row is what the main pane is currently showing. */
   selected: boolean;
   onToggle: () => void;
@@ -218,7 +190,8 @@ function FileRow({
   const tip = useViewportTooltip();
   return (
     <div
-      className={`file-row is-clickable${file.staged ? " is-staged" : ""}${split ? " is-split" : ""}${nested ? " file-row--nested" : ""}${selected ? " is-selected" : ""}`}
+      className={`file-row is-clickable${file.staged ? " is-staged" : ""}${split ? " is-split" : ""}${tree ? " file-row--tree" : ""}${selected ? " is-selected" : ""}`}
+      style={tree ? depthStyle(depth) : undefined}
       {...(selected ? { "aria-current": "true" as const } : {})}
       onClick={onOpen}
       onContextMenu={onContextMenu}
@@ -270,6 +243,8 @@ function FileRow({
 
 function FolderRow({
   dir,
+  label,
+  depth,
   count,
   open,
   staged,
@@ -278,7 +253,12 @@ function FolderRow({
   onDiscard,
   onContextMenu
 }: {
+  /** Full path, for tooltips and labels that must say which folder. */
   dir: string;
+  /** What the row shows: one segment, or a compacted chain. */
+  label: string;
+  depth: number;
+  /** Every file beneath the folder, at any depth. */
   count: number;
   open: boolean;
   /** The folder sits in the staged section, so its verb is "unstage". */
@@ -293,6 +273,7 @@ function FolderRow({
   return (
     <div
       className="folder-row"
+      style={depthStyle(depth)}
       onClick={onToggleOpen}
       onContextMenu={onContextMenu}
     >
@@ -319,7 +300,7 @@ function FolderRow({
         className="folder-row__path"
         {...hoverTooltip(tip, `${dir}/ — ${count} files`)}
       >
-        {dir}/
+        {label}
       </span>
       <span className="folder-row__count">{count}</span>
       <span className="file-row__actions">
@@ -378,7 +359,8 @@ export function ChangesTab({
   const [committing, setCommitting] = useState(false);
   const agent = useAgent("commitMessage");
   const messageRef = useRef<HTMLTextAreaElement>(null);
-  /** Explicit folder disclosure state; unset folders follow the size default. */
+  /** Explicit folder disclosure state, keyed `section:dir`; unset folders
+   *  follow `folderStartsOpen`. */
   const [folderOpen, setFolderOpen] = useState<Record<string, boolean>>({});
   const [menu, setMenu] = useState<{
     x: number;
@@ -455,6 +437,25 @@ export function ChangesTab({
       offChanges();
     };
   }, [wtId]);
+
+  // Opening a file from elsewhere (⌘K, history, the diff pane) unfolds the
+  // folders above it, so the marked row is on screen — VS Code's autoReveal.
+  // Keyed on the path alone: folding that folder again afterwards sticks.
+  const activePath = activeFile?.path ?? null;
+  const activeSide = activeFile?.staged ?? null;
+  useEffect(() => {
+    if (activePath === null) return;
+    const dirs = ancestorDirs(activePath);
+    if (dirs.length === 0) return;
+    const sections = activeSide === null ? ["s", "u"] : [activeSide ? "s" : "u"];
+    setFolderOpen((prev) => {
+      const next = { ...prev };
+      for (const section of sections) {
+        for (const dir of dirs) next[`${section}:${dir}`] = true;
+      }
+      return next;
+    });
+  }, [activePath, activeSide, wtId]);
 
   /**
    * Which of the paths about to be staged are conflicted. "." means "stage
@@ -695,74 +696,64 @@ export function ChangesTab({
       event.stopPropagation();
       setMenu({ x: event.clientX, y: event.clientY, target });
     };
-    const fileRow = (
-      file: FileChange,
-      key: string,
-      dir: string | null
-    ): ReactNode => {
-      const target: ChangesRowTarget = { kind: "file", file };
-      return (
-        <FileRow
-          key={key}
-          file={file}
-          label={dir === null ? file.path : file.path.slice(dir.length + 1)}
-          split={splitPaths.has(file.path)}
-          nested={dir !== null}
-          onToggle={() => run(command, [file.path])}
-          onOpen={() => onOpenDiff(file.path, stagedSection)}
-          onDiscard={() => void discardTarget(target)}
-          onContextMenu={(event) => openMenu(event, target)}
-          selected={
-            activeFile !== null &&
-            activeFile.path === file.path &&
-            effectiveActiveStaged === file.staged
-          }
-        />
-      );
-    };
-
-    return groupChanges(files).flatMap((entry, i) => {
-      if (entry.kind === "file") {
-        const key = `${keyPrefix}-${i}-${entry.file.path}`;
-        return [fileRow(entry.file, key, null)];
+    const tree = buildChangeTree(files);
+    const isTree = tree.folders.length > 0;
+    // Disclosure state is keyed per section: the same folder can hold both
+    // staged and unstaged files, and they fold independently.
+    const foldKey = (dir: string): string => `${keyPrefix}:${dir}`;
+    return visibleTreeRows(
+      tree,
+      (folder) => folderOpen[foldKey(folder.dir)] ?? folderStartsOpen(folder)
+    ).map((row) => {
+      if (row.kind === "file") {
+        const { file } = row;
+        const target: ChangesRowTarget = { kind: "file", file };
+        return (
+          <FileRow
+            key={`${keyPrefix}-f-${file.path}`}
+            file={file}
+            label={fileLabel(file.path)}
+            split={splitPaths.has(file.path)}
+            depth={row.depth}
+            tree={isTree}
+            onToggle={() => run(command, [file.path])}
+            onOpen={() => onOpenDiff(file.path, stagedSection)}
+            onDiscard={() => void discardTarget(target)}
+            onContextMenu={(event) => openMenu(event, target)}
+            selected={
+              activeFile !== null &&
+              activeFile.path === file.path &&
+              effectiveActiveStaged === file.staged
+            }
+          />
+        );
       }
-      // Disclosure state is keyed per section: the same folder can hold both
-      // staged and unstaged files, and they fold independently.
-      const foldKey = `${keyPrefix}:${entry.dir}`;
-      const open =
-        folderOpen[foldKey] ?? entry.files.length <= FOLDER_AUTO_COLLAPSE;
+      const { folder, open } = row;
       const target: ChangesRowTarget = {
         kind: "folder",
-        dir: entry.dir,
-        files: entry.files
+        dir: folder.dir,
+        files: folder.all
       };
-      return [
+      return (
         <FolderRow
-          key={`${keyPrefix}-${i}-${entry.dir}`}
-          dir={entry.dir}
-          count={entry.files.length}
+          key={`${keyPrefix}-d-${folder.dir}`}
+          dir={folder.dir}
+          label={folder.label}
+          depth={row.depth}
+          count={folder.all.length}
           open={open}
           staged={stagedSection}
           onToggleOpen={() =>
-            setFolderOpen((prev) => ({ ...prev, [foldKey]: !open }))
+            setFolderOpen((prev) => ({ ...prev, [foldKey(folder.dir)]: !open }))
           }
-          // Every listed file by name, not the directory: `git add -- dir`
-          // would also sweep in nested folders this row never showed.
-          onToggle={() =>
-            run(
-              command,
-              entry.files.map((f) => f.path)
-            )
-          }
+          // Every file beneath it by name, not the directory: past the render
+          // cap, `git add -- dir` would also sweep in files this list never
+          // showed.
+          onToggle={() => run(command, folder.all.map((f) => f.path))}
           onDiscard={() => void discardTarget(target)}
           onContextMenu={(event) => openMenu(event, target)}
-        />,
-        ...(open
-          ? entry.files.map((file, j) =>
-              fileRow(file, `${keyPrefix}-${i}-${j}-${file.path}`, entry.dir)
-            )
-          : [])
-      ];
+        />
+      );
     });
   };
 

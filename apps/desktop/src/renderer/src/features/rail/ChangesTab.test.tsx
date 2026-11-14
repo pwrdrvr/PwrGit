@@ -33,8 +33,7 @@ vi.mock("./SubmodulePanel", () => ({ SubmodulePanel: () => null }));
 import {
   ChangesTab,
   commitFailureTitle,
-  confirmAndDiscardAllChanges,
-  groupChanges
+  confirmAndDiscardAllChanges
 } from "./ChangesTab";
 
 const changes: ChangeSet = {
@@ -93,40 +92,6 @@ describe("commitFailureTitle", () => {
     expect(
       commitFailureTitle(failure("nothing_to_commit", "nothing to commit"))
     ).toBe("Nothing to commit");
-  });
-});
-
-describe("groupChanges", () => {
-  const untracked = (path: string) =>
-    ({ path, status: "?", staged: false }) as const;
-
-  it("gathers files under their folder, whatever their status", () => {
-    const edited = { path: "src/app.ts", status: "M", staged: false } as const;
-    expect(
-      groupChanges([
-        edited,
-        untracked("design/handoff/icon.swift"),
-        untracked("design/handoff/tray.mjs"),
-        untracked("README.md")
-      ])
-    ).toEqual([
-      { kind: "file", file: edited },
-      {
-        kind: "folder",
-        dir: "design/handoff",
-        files: [
-          untracked("design/handoff/icon.swift"),
-          untracked("design/handoff/tray.mjs")
-        ]
-      },
-      { kind: "file", file: untracked("README.md") }
-    ]);
-  });
-
-  it("does not wrap a lone file in folder chrome", () => {
-    expect(groupChanges([untracked("design/only.md")])).toEqual([
-      { kind: "file", file: untracked("design/only.md") }
-    ]);
   });
 });
 
@@ -195,19 +160,43 @@ describe("ChangesTab list", () => {
   });
 
   it("shows a new folder's files and stages the whole folder from one click", async () => {
-    expect(container.textContent).toContain("design/handoff/");
-    expect(container.textContent).toContain("icon.swift");
-    expect(container.textContent).toContain("tray.mjs");
+    // A tree: design/ holds handoff/ and one file of its own, folders first.
+    expect(
+      [...container.querySelectorAll(".folder-row__path, .file-path")].map(
+        (el) => el.textContent
+      )
+    ).toEqual([
+      "design",
+      "handoff",
+      "icon.swift",
+      "tray.mjs",
+      "Background Comparison.html"
+    ]);
 
     await act(async () => {
       buttonByLabel("Stage all 2 files in design/handoff").click();
     });
 
-    // Named files, not the directory — `git add -- design/handoff` would also
-    // sweep in nested folders this row never listed.
+    // Named files, not the directory: past the render cap, `git add -- dir`
+    // would sweep in files this row never listed.
     expect(mocks.dispatch).toHaveBeenCalledWith("changes:stage", {
       worktreeId: "worktree-1",
       paths: ["design/handoff/icon.swift", "design/handoff/tray.mjs"]
+    });
+  });
+
+  it("stages a parent folder's whole subtree, nested folders included", async () => {
+    await act(async () => {
+      buttonByLabel("Stage all 3 files in design").click();
+    });
+
+    expect(mocks.dispatch).toHaveBeenCalledWith("changes:stage", {
+      worktreeId: "worktree-1",
+      paths: [
+        "design/Background Comparison.html",
+        "design/handoff/icon.swift",
+        "design/handoff/tray.mjs"
+      ]
     });
   });
 
@@ -658,7 +647,9 @@ describe("ChangesTab folder actions", () => {
 
     const selected = [...container.querySelectorAll(".file-row.is-selected")];
     expect(selected).toHaveLength(1);
-    expect(selected[0]?.textContent).toContain("src/app.ts");
+    expect(
+      selected[0]?.querySelector('[aria-label="Stage src/app.ts"]')
+    ).not.toBeNull();
     expect(selected[0]?.getAttribute("aria-current")).toBe("true");
   });
 
@@ -710,8 +701,8 @@ describe("ChangesTab folder actions", () => {
   });
 
   it("offers no ignore entry for a tracked file", async () => {
-    const row = [...container.querySelectorAll(".file-row")].find((r) =>
-      r.textContent?.includes("src/app.ts")
+    const row = [...container.querySelectorAll(".file-row")].find(
+      (r) => r.querySelector('[aria-label="Stage src/app.ts"]') !== null
     );
     if (row === undefined) throw new Error("no tracked row");
     await rightClick(row);
@@ -1024,5 +1015,85 @@ describe("ChangesTab hidden-by-ignore-rules card", () => {
       container.dispatchEvent(new MouseEvent("mousedown", { bubbles: true }));
     });
     expect(card()).toBeNull();
+  });
+});
+
+describe("ChangesTab tree folding", () => {
+  let container: HTMLDivElement;
+  let root: Root;
+  const worktree = { id: "worktree-1" } as Worktree;
+  const dump: ChangeSet = {
+    staged: [],
+    unstaged: [
+      { path: "src/app.ts", status: "M", staged: false },
+      ...Array.from({ length: 11 }, (_, i) => ({
+        path: `src/gen/f${i}.ts`,
+        status: "?" as const,
+        staged: false
+      }))
+    ]
+  };
+
+  const shownPaths = (): string[] =>
+    [...container.querySelectorAll(".file-row button")]
+      .map((b) => b.getAttribute("aria-label") ?? "")
+      .filter((label) => label.startsWith("Stage "))
+      .map((label) => label.slice("Stage ".length));
+
+  const renderWith = async (
+    activeFile: { path: string; staged: boolean | null } | null
+  ): Promise<void> => {
+    await act(async () => {
+      root.render(
+        <ChangesTab
+          worktree={worktree}
+          activeEmail="a@b.c"
+          onOpenDiff={vi.fn()}
+          onOpenFileInsight={vi.fn()}
+          activeFile={activeFile}
+        />
+      );
+    });
+  };
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mocks.subscribe.mockReturnValue(() => undefined);
+    mocks.dispatch.mockImplementation(async (command: string) =>
+      command === "changes:list" ? ok(dump) : ok(null)
+    );
+    container = document.createElement("div");
+    document.body.append(container);
+    root = createRoot(container);
+  });
+
+  afterEach(async () => {
+    await act(async () => root.unmount());
+    container.remove();
+  });
+
+  it("starts a big all-new folder folded but leaves its parent open", async () => {
+    await renderWith(null);
+    expect(shownPaths()).toEqual(["src/app.ts"]);
+    expect(
+      [...container.querySelectorAll(".folder-row__twisty")].map((b) =>
+        b.getAttribute("aria-label")
+      )
+    ).toEqual(["Hide the files in src", "Show the files in src/gen"]);
+  });
+
+  it("unfolds the folders above a file opened from elsewhere, once", async () => {
+    await renderWith({ path: "src/gen/f3.ts", staged: false });
+    expect(shownPaths()).toContain("src/gen/f3.ts");
+    expect(container.querySelector(".file-row.is-selected")).not.toBeNull();
+
+    // Folding it again afterwards sticks while the same file stays open.
+    await act(async () => {
+      container
+        .querySelector<HTMLButtonElement>('[aria-label="Hide the files in src/gen"]')
+        ?.click();
+    });
+    await renderWith({ path: "src/gen/f3.ts", staged: false });
+    expect(shownPaths()).toEqual(["src/app.ts"]);
   });
 });

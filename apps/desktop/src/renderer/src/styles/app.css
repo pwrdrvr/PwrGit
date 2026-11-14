@@ -11546,10 +11546,40 @@ button.ref-chip:focus-visible {
   border-radius: var(--radius-md);
   margin-bottom: 1px;
 }
-/* A file inside an untracked-folder group: indented under its folder row and
-   labelled by basename, so the shared prefix is stated once, not per row. */
-.file-row--nested {
-  padding-left: 22px;
+/* ---- Changes tree ----
+   A section with folders lays its rows out as a tree (features/rail/
+   changes-tree.ts): `--tree-depth` steps each level in by --tree-indent, and
+   a file's status chip sits past the chevron column so it lines up with its
+   sibling folders' icons. A section without folders keeps the flat padding
+   above. One guide line per ancestor, centred under that ancestor's chevron
+   (4px row padding + half the 16px twisty = 12px), drawn on ::before so the
+   rows' own hover and selection backgrounds stay untouched. */
+.changes-list {
+  --tree-indent: 14px;
+}
+.file-row--tree,
+.folder-row {
+  position: relative;
+}
+.file-row--tree {
+  padding-left: calc(26px + var(--tree-depth, 0) * var(--tree-indent));
+}
+.file-row--tree::before,
+.folder-row::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 0;
+  /* Bridge the rows' 1px margin so a guide reads as one line. */
+  bottom: -1px;
+  width: calc(var(--tree-depth, 0) * var(--tree-indent));
+  pointer-events: none;
+  background: repeating-linear-gradient(
+    to right,
+    transparent 0 12px,
+    var(--border-subtle) 12px 13px,
+    transparent 13px var(--tree-indent)
+  );
 }
 .file-status {
   flex: 0 0 auto;
@@ -11717,13 +11747,13 @@ button.ref-chip:focus-visible {
   color: var(--text-primary);
 }
 
-/* ---- Untracked folder group ---- */
+/* ---- Changes tree folder row ---- */
 
 .folder-row {
   display: flex;
   align-items: center;
   gap: 6px;
-  padding: 4px 4px 4px 4px;
+  padding: 4px 4px 4px calc(4px + var(--tree-depth, 0) * var(--tree-indent, 14px));
   min-height: 30px;
   border-radius: var(--radius-md);
   margin-bottom: 1px;
