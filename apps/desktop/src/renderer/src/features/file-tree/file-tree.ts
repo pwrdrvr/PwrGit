@@ -12,9 +12,20 @@
  * - **Folders first**, then files, each in code-unit order (Git's order for
  *   the ASCII paths it lists).
  */
-/** Anything with a repository-relative path. `status: "?"` (untracked) is
- *  the only status the tree reads, for the fold default. */
+/** Anything with a repository-relative path. The tree reads `status` only
+ *  to tell a new file from the rest, for the fold default. */
 export type TreeFile = { path: string; status?: string };
+
+/**
+ * The statuses of a file that did not exist before, in each list's own
+ * vocabulary: untracked (`?`) and added (`A`) in Changes and a commit, and a
+ * change request's parsed diff (`added`).
+ */
+const NEW_FILE_STATUSES: ReadonlySet<string> = new Set(["?", "A", "added"]);
+
+export function isNewFile(file: TreeFile): boolean {
+  return file.status !== undefined && NEW_FILE_STATUSES.has(file.status);
+}
 
 export type FileTreeFolder<F extends TreeFile> = {
   /** Full path of the deepest folder this row stands for, no trailing slash. */
@@ -36,8 +47,9 @@ export type FileTreeRow<F extends TreeFile> =
   | { kind: "folder"; folder: FileTreeFolder<F>; depth: number; open: boolean }
   | { kind: "file"; file: F; depth: number };
 
-/** A folder of only new files this big starts folded: an untracked dump can
- *  be hundreds of files, and unfolding all of them buries the rest. */
+/** A folder of only new files this big starts folded: an untracked build
+ *  dump, or a commit that vendors a library, can be hundreds of files, and
+ *  unfolding all of them buries the rest. */
 export const FOLDER_AUTO_COLLAPSE = 10;
 
 /**
@@ -130,7 +142,7 @@ export function buildFileTree<F extends TreeFile>(files: readonly F[]): FileTree
 export function folderStartsOpen<F extends TreeFile>(folder: FileTreeFolder<F>): boolean {
   return !(
     folder.all.length > FOLDER_AUTO_COLLAPSE &&
-    folder.all.every((file) => file.status === "?")
+    folder.all.every(isNewFile)
   );
 }
 

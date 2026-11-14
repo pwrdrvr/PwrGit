@@ -15,6 +15,10 @@ section), a clicked commit's files (`CommitTab`) and a change request's files
   worktree, commit or scope starts from the defaults.
 - **A folder stands for its whole subtree.** Counts and actions use
   `folder.all`, never the folder's direct `files`.
+- **A folder of more than 10 files, all new, starts folded** (an untracked
+  dump, a vendored library). A list whose status names a new file
+  differently adds that status to `NEW_FILE_STATUSES`, or its big new
+  folders never fold.
 - `file-tree.test.ts` holds the model's properties;
   `file-lists.tree.property.test.tsx` checks each list draws the model.
   Add a new list to its `surfaces`.

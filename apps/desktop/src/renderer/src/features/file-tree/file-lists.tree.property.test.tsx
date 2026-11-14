@@ -37,7 +37,8 @@ type Surface = {
   name: string;
   fileLabelSelector: string;
   fileRowSelector: string;
-  render: (paths: string[]) => ReactElement;
+  /** `added` names the paths that are new in this list. */
+  render: (paths: string[], added?: ReadonlySet<string>) => ReactElement;
 };
 
 const surfaces: Surface[] = [
@@ -45,10 +46,10 @@ const surfaces: Surface[] = [
     name: "Commit tab",
     fileLabelSelector: ".file-row .file-path",
     fileRowSelector: ".file-row",
-    render: (paths) => {
+    render: (paths, added = new Set()) => {
       mocks.dispatch.mockImplementation(async (command: string) =>
         command === "commit:files"
-          ? ok(paths.map((path) => ({ path, status: "M" })))
+          ? ok(paths.map((path) => ({ path, status: added.has(path) ? "A" : "M" })))
           : ok(null)
       );
       return (
@@ -68,7 +69,7 @@ const surfaces: Surface[] = [
     name: "change-request rail",
     fileLabelSelector: ".cr-rail__file .cr-rail__path",
     fileRowSelector: ".cr-rail__file",
-    render: (paths) => {
+    render: (paths, added = new Set()) => {
       const state = {
         view: null,
         fetching: null,
@@ -79,7 +80,7 @@ const surfaces: Surface[] = [
         scopeError: null,
         files: paths.map((path) => ({
           path,
-          status: "modified",
+          status: added.has(path) ? "added" : "modified",
           hunks: [],
           additions: 1,
           deletions: 0,
@@ -94,11 +95,11 @@ const surfaces: Surface[] = [
   }
 ];
 
-async function mount(surface: Surface, paths: string[]) {
+async function mount(surface: Surface, paths: string[], added?: ReadonlySet<string>) {
   const container = document.createElement("div");
   document.body.append(container);
   const root = createRoot(container);
-  await act(async () => root.render(surface.render(paths)));
+  await act(async () => root.render(surface.render(paths, added)));
   const rows = (): string[] =>
     [...container.querySelectorAll(`.folder-row, ${surface.fileRowSelector}`)].map((row) => {
       const depth = (row as HTMLElement).style.getPropertyValue("--tree-depth") || "0";
@@ -161,6 +162,29 @@ describe.each(surfaces)("$name draws a folder tree (property)", (surface) => {
         }
       }),
       { numRuns: 40 }
+    );
+  });
+
+  it("starts a folder of more than 10 added files folded, and no other", async () => {
+    // A commit or PR that vendors a library lists hundreds of new files; the
+    // folder holding them starts as one row, as an untracked dump does in
+    // Changes. One edited file inside keeps it open.
+    await fc.assert(
+      fc.asyncProperty(fc.integer({ min: 1, max: 16 }), fc.boolean(), async (count, edited) => {
+        const fresh = Array.from({ length: count }, (_, i) => `vendor/lib/f${i}.ts`);
+        const paths = [...fresh, ...(edited ? ["vendor/lib/edited.ts"] : []), "README.md"];
+        const list = await mount(surface, paths, new Set(fresh));
+        try {
+          // The one folder row (`vendor/lib`, compacted) holds every file but README.
+          const twisty = list.container.querySelector<HTMLButtonElement>(".folder-row__twisty");
+          const folds = count > 10 && !edited;
+          expect(twisty?.getAttribute("aria-expanded")).toBe(String(!folds));
+          expect(list.fileLabels().length).toBe(folds ? 1 : paths.length);
+        } finally {
+          await list.cleanup();
+        }
+      }),
+      { numRuns: 30 }
     );
   });
 });

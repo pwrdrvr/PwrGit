@@ -90,6 +90,18 @@ describe("buildFileTree", () => {
     expect(folderStartsOpen(byDir.get("lib/gen")!)).toBe(false);
   });
 
+  it("counts added files as new in every list's vocabulary", () => {
+    for (const status of ["?", "A", "added"]) {
+      const tree = buildFileTree(Array.from({ length: 11 }, (_, i) => ({ path: `vendor/f${i}.ts`, status })));
+      expect(folderStartsOpen(tree.folders[0]!), status).toBe(false);
+    }
+    for (const status of ["M", "D", "modified", "renamed", undefined]) {
+      const files = Array.from({ length: 11 }, (_, i) => ({ path: `vendor/f${i}.ts`, status: "A" }));
+      const tree = buildFileTree([...files, { path: "vendor/x.ts", status }]);
+      expect(folderStartsOpen(tree.folders[0]!), String(status)).toBe(true);
+    }
+  });
+
   it("names every folder above a path", () => {
     expect(ancestorDirs("a/b/c.ts")).toEqual(["a", "a/b"]);
     expect(ancestorDirs("top.ts")).toEqual([]);
