@@ -247,14 +247,14 @@ describe("AI Features — availability", () => {
 });
 
 describe("AI Features — default agents", () => {
-  it("offers only Codex for history editing, and says why", async () => {
+  it("offers Codex and ChatGPT for history editing, and explains the ACP boundary", async () => {
     // Grok is enabled, and would be offered for a job that accepts ACP.
     settings = { ...DEFAULT_AI_PROVIDER_SETTINGS, acp: { enabledAgentIds: ["grok"], agents: {} } };
     await render();
 
     const provider = select("History editing provider");
-    expect(options(provider)).toEqual(["Codex"]);
-    expect(provider.disabled).toBe(true);
+    expect(options(provider)).toEqual(["Codex", "Sign in with ChatGPT"]);
+    expect(provider.disabled).toBe(false);
     expect(container.textContent).toContain("no-tools boundary");
   });
 
@@ -296,6 +296,46 @@ describe("AI Features — default agents", () => {
     expect(options(select("History editing reasoning effort"))).toEqual(["Default (low)", "low", "medium", "high", "xhigh", "max"]);
     await choose(select("History editing model"), "gpt-6.1-sol");
     expect(updates()).toEqual([{ jobs: { historyEditing: { model: "gpt-6.1-sol" } } }]);
+  });
+
+  it("preserves ChatGPT choices without using the ordinary Codex catalog", async () => {
+    settings = {
+      ...DEFAULT_AI_PROVIDER_SETTINGS,
+      jobs: {
+        ...DEFAULT_AI_PROVIDER_SETTINGS.jobs,
+        historyEditing: { provider: "chatgpt", model: "chatgpt-only", reasoning: "xhigh" },
+        commitMessage: { provider: "chatgpt" }
+      }
+    };
+    await render();
+
+    expect(select("History editing model").value).toBe("chatgpt-only");
+    expect(options(select("History editing model"))).toEqual(["Default", "chatgpt-only (saved choice)"]);
+    expect(select("History editing reasoning effort").value).toBe("xhigh");
+    expect(options(select("History editing reasoning effort"))).toContain("xhigh");
+    expect(options(select("History editing reasoning effort"))[0]).toBe("Default");
+    expect(options(select("Commit messages model"))).toEqual(["Default"]);
+    expect(updates()).toEqual([]);
+
+    await click(button(container, "Refresh models"));
+    expect(select("History editing model").value).toBe("chatgpt-only");
+    expect(select("History editing reasoning effort").value).toBe("xhigh");
+    expect(updates()).toEqual([]);
+
+    await choose(select("History editing model"), "");
+    expect(updates()).toEqual([{ jobs: { historyEditing: { model: "" } } }]);
+  });
+
+  it("keeps a ChatGPT effort when the same model id in the Codex account only supports another effort", async () => {
+    // The catalog-isolation property shrank to the same model id on both
+    // backends: a name match still does not make their capabilities shared.
+    models = [model({ id: "a", isDefault: true, supportedReasoningEfforts: ["high"], defaultReasoningEffort: "high" })];
+    settings = { ...DEFAULT_AI_PROVIDER_SETTINGS, jobs: { ...DEFAULT_AI_PROVIDER_SETTINGS.jobs,
+      historyEditing: { provider: "chatgpt", model: "a", reasoning: "low" } } };
+    await render();
+    expect(select("History editing model").value).toBe("a");
+    expect(select("History editing reasoning effort").value).toBe("low");
+    expect(updates()).toEqual([]);
   });
 
   it("refreshes runtime discovery along with the models so an upgrade clears its warning", async () => {

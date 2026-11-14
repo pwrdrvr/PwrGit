@@ -241,9 +241,9 @@ function JobDefaultRow(props: {
   // since been switched off.
   const provider: AiProviderId =
     settings === null ? "codex" : effectiveJobProvider(settings, props.jobId);
-  const isAcp = provider !== "codex";
+  const isAcp = provider !== "codex" && provider !== "chatgpt";
   const providerOptions: AiProviderId[] = [
-    "codex",
+    "codex", "chatgpt",
     ...(job.acp ? (settings?.acp.enabledAgentIds ?? []) : [])
   ];
   const providerLabel = (id: AiProviderId): string =>
@@ -261,19 +261,24 @@ function JobDefaultRow(props: {
   );
 
   // ---- Model ----
+  // The ordinary Codex account catalog does not describe the ChatGPT backend.
+  // Preserve its saved choices until a catalog from that backend is available.
+  const codexModels = provider === "codex" ? props.codexModels : null;
   const modelValue = value.model ?? "";
   const acpList = isAcp ? acpModels[provider] : undefined;
   const modelLoading = isAcp
     ? acpModelsLoadingIds.includes(provider) || acpList === undefined
-    : props.codexModelsLoading;
-  const visibleCodex = (props.codexModels ?? []).filter((model) => !model.hidden);
+    : provider === "chatgpt" ? false : props.codexModelsLoading;
+  const visibleCodex = (codexModels ?? []).filter((model) => !model.hidden);
   const choices: Array<{ id: string; label: string; isDefault: boolean }> = isAcp
     ? (acpList ?? []).map((model) => ({
         id: model.id,
         label: model.label,
         isDefault: model.isDefault === true
       }))
-    : visibleCodex.map((model) => ({
+    : provider === "chatgpt"
+      ? (modelValue === "" ? [] : [{ id: modelValue, label: `${modelValue} (saved choice)`, isDefault: false }])
+      : visibleCodex.map((model) => ({
         id: model.id,
         label: modelLabel(model),
         isDefault: model.isDefault
@@ -281,7 +286,7 @@ function JobDefaultRow(props: {
   // The Sol policy can hide the runtime's own default; Default still runs it,
   // so still name it.
   const hiddenDefault = isAcp ? undefined
-    : props.codexModels?.find((model) => model.isDefault && model.hidden);
+    : codexModels?.find((model) => model.isDefault && model.hidden);
   const defaultModel = choices.find((choice) => choice.isDefault) ??
     (hiddenDefault === undefined ? undefined : { label: modelLabel(hiddenDefault) });
   const modelInChoices = choices.some((choice) => choice.id === modelValue);
@@ -289,21 +294,21 @@ function JobDefaultRow(props: {
   // Default while main still runs it. Show the saved value without offering
   // it as a new selection; migrations are persisted by the Codex service.
   const savedHiddenCodex = isAcp ? undefined
-    : props.codexModels?.find((model) => model.id === modelValue && model.hidden);
+    : codexModels?.find((model) => model.id === modelValue && model.hidden);
   // A model the running provider's live list does not carry is left over from
   // another provider or a retired release. Shown as Default — and cleared, so
   // the value stored is the value shown is the value that runs. Only against a
   // list that actually loaded: an empty one may be a failed read.
   const liveIds = isAcp
     ? (acpList ?? []).map((model) => model.id)
-    : (props.codexModels ?? []).map((model) => model.id);
+    : (codexModels ?? []).map((model) => model.id);
   const staleModel = !modelLoading && liveIds.length > 0 && modelValue !== "" && !liveIds.includes(modelValue);
 
   // ---- Reasoning ----
   const reasoningValue = isAiReasoningEffort(value.reasoning) ? value.reasoning : "";
   const selectedCodexModel =
-    props.codexModels?.find((model) => model.id === modelValue) ??
-    props.codexModels?.find((model) => model.isDefault);
+    codexModels?.find((model) => model.id === modelValue) ??
+    codexModels?.find((model) => model.isDefault);
   const liveEfforts = selectedCodexModel?.supportedReasoningEfforts.filter(isAiReasoningEffort) ?? [];
   const efforts = codexEfforts(selectedCodexModel);
   const reasoningChoices: ReadonlyArray<{ value: string; label: string }> = isAcp
@@ -344,7 +349,7 @@ function JobDefaultRow(props: {
     patch({ ...(staleModel ? { model: "" } : {}), ...(staleReasoning ? { reasoning: "" } : {}) });
   }, [staleModel, staleReasoning, provider, modelValue, reasoningValue, patch]);
 
-  const modelError = isAcp ? acpModelErrors[provider] : props.codexModelsError;
+  const modelError = isAcp ? acpModelErrors[provider] : provider === "chatgpt" ? null : props.codexModelsError;
   const unavailable = settings === null;
   const blocked = ai.saving;
 
@@ -389,13 +394,13 @@ function JobDefaultRow(props: {
               onChange={(event) => {
                 if (blocked) return;
                 const next = event.target.value;
-                if (isAcp) {
+                if (isAcp || provider === "chatgpt") {
                   patch({ model: next });
                   return;
                 }
                 const nextModel =
-                  props.codexModels?.find((model) => model.id === next) ??
-                  (next === "" ? props.codexModels?.find((model) => model.isDefault) : undefined);
+                  codexModels?.find((model) => model.id === next) ??
+                  (next === "" ? codexModels?.find((model) => model.isDefault) : undefined);
                 patch({
                   model: next,
                   // An effort the new model does not take would be sent anyway.

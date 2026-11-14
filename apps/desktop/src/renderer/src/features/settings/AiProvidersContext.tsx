@@ -38,7 +38,8 @@ import type {
   AiProviderSettingsPatch,
   BuiltInAcpAgentId,
   CodexProviderDiscovery,
-  ProfileId
+  ProfileId,
+  ChatGptConnection
 } from "@pwrgit/shared";
 import { dispatch, subscribe } from "../../lib/pwrgit";
 import {
@@ -72,6 +73,8 @@ export type AiProvidersValue = {
   fetchAcpModels: (agentId: BuiltInAcpAgentId, refresh?: boolean) => Promise<void>;
   /** Every provider's status, in nav order. */
   statuses: readonly AiProviderStatus[];
+  chatGpt?: ChatGptConnection | null;
+  refreshChatGpt?: () => Promise<void>;
 };
 
 const AiProvidersContext = createContext<AiProvidersValue | null>(null);
@@ -85,6 +88,12 @@ export function AiProvidersProvider(props: {
   children: ReactNode;
 }): ReactElement {
   const { profileId } = props;
+  const [chatGpt, setChatGpt] = useState<ChatGptConnection | null>(null);
+  const refreshChatGpt = useCallback(async () => {
+    if (profileId === null) return;
+    const result = await dispatch("aiProviders:chatGptStatus", { profileId });
+    if (profileRef.current === profileId && result.ok) setChatGpt(result.value);
+  }, [profileId]);
   const [settings, setSettings] = useState<AiProviderSettings | null>(null);
   const [settingsError, setSettingsError] = useState<string | null>(null);
   /** How many writes are in flight, not whether one is: two fields saving at
@@ -123,6 +132,7 @@ export function AiProvidersProvider(props: {
       if (snapshot.profileId !== profileId) return;
       pushed = true;
       setSettings(snapshot.settings);
+      void refreshChatGpt();
     });
     void dispatch("aiProviders:read", { profileId })
       .then((result) => {
@@ -137,7 +147,7 @@ export function AiProvidersProvider(props: {
       live = false;
       unsubscribe();
     };
-  }, [profileId]);
+  }, [profileId, refreshChatGpt]);
 
   const update = useCallback(
     async (patch: AiProviderSettingsPatch): Promise<string | null> => {
@@ -250,9 +260,10 @@ export function AiProvidersProvider(props: {
   const request = useCallback((): void => {
     if (profileId === null || requestedRef.current === profileId) return;
     requestedRef.current = profileId;
+    void refreshChatGpt();
     void refreshCodexSnapshot(false);
     void refreshAcpDiscovery(false);
-  }, [profileId, refreshCodexSnapshot, refreshAcpDiscovery]);
+  }, [profileId, refreshCodexSnapshot, refreshAcpDiscovery, refreshChatGpt]);
 
   // A different profile: none of the previous one's answers apply. If it was
   // already requested, the reader is looking at AI state, so read again.
@@ -263,6 +274,7 @@ export function AiProvidersProvider(props: {
     codexSeq.current += 1;
     acpSeq.current += 1;
     acpModelsSeq.current = {};
+    setChatGpt(null);
     setCodexSnapshot(null);
     setCodexError(null);
     setCodexSnapshotLoading(true);
@@ -316,6 +328,7 @@ export function AiProvidersProvider(props: {
   const statuses = useMemo(
     () =>
       describeAiProviders({
+        chatGpt,
         codex: codexSnapshot,
         codexLoading: codexSnapshotLoading,
         acpDiscovery,
@@ -324,6 +337,8 @@ export function AiProvidersProvider(props: {
         acpModelErrors
       }),
     [
+      chatGpt,
+      refreshChatGpt,
       codexSnapshot,
       codexSnapshotLoading,
       acpDiscovery,
@@ -341,6 +356,8 @@ export function AiProvidersProvider(props: {
       saving,
       update,
       request,
+      chatGpt,
+      refreshChatGpt,
       codexSnapshot,
       codexSnapshotLoading,
       codexError,
@@ -362,6 +379,8 @@ export function AiProvidersProvider(props: {
       saving,
       update,
       request,
+      chatGpt,
+      refreshChatGpt,
       codexSnapshot,
       codexSnapshotLoading,
       codexError,
