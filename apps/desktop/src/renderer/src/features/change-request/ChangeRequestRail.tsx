@@ -6,6 +6,9 @@ import {
   useViewportTooltip
 } from "../../lib/useViewportTooltip";
 import type { DiffFileStatus } from "../diff/parse-diff";
+import { fileLabel } from "../file-tree/file-tree";
+import { TreeFolderRow, treeDepthStyle } from "../file-tree/TreeFolderRow";
+import { useFileTree } from "../file-tree/useFileTree";
 import { shortWhen } from "../graph/graph-view";
 import type { ChangeRequestViewState } from "./useChangeRequestView";
 
@@ -20,7 +23,8 @@ const STATUS_LETTER: Record<DiffFileStatus, string> = {
  * The rail while a change request is on screen: its table of contents.
  * Changes lists the files of what the main pane draws (all of it, or one
  * commit) and brings a file into view; Commits picks that scope. The same
- * place the Changes tab lists a clicked commit's files for a worktree.
+ * place the Changes tab lists a clicked commit's files for a worktree, drawn
+ * as the same folder tree.
  *
  * Design: `design/Change Request View - UX Review.dc.html`, 2a and 3c.
  */
@@ -40,6 +44,12 @@ export function ChangeRequestRail({
   const { view, scope, setScope, files, patch } = state;
   const ready = view?.state === "ready" ? view : null;
   const commits = ready?.commits ?? [];
+  // Folds belong to the scope: picking another commit starts from the defaults.
+  const fileTree = useFileTree(
+    files,
+    scope.kind === "all" ? "all" : scope.hash,
+    null
+  );
 
   return (
     <aside className="pane pane--rail cr-rail" data-testid="rail">
@@ -90,17 +100,33 @@ export function ChangeRequestRail({
             ) : patch === null ? (
               <div className="cr-rail__note">Loading…</div>
             ) : (
-              files.map((file) => {
+              fileTree.rows.map((row) => {
+                if (row.kind === "folder") {
+                  const { folder, open } = row;
+                  return (
+                    <TreeFolderRow
+                      key={`d-${folder.dir}`}
+                      dir={folder.dir}
+                      label={folder.label}
+                      depth={row.depth}
+                      count={folder.all.length}
+                      open={open}
+                      onToggleOpen={() => fileTree.toggle(folder, open)}
+                    />
+                  );
+                }
+                const { file } = row;
                 const letter = STATUS_LETTER[file.status];
                 return (
                   <button
-                    key={file.path}
-                    className="cr-rail__item cr-rail__file"
+                    key={`f-${file.path}`}
+                    className={`cr-rail__item cr-rail__file${fileTree.nested ? " tree-file" : ""}`}
+                    style={fileTree.nested ? treeDepthStyle(row.depth) : undefined}
                     onClick={() => onFocusFile(file.path)}
                     {...hoverTooltip(tip, file.oldPath === undefined ? file.path : `${file.oldPath} → ${file.path}`)}
                   >
                     <span {...fileStatusChipProps(letter)}>{letter}</span>
-                    <span className="cr-rail__path">{file.path}</span>
+                    <span className="cr-rail__path">{fileLabel(file.path)}</span>
                     {!file.binary && (
                       <span className="cr-rail__stat">
                         {file.additions > 0 && <span className="cr-view__add">+{file.additions}</span>}

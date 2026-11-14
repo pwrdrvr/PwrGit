@@ -6,12 +6,18 @@ import {
   hoverTooltip,
   useViewportTooltip
 } from "../../lib/useViewportTooltip";
+import { fileLabel } from "../file-tree/file-tree";
+import { TreeFolderRow, treeDepthStyle } from "../file-tree/TreeFolderRow";
+import { useFileTree } from "../file-tree/useFileTree";
+
+const NO_FILES: CommitFileChange[] = [];
 
 /**
  * Commit-scoped file list in the rail — the mirror of the Changes tab for a
  * commit you clicked in the lineage. Click a file → its diff (for THIS
  * commit) opens in the main pane; the full multi-file patch stays one click
- * away, never the default.
+ * away, never the default. Files are drawn as the same folder tree as the
+ * Changes tab.
  */
 export function CommitTab({
   worktreeId,
@@ -43,6 +49,13 @@ export function CommitTab({
       active = false;
     };
   }, [worktreeId, hash]);
+
+  const openPath = view?.kind === "file" ? view.path : null;
+  const { rows, nested, toggle } = useFileTree(
+    files ?? NO_FILES,
+    `${worktreeId}:${hash}`,
+    openPath
+  );
 
   const tip = useViewportTooltip();
   return (
@@ -81,26 +94,41 @@ export function CommitTab({
             <div className="changes-section">
               Files · {files.length}
             </div>
-            {files.map((f, i) => (
-              <div
-                key={`${i}-${f.path}`}
-                className={`file-row is-clickable${
-                  view?.kind === "file" && view.path === f.path
-                    ? " is-selected"
-                    : ""
-                }`}
-                {...(view?.kind === "file" && view.path === f.path
-                  ? { "aria-current": "true" as const }
-                  : {})}
-                onClick={() => onOpenFile(f.path)}
-                {...hoverTooltip(tip, "View this file's changes in the commit")}
-              >
-                <span {...fileStatusChipProps(f.status)}>{f.status}</span>
-                <span className="file-path" {...hoverTooltip(tip, f.path)}>
-                  {f.path}
-                </span>
-              </div>
-            ))}
+            {rows.map((row) => {
+              if (row.kind === "folder") {
+                const { folder, open } = row;
+                return (
+                  <TreeFolderRow
+                    key={`d-${folder.dir}`}
+                    dir={folder.dir}
+                    label={folder.label}
+                    depth={row.depth}
+                    count={folder.all.length}
+                    open={open}
+                    onToggleOpen={() => toggle(folder, open)}
+                  />
+                );
+              }
+              const f = row.file;
+              const selected = openPath === f.path;
+              return (
+                <div
+                  key={`f-${f.path}`}
+                  className={`file-row is-clickable${nested ? " tree-file" : ""}${
+                    selected ? " is-selected" : ""
+                  }`}
+                  style={nested ? treeDepthStyle(row.depth) : undefined}
+                  {...(selected ? { "aria-current": "true" as const } : {})}
+                  onClick={() => onOpenFile(f.path)}
+                  {...hoverTooltip(tip, "View this file's changes in the commit")}
+                >
+                  <span {...fileStatusChipProps(f.status)}>{f.status}</span>
+                  <span className="file-path" {...hoverTooltip(tip, f.path)}>
+                    {fileLabel(f.path)}
+                  </span>
+                </div>
+              );
+            })}
             {files.length === 0 && (
               <div className="changes-section">No files (empty commit).</div>
             )}

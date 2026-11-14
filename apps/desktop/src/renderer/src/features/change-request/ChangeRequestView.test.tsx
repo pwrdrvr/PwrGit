@@ -178,11 +178,10 @@ describe("ChangeRequestView", () => {
       "src/audit.ts",
       "README.md"
     ]);
-    // The rail lists what the main pane draws.
-    expect([...container.querySelectorAll(".cr-rail__path")].map((path) => path.textContent)).toEqual([
-      "src/audit.ts",
-      "README.md"
-    ]);
+    // The rail lists what the main pane draws, as a folder tree.
+    expect(
+      [...container.querySelectorAll(".folder-row__path, .cr-rail__path")].map((path) => path.textContent)
+    ).toEqual(["src", "audit.ts", "README.md"]);
     // Fetched now, so the verb is + Worktree.
     expect(text(".cr-view__verb")).toContain("Worktree");
   });

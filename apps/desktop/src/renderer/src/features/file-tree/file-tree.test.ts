@@ -3,13 +3,13 @@ import { describe, expect, it } from "vitest";
 import type { FileChange, FileStatus } from "@pwrgit/shared";
 import {
   ancestorDirs,
-  buildChangeTree,
+  buildFileTree,
   fileLabel,
   folderStartsOpen,
   visibleTreeRows,
-  type ChangeTree,
-  type ChangeTreeFolder
-} from "./changes-tree";
+  type FileTree,
+  type FileTreeFolder
+} from "./file-tree";
 
 const change = (path: string, status: FileStatus = "M"): FileChange => ({
   path,
@@ -17,9 +17,9 @@ const change = (path: string, status: FileStatus = "M"): FileChange => ({
   staged: false
 });
 
-function allFolders(tree: ChangeTree): ChangeTreeFolder[] {
-  const out: ChangeTreeFolder[] = [];
-  const walk = (folders: ChangeTreeFolder[]): void => {
+function allFolders(tree: FileTree<FileChange>): FileTreeFolder<FileChange>[] {
+  const out: FileTreeFolder<FileChange>[] = [];
+  const walk = (folders: FileTreeFolder<FileChange>[]): void => {
     for (const folder of folders) {
       out.push(folder);
       walk(folder.folders);
@@ -37,9 +37,9 @@ const parentOf = (path: string): string => {
 };
 const under = (path: string, dir: string): boolean => path.startsWith(`${dir}/`);
 
-describe("buildChangeTree", () => {
+describe("buildFileTree", () => {
   it("nests folders, compacts lone chains, and puts folders first", () => {
-    const tree = buildChangeTree([
+    const tree = buildFileTree([
       change("README.md"),
       change("packages/shared/src/index.ts"),
       change("src/app.ts"),
@@ -70,7 +70,7 @@ describe("buildChangeTree", () => {
   });
 
   it("keeps a nested repository's trailing slash on the leaf", () => {
-    const tree = buildChangeTree([change("vendor/", "?"), change("libs/sub/", "?")]);
+    const tree = buildFileTree([change("vendor/", "?"), change("libs/sub/", "?")]);
     expect(tree.files.map((f) => f.path)).toEqual(["vendor/"]);
     expect(tree.folders.map((f) => [f.dir, f.files.map((x) => fileLabel(x.path))])).toEqual([
       ["libs", ["sub/"]]
@@ -81,7 +81,7 @@ describe("buildChangeTree", () => {
     const generated = Array.from({ length: 11 }, (_, i) => change(`gen/f${i}.ts`, "?"));
     const edited = Array.from({ length: 11 }, (_, i) => change(`src/f${i}.ts`));
     const mixed = [...generated.map((f) => ({ ...f, path: `lib/${f.path}` })), change("lib/x.ts")];
-    const tree = buildChangeTree([...generated, ...edited, ...mixed]);
+    const tree = buildFileTree([...generated, ...edited, ...mixed]);
     const byDir = new Map(allFolders(tree).map((f) => [f.dir, f]));
     expect(folderStartsOpen(byDir.get("gen")!)).toBe(false);
     expect(folderStartsOpen(byDir.get("src")!)).toBe(true);
@@ -129,11 +129,11 @@ const changeSetArb = fc
     )
   );
 
-describe("buildChangeTree properties", () => {
+describe("buildFileTree properties", () => {
   it("lists every file exactly once, under its own parent folder", () => {
     fc.assert(
       fc.property(changeSetArb, (files) => {
-        const tree = buildChangeTree(files);
+        const tree = buildFileTree(files);
         const rows = visibleTreeRows(tree, () => true);
         const listed = rows.flatMap((row) => (row.kind === "file" ? [row.file.path] : []));
         expect([...listed].sort()).toEqual(files.map((f) => f.path).sort());
@@ -150,7 +150,7 @@ describe("buildChangeTree properties", () => {
   it("a folder stands for exactly the files beneath it (oracle: path prefix)", () => {
     fc.assert(
       fc.property(changeSetArb, (files) => {
-        for (const folder of allFolders(buildChangeTree(files))) {
+        for (const folder of allFolders(buildFileTree(files))) {
           expect(folder.all.map((f) => f.path)).toEqual(
             files.filter((f) => under(f.path, folder.dir)).map((f) => f.path)
           );
@@ -162,7 +162,7 @@ describe("buildChangeTree properties", () => {
   it("compacts: no folder row holds a lone folder and nothing else", () => {
     fc.assert(
       fc.property(changeSetArb, (files) => {
-        const check = (folders: ChangeTreeFolder[], parent: string): void => {
+        const check = (folders: FileTreeFolder<FileChange>[], parent: string): void => {
           for (const folder of folders) {
             expect(folder.files.length === 0 && folder.folders.length === 1).toBe(false);
             // The label is exactly the path between its parent row and itself.
@@ -170,7 +170,7 @@ describe("buildChangeTree properties", () => {
             check(folder.folders, folder.dir);
           }
         };
-        check(buildChangeTree(files).folders, "");
+        check(buildFileTree(files).folders, "");
       })
     );
   });
@@ -179,12 +179,12 @@ describe("buildChangeTree properties", () => {
     fc.assert(
       fc.property(
         changeSetArb.chain((files) => {
-          const dirs = allFolders(buildChangeTree(files)).map((f) => f.dir);
+          const dirs = allFolders(buildFileTree(files)).map((f) => f.dir);
           return fc.tuple(fc.constant(files), fc.subarray(dirs));
         }),
         ([files, folded]) => {
           const closed = new Set(folded);
-          const rows = visibleTreeRows(buildChangeTree(files), (f) => !closed.has(f.dir));
+          const rows = visibleTreeRows(buildFileTree(files), (f) => !closed.has(f.dir));
           const shownFiles = rows.flatMap((r) => (r.kind === "file" ? [r.file.path] : []));
           const shownFolders = rows.flatMap((r) => (r.kind === "folder" ? [r.folder.dir] : []));
           // Oracle: visible iff no folded folder is a proper ancestor.

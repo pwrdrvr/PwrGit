@@ -1,10 +1,8 @@
 import {
-  type CSSProperties,
   type MouseEvent as ReactMouseEvent,
   type ReactNode,
   useCallback,
   useEffect,
-  useMemo,
   useRef,
   useState
 } from "react";
@@ -38,14 +36,11 @@ import {
   targetPaths,
   type ChangesRowTarget
 } from "./changes-row-menu";
-import {
-  ancestorDirs,
-  buildChangeTree,
-  fileLabel,
-  folderStartsOpen,
-  visibleTreeRows,
-  type ChangeTree
-} from "./changes-tree";
+import { fileLabel } from "../file-tree/file-tree";
+import { TreeFolderRow, treeDepthStyle } from "../file-tree/TreeFolderRow";
+import { useFileTree, type FileTreeView } from "../file-tree/useFileTree";
+
+const NO_FILES: FileChange[] = [];
 const STAGED_SOURCE: DraftSource = { kind: "staged" };
 
 function PlusIcon() {
@@ -155,11 +150,6 @@ function TruncationNotice({
   );
 }
 
-/** Indent level for a tree row; the stylesheet turns it into padding and
- *  one guide line per ancestor folder. */
-const depthStyle = (depth: number): CSSProperties =>
-  ({ "--tree-depth": depth }) as CSSProperties;
-
 function FileRow({
   file,
   label,
@@ -192,8 +182,8 @@ function FileRow({
   const tip = useViewportTooltip();
   return (
     <div
-      className={`file-row is-clickable${file.staged ? " is-staged" : ""}${split ? " is-split" : ""}${tree ? " file-row--tree" : ""}${selected ? " is-selected" : ""}`}
-      style={tree ? depthStyle(depth) : undefined}
+      className={`file-row is-clickable${file.staged ? " is-staged" : ""}${split ? " is-split" : ""}${tree ? " tree-file" : ""}${selected ? " is-selected" : ""}`}
+      style={tree ? treeDepthStyle(depth) : undefined}
       {...(selected ? { "aria-current": "true" as const } : {})}
       onClick={onOpen}
       onContextMenu={onContextMenu}
@@ -243,6 +233,8 @@ function FileRow({
   );
 }
 
+/** A Changes folder row: the shared tree row plus Stage/Unstage and Discard
+ *  for every file beneath it. */
 function FolderRow({
   dir,
   label,
@@ -255,12 +247,9 @@ function FolderRow({
   onDiscard,
   onContextMenu
 }: {
-  /** Full path, for tooltips and labels that must say which folder. */
   dir: string;
-  /** What the row shows: one segment, or a compacted chain. */
   label: string;
   depth: number;
-  /** Every file beneath the folder, at any depth. */
   count: number;
   open: boolean;
   /** The folder sits in the staged section, so its verb is "unstage". */
@@ -270,69 +259,45 @@ function FolderRow({
   onDiscard: () => void;
   onContextMenu: (event: ReactMouseEvent) => void;
 }) {
-  const tip = useViewportTooltip();
   const verb = staged ? "Unstage" : "Stage";
-  // A one-file folder is an ordinary tree row now, so the count can be 1.
+  // A one-file folder is an ordinary tree row, so the count can be 1.
   const scope = count === 1 ? "the file" : `all ${count} files`;
   return (
-    <div
-      className="folder-row"
-      style={depthStyle(depth)}
-      onClick={onToggleOpen}
+    <TreeFolderRow
+      dir={dir}
+      label={label}
+      depth={depth}
+      count={count}
+      open={open}
+      onToggleOpen={onToggleOpen}
       onContextMenu={onContextMenu}
-    >
-      <button
-        className="folder-row__twisty"
-        onClick={(e) => {
-          e.stopPropagation();
-          onToggleOpen();
-        }}
-        {...hoverTooltip(tip, open ? "Hide files" : "Show files")}
-        aria-label={`${open ? "Hide" : "Show"} the files in ${dir}`}
-        aria-expanded={open}
-      >
-        <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.6" strokeLinecap="round" strokeLinejoin="round">
-          <path d={open ? "m6 9 6 6 6-6" : "m9 18 6-6-6-6"} />
-        </svg>
-      </button>
-      <span className="folder-row__icon" aria-hidden="true">
-        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-          <path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z" />
-        </svg>
-      </span>
-      <span
-        className="folder-row__path"
-        {...hoverTooltip(tip, `${dir}/ — ${count} file${count === 1 ? "" : "s"}`)}
-      >
-        {label}
-      </span>
-      <span className="folder-row__count">{count}</span>
-      <span className="file-row__actions">
-        <button
-          className="file-action file-action--discard"
-          onClick={(e) => {
-            e.stopPropagation();
-            onDiscard();
-          }}
-          {...hoverTooltip(tip, `Discard ${scope} in this folder`)}
-          aria-label={`Discard ${scope} in ${dir}`}
-        >
-          <TrashIcon />
-        </button>
-        <button
-          className={`file-action file-action--${staged ? "unstage" : "stage"}`}
-          onClick={(e) => {
-            e.stopPropagation();
-            onToggle();
-          }}
-          {...hoverTooltip(tip, `${verb} ${scope} in this folder`)}
-          aria-label={`${verb} ${scope} in ${dir}`}
-        >
-          {staged ? <MinusIcon /> : <PlusIcon />}
-        </button>
-      </span>
-      {tip.tooltipNode}
-    </div>
+      actions={(tip) => (
+        <>
+          <button
+            className="file-action file-action--discard"
+            onClick={(e) => {
+              e.stopPropagation();
+              onDiscard();
+            }}
+            {...hoverTooltip(tip, `Discard ${scope} in this folder`)}
+            aria-label={`Discard ${scope} in ${dir}`}
+          >
+            <TrashIcon />
+          </button>
+          <button
+            className={`file-action file-action--${staged ? "unstage" : "stage"}`}
+            onClick={(e) => {
+              e.stopPropagation();
+              onToggle();
+            }}
+            {...hoverTooltip(tip, `${verb} ${scope} in this folder`)}
+            aria-label={`${verb} ${scope} in ${dir}`}
+          >
+            {staged ? <MinusIcon /> : <PlusIcon />}
+          </button>
+        </>
+      )}
+    />
   );
 }
 
@@ -363,9 +328,6 @@ export function ChangesTab({
   const [committing, setCommitting] = useState(false);
   const agent = useAgent("commitMessage");
   const messageRef = useRef<HTMLTextAreaElement>(null);
-  /** Explicit folder disclosure state, keyed `section:dir`; unset folders
-   *  follow `folderStartsOpen`. */
-  const [folderOpen, setFolderOpen] = useState<Record<string, boolean>>({});
   const [menu, setMenu] = useState<{
     x: number;
     y: number;
@@ -403,7 +365,6 @@ export function ChangesTab({
   );
 
   useEffect(() => {
-    setFolderOpen({});
     setMenu(null);
     setIgnoreTarget(null);
     setCommitOutcome(null);
@@ -442,43 +403,34 @@ export function ChangesTab({
     };
   }, [wtId]);
 
-  // Opening a file from elsewhere (⌘K, history, the diff pane) unfolds the
-  // folders above its row, so the marked row is on screen — VS Code's
-  // autoReveal. Only a path this list actually holds, only in the section
-  // whose row is marked, and once per opening: folding that folder again
-  // afterwards sticks, and a file viewed from history writes no fold state
-  // that would later override the untracked-dump default.
-  const activePath = activeFile?.path ?? null;
-  const activeSide = activeFile?.staged ?? null;
-  const revealedRef = useRef<string | null>(null);
-  useEffect(() => {
-    if (activePath === null) {
-      revealedRef.current = null;
-      return;
-    }
-    if (changes === null) return;
-    // Same resolution as the row marking below: unstaged wins for `null`.
-    const staged =
-      activeSide ?? !changes.unstaged.some((file) => file.path === activePath);
-    const section = staged ? changes.staged : changes.unstaged;
-    if (!section.some((file) => file.path === activePath)) return;
-    const prefix = staged ? "s" : "u";
-    const reveal = `${wtId ?? ""}\0${prefix}\0${activePath}`;
-    if (revealedRef.current === reveal) return;
-    revealedRef.current = reveal;
-    const dirs = ancestorDirs(activePath);
-    if (dirs.length === 0) return;
-    setFolderOpen((prev) => {
-      const next = { ...prev };
-      for (const dir of dirs) next[`${prefix}:${dir}`] = true;
-      return next;
-    });
-  }, [activePath, activeSide, changes, wtId]);
+  // Which side of the index the active file means. Openers that know their
+  // side say so; for those that don't (the palette, a commit-scoped view that
+  // fell back), resolve against the sections — unstaged wins when the path is
+  // in both, since a workingTree-context view shows working-tree content. One
+  // row marks either way; `staged: null` used to match both.
+  const effectiveActiveStaged: boolean | null =
+    activeFile === null
+      ? null
+      : activeFile.staged !== null
+        ? activeFile.staged
+        : changes === null
+          ? null
+          : !changes.unstaged.some((file) => file.path === activeFile.path);
 
-  // Built once per change set, not on every render (each keystroke in the
-  // commit message re-renders this component).
-  const stagedTree = useMemo(() => buildChangeTree(changes?.staged ?? []), [changes]);
-  const unstagedTree = useMemo(() => buildChangeTree(changes?.unstaged ?? []), [changes]);
+  // One tree per section, each with its own folds: the same folder can hold
+  // both staged and unstaged files. Opening a file from elsewhere (⌘K,
+  // history) unfolds the folders above its row in the section that marks it.
+  const activePath = activeFile?.path ?? null;
+  const stagedTree = useFileTree(
+    changes?.staged ?? NO_FILES,
+    `${wtId ?? ""}:staged`,
+    effectiveActiveStaged === true ? activePath : null
+  );
+  const unstagedTree = useFileTree(
+    changes?.unstaged ?? NO_FILES,
+    `${wtId ?? ""}:unstaged`,
+    effectiveActiveStaged === false ? activePath : null
+  );
 
   /**
    * Which of the paths about to be staged are conflicted. "." means "stage
@@ -691,22 +643,8 @@ export function ChangesTab({
   const splitPaths = new Set(
     staged.map((file) => file.path).filter((path) => unstagedPaths.has(path))
   );
-  // Which side of the index the active file means. Openers that know their
-  // side say so; for those that don't (the palette, a commit-scoped view that
-  // fell back), resolve against the sections — unstaged wins when the path is
-  // in both, since a workingTree-context view shows working-tree content. One
-  // row marks either way; `staged: null` used to match both.
-  const effectiveActiveStaged: boolean | null =
-    activeFile === null
-      ? null
-      : activeFile.staged !== null
-        ? activeFile.staged
-        : changes === null
-          ? null
-          : !changes.unstaged.some((file) => file.path === activeFile.path);
-
   const renderEntries = (
-    tree: ChangeTree,
+    view: FileTreeView<FileChange>,
     keyPrefix: string,
     stagedSection: boolean
   ): ReactNode[] => {
@@ -719,14 +657,7 @@ export function ChangesTab({
       event.stopPropagation();
       setMenu({ x: event.clientX, y: event.clientY, target });
     };
-    const isTree = tree.folders.length > 0;
-    // Disclosure state is keyed per section: the same folder can hold both
-    // staged and unstaged files, and they fold independently.
-    const foldKey = (dir: string): string => `${keyPrefix}:${dir}`;
-    return visibleTreeRows(
-      tree,
-      (folder) => folderOpen[foldKey(folder.dir)] ?? folderStartsOpen(folder)
-    ).map((row) => {
+    return view.rows.map((row) => {
       if (row.kind === "file") {
         const { file } = row;
         const target: ChangesRowTarget = { kind: "file", file };
@@ -737,7 +668,7 @@ export function ChangesTab({
             label={fileLabel(file.path)}
             split={splitPaths.has(file.path)}
             depth={row.depth}
-            tree={isTree}
+            tree={view.nested}
             onToggle={() => run(command, [file.path])}
             onOpen={() => onOpenDiff(file.path, stagedSection)}
             onDiscard={() => void discardTarget(target)}
@@ -765,9 +696,7 @@ export function ChangesTab({
           count={folder.all.length}
           open={open}
           staged={stagedSection}
-          onToggleOpen={() =>
-            setFolderOpen((prev) => ({ ...prev, [foldKey(folder.dir)]: !open }))
-          }
+          onToggleOpen={() => view.toggle(folder, open)}
           // Every file beneath it by name, not the directory: past the render
           // cap, `git add -- dir` would also sweep in files this list never
           // showed.
