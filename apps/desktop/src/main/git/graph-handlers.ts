@@ -21,6 +21,7 @@ import {
   readLog,
   readLogRefs,
   readUniqueCommits,
+  readUnpushedCommits,
   selectActiveBranches,
   selectAllGraphBranches,
   topoMergeCommits,
@@ -450,18 +451,19 @@ export function registerGraphHandlers(
     // from a ref chip. In particular, a detached checkout should not lend its
     // label to every shared ancestor in the graph.
     let headOnlyCommits: string[] = [];
+    // Which of HEAD's commits are already on a remote, so "Edit history from
+    // here" can say a rewrite will need a force push.
+    let headUnpushedCommits: string[] | undefined;
     if (head !== "") {
-      const headOnly = await readUniqueCommits(
-        git,
-        wt.path,
-        cached.defaultRef,
-        [head],
-        UNIQUE_CAP
-      );
+      const [headOnly, unpushed] = await Promise.all([
+        readUniqueCommits(git, wt.path, cached.defaultRef, [head], UNIQUE_CAP),
+        readUnpushedCommits(git, wt.path, head, UNIQUE_CAP)
+      ]);
       // Context labeling is supplemental. Preserve a usable graph if this
       // extra rev walk cannot run (for example, a transiently unavailable
       // worktree); the card simply omits branch context in that case.
       if (headOnly.ok) headOnlyCommits = headOnly.value.map((commit) => commit.hash);
+      if (unpushed.ok) headUnpushedCommits = unpushed.value;
     }
 
     // Two things the repo-level walk can miss for THIS worktree:
@@ -567,6 +569,7 @@ export function registerGraphHandlers(
       branches: out.branches,
       head,
       headOnlyCommits,
+      ...(headUnpushedCommits === undefined ? {} : { headUnpushedCommits }),
       defaultBranch: out.defaultBranch,
       defaultRef: out.defaultRef,
       defaultRefTips: out.defaultRefTips,

@@ -663,12 +663,18 @@ export function LineageGraph({
   // Walked once per opened menu, not on every re-render while it is open.
   const menuHash = menuVm?.commit.hash;
   const menuCommits = data?.commits;
+  const unpushedList = data?.headUnpushedCommits;
   const menuHistoryRange = useMemo(
     () =>
       menuHash === undefined
         ? null
-        : historyRangeFrom(menuCommits ?? [], head, menuHash),
-    [menuCommits, head, menuHash]
+        : historyRangeFrom(
+            menuCommits ?? [],
+            head,
+            menuHash,
+            unpushedList === undefined ? undefined : new Set(unpushedList)
+          ),
+    [menuCommits, head, menuHash, unpushedList]
   );
 
   // The interactive card owns its delayed dismissal. Clear the associated

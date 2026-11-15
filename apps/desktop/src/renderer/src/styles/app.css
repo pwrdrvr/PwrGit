@@ -13179,6 +13179,19 @@ body.is-col-resizing {
   letter-spacing: 0.08em;
   text-transform: uppercase;
 }
+/* A sentence that applies to the whole group (Edit history from here's
+   "already pushed" warning): sentence case and warning-toned, under the
+   uppercase label, at the entries' inset so it reads as theirs. */
+.pop-menu__heading-hint {
+  display: block;
+  max-width: 260px;
+  margin-top: 5px;
+  color: var(--status-warning);
+  font: 500 10.5px/1.35 var(--font-sans);
+  letter-spacing: normal;
+  text-transform: none;
+  text-wrap: pretty;
+}
 /* Pull's menu. Each row says what it does to which branch, so it is two
    lines where the kebab's rows are one, and the width is set for the
    sentence rather than grown from it. */

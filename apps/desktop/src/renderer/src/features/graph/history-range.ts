@@ -11,19 +11,24 @@ import type { Commit } from "@pwrgit/shared";
  * every commit from HEAD down to that one.
  *
  * - `range`: the run, newest (HEAD) first, ready to hand to the rebase tool.
+ *   `pushed` counts the commits in it that a remote already has (not in
+ *   `unpushed`): publishing a rewrite of those needs a force push. Without an
+ *   `unpushed` answer nothing is claimed either way.
  * - `blocked`: the commit is on HEAD's line, but the run cannot be edited.
  *   The menu shows the entry disabled with the reason.
  * - `null`: nothing to offer here — HEAD itself (a run of one), a commit HEAD
  *   does not reach along its first parents, or one past the loaded window.
  */
 export type HistoryRange =
-  | { kind: "range"; hashes: string[] }
+  | { kind: "range"; hashes: string[]; pushed: number }
   | { kind: "blocked"; reason: "merge" | "root"; count: number };
 
 export function historyRangeFrom(
   commits: readonly Commit[],
   head: string,
-  start: string
+  start: string,
+  /** HEAD's commits no remote-tracking ref reaches (`headUnpushedCommits`). */
+  unpushed?: ReadonlySet<string>
 ): HistoryRange | null {
   if (head === "" || start === head) return null;
   const byHash = new Map(commits.map((commit) => [commit.hash, commit]));
@@ -44,7 +49,11 @@ export function historyRangeFrom(
       if (commit.parents.length === 0) {
         return { kind: "blocked", reason: "root", count: hashes.length };
       }
-      return { kind: "range", hashes };
+      const pushed =
+        unpushed === undefined
+          ? 0
+          : hashes.filter((hash) => !unpushed.has(hash)).length;
+      return { kind: "range", hashes, pushed };
     }
     cursor = commit.parents[0];
   }

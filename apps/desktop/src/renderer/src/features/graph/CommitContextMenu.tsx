@@ -185,7 +185,13 @@ function historyItems(
   if (range === null) return [];
   const heading: MenuItem[] = [
     { type: "sep" },
-    { type: "heading", label: "Edit history from here" }
+    {
+      type: "heading",
+      label: "Edit history from here",
+      ...(range.kind === "range" && range.pushed > 0
+        ? { hint: pushedWarning(range.pushed, range.hashes.length) }
+        : {})
+    }
   ];
   if (range.kind === "blocked") {
     return [
@@ -228,4 +234,17 @@ function historyItems(
         ]
       : [])
   ];
+}
+
+/** Said once, under the heading, for every entry in the group: rewriting a
+ *  commit a remote already has is local until a force push, which is the
+ *  part that changes history for everyone else. */
+export function pushedWarning(pushed: number, total: number): string {
+  const which =
+    pushed === total
+      ? total === 2
+        ? "Both are already pushed."
+        : `All ${total} are already pushed.`
+      : `${pushed} of these ${total} ${pushed === 1 ? "is" : "are"} already pushed.`;
+  return `${which} Publishing the rewrite needs a force push.`;
 }
