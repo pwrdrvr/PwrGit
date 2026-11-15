@@ -46,6 +46,8 @@ type LockRunner = <T>(id: string, operation: () => Promise<T>) => Promise<T>;
 export type BulkSyncOptions = {
   operationId: string;
   mode: BulkSyncMode;
+  /** Stops queued work, transfers and probes. A started checkout finishes and
+   * verifies its commit under the worktree lock before cancellation completes. */
   signal?: AbortSignal;
   concurrency?: number;
   runRepository?: LockRunner;
@@ -64,7 +66,7 @@ type RepoProgressUpdate = Pick<
 >;
 type ReportProgress = (update: RepoProgressUpdate) => void;
 
-/** Each actual Git invocation gets its own clock, after its queue lock is held.
+/** Each interruptible Git invocation gets a clock after its queue lock is held.
  * Output from another repository/checkout cannot keep a wedged command alive. */
 function watchedGit(git: GitExec, signal: AbortSignal | undefined): GitExec {
   return async (args, cwd, options) => {
@@ -606,28 +608,20 @@ async function inspectWorktree(
 
 async function softPullWorktree(
   git: GitExec,
+  finishGit: GitExec,
   worktree: BulkSyncRepoInput["worktrees"][number],
   fetched: ReadonlyMap<string, BulkSyncRemoteResult>,
   signal: AbortSignal | undefined,
   report: (detail: string) => void
 ): Promise<BulkSyncWorktreeResult> {
-  if (isAborted(signal)) {
-    return worktreeResult(worktree, {
-      outcome: "cancelled",
-      reason: "cancelled",
-      message: "Cancelled before this worktree was checked."
-    });
-  }
+  const cancelled = (): BulkSyncWorktreeResult => worktreeResult(worktree, {
+    outcome: "cancelled", reason: "cancelled",
+    message: "Cancelled before the fast-forward started."
+  });
+  if (isAborted(signal)) return cancelled();
   const first = await inspectWorktree(git, worktree, fetched, report);
+  if (isAborted(signal)) return cancelled();
   if (first.kind === "result") return first.value;
-  if (isAborted(signal)) {
-    return worktreeResult(worktree, {
-      branch: first.value.branch,
-      outcome: "cancelled",
-      reason: "cancelled",
-      message: "Cancelled before the fast-forward started."
-    });
-  }
 
   // Re-read every fact immediately before mutation. The exact upstream commit
   // is passed to merge, so this never follows a ref that changed after review.
@@ -636,17 +630,14 @@ async function softPullWorktree(
     (detail) => report(`Rechecking before update: ${detail}`),
     first.value
   );
+  if (isAborted(signal)) return cancelled();
   if (second.kind === "result") return second.value;
-  if (isAborted(signal)) {
-    return worktreeResult(worktree, {
-      branch: second.value.branch,
-      outcome: "cancelled",
-      reason: "cancelled",
-      message: "Cancelled before the fast-forward started."
-    });
-  }
   report("Fast-forwarding…");
-  const merge = await git(
+  if (isAborted(signal)) return cancelled();
+  // Checkout can partially write files before it moves HEAD. Preserve bulk
+  // pull's non-interruptible mutation semantics: keep this merge and its final
+  // verification under the worktree lock, outside cancellation and watchdogs.
+  const merge = await finishGit(
     [
       "merge",
       "--ff-only",
@@ -667,7 +658,7 @@ async function softPullWorktree(
     });
   }
   report("Verifying updated commit…");
-  const after = await checked(git, ["rev-parse", "--verify", "HEAD"], worktree.path);
+  const after = await checked(finishGit, ["rev-parse", "--verify", "HEAD"], worktree.path);
   if (!after.ok || after.value.stdout.trim() !== second.value.upstreamHead) {
     return worktreeResult(worktree, {
       branch: second.value.branch,
@@ -745,7 +736,7 @@ function cancelledRepo(repo: BulkSyncRepoInput): BulkSyncRepoResult {
       worktreeResult(worktree, {
         outcome: "cancelled",
         reason: "cancelled",
-        message: "Cancelled before this repository started."
+        message: "Cancelled before this repository completed."
       })
     )
   };
@@ -761,6 +752,7 @@ async function syncRepo(
   const git = watchedGit(exec, options.signal);
   const fetched = await fetchConfiguredRemotes(git, repo, options.signal, report);
   if (!fetched.ok) {
+    if (isAborted(options.signal)) return cancelledRepo(repo);
     return {
       repoId: repo.id,
       name: repo.name,
@@ -792,7 +784,7 @@ async function syncRepo(
       });
       reportWorktree("Waiting for another worktree operation…");
       const result = await runWorktree(worktree.id, () =>
-        softPullWorktree(git, worktree, fetchedByName, options.signal, reportWorktree)
+        softPullWorktree(git, exec, worktree, fetchedByName, options.signal, reportWorktree)
       );
       report({ worktreeResult: result });
       return result;
