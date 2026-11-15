@@ -85,12 +85,17 @@ describe("nextBulkSyncRun", () => {
     });
   });
 
-  it("never doubles a live run: a click shows a hidden one, a tick leaves it", () => {
+  it("never doubles a live run: a click opens it in the dialog, a tick leaves it", () => {
     const hidden = nextBulkSyncRun(null, request({ auto: true })) as BulkSyncRun;
     expect(nextBulkSyncRun(hidden, request({ auto: true, key: 8 }))).toBe(hidden);
     expect(
       nextBulkSyncRun(hidden, request({ remembered: "toast", key: 8 }))
-    ).toMatchObject({ key: hidden.key, view: "toast" });
+    ).toMatchObject({ key: hidden.key, view: "dialog" });
+    const toast = { ...hidden, view: "toast" as const };
+    expect(nextBulkSyncRun(toast, request({ key: 8 }))).toMatchObject({
+      key: hidden.key,
+      view: "dialog"
+    });
     const shown = { ...hidden, view: "dialog" as const };
     expect(nextBulkSyncRun(shown, request({ key: 8 }))).toBe(shown);
   });

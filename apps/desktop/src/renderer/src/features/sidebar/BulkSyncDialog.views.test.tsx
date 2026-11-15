@@ -476,3 +476,51 @@ describe("the status card's path line", () => {
     expect(line()).toBe("/repos/atlas-api");
   });
 });
+
+/**
+ * A timed run is hidden: nothing of the dialog is on screen, and the sync
+ * button is the only place it shows. So the run reports its fold up while
+ * hidden, and stops reporting once it ends.
+ * design/Sync Progress on the Button - UX Review.dc.html, turn 4.
+ */
+describe("BulkSyncDialog progress reports", () => {
+  it("reports the fold while hidden, and nothing after the run ends", async () => {
+    let emit: (event: unknown) => void = () => undefined;
+    subscribe.mockImplementation((_channel: string, handler: (event: unknown) => void) => {
+      emit = handler;
+      return vi.fn();
+    });
+    const onProgress = vi.fn();
+    await act(async () => {
+      root.render(
+        <BulkSyncDialog
+          profileId="profile-1"
+          repos={repos}
+          mode="fetch"
+          platform="darwin"
+          view="hidden"
+          onProgress={onProgress}
+          onClose={vi.fn()}
+        />
+      );
+    });
+    expect(document.querySelector(".bulk-sync-toast, [role=\"dialog\"]")).toBeNull();
+    expect(onProgress).toHaveBeenLastCalledWith(
+      expect.objectContaining({ inFlight: 0, queued: 1 })
+    );
+    const operationId = (
+      dispatch.mock.calls.find(([c]) => c === "remote:bulkSync")![1] as {
+        operationId: string;
+      }
+    ).operationId;
+    await act(async () =>
+      emit({ operationId, phase: "repo_started", repoId: "repo-a", completedRepos: 0, totalRepos: 1 })
+    );
+    expect(onProgress).toHaveBeenLastCalledWith(
+      expect.objectContaining({ inFlight: 1, queued: 0 })
+    );
+    const calls = onProgress.mock.calls.length;
+    await act(async () => finish(cleanSummary()));
+    expect(onProgress).toHaveBeenCalledTimes(calls);
+  });
+});

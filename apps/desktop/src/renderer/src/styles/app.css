@@ -879,6 +879,7 @@ textarea,
    belonged to the face, and open looked like hover.
    design/Sync Split Button - UX Review.dc.html, turn 2. */
 .sidebar-toolbar__split {
+  position: relative;
   display: flex;
   height: 30px;
   overflow: hidden;
@@ -989,6 +990,81 @@ textarea,
 .sidebar-toolbar--icons .sidebar-toolbar__chevron {
   flex: 0 0 20px;
   min-width: 20px;
+}
+/* A live run's position on the face: "Pulling 12/27". The count is outside
+   the label, so the icon-only step keeps it, and the split makes room for
+   it there. design/Sync Progress on the Button - UX Review.dc.html, 2a. */
+.sidebar-toolbar__count {
+  flex: 0 0 auto;
+  font: 600 11px/1 var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+.sidebar-toolbar--icons .sidebar-toolbar__split:has(.sidebar-toolbar__count) {
+  min-width: 84px;
+}
+.sidebar-toolbar--icons .sidebar-toolbar__sync:has(.sidebar-toolbar__count) {
+  gap: 4px;
+}
+/* The run's outcome bar along the split's bottom edge, clipped by its
+   radius. The face's own hit area is unchanged. */
+.bulk-sync__bar.sidebar-toolbar__progress {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 2px;
+  border-radius: 0;
+  pointer-events: none;
+}
+
+/* The sync button's hover card while a run is live (SyncRunCard). */
+.sync-run-card {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  width: 290px;
+  padding: 3px 0;
+  white-space: normal;
+}
+.sync-run-card__head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+}
+.sync-run-card__clock,
+.sync-run-card__path {
+  color: var(--text-muted);
+  font: 500 10.5px/1.3 var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+.sync-run-card__path {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.bulk-sync__bar.sync-run-card__bar {
+  height: 5px;
+}
+.sync-run-card__counts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px 10px;
+  color: var(--text-secondary);
+  font-size: 11px;
+}
+.sync-run-card__counts strong {
+  color: var(--text-primary);
+  font-variant-numeric: tabular-nums;
+}
+.sync-run-card__count.is-failed strong {
+  color: var(--danger-text);
+}
+.sync-run-card__foot {
+  padding-top: 6px;
+  border-top: 1px solid var(--border-subtle);
+  color: var(--text-muted);
+  font-size: 10.5px;
 }
 
 .sidebar__lens {
@@ -7291,16 +7367,22 @@ button.agent-menu__item:hover {
    read as a different outcome. */
 .bulk-sync__status .is-success,
 .bulk-sync-toast__bar > .is-success,
+.sidebar-toolbar__progress > .is-success,
+.sync-run-card__bar > .is-success,
 .bulk-sync-toast__count.is-success {
   --bulk-sync-outcome: var(--status-ok);
 }
 .bulk-sync__status .is-partial,
 .bulk-sync-toast__bar > .is-partial,
+.sidebar-toolbar__progress > .is-partial,
+.sync-run-card__bar > .is-partial,
 .bulk-sync-toast__count.is-partial {
   --bulk-sync-outcome: var(--status-warning);
 }
 .bulk-sync__status .is-skipped,
 .bulk-sync-toast__bar > .is-skipped,
+.sidebar-toolbar__progress > .is-skipped,
+.sync-run-card__bar > .is-skipped,
 .bulk-sync-toast__count.is-skipped {
   --bulk-sync-outcome: color-mix(
     in srgb,
@@ -7310,11 +7392,15 @@ button.agent-menu__item:hover {
 }
 .bulk-sync__status .is-failed,
 .bulk-sync-toast__bar > .is-failed,
+.sidebar-toolbar__progress > .is-failed,
+.sync-run-card__bar > .is-failed,
 .bulk-sync-toast__count.is-failed {
   --bulk-sync-outcome: var(--danger-base);
 }
 .bulk-sync__status .is-cancelled,
 .bulk-sync-toast__bar > .is-cancelled,
+.sidebar-toolbar__progress > .is-cancelled,
+.sync-run-card__bar > .is-cancelled,
 .bulk-sync-toast__count.is-cancelled {
   --bulk-sync-outcome: var(--status-suspended);
 }

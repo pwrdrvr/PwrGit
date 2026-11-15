@@ -604,6 +604,8 @@ export function Sidebar({
     repos,
     recentRepos
   });
+  // The run a progress report belongs to; the hook drops any other's.
+  const bulkRunKey = bulk.run?.key ?? -1;
   // Where a window with no remembered lens lands, decided once — the first
   // time repos actually arrive, because until then every count is 0 and
   // "empty" and "not read yet" look identical.
@@ -1275,6 +1277,8 @@ export function Sidebar({
         syncScope={bulk.scope}
         fetchInterval={bulk.interval}
         syncBusy={bulk.busy}
+        syncProgress={bulk.progress}
+        syncAuto={bulk.run?.auto ?? false}
         lastAutoRun={bulk.lastAutoRun}
         lastRun={bulk.lastRun}
         onShowRun={bulk.showRun}
@@ -1492,6 +1496,7 @@ export function Sidebar({
           {...(bulk.run.replay === undefined ? {} : { replay: bulk.run.replay })}
           onViewChange={bulk.setView}
           onFinished={bulk.finish}
+          onProgress={(progress) => bulk.reportProgress(bulkRunKey, progress)}
           onClose={bulk.close}
         />
       )}

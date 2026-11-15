@@ -91,3 +91,48 @@ export function progressValueText(
     .filter(Boolean)
     .join(", ");
 }
+
+/**
+ * A live run's progress, as the run's own fold has it. The dialog folds
+ * `remote:bulkSyncProgress` and reports this up, so the sync button's face,
+ * its hover card and the Sync options hint read the same numbers the dialog
+ * and toast draw, even while a timed run is hidden.
+ * Design: `design/Sync Progress on the Button - UX Review.dc.html`.
+ */
+export type BulkSyncLiveProgress = {
+  counts: BulkSyncOutcomeCounts;
+  inFlight: number;
+  queued: number;
+  /** `Date.now()` when the run was launched. */
+  startedAt: number;
+  /** The repository being worked on, as the status card's second line. */
+  path: string | null;
+};
+
+export function liveTotal(progress: BulkSyncLiveProgress): number {
+  return finishedCount(progress.counts) + progress.inFlight + progress.queued;
+}
+
+/** "12/27": the face's count, short enough to survive the icon-only step. */
+export function faceCount(progress: BulkSyncLiveProgress): string {
+  return `${finishedCount(progress.counts)}/${liveTotal(progress)}`;
+}
+
+/**
+ * Sync options → Show the running sync's hint, the same shape as Show last
+ * run's: position, trouble, then who started it and the clock.
+ */
+export function runningSyncHint(
+  progress: BulkSyncLiveProgress,
+  auto: boolean,
+  elapsed: string
+): string {
+  const total = liveTotal(progress);
+  return [
+    `${finishedCount(progress.counts)} of ${total}`,
+    progress.counts.failed > 0 ? `${progress.counts.failed} failed` : null,
+    `${auto ? "automatic, " : ""}${elapsed}`
+  ]
+    .filter(Boolean)
+    .join(" · ");
+}

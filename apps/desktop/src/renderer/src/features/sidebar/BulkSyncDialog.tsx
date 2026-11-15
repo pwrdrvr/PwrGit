@@ -26,7 +26,11 @@ import { MinimizeGlyph } from "../../lib/MinimizeGlyph";
 import { BulkSyncStatus, type BulkSyncStatusPhase } from "./BulkSyncStatus";
 import { BulkSyncToast } from "./BulkSyncToast";
 import type { BulkSyncView, FetchScope } from "./bulk-sync-prefs";
-import { countOutcomes, finishedCount } from "./bulk-sync-progress";
+import {
+  countOutcomes,
+  finishedCount,
+  type BulkSyncLiveProgress
+} from "./bulk-sync-progress";
 
 type RepoProgress =
   | { phase: "waiting" }
@@ -308,6 +312,7 @@ export function BulkSyncDialog({
   replay,
   onViewChange,
   onFinished,
+  onProgress,
   onClose
 }: {
   profileId: string;
@@ -328,6 +333,10 @@ export function BulkSyncDialog({
   /** Without it the run has no toast, and Escape closes as it always did. */
   onViewChange?: (view: BulkSyncView) => void;
   onFinished?: (summary: BulkSyncSummary | null) => void;
+  /** This run's fold while it is live, for the sync button's face, hover
+   *  card and menu hint. Reported hidden too: a timed run draws nothing here,
+   *  and the button is then the only place it shows. */
+  onProgress?: (progress: BulkSyncLiveProgress) => void;
   onClose: () => void;
 }) {
   const tip = useViewportTooltip();
@@ -527,6 +536,34 @@ export function BulkSyncDialog({
       flyBetween(from, surfaceRef.current);
     }
   }, [view]);
+
+  const onProgressRef = useRef(onProgress);
+  onProgressRef.current = onProgress;
+  // Primitives only, so a parent re-render that changes nothing reports
+  // nothing, and the report cannot loop through the parent's state.
+  const { success, partial, skipped, failed, cancelled } = outcomeCounts;
+  const inFlightCount = runningRepos.length;
+  useEffect(() => {
+    if (!running || replayRef.current !== undefined) return;
+    onProgressRef.current?.({
+      counts: { success, partial, skipped, failed, cancelled },
+      inFlight: inFlightCount,
+      queued: queuedCount,
+      startedAt,
+      path: livePath
+    });
+  }, [
+    running,
+    success,
+    partial,
+    skipped,
+    failed,
+    cancelled,
+    inFlightCount,
+    queuedCount,
+    startedAt,
+    livePath
+  ]);
 
   const onFinishedRef = useRef(onFinished);
   onFinishedRef.current = onFinished;
