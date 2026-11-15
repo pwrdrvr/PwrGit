@@ -1,5 +1,6 @@
 import { execFileSync, spawnSync } from "node:child_process";
 import {
+  existsSync,
   mkdirSync,
   mkdtempSync,
   readFileSync,
@@ -14,6 +15,7 @@ import { type BulkSyncProgress, err, ok } from "@pwrgit/shared";
 import { BULK_WORKTREE_CONCURRENCY, bulkSyncRepositories, type BulkSyncRepoInput } from "./bulk-sync";
 import type { GitExec } from "./dugite";
 import { createSystemGit } from "./test-support/system-git";
+import { WorktreeOperationQueue } from "./worktree-operation-queue";
 
 const GIT_ENV: NodeJS.ProcessEnv = {
   ...process.env,
@@ -115,6 +117,93 @@ afterEach(() => {
 });
 
 describe("bulk repository synchronization", () => {
+  it("finishes a cancelled checkout stalled in a smudge filter before releasing its worktree", async () => {
+    const repo = trackedRepo("cancel-smudge");
+    writeFileSync(join(repo.input.path, ".gitattributes"), "z.filtered filter=pause\n");
+    writeFileSync(join(repo.input.path, "z.filtered"), "base\n");
+    git(repo.input.path, "add", "-A");
+    git(repo.input.path, "commit", "-m", "add filtered file");
+    git(repo.input.path, "push", "origin", "main");
+    const before = git(repo.input.path, "rev-parse", "HEAD");
+    writeFileSync(join(repo.input.path, "shared.txt"), "updated\n");
+    writeFileSync(join(repo.input.path, "z.filtered"), "updated filtered\n");
+    git(repo.input.path, "add", "-A");
+    git(repo.input.path, "commit", "-m", "advance both files");
+    git(repo.input.path, "push", "origin", "main");
+    const target = git(repo.input.path, "rev-parse", "HEAD");
+    git(repo.input.path, "reset", "--hard", before);
+
+    const script = join(root, "pause-smudge.cjs");
+    const releasePath = join(root, "release-smudge");
+    writeFileSync(script, `
+      const fs = require('node:fs');
+      let input = '';
+      process.stdin.setEncoding('utf8');
+      process.stdin.on('data', chunk => { input += chunk; });
+      process.stdin.on('end', () => {
+        process.stderr.write('PWRGIT_TEST_SMUDGE_PAUSED\\n');
+        const timer = setInterval(() => {
+          if (!fs.existsSync(process.argv[2])) return;
+          clearInterval(timer);
+          process.stdout.end(input);
+        }, 10);
+      });
+    `);
+    const quoted = (path: string): string => `'${path.replaceAll("\\", "/").replaceAll("'", "'\\''")}'`;
+    git(repo.input.path, "config", "filter.pause.smudge", `${quoted(process.execPath)} ${quoted(script)} ${quoted(releasePath)}`);
+    git(repo.input.path, "config", "filter.pause.clean", `${quoted(process.execPath)} -e 'process.stdin.pipe(process.stdout)'`);
+    git(repo.input.path, "config", "filter.pause.required", "true");
+
+    let entered!: () => void;
+    const paused = new Promise<void>((resolve) => { entered = resolve; });
+    let stderr = "";
+    const observed: GitExec = (args, cwd, options) => systemGit(args, cwd, args[0] !== "merge" ? options : {
+      ...options,
+      onStderr: (chunk) => {
+        options?.onStderr?.(chunk);
+        stderr += chunk;
+        if (stderr.includes("PWRGIT_TEST_SMUDGE_PAUSED")) entered();
+      }
+    });
+    const controller = new AbortController();
+    const queue = new WorktreeOperationQueue();
+    let lockHeld = false;
+    let finished = false;
+    const operation = bulkSyncRepositories(observed, [repo.input], {
+      operationId: "cancel-smudge", mode: "soft-pull", signal: controller.signal,
+      runWorktree: (id, operation) => queue.run(id, async () => {
+        lockHeld = true;
+        try { return await operation(); } finally { lockHeld = false; }
+      })
+    }).then((summary) => { finished = true; return summary; });
+    try {
+      await Promise.race([paused, operation.then((summary) => {
+        throw new Error(`Bulk sync finished before reaching the paused checkout: ${JSON.stringify(summary.results)}`);
+      })]);
+      // Git is actually mid-checkout, with files changing before HEAD moves.
+      expect(git(repo.input.path, "rev-parse", "HEAD")).toBe(before);
+      expect(existsSync(join(repo.input.path, ".git", "index.lock"))).toBe(true);
+      controller.abort();
+      expect(lockHeld).toBe(true);
+      expect(finished).toBe(false);
+      writeFileSync(releasePath, "continue\n");
+      const summary = await operation;
+      // Git is the oracle: HEAD, index and working tree must agree, and the
+      // lock must be gone before another worktree operation is permitted.
+      expect(git(repo.input.path, "rev-parse", "HEAD")).toBe(target);
+      expect(git(repo.input.path, "status", "--porcelain")).toBe("");
+      expect(readFileSync(join(repo.input.path, "shared.txt"), "utf8")).toBe("updated\n");
+      expect(readFileSync(join(repo.input.path, "z.filtered"), "utf8")).toBe("updated filtered\n");
+      expect(existsSync(join(repo.input.path, ".git", "index.lock"))).toBe(false);
+      expect(summary.results[0]?.worktrees[0]?.outcome).toBe("updated");
+      expect(summary.counts.worktrees.failed).toBe(0);
+      expect(lockHeld).toBe(false);
+    } finally {
+      writeFileSync(releasePath, "continue\n");
+      await operation;
+    }
+  });
+
   it("fetches a shared repository once and fast-forwards each safe worktree", async () => {
     const repo = trackedRepo("shared-worktrees");
     git(repo.input.path, "branch", "release");
@@ -161,7 +250,7 @@ describe("bulk repository synchronization", () => {
     expect(progress.filter((event) => event.worktreeResult)).toHaveLength(2);
     expect(progress.map((event) => event.detail)).toContain("main: Fast-forwarding…");
     expect(fetches).toBe(1);
-    expect(fetchArgs).toEqual(["fetch", "--atomic", "--prune", "origin"]);
+    expect(fetchArgs).toEqual(["fetch", "--atomic", "--prune", "--progress", "origin"]);
     expect(summary.counts.worktrees.updated).toBe(2);
     expect(summary.results[0]?.outcome).toBe("success");
     expect(git(repo.input.path, "rev-parse", "HEAD")).toBe(mainHead);

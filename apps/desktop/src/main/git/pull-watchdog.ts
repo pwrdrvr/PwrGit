@@ -10,6 +10,13 @@ export const PULL_RECOVERY_STALL_WARNING_MS = 60_000;
 export const PULL_RECOVERY_STALL_TIMEOUT_MS = 5 * 60_000;
 export const PULL_RECOVERY_OPERATION_TIMEOUT_MS = 10 * 60_000;
 
+const activeWatchdogs = new Set<PullWatchdog>();
+
+/** Timer clocks can pause across system sleep; recheck wall time on wake. */
+export function checkPullWatchdogDeadlines(): void {
+  for (const watchdog of activeWatchdogs) watchdog.checkDeadline();
+}
+
 export type PullWatchdogPhase = PullProgressPhase | "starting" | "recovery";
 
 export type PullWatchdogSnapshot = {
@@ -19,6 +26,7 @@ export type PullWatchdogSnapshot = {
 };
 
 export type PullWatchdogOptions = {
+  operationName?: string;
   stallWarningMs?: number;
   stallTimeoutMs?: number;
   operationTimeoutMs?: number;
@@ -80,6 +88,7 @@ export class PullWatchdog {
       () => this.timeout("pull_timed_out"),
       this.operationTimeoutMs
     );
+    activeWatchdogs.add(this);
   }
 
   get signal(): AbortSignal {
@@ -91,12 +100,14 @@ export class PullWatchdog {
   }
 
   setPhase(phase: PullWatchdogPhase): void {
+    this.checkDeadline();
     if (this.stopped) return;
     this.currentPhase = phase;
     this.noteActivity();
   }
 
   noteActivity(): void {
+    this.checkDeadline();
     if (this.stopped) return;
     this.lastActivityAt = Date.now();
     this.armIdleTimers();
@@ -105,7 +116,15 @@ export class PullWatchdog {
   finish(): void {
     if (this.stopped) return;
     this.stopped = true;
+    activeWatchdogs.delete(this);
     this.clearTimers();
+  }
+
+  checkDeadline(): void {
+    if (this.stopped) return;
+    const now = Date.now();
+    if (now - this.startedAt >= this.operationTimeoutMs) this.timeout("pull_timed_out");
+    else if (now - this.lastActivityAt >= this.stallTimeoutMs) this.timeout("pull_stalled");
   }
 
   private snapshot(): PullWatchdogSnapshot {
@@ -145,10 +164,11 @@ export class PullWatchdog {
       message:
         code === "pull_stalled"
           ? `PwrGit stopped the Git process during ${phase} after ${elapsed} because it produced no output for ${idle}. Check the network, credentials, and Git LFS, then retry. See Logs for details.`
-          : `PwrGit stopped the Git process during ${phase} after ${elapsed} because Pull exceeded the ${formatPullDuration(this.operationTimeoutMs)} operation limit. Check the network and Git LFS, then retry. See Logs for details.`,
+          : `PwrGit stopped the Git process during ${phase} after ${elapsed} because ${this.options.operationName ?? "Pull"} exceeded the ${formatPullDuration(this.operationTimeoutMs)} operation limit. Check the network and Git LFS, then retry. See Logs for details.`,
       cause: snapshot
     };
     this.stopped = true;
+    activeWatchdogs.delete(this);
     this.clearTimers();
     this.options.onTimeout?.(error, snapshot);
     this.controller.abort(error);

@@ -59,6 +59,7 @@ import { activeGitReflinkProbe, configureBundledGit, configureBundledGitConfig, 
 import { openExternalUrlFromMenu } from "./external-links";
 import { registerBranchHandlers } from "./git/branch-handlers";
 import { registerBulkSyncHandlers } from "./git/bulk-sync-handlers";
+import { checkPullWatchdogDeadlines } from "./git/pull-watchdog";
 import { registerMaintenanceHandlers } from "./git/maintenance-handlers";
 import { registerPruneHandlers } from "./git/prune-handlers";
 import { SshHostTrustService } from "./git/ssh-host-trust";
@@ -468,8 +469,15 @@ if (!gotSingleInstanceLock) {
     // platforms and not others; pausing across it keeps a closed lid from
     // reading as a blocked main thread.
     const eventLoopStalls = watchEventLoopStalls();
-    powerMonitor.on("suspend", () => eventLoopStalls.pause());
-    powerMonitor.on("resume", () => eventLoopStalls.resume());
+    powerMonitor.on("suspend", () => {
+      logMain("info", "process", "system suspending");
+      eventLoopStalls.pause();
+    });
+    powerMonitor.on("resume", () => {
+      logMain("info", "process", "system resumed");
+      eventLoopStalls.resume();
+      checkPullWatchdogDeadlines();
+    });
     installDevelopmentDockIcon();
     installWindowDefaults();
     bus.register("logs:read", () => ok(readLogSnapshot()));
