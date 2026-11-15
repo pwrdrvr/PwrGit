@@ -10736,21 +10736,6 @@ button.agent-menu__item:hover {
   display: block;
   height: 100%;
 }
-.commit-check {
-  flex: 0 0 auto;
-  align-self: center;
-  width: 18px;
-  height: 18px;
-  border-radius: 5px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  border: 1.5px solid var(--border-strong);
-}
-.commit-check.is-checked {
-  border-color: var(--accent);
-  background: var(--accent);
-}
 .commit-body {
   flex: 1;
   min-width: 0;
@@ -11091,11 +11076,13 @@ button.commit-byline:focus-visible {
    row can overflow. The app's 940px minimum leaves a 276px main pane with the
    default side panels.
 
-   The 230px covers the checkbox, the SHA and the age, and left nothing for
-   the subject: at a 400px pane the lanes kept their full 160px and subjects
-   collapsed to "M…". The extra 14ch keeps about fourteen characters of
+   The 204px covers the row's padding, the SHA and the age. Without a cap at
+   all, a 400px pane kept the lanes' full 160px and subjects collapsed to
+   "M…". (It was 230px while every row reserved a hover-only rebase checkbox;
+   Rebase Selection Column 2a moved that choice to the commit menu and gave
+   the 26px back to the lanes.) The extra 14ch keeps about fourteen characters of
    subject before the lanes give way (Post-ship 2g). The 160px ceiling still
-   wins at the stock 696px pane; this only bites below a pane of ~510px, and
+   wins at the stock 696px pane; this only bites below a pane of ~490px, and
    it never caps the lane count at normal widths. The scrollbar below carries
    the same expression, so the two stay the same width.
 
@@ -11110,7 +11097,7 @@ button.commit-byline:focus-visible {
   align-items: center;
   font-size: 12.5px;
   font-weight: 600;
-  max-width: clamp(16px, calc(100cqi - 230px - 14ch), 160px);
+  max-width: clamp(16px, calc(100cqi - 204px - 14ch), 160px);
   overflow: hidden;
 }
 .graph-lanes {
@@ -11127,7 +11114,7 @@ button.commit-byline:focus-visible {
   height: 12px;
   font-size: 12.5px;
   font-weight: 600;
-  max-width: clamp(16px, calc(100cqi - 230px - 14ch), 160px);
+  max-width: clamp(16px, calc(100cqi - 204px - 14ch), 160px);
   margin: 0 0 4px 29px;
 }
 .lane-scrollbar::-webkit-scrollbar {
@@ -11157,18 +11144,6 @@ button.commit-byline:focus-visible {
   50% {
     opacity: 0.25;
   }
-}
-/* Rebase checkboxes are hover-revealed (or pinned while a selection exists) —
-   a column of empty boxes on every row was visual noise. */
-.graph-row .commit-check {
-  opacity: 0;
-  transition: opacity 120ms ease;
-}
-.graph-row:hover .commit-check,
-.graph-row.is-context-open .commit-check,
-.graph-card.has-selection .commit-check,
-.commit-check.is-checked {
-  opacity: 1;
 }
 .graph-card {
   animation: card-in 240ms ease-out;
@@ -15136,12 +15111,6 @@ body.is-col-resizing {
 .file-row.is-selected {
   background: var(--bg-row-active);
   box-shadow: inset 0 0 0 1px var(--accent);
-}
-.commit-check {
-  cursor: pointer;
-}
-.commit-check:hover {
-  border-color: var(--accent-border);
 }
 
 /* ---- Diff pane + viewer ---- */

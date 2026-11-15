@@ -418,14 +418,6 @@ export function App() {
     setPendingCommit(null);
   }, [pendingCommit, selection?.worktreeId]);
 
-  const toggleCommit = useCallback((hash: string) => {
-    setSelectedCommits((prev) => {
-      const next = new Set(prev);
-      if (next.has(hash)) next.delete(hash);
-      else next.add(hash);
-      return next;
-    });
-  }, []);
 
   const clearSelection = useCallback(() => {
     setSelectedCommits(new Set());
@@ -437,6 +429,15 @@ export function App() {
     setRailCollapsed(false);
   }, []);
   const startTidy = useCallback(() => startRebase("tidy"), [startRebase]);
+  // "Edit history from here" on a commit: the run from HEAD down to it
+  // replaces any selection, and the rail opens on the chosen operation.
+  const editHistory = useCallback(
+    (hashes: string[], op: RebaseOperation) => {
+      setSelectedCommits(new Set(hashes));
+      startRebase(op);
+    },
+    [startRebase]
+  );
   // Tidy is an agent action from the start, so with AI off for this profile
   // the selection bar does not offer it. Squash and Reorder always stay.
   const tidyOffered = useAgentOffered("historyEditing");
@@ -1239,7 +1240,8 @@ export function App() {
                   selectedCommits={selectedCommits}
                   focusedCommit={commitFocus?.hash ?? null}
                   revealCommit={commitReveal}
-                  onToggleCommit={toggleCommit}
+                  tidyOffered={tidyOffered}
+                  onEditHistory={editHistory}
                   onCommitsChange={setSearchableCommits}
                   onOpenCommit={(hash, subject) => {
                     setCommitFocus({ hash, subject });

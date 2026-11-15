@@ -1,4 +1,4 @@
-import type { LaneBranchInfo } from "@pwrgit/shared";
+import type { LaneBranchInfo, RebaseOperation } from "@pwrgit/shared";
 import { copyText } from "../../lib/copyText";
 import { ContextMenu, type MenuItem } from "../shell/ContextMenu";
 import { changeRequestMenuItems } from "../shell/change-request-menu-items";
@@ -10,6 +10,7 @@ import {
   pullRequestsAtCommit,
   switchTargetsAtCommit
 } from "./commit-context-menu";
+import type { HistoryRange } from "./history-range";
 
 /** Context actions for a lineage commit. PR actions are shown only when a
  * branch that tips this exact commit has cached PR metadata. */
@@ -25,6 +26,9 @@ export function CommitContextMenu({
   onTagFrom,
   onSwitchBranch,
   onRevealWorktree,
+  historyRange,
+  tidyOffered,
+  onEditHistory,
   onClose
 }: {
   x: number;
@@ -42,6 +46,12 @@ export function CommitContextMenu({
   onSwitchBranch: (target: CommitSwitchTarget) => void;
   /** Jump to the worktree already holding a branch tipped here. */
   onRevealWorktree: (worktreeId: string) => void;
+  /** The run from HEAD down to this commit, for "Edit history from here". */
+  historyRange: HistoryRange | null;
+  /** AI history editing is on for this profile, so Tidy is offered. */
+  tidyOffered: boolean;
+  /** Select the run and open the rebase tool on one operation. */
+  onEditHistory: (hashes: string[], op: RebaseOperation) => void;
   onClose: () => void;
 }) {
   const { commit } = vm;
@@ -87,6 +97,7 @@ export function CommitContextMenu({
       label: "Tag this commit…",
       onSelect: onTagFrom
     },
+    ...historyItems(historyRange, tidyOffered, onEditHistory),
     { type: "sep" },
     {
       type: "item",
@@ -160,4 +171,59 @@ export function CommitContextMenu({
       onClose={onClose}
     />
   );
+}
+
+/** "Edit history from here": the run always ends at HEAD, so the commit
+ *  right-clicked is the one choice to make, and each entry names the count
+ *  so the range is visible before choosing (design: Rebase Selection Column,
+ *  2a). */
+function historyItems(
+  range: HistoryRange | null,
+  tidyOffered: boolean,
+  onEditHistory: (hashes: string[], op: RebaseOperation) => void
+): MenuItem[] {
+  if (range === null) return [];
+  const heading: MenuItem[] = [
+    { type: "sep" },
+    { type: "heading", label: "Edit history from here" }
+  ];
+  if (range.kind === "blocked") {
+    return [
+      ...heading,
+      {
+        type: "item",
+        label: `Squash, reorder or tidy ${range.count} commits`,
+        disabled: true,
+        hint:
+          range.reason === "merge"
+            ? "A merge sits between here and HEAD."
+            : "This reaches the repository's first commit.",
+        onSelect: () => undefined
+      }
+    ];
+  }
+  const { hashes } = range;
+  const n = hashes.length;
+  return [
+    ...heading,
+    {
+      type: "item",
+      label: `Squash ${n} commits into one…`,
+      onSelect: () => onEditHistory(hashes, "squash")
+    },
+    {
+      type: "item",
+      label: `Reorder ${n} commits…`,
+      onSelect: () => onEditHistory(hashes, "reorder")
+    },
+    ...(tidyOffered
+      ? [
+          {
+            type: "item",
+            label: `Tidy ${n} commits with an agent…`,
+            onSelect: () => onEditHistory(hashes, "tidy")
+          } satisfies MenuItem
+        ]
+      : [])
+  ];
 }

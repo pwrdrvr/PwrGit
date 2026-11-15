@@ -676,13 +676,15 @@ export function RebaseTab({
 
       {op === null || plan === null ? (
         <div className="rebase-empty">
-          Select commits in the graph, then choose{" "}
-          <span className="rebase-accent">Squash</span>,{" "}
+          Right-click the oldest commit you want to change in the graph and
+          choose <span className="rebase-accent">Squash</span>,{" "}
           <span className="rebase-accent">Reorder</span> or{" "}
           <span className="rebase-accent">
             <AgentGlyph size={11} /> Tidy
-          </span>. You can inspect the
-          exact plan and check it safely before changing the worktree.
+          </span>{" "}
+          under “Edit history from here”. Every commit from there up to HEAD
+          is included. You can inspect the exact plan and check it safely
+          before changing the worktree.
         </div>
       ) : (
         <>

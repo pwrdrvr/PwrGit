@@ -69,23 +69,23 @@ function remoteHead(box: GitSandbox, repo: RemoteTestRepo): string {
   return box.git(repo.remotePath, "rev-parse", "refs/heads/main");
 }
 
-async function selectCommit(window: Page, subject: string): Promise<void> {
-  const row = window.locator(".graph-row", { hasText: subject });
-  await expect(row).toBeVisible({ timeout: 20_000 });
-  await row.getByRole("checkbox").click();
-}
-
+/** Right-click the oldest commit of the run and choose an operation under
+ *  "Edit history from here"; the run is every commit from there to HEAD. */
 async function openReorderPlan(
   window: Page,
   newest: string,
   older: string
 ): Promise<void> {
-  await selectCommit(window, newest);
-  await selectCommit(window, older);
+  await expect(window.locator(".graph-row", { hasText: newest })).toBeVisible({
+    timeout: 20_000
+  });
+  const row = window.locator(".graph-row", { hasText: older });
+  await expect(row).toBeVisible({ timeout: 20_000 });
+  await row.locator(".commit-msg").click({ button: "right" });
+  await window.getByRole("menuitem", { name: "Reorder 2 commits…" }).click();
   await expect(window.locator(".selection-bar__count")).toHaveText(
     "2 commits selected"
   );
-  await window.getByRole("button", { name: "Reorder", exact: true }).click();
   await expect(window.locator(".rebase-section").first()).toHaveText(
     "Reorder · 2 commits"
   );

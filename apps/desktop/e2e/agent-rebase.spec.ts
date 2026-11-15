@@ -26,18 +26,18 @@ test("with AI off, the deterministic isolated rebase workflow is whole and usabl
   await addRootAndExpand(window, handle, sandbox, repo.name);
   await branchRow(window, "main").first().click();
 
-  for (const subject of ["second focused change", "first focused change"]) {
-    const row = window.locator(".graph-row", { hasText: subject });
-    await expect(row).toBeVisible({ timeout: 20_000 });
-    const selection = row.getByRole("checkbox");
-    await selection.click();
-    await expect(selection).toBeChecked();
-  }
+  // The run starts at the commit right-clicked and ends at HEAD.
+  const oldest = window.locator(".graph-row", { hasText: "first focused change" });
+  await expect(oldest).toBeVisible({ timeout: 20_000 });
+  await oldest.locator(".commit-msg").click({ button: "right" });
   // AI is off until the operator turns it on, and Tidy is an agent action
-  // from the start, so the selection bar offers only the Git operations.
+  // from the start, so neither the menu nor the selection bar offers it.
+  await expect(window.getByRole("menuitem", { name: "Reorder 2 commits…" })).toBeVisible();
+  await expect(window.getByRole("menuitem", { name: /Tidy/ })).toHaveCount(0);
+  await window.getByRole("menuitem", { name: "Squash 2 commits into one…" }).click();
+  await expect(window.locator(".graph-row.is-selected")).toHaveCount(2);
   await expect(window.locator(".selection-bar")).toContainText("Reorder");
   await expect(window.locator(".selection-bar")).not.toContainText("Tidy");
-  await window.getByRole("button", { name: "Squash", exact: true }).click();
 
   await expect(window.locator(".rebase-plan")).toContainText("pick");
   await expect(window.locator(".rebase-plan")).toContainText("squash");
