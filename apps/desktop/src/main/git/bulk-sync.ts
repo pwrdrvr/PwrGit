@@ -6,19 +6,25 @@ import {
   type BulkSyncRepoResult,
   type BulkSyncSummary,
   type BulkSyncWorktreeResult,
+  type PwrGitError,
+  err,
   ok,
   type Result
 } from "@pwrgit/shared";
 import { access } from "node:fs/promises";
 import { resolve } from "node:path";
 import { mapLimit } from "../util/map-limit";
+import { logMain } from "../logs";
 import { nestedWorktreePathspec } from "@pwrgit/mcp-server/nested-worktrees";
 import {
   NO_OPTIONAL_LOCKS,
   requireExit0,
+  sanitizeGitLogDetail,
   type GitExec,
+  type GitProcessEvent,
   type GitOutput
 } from "./dugite";
+import { formatPullDuration, PullWatchdog } from "./pull-watchdog";
 
 export const BULK_SYNC_CONCURRENCY = 3;
 /** Each repository worker runs at most four independent checkout operations. */
@@ -57,6 +63,90 @@ type RepoProgressUpdate = Pick<
   "detail" | "worktreePath" | "remoteResult" | "worktreeResult"
 >;
 type ReportProgress = (update: RepoProgressUpdate) => void;
+
+/** Each actual Git invocation gets its own clock, after its queue lock is held.
+ * Output from another repository/checkout cannot keep a wedged command alive. */
+function watchedGit(git: GitExec, signal: AbortSignal | undefined): GitExec {
+  return async (args, cwd, options) => {
+    if (signal?.aborted) {
+      return err({ kind: "remote", code: "aborted", message: "Repository synchronization was cancelled." });
+    }
+    const command = sanitizeGitLogDetail(`git ${args.join(" ")} (${cwd})`);
+    let processState: GitProcessEvent | undefined;
+    let pendingOutput = "";
+    let droppingOutput = false;
+    const tail: string[] = [];
+    const context = (): string => {
+      const state = processState === undefined ? "spawn not observed" :
+        `pid=${processState.pid ?? "unknown"} event=${processState.event} exit=${processState.exitCode ?? "none"} signal=${processState.signalCode ?? "none"}`;
+      // An unfinished URL can contain credentials whose trailing @ has not
+      // arrived yet. Describe partial output without logging those bytes.
+      const pending = pendingOutput === "" ? "" :
+        `; ${pendingOutput.length} chars of unfinished stderr withheld${/password|passphrase|username|continue connecting/i.test(pendingOutput) ? " (possible authentication or host-key prompt)" : ""}`;
+      return `${state}; stderr tail: ${tail.join(" | ") || "(no complete stderr lines)"}${pending}`;
+    };
+    let timeout: PwrGitError | undefined;
+    const watchdog = new PullWatchdog({
+      operationName: "Repository synchronization",
+      onStallWarning: (snapshot) => logMain(
+        "warn", "remote",
+        `bulk sync still waiting: ${command}; ${formatPullDuration(snapshot.elapsedMs)} elapsed; no Git output for ${formatPullDuration(snapshot.idleMs)}; ${context()}`
+      ),
+      onTimeout: (error) => {
+        timeout = error;
+        logMain("error", "remote", `bulk sync timeout: ${command}; ${error.code}; ${error.message}; ${context()}; direct Git termination requested`);
+      }
+    });
+    watchdog.setPhase(args[0] === "fetch" ? "fetch" : args[0] === "merge" ? "fast_forward" : "prepare");
+    const signals = [watchdog.signal];
+    if (signal !== undefined) signals.push(signal);
+    if (options?.signal !== undefined) signals.push(options.signal);
+    try {
+      const result = await git(args, cwd, {
+        ...options,
+        signal: AbortSignal.any(signals),
+        killSignal: "SIGKILL",
+        onActivity: () => {
+          watchdog.noteActivity();
+          options?.onActivity?.();
+        },
+        onProcess: (event) => {
+          processState = event;
+          logMain("debug", "remote", `bulk sync Git ${event.event}: ${command}; pid=${event.pid ?? "unknown"} exit=${event.exitCode ?? "none"} signal=${event.signalCode ?? "none"}`);
+          options?.onProcess?.(event);
+        },
+        onStderr: (chunk) => {
+          // Keep complete lines so a credential split across chunks is redacted
+          // before logging. Omit oversized lines instead of retaining fragments.
+          const lines = (pendingOutput + chunk).split(/[\r\n]/);
+          pendingOutput = lines.pop() ?? "";
+          if (droppingOutput) {
+            if (lines.length === 0) pendingOutput = "";
+            else {
+              lines.shift();
+              droppingOutput = false;
+            }
+          }
+          for (const line of lines) {
+            if (line) tail.push(line.length > 16_384 ? "[oversized Git output line omitted]" : sanitizeGitLogDetail(line));
+          }
+          if (pendingOutput.length > 16_384) {
+            pendingOutput = "";
+            droppingOutput = true;
+            tail.push("[oversized Git output line omitted]");
+          }
+          tail.splice(0, Math.max(0, tail.length - 3));
+          options?.onStderr?.(chunk);
+        }
+      });
+      // A timeout is a failure, even if the process reports a generic abort or
+      // exits successfully as the deadline fires. It does not cancel the batch.
+      return timeout === undefined ? result : err(timeout);
+    } finally {
+      watchdog.finish();
+    }
+  };
+}
 
 type ConfiguredRemote = {
   name: string;
@@ -176,7 +266,7 @@ async function fetchConfiguredRemotes(
     }
     report({ detail: `Fetching ${remote.name}…` });
     const raw = await git(
-      ["fetch", "--atomic", "--prune", remote.name],
+      ["fetch", "--atomic", "--prune", "--progress", remote.name],
       repo.path,
       signal === undefined ? undefined : { signal }
     );
@@ -186,12 +276,13 @@ async function fetchConfiguredRemotes(
     }
     if (!raw.ok || raw.value.exitCode !== 0) {
       const detail = raw.ok ? `${raw.value.stderr}\n${raw.value.stdout}` : raw.error.message;
-      const authentication = authFailure(detail);
+      const timedOut = !raw.ok && ["pull_stalled", "pull_timed_out"].includes(raw.error.code);
+      const authentication = !timedOut && authFailure(detail);
       complete({
         remote: remote.name,
         outcome: "failed",
         reason: authentication ? "authentication" : "fetch_failed",
-        message: authentication
+        message: timedOut ? raw.error.message : authentication
           ? "Authentication is required; PwrGit did not open an interactive prompt."
           : "Git could not fetch this remote. See Logs for details."
       });
@@ -559,6 +650,7 @@ async function softPullWorktree(
     [
       "merge",
       "--ff-only",
+      "--progress",
       "--no-edit",
       "--no-overwrite-ignore",
       second.value.upstreamHead
@@ -660,12 +752,13 @@ function cancelledRepo(repo: BulkSyncRepoInput): BulkSyncRepoResult {
 }
 
 async function syncRepo(
-  git: GitExec,
+  exec: GitExec,
   repo: BulkSyncRepoInput,
   options: BulkSyncOptions,
   report: ReportProgress
 ): Promise<BulkSyncRepoResult> {
   if (isAborted(options.signal)) return cancelledRepo(repo);
+  const git = watchedGit(exec, options.signal);
   const fetched = await fetchConfiguredRemotes(git, repo, options.signal, report);
   if (!fetched.ok) {
     return {

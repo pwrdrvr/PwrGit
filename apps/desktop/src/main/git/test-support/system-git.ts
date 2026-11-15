@@ -2,6 +2,7 @@ import { spawn } from "node:child_process";
 import { accessSync, constants, statSync } from "node:fs";
 import { delimiter, isAbsolute, join } from "node:path";
 import { beginGitCall } from "./git-tripwire";
+import { bindGitAbort, gitProcessGroupOptions } from "../git-process-control";
 import { err, ok, type PwrGitError, type Result } from "@pwrgit/shared";
 import {
   gitExecutionEnvironment,
@@ -70,7 +71,7 @@ function runGit(
         // honours it, so a test double that quietly ignored it would let an
         // un-aborted git run to the suite timeout — the very failure this
         // module exists to remove.
-        ...(options?.signal === undefined ? {} : { signal: options.signal }),
+        ...gitProcessGroupOptions(options?.signal),
         ...(options?.killSignal === undefined
           ? {}
           : { killSignal: options.killSignal })
@@ -84,6 +85,13 @@ function runGit(
       return;
     }
     const child = proc;
+    if (options?.onProcess !== undefined) {
+      for (const event of ["spawn", "exit", "close"] as const) {
+        child.on(event, () => options.onProcess?.({
+          event, pid: child.pid, exitCode: child.exitCode, signalCode: child.signalCode
+        }));
+      }
+    }
     // Git can close stdin before the write lands; its exit code says why.
     child.stdin.on("error", () => undefined);
     child.stdin.end(options?.input);
@@ -97,6 +105,7 @@ function runGit(
     let exitCode = 1;
     let settled = false;
     let grace: ReturnType<typeof setTimeout> | undefined;
+    let unbindAbort = (): void => {};
     const streamState = (stream: typeof child.stdout) => ({ ended: stream.readableEnded,
       destroyed: stream.destroyed, closed: stream.closed, bufferedBytes: stream.readableLength });
     snapshot = () => ({ pid: child.pid, exitObserved: exited, exitCode: child.exitCode,
@@ -110,6 +119,7 @@ function runGit(
     const settle = (result: Result<Collected, PwrGitError>): void => {
       if (settled) return;
       settled = true;
+      unbindAbort();
       if (grace) clearTimeout(grace);
       child.removeListener("spawn", onSpawn);
       call?.event("settlement");
@@ -155,6 +165,9 @@ function runGit(
       grace = setTimeout(() => { call?.report("drain-grace-expired"); finish(); }, FLUSH_GRACE_MS);
       grace.unref?.();
       finishWhenDrained();
+    });
+    unbindAbort = bindGitAbort(child, options?.signal, options?.killSignal, () => {
+      settle(err({ kind: "git", code: "aborted", message: "Git was stopped before it completed." }));
     });
   });
 }

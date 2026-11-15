@@ -1,6 +1,7 @@
 // dugite is CommonJS; default-import it so the strict-ESM main bundle loads
 // it (a named `import { exec }` throws at runtime).
-import { execFile, spawn, type ChildProcessWithoutNullStreams, type ExecFileOptions } from "node:child_process";
+import { spawn, type ChildProcessWithoutNullStreams, type ExecFileOptions } from "node:child_process";
+import { bindGitAbort, gitProcessGroupOptions } from "./git-process-control";
 import { bundledGitEnvironment, installedKeychainHelper, userSystemConfig } from "@pwrgit/mcp-server";
 import { tmpdir } from "node:os";
 import { delimiter, dirname, isAbsolute, relative, resolve } from "node:path";
@@ -180,14 +181,23 @@ export type GitRecordExec = (
   options: GitRecordExecOptions
 ) => Promise<Result<GitRecordOutput, PwrGitError>>;
 
+export type GitProcessEvent = {
+  event: "spawn" | "exit" | "close";
+  pid: number | undefined;
+  exitCode: number | null;
+  signalCode: NodeJS.Signals | null;
+};
+
 export type GitExecOptions = {
+  /** Lifecycle evidence: exit and pipe closure are distinct events. */
+  onProcess?: (event: GitProcessEvent) => void;
   /** Receive stderr as Git writes it (progress output is emitted here). */
   onStderr?: (chunk: string) => void;
   /** Called whenever Git writes stdout or stderr; used by pull watchdogs. */
   onActivity?: () => void;
   /** Extra environment variables applied to this Git process. */
   env?: Record<string, string | undefined>;
-  /** Abort the direct Git process through Dugite/Node execFile. */
+  /** Abort Git and close its pipes; on POSIX also terminate its process group. */
   signal?: AbortSignal;
   /** Signal used when `signal` aborts. */
   killSignal?: ExecFileOptions["killSignal"];
@@ -357,7 +367,7 @@ function execFileGit(
     encoding: "utf8" | "buffer";
     signal?: AbortSignal;
     killSignal?: ExecFileOptions["killSignal"];
-    processCallback?: (child: ReturnType<typeof execFile>) => void;
+    processCallback?: (child: ChildProcessWithoutNullStreams) => void;
   }
 ): Promise<ExecFileResult<string | Buffer>> {
   // The Git is picked once the gate opens, not when the command was asked
@@ -373,36 +383,51 @@ function runExecFileGit(
     encoding: "utf8" | "buffer";
     signal?: AbortSignal;
     killSignal?: ExecFileOptions["killSignal"];
-    processCallback?: (child: ReturnType<typeof execFile>) => void;
+    processCallback?: (child: ChildProcessWithoutNullStreams) => void;
   }
 ): Promise<ExecFileResult<string | Buffer>> {
   return new Promise((resolveExec, rejectExec) => {
-    const child = execFile(
-      launch.binary,
-      args,
-      {
-        cwd,
-        env: launch.env,
-        encoding: options.encoding,
-        maxBuffer: Infinity,
-        ...(options.signal === undefined ? {} : { signal: options.signal }),
-        ...(options.killSignal === undefined ? {} : { killSignal: options.killSignal })
-      },
-      (error, stdout, stderr) => {
-        if (error === null || typeof error.code === "number") {
-          resolveExec({
-            stdout,
-            stderr,
-            exitCode: typeof error?.code === "number" ? error.code : 0
-          });
-          return;
-        }
-        rejectExec(new Error(spawnFailureMessage(launch.binary, error), { cause: error }));
+    if (options.signal?.aborted) {
+      rejectExec(new Error("Git was stopped before it started.", { cause: options.signal.reason }));
+      return;
+    }
+    let unbindAbort: (() => void) | undefined;
+    // execFile does not forward `detached` to spawn. Use spawn directly so
+    // cancellable commands really own the process group we terminate.
+    const child = spawn(launch.binary, args, {
+      cwd, env: launch.env, ...gitProcessGroupOptions(options.signal)
+    });
+    const stdout: Buffer[] = [];
+    const stderr: Buffer[] = [];
+    child.stdout.on("data", (chunk: Buffer) => stdout.push(chunk));
+    child.stderr.on("data", (chunk: Buffer) => stderr.push(chunk));
+    child.on("error", (cause) => {
+      unbindAbort?.();
+      rejectExec(new Error(spawnFailureMessage(launch.binary, cause), { cause }));
+    });
+    child.on("close", (code, signal) => {
+      unbindAbort?.();
+      if (code === null) {
+        rejectExec(new Error(`Git stopped by ${signal ?? "an unknown signal"}.`));
+        return;
       }
-    );
+      const output = Buffer.concat(stdout);
+      const errors = Buffer.concat(stderr);
+      resolveExec({
+        stdout: options.encoding === "buffer" ? output : output.toString("utf8"),
+        stderr: options.encoding === "buffer" ? errors : errors.toString("utf8"),
+        exitCode: code
+      });
+    });
     // Git can close stdin before a write lands; the exit code says what happened.
     child.stdin?.on("error", () => undefined);
     options.processCallback?.(child);
+    unbindAbort = bindGitAbort(child, options.signal, options.killSignal, (terminationError) => {
+      if (terminationError !== undefined) {
+        logMain("error", "git", `Git process-group termination failed pid=${child.pid ?? "unknown"}: ${sanitizeGitLogDetail(terminationError)}`);
+      }
+      rejectExec(new Error("Git was stopped before it completed.", { cause: options.signal?.reason }));
+    });
   });
 }
 
@@ -502,6 +527,13 @@ export const execGit: GitExec = async (args, cwd, options) => {
         ? { killSignal: options.killSignal }
         : {}),
       processCallback: (child) => {
+        if (options?.onProcess !== undefined) {
+          for (const event of ["spawn", "exit", "close"] as const) {
+            child.on(event, () => options.onProcess?.({
+              event, pid: child.pid, exitCode: child.exitCode, signalCode: child.signalCode
+            }));
+          }
+        }
         // Always closed: nothing here answers a prompt, and a `--stdin`
         // command whose input went missing would otherwise wait for an EOF
         // that never comes. The test double closes it the same way.
