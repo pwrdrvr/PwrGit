@@ -373,6 +373,12 @@ describe("applyRebase (system git)", () => {
     const notTop = [all[1], all[2]] as RebaseCommitRef[]; // c2, c1 (excludes HEAD)
     const v = await validateSelection(systemGit, repo, notTop);
     expect(v.ok).toBe(false);
+    // Commits are no longer selectable row by row; the reason must point at
+    // the menu that chooses a run, not at a selection the user cannot make.
+    if (!v.ok) {
+      expect(v.error.code).toBe("not_top_run");
+      expect(v.error.message).toContain("Edit history from here");
+    }
   });
 
   it("refuses an apply when HEAD no longer matches the checked HEAD", async () => {

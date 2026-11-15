@@ -325,7 +325,10 @@ export async function validateSelection(
     return err({
       kind: "rebase",
       code: "not_top_run",
-      message: "Select a contiguous run of the most recent commits."
+      // The run is chosen from a commit's menu, never selected row by row, so
+      // the way out is to choose it again from the current HEAD.
+      message:
+        "These are no longer the newest commits on HEAD. Right-click the oldest commit to change and choose Edit history from here again."
     });
   }
   if (lines.some((parts) => parts.length > 2)) {
