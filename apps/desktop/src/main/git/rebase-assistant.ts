@@ -295,14 +295,17 @@ export function planRebase(
   };
 }
 
-/** The selection must be exactly the N most-recent commits (contiguous, incl HEAD). */
+/** The selection must be exactly the N most-recent commits (contiguous, incl
+ *  HEAD), with no merge among them: the rewrite cherry-picks each one, and
+ *  Git refuses to cherry-pick a merge. The lineage's "Edit history from here"
+ *  (`history-range.ts`) offers only runs this accepts. */
 export async function validateSelection(
   git: GitExec,
   cwd: string,
   commits: RebaseCommitRef[]
 ): Promise<Result<{ oldest: string; base: string }>> {
   const n = commits.length;
-  const raw = await git(["log", "-n", String(n), "--format=%H"], cwd);
+  const raw = await git(["log", "-n", String(n), "--format=%H %P"], cwd);
   if (!raw.ok) return raw;
   if (raw.value.exitCode !== 0) {
     return err({
@@ -311,16 +314,25 @@ export async function validateSelection(
       message: "Could not read the selected commit history."
     });
   }
-  const top = raw.value.stdout
+  const lines = raw.value.stdout
     .split("\n")
     .map((s) => s.trim())
-    .filter((s) => s.length > 0);
+    .filter((s) => s.length > 0)
+    .map((line) => line.split(" "));
+  const top = lines.map(([hash = ""]) => hash);
   const selected = new Set(commits.map((c) => c.hash));
   if (top.length !== n || !top.every((h) => selected.has(h))) {
     return err({
       kind: "rebase",
       code: "not_top_run",
       message: "Select a contiguous run of the most recent commits."
+    });
+  }
+  if (lines.some((parts) => parts.length > 2)) {
+    return err({
+      kind: "rebase",
+      code: "includes_merge",
+      message: "Can't rebase a range that includes a merge commit."
     });
   }
   const oldest = top[n - 1];

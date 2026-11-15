@@ -42,13 +42,17 @@ type Op =
   | { kind: "commit" }
   | { kind: "branch" }
   | { kind: "switch"; pick: number }
-  | { kind: "merge"; pick: number };
+  | { kind: "merge"; pick: number }
+  /** A side branch with its own commit, a commit here, then a real merge:
+   *  the shape that puts a merge on HEAD's first-parent run. */
+  | { kind: "diverge" };
 
 const opArb: fc.Arbitrary<Op> = fc.oneof(
   { weight: 5, arbitrary: fc.constant({ kind: "commit" } as const) },
   { weight: 1, arbitrary: fc.constant({ kind: "branch" } as const) },
   { weight: 1, arbitrary: fc.nat(8).map((pick) => ({ kind: "switch", pick }) as const) },
-  { weight: 2, arbitrary: fc.nat(8).map((pick) => ({ kind: "merge", pick }) as const) }
+  { weight: 2, arbitrary: fc.nat(8).map((pick) => ({ kind: "merge", pick }) as const) },
+  { weight: 2, arbitrary: fc.constant({ kind: "diverge" } as const) }
 );
 
 /** Every commit in the repository, parsed the way the graph receives them. */
@@ -92,7 +96,16 @@ it("offers exactly the runs the rebase assistant accepts", async () => {
       const branches = ["main"];
       for (const op of ops) {
         if (op.kind === "commit") commit();
-        else if (op.kind === "branch") {
+        else if (op.kind === "diverge") {
+          const here = git(repo, "rev-parse", "--abbrev-ref", "HEAD");
+          const side = `side${branches.length}`;
+          git(repo, "switch", "-q", "-c", side);
+          commit();
+          git(repo, "switch", "-q", here === "HEAD" ? "-" : here);
+          commit();
+          git(repo, "merge", "-q", "--no-ff", "--no-edit", side);
+          branches.push(side);
+        } else if (op.kind === "branch") {
           const name = `b${branches.length}`;
           git(repo, "switch", "-q", "-c", name);
           branches.push(name);

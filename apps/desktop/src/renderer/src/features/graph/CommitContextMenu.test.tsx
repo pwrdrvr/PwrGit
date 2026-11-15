@@ -108,6 +108,12 @@ describe("CommitContextMenu › Edit history from here", () => {
     expect(blocked?.textContent).toContain("A merge sits between here and HEAD.");
   });
 
+  it("does not name Tidy on a blocked run where AI is off", async () => {
+    await render({ kind: "blocked", reason: "root", count: 2 }, false);
+    expect(entry("Squash or reorder 2 commits")?.disabled).toBe(true);
+    expect(entry("Squash, reorder or tidy")).toBeUndefined();
+  });
+
   it("offers nothing where there is no run", async () => {
     await render(null, true);
     expect(headings()).not.toContain("Edit history from here");

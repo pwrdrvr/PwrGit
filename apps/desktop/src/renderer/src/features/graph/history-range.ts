@@ -5,7 +5,8 @@ import type { Commit } from "@pwrgit/shared";
  *
  * The rebase assistant accepts exactly one shape (`validateSelection` in
  * main's `rebase-assistant.ts`): the N most recent commits of HEAD, contiguous,
- * at least two, not reaching the repository's first commit. So the graph does
+ * at least two, no merge among them, not reaching the repository's first
+ * commit. So the graph does
  * not ask for a set of commits; it asks where the run starts, and the run is
  * every commit from HEAD down to that one.
  *

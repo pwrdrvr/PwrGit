@@ -418,7 +418,6 @@ export function App() {
     setPendingCommit(null);
   }, [pendingCommit, selection?.worktreeId]);
 
-
   const clearSelection = useCallback(() => {
     setSelectedCommits(new Set());
     setRebaseAction(null);

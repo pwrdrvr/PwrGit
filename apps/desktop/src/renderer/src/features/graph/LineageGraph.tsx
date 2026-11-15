@@ -660,6 +660,16 @@ export function LineageGraph({
     hoveredCommit === null ? undefined : vmByHash.get(hoveredCommit);
   const menuVm =
     commitMenu === null ? undefined : vmByHash.get(commitMenu.hash);
+  // Walked once per opened menu, not on every re-render while it is open.
+  const menuHash = menuVm?.commit.hash;
+  const menuCommits = data?.commits;
+  const menuHistoryRange = useMemo(
+    () =>
+      menuHash === undefined
+        ? null
+        : historyRangeFrom(menuCommits ?? [], head, menuHash),
+    [menuCommits, head, menuHash]
+  );
 
   // The interactive card owns its delayed dismissal. Clear the associated
   // commit once it is actually gone, rather than as the pointer starts across
@@ -1363,7 +1373,7 @@ export function LineageGraph({
           onTagFrom={() => setTagFromCommit(menuVm.commit)}
           onSwitchBranch={(target) => void switchToBranch(target)}
           onRevealWorktree={onRevealWorktree}
-          historyRange={historyRangeFrom(data?.commits ?? [], head, menuVm.commit.hash)}
+          historyRange={menuHistoryRange}
           tidyOffered={tidyOffered}
           onEditHistory={onEditHistory}
           onClose={() => setCommitMenu(null)}

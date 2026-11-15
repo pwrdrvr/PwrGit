@@ -192,7 +192,9 @@ function historyItems(
       ...heading,
       {
         type: "item",
-        label: `Squash, reorder or tidy ${range.count} commits`,
+        label: tidyOffered
+          ? `Squash, reorder or tidy ${range.count} commits`
+          : `Squash or reorder ${range.count} commits`,
         disabled: true,
         hint:
           range.reason === "merge"
