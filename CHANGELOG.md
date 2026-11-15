@@ -1,5 +1,11 @@
 # Changelog
 
+## v0.59.3 - 2026-11-15
+
+- File lists - Added the Changes folder tree to commit Files and PR Changes, with compact folder paths, subtree counts and folding, and automatic reveal of the open file. Large folders containing only added files now start folded in these lists and in staged Changes; folders with modified files stay open by default. File names are shorter visually while accessible labels retain the full path.
+- History editing - Replaced graph-row rebase checkboxes with Edit history from here in a commit's context menu. Squash, Reorder, or Tidy with an agent when enabled selects the contiguous range from HEAD through that commit. Ranges containing merges or the repository's first commit are blocked, and already-pushed commits trigger a warning that publishing the rewrite requires a force push. Removing the checkbox column also gives narrow graphs more room.
+- Rebase validation - Fixed long history-editing ranges being silently trimmed to 200 commits. The assistant now reads the full selected range and preserves a stale selection for rejection rather than rewriting only the portion still at HEAD.
+
 ## v0.59.2 - 2026-11-14
 
 - Changes - Improved the rail with a nested folder tree. Folder counts, folding, Stage/Unstage, and Discard now include files in subfolders instead of treating each directory as an unrelated group. Single-child folder chains share a compact row, with folders before files and guides showing the hierarchy.
