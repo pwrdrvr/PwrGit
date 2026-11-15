@@ -345,12 +345,40 @@ describe("applyRebase (system git)", () => {
     if (!r.ok) expect(r.error.code).toBe("dirty");
   });
 
+  // Rule: a run holding a merge is refused by name. Git cannot cherry-pick a
+  // merge, and before this check the run passed and the isolated check
+  // reported it as "Squash would hit a conflict".
+  it("validateSelection rejects a run that includes a merge", async () => {
+    const repo = makeRepo();
+    git(repo, ["switch", "-q", "-c", "side", "HEAD~1"]);
+    writeFileSync(join(repo, "side.txt"), "side\n");
+    git(repo, ["add", "."]);
+    git(repo, ["commit", "-m", "side"]);
+    git(repo, ["switch", "-q", "main"]);
+    git(repo, ["merge", "--no-ff", "--no-edit", "side"]);
+    writeFileSync(join(repo, "top.txt"), "top\n");
+    git(repo, ["add", "."]);
+    git(repo, ["commit", "-m", "top"]);
+    // top, the merge, and whichever parent `git log` lists next.
+    const v = await validateSelection(systemGit, repo, topCommits(repo, 3));
+    expect(v.ok).toBe(false);
+    if (!v.ok) expect(v.error.code).toBe("includes_merge");
+    // The run above the merge stays editable.
+    expect((await validateSelection(systemGit, repo, topCommits(repo, 1))).ok).toBe(true);
+  });
+
   it("validateSelection rejects a non-top selection", async () => {
     const repo = makeRepo();
     const all = topCommits(repo, 4); // c3, c2, c1, c0
     const notTop = [all[1], all[2]] as RebaseCommitRef[]; // c2, c1 (excludes HEAD)
     const v = await validateSelection(systemGit, repo, notTop);
     expect(v.ok).toBe(false);
+    // Commits are no longer selectable row by row; the reason must point at
+    // the menu that chooses a run, not at a selection the user cannot make.
+    if (!v.ok) {
+      expect(v.error.code).toBe("not_top_run");
+      expect(v.error.message).toContain("Edit history from here");
+    }
   });
 
   it("refuses an apply when HEAD no longer matches the checked HEAD", async () => {

@@ -49,12 +49,27 @@ async function orderedSelection(
   worktreeId: string,
   selectedHashes: string[]
 ): Promise<RebaseCommitRef[]> {
-  const r = await dispatch("graph:log", { worktreeId });
+  // The selection is HEAD's newest N commits, so read exactly N. The default
+  // window (200) silently dropped the oldest commits of a longer run, and the
+  // newest 200 still passed as a valid run of their own.
+  const r = await dispatch("graph:log", {
+    worktreeId,
+    limit: selectedHashes.length
+  });
   if (!r.ok) return [];
   const set = new Set(selectedHashes);
-  return r.value.commits
+  const ordered = r.value.commits
     .filter((c) => set.has(c.hash))
     .map((c) => ({ hash: c.hash, subject: c.subject }));
+  // A selection that is no longer HEAD's newest N (HEAD moved) is sent whole,
+  // so main refuses it by name instead of rewriting the subset still on top.
+  const found = new Set(ordered.map((c) => c.hash));
+  return [
+    ...ordered,
+    ...selectedHashes
+      .filter((hash) => !found.has(hash))
+      .map((hash) => ({ hash, subject: short(hash) }))
+  ];
 }
 
 const STEP_CLASS: Record<string, string> = {
@@ -676,13 +691,15 @@ export function RebaseTab({
 
       {op === null || plan === null ? (
         <div className="rebase-empty">
-          Select commits in the graph, then choose{" "}
-          <span className="rebase-accent">Squash</span>,{" "}
+          Right-click the oldest commit you want to change in the graph and
+          choose <span className="rebase-accent">Squash</span>,{" "}
           <span className="rebase-accent">Reorder</span> or{" "}
           <span className="rebase-accent">
             <AgentGlyph size={11} /> Tidy
-          </span>. You can inspect the
-          exact plan and check it safely before changing the worktree.
+          </span>{" "}
+          under “Edit history from here”. Every commit from there up to HEAD
+          is included. You can inspect the exact plan and check it safely
+          before changing the worktree.
         </div>
       ) : (
         <>

@@ -2593,6 +2593,11 @@ export type LaneGraph = {
    *  This is per-worktree (unlike the cached lane graph) and lets consumers
    *  distinguish a branch's own commits from shared/base history. */
   headOnlyCommits: string[];
+  /** Commits reachable from this worktree's HEAD that no remote-tracking ref
+   *  reaches: rewriting them needs no force push. Newest first and capped
+   *  (500), so a commit older than the cap reads as pushed, the safe side.
+   *  Absent when the walk could not run. */
+  headUnpushedCommits?: string[];
   /** Actual tracking ref of the focused branch when it has unapplied work. */
   headUpstream?: string;
   defaultBranch: string;

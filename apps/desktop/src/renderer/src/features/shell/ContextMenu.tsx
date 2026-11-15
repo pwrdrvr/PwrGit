@@ -1,5 +1,6 @@
 import {
   useEffect,
+  useId,
   useLayoutEffect,
   useRef,
   useState,
@@ -40,7 +41,13 @@ export type MenuItem =
   | { type: "sep" }
   /** A label over the group of entries below it ("Fetch automatically").
    *  Not focusable, and not a menu item: the arrow keys pass over it. */
-  | { type: "heading"; label: string };
+  | {
+      type: "heading";
+      label: string;
+      /** A muted sentence under the heading that applies to every entry in
+       *  its group, so it is not repeated on each one. */
+      hint?: string;
+    };
 
 /**
  * A context menu anchored at a screen point (right-click). Portalled to <body>,
@@ -93,6 +100,18 @@ export function ContextMenu({
     surfaceRef: ref
   });
   useMenuNavigation({ open: true, menuRef: ref, onClose });
+  // A heading's hint is read with every entry under it: headings are
+  // presentational, and arrow keys only visit the entries.
+  const hintId = useId();
+  const groupHint: (string | undefined)[] = [];
+  let currentHint: string | undefined;
+  items.forEach((it, i) => {
+    if (it.type === "sep") currentHint = undefined;
+    else if (it.type === "heading") {
+      currentHint = it.hint === undefined ? undefined : `${hintId}-${i}`;
+    }
+    groupHint.push(it.type === "item" ? currentHint : undefined);
+  });
 
   useLayoutEffect(() => {
     const el = ref.current;
@@ -152,6 +171,11 @@ export function ContextMenu({
         ) : it.type === "heading" ? (
           <div key={i} className="pop-menu__heading" role="presentation">
             {it.label}
+            {it.hint !== undefined && (
+              <span id={`${hintId}-${i}`} className="pop-menu__heading-hint">
+                {it.hint}
+              </span>
+            )}
           </div>
         ) : (
           <button
@@ -165,6 +189,7 @@ export function ContextMenu({
                   : "menuitemcheckbox"
             }
             aria-checked={it.checked}
+            aria-describedby={groupHint[i]}
             disabled={it.disabled === true}
             onClick={(e) => {
               e.stopPropagation();

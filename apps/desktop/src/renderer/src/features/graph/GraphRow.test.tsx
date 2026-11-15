@@ -45,7 +45,6 @@ describe("GraphRow remote ref chips", () => {
         focused={false}
         contextOpen={false}
         flashing={false}
-        onToggle={() => undefined}
         onOpen={() => undefined}
         onShowContext={() => undefined}
         onHideContext={() => undefined}
@@ -90,7 +89,6 @@ const props = (
   focused: false,
   contextOpen: false,
   flashing: false,
-  onToggle: () => undefined,
   onOpen: () => undefined,
   onShowContext: () => undefined,
   onHideContext: () => undefined,

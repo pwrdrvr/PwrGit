@@ -17,7 +17,8 @@ import {
   type CommitStats,
   type LaneGraph,
   type MovedTag,
-  type PrSummary
+  type PrSummary,
+  type RebaseOperation
 } from "@pwrgit/shared";
 import { announce } from "../../lib/announce";
 import { prefersReducedMotion } from "../../lib/reducedMotion";
@@ -44,6 +45,7 @@ import { lastSegment } from "../sidebar/repo-view";
 import { requestSidebarWorktreeReveal } from "../sidebar/sidebar-reveal";
 import { CommitContextCard } from "./CommitContextCard";
 import { CommitContextMenu } from "./CommitContextMenu";
+import { historyRangeFrom } from "./history-range";
 import { PersonCard, type PersonGraphStats } from "./PersonCard";
 import {
   GraphRow,
@@ -234,7 +236,8 @@ export function LineageGraph({
   selectedCommits,
   focusedCommit,
   revealCommit,
-  onToggleCommit,
+  tidyOffered,
+  onEditHistory,
   onCommitsChange,
   onOpenCommit,
   onRevealWorktree,
@@ -255,7 +258,11 @@ export function LineageGraph({
   focusedCommit: string | null;
   /** An explicit request to center and flash a commit. */
   revealCommit: { hash: string; requestId: number; tagName?: string; tagKind?: "annotated" | "lightweight" } | null;
-  onToggleCommit: (hash: string) => void;
+  /** AI history editing is on, so "Edit history from here" offers Tidy. */
+  tidyOffered: boolean;
+  /** Select the run from HEAD down to a commit and open the rebase tool on
+   *  one operation (the commit menu's "Edit history from here"). */
+  onEditHistory: (hashes: string[], op: RebaseOperation) => void;
   /** Publishes the currently loaded timeline for command-palette search. */
   onCommitsChange: (commits: Commit[]) => void;
   onOpenCommit: (hash: string, subject: string) => void;
@@ -653,6 +660,22 @@ export function LineageGraph({
     hoveredCommit === null ? undefined : vmByHash.get(hoveredCommit);
   const menuVm =
     commitMenu === null ? undefined : vmByHash.get(commitMenu.hash);
+  // Walked once per opened menu, not on every re-render while it is open.
+  const menuHash = menuVm?.commit.hash;
+  const menuCommits = data?.commits;
+  const unpushedList = data?.headUnpushedCommits;
+  const menuHistoryRange = useMemo(
+    () =>
+      menuHash === undefined
+        ? null
+        : historyRangeFrom(
+            menuCommits ?? [],
+            head,
+            menuHash,
+            unpushedList === undefined ? undefined : new Set(unpushedList)
+          ),
+    [menuCommits, head, menuHash, unpushedList]
+  );
 
   // The interactive card owns its delayed dismissal. Clear the associated
   // commit once it is actually gone, rather than as the pointer starts across
@@ -1283,7 +1306,7 @@ export function LineageGraph({
         {vms.length > 0 ? (
           <div
             ref={cardRef}
-            className={`graph-card${selectedCommits.size > 0 ? " has-selection" : ""}`}
+            className="graph-card"
           >
             {vms.map((vm, i) => (
               <GraphRow
@@ -1303,7 +1326,6 @@ export function LineageGraph({
                 }
                 personOpen={openPerson?.hash === vm.commit.hash && personCard.visible}
                 hoverIntent={hoverIntent}
-                onToggle={() => onToggleCommit(vm.commit.hash)}
                 onOpen={() => onOpenCommit(vm.commit.hash, vm.commit.subject)}
                 onShowContext={(target, anchor) =>
                   showCommitContext(target, anchor, vm)
@@ -1357,6 +1379,9 @@ export function LineageGraph({
           onTagFrom={() => setTagFromCommit(menuVm.commit)}
           onSwitchBranch={(target) => void switchToBranch(target)}
           onRevealWorktree={onRevealWorktree}
+          historyRange={menuHistoryRange}
+          tidyOffered={tidyOffered}
+          onEditHistory={onEditHistory}
           onClose={() => setCommitMenu(null)}
         />
       )}

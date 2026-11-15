@@ -688,6 +688,33 @@ export async function readUniqueCommits(
 }
 
 /**
+ * HEAD's commits that no remote-tracking ref reaches, newest first, at most
+ * `limit`. These are the ones a history edit can rewrite without anyone else
+ * having them; everything else on HEAD is already pushed somewhere
+ * (`git log HEAD --not --remotes`, the same test as Git's own "unpushed").
+ */
+export async function readUnpushedCommits(
+  git: GitExec,
+  cwd: string,
+  head: string,
+  limit: number
+): Promise<Result<string[]>> {
+  const raw = await git(
+    ["rev-list", "-n", String(limit), head, "--not", "--remotes", "--"],
+    cwd
+  );
+  if (!raw.ok) return raw;
+  const checked = requireExit0(raw.value, ["rev-list"]);
+  if (!checked.ok) return checked;
+  return ok(
+    checked.value.stdout
+      .split("\n")
+      .map((line) => line.trim())
+      .filter((line) => line !== "")
+  );
+}
+
+/**
  * Merge separately-fetched commit groups (trunk window + branch segments) into
  * one children-before-parents order, newest-first among the ready set — the
  * order the lane layout expects. Kahn's algorithm over the sub-DAG; parents

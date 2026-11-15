@@ -100,7 +100,6 @@ export function GraphRow({
   authorAvatarUrl,
   personOpen = false,
   hoverIntent,
-  onToggle,
   onOpen,
   onShowContext,
   onHideContext,
@@ -136,7 +135,6 @@ export function GraphRow({
   /** Shared hover-intent gate, owned by LineageGraph so hundreds of rows do
    *  not each mount their own. */
   hoverIntent: HoverIntent;
-  onToggle: () => void;
   onOpen: () => void;
   onShowContext: (
     target: HTMLElement,
@@ -168,7 +166,7 @@ export function GraphRow({
     isMine,
     pullRequest
   } = vm;
-  /** The row's plain tooltips — the rebase checkbox, the tag chip, the
+  /** The row's plain tooltips — the tag chip, the
    *  overflow pill, the worktree button, the author. Not the gated SHA/PR
    *  cards below, which repeat down a column the pointer crosses (see
    *  lib/AGENTS.md). */
@@ -415,23 +413,6 @@ export function GraphRow({
         )}
         </svg>
       </div>
-
-      <span
-        className={`commit-check${selected ? " is-checked" : ""}`}
-        role="checkbox"
-        aria-checked={selected}
-        {...hoverTooltip(tip, selected ? "Deselect for rebase" : "Select for rebase")}
-        onClick={(e) => {
-          e.stopPropagation();
-          onToggle();
-        }}
-      >
-        {selected && (
-          <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="var(--accent-on)" strokeWidth="4" strokeLinecap="round" strokeLinejoin="round">
-            <path d="m20 6-11 11-5-5" />
-          </svg>
-        )}
-      </span>
 
       <div className="commit-body">
         {/* The SHA scopes only the title line. Branch chips and authorship keep

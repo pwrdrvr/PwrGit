@@ -1,0 +1,286 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <script src="./support.js"></script>
+  </head>
+  <body>
+    <x-dc>
+      <helmet data-dc-atomics>
+        <link href="https://fonts.googleapis.com/css2?family=Geist:wght@400..700&amp;family=Geist+Mono:wght@400..700&amp;display=swap" rel="stylesheet" />
+        <style>
+          :root {
+            --rv-bg: #050505; --rv-line: rgba(247, 243, 235, 0.1);
+            --rv-t1: #f7f3eb; --rv-t2: #b8b0a5; --rv-t3: #8c857a; --rv-tsub: rgba(247, 243, 235, 0.54);
+            --rv-acc: #ff8a1f; --rv-accb: #ffb35c; --rv-accon: #160a00;
+            --rv-bad: #b94232; --rv-ok: #5fa969;
+            --font-sans: "Geist", "SF Pro Text", system-ui, sans-serif;
+            --font-mono: "Geist Mono", "SF Mono", "JetBrains Mono", Consolas, monospace;
+          }
+          *, *::before, *::after { box-sizing: border-box; }
+          html { background: var(--rv-bg); }
+          body { margin: 0; background: var(--rv-bg); font-family: var(--font-sans); }
+          a { color: var(--rv-accb); text-decoration: none; } a:hover { color: var(--rv-acc); }
+
+          .dv-turn { padding: 40px 44px 32px; background: var(--rv-bg); border-bottom: 1px solid var(--rv-line); }
+          .dv-thd { display: flex; align-items: baseline; gap: 10px; margin: 0 0 6px; }
+          .dv-tid { font: 600 10px var(--font-mono); padding: 3px 7px; background: var(--rv-t1); color: var(--rv-bg); border-radius: 4px; }
+          .dv-tname { font: 600 13px/1.2 var(--font-sans); color: var(--rv-t1); }
+          .dv-sub { margin: 0 0 22px; font: 400 11.5px/1.5 var(--font-sans); color: var(--rv-t3); max-width: 860px; text-wrap: pretty; }
+          .dv-sub b { color: var(--rv-t2); font-weight: 600; }
+          .dv-opts { display: flex; flex-wrap: wrap; gap: 28px; align-items: flex-start; }
+          .dv-opt { flex: 0 1 auto; min-width: 0; display: flex; flex-direction: column; gap: 9px; }
+          .dv-oid { font: 600 10.5px var(--font-mono); padding: 3px 7px; background: rgba(247, 243, 235, 0.08); color: var(--rv-t1); border-radius: 5px; }
+          .dv-olabel { display: flex; align-items: baseline; gap: 8px; font: 400 11px/1.3 var(--font-sans); color: var(--rv-tsub); max-width: 860px; }
+          .dv-olabel b { color: var(--rv-accb); font-weight: 600; }
+          .dv-olabel .rec { color: var(--rv-ok); font-weight: 600; }
+          .dv-olabel .rej { color: var(--rv-bad); font-weight: 600; }
+          .dv-next { margin: 26px 0 0; font: 400 11px/1.6 var(--font-sans); color: var(--rv-t3); }
+          .dv-next b { color: var(--rv-t2); }
+          .note { margin: 0; font: 400 10.5px/1.5 var(--font-sans); color: var(--rv-t3); text-wrap: pretty; max-width: 470px; }
+          .note b { color: var(--rv-t2); font-weight: 600; }
+          .pin { display: inline-flex; align-items: center; justify-content: center; flex: none; width: 15px; height: 15px; border-radius: 999px; background: var(--rv-bad); color: #fff; font: 700 9px/1 var(--font-mono); }
+          .find { width: 520px; max-width: 100%; display: flex; flex-direction: column; gap: 14px; padding: 16px; border: 1px solid var(--rv-line); border-radius: 9px; background: #0a0a0a; }
+          .fitem { display: grid; grid-template-columns: 15px minmax(0, 1fr); gap: 9px; align-items: start; }
+          .fitem h4 { margin: 0 0 3px; font: 650 11.5px/1.3 var(--font-sans); color: var(--rv-t1); }
+          .fitem p { margin: 0; font: 400 10.5px/1.5 var(--font-sans); color: var(--rv-t3); text-wrap: pretty; }
+          .fitem b { color: var(--rv-t2); font-weight: 600; }
+          .fitem code { font: 500 10px var(--font-mono); color: var(--rv-t2); }
+
+          .th-light {
+            --bg-stage: #efe9df; --bg-panel: #fdfcfa; --bg-menu: #ffffff;
+            --border-faint: rgba(0, 0, 0, 0.05); --border-subtle: rgba(0, 0, 0, 0.08); --border-default: rgba(0, 0, 0, 0.12); --border-strong: rgba(0, 0, 0, 0.18);
+            --text-primary: #1a1612; --text-secondary: #524a40; --text-muted: #736c64; --text-subtle: rgba(26, 22, 18, 0.68);
+            --accent: #b74c00; --accent-bright: #994c00; --accent-on: #ffffff;
+            --shadow-overlay: 0 24px 60px rgba(40, 28, 12, 0.18);
+            --accent-tint: color-mix(in srgb, var(--accent) 8%, transparent);
+            --accent-soft: color-mix(in srgb, var(--accent) 12%, transparent);
+            --accent-border: color-mix(in srgb, var(--accent) 42%, transparent);
+            --brand-purple: #7c4dcc;
+          }
+          .stage { position: relative; padding: 18px; border-radius: 10px; background: var(--bg-stage); }
+          .card { width: 440px; overflow: hidden; background: var(--bg-panel); border: 1px solid var(--border-default); border-radius: 12px; }
+          .card.wide { width: 560px; }
+          .row { position: relative; display: flex; align-items: stretch; gap: 8px; height: 64px; padding: 0 12px 0 8px; border-bottom: 1px solid var(--border-faint); }
+          .row.head { background: color-mix(in srgb, var(--accent) 6%, transparent); box-shadow: inset 2px 0 0 var(--accent); }
+          .row.hover { background: var(--accent-tint); }
+          .row.sel { background: var(--accent-soft); }
+          .row.sel.head { background: var(--accent-soft); }
+          .lanes { flex: none; overflow: hidden; }
+          .lanes svg { display: block; }
+          .chk { flex: none; align-self: center; width: 18px; height: 18px; border-radius: 5px; border: 1.5px solid var(--border-strong); }
+          .chk.ghost { opacity: 0; }
+          .body { flex: 1; min-width: 0; padding: 11px 0; }
+          .line { display: flex; align-items: center; gap: 10px; }
+          .sha { flex: none; padding: 3px 8px; border-radius: 999px; background: var(--bg-menu); border: 1px solid var(--border-subtle); color: var(--text-secondary); font: 500 10.5px/1.2 var(--font-mono); }
+          .msg { flex: 1; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; color: var(--text-primary); font: 600 12.5px/1.2 var(--font-sans); }
+          .age { flex: none; color: var(--text-muted); font: 500 11px/1 var(--font-sans); }
+          .meta { display: flex; align-items: center; gap: 6px; margin-top: 7px; color: var(--text-muted); font: 500 10.5px/1 var(--font-sans); }
+          .chip { padding: 3px 7px; border-radius: 999px; border: 1px solid var(--accent-border); color: var(--accent-bright); background: var(--accent-tint); font: 600 9.5px/1 var(--font-mono); }
+          .chip.solid { background: var(--accent); border-color: var(--accent); color: var(--accent-on); font-family: var(--font-sans); }
+          .hl { outline: 2px dashed var(--rv-acc); outline-offset: 2px; border-radius: 4px; }
+          .tag { position: absolute; z-index: 3; }
+
+          .menu { position: absolute; z-index: 4; width: 250px; padding: 4px; border: 1px solid var(--border-strong); border-radius: 8px; background: var(--bg-menu); box-shadow: var(--shadow-overlay); display: flex; flex-direction: column; }
+          .menu > span { display: flex; flex-direction: column; gap: 3px; padding: 6px 9px; border-radius: 5px; color: var(--text-primary); font: 500 11.5px/1.15 var(--font-sans); }
+          .menu > span.on { background: var(--accent); color: var(--accent-on); }
+          .menu > span.dis { color: var(--text-subtle); }
+          .menu > span small { color: var(--text-subtle); font: 400 10px/1.3 var(--font-sans); }
+          .menu > em { padding: 7px 9px 3px; color: var(--text-subtle); font: 700 9px/1 var(--font-sans); font-style: normal; letter-spacing: .07em; text-transform: uppercase; }
+          .menu > i { display: block; padding: 0 9px 5px; color: #805200; font: 500 10.5px/1.35 var(--font-sans); font-style: normal; max-width: 240px; }
+          .menu > hr { width: 100%; margin: 4px 0; border: 0; border-top: 1px solid var(--border-subtle); }
+
+          .sbar { display: flex; align-items: center; gap: 8px; padding: 8px 12px; border-top: 1px solid var(--border-subtle); background: var(--bg-menu); font: 500 11px/1 var(--font-sans); color: var(--text-secondary); }
+          .sbar b { color: var(--text-primary); }
+          .sbar .btn { padding: 5px 9px; border: 1px solid var(--border-default); border-radius: 6px; color: var(--text-primary); font-weight: 600; }
+          .sbar .pri { margin-left: auto; padding: 5px 10px; border-radius: 6px; background: var(--accent); color: var(--accent-on); font-weight: 600; }
+          .empty { width: 300px; padding: 14px; border: 1px solid var(--border-default); border-radius: 10px; background: var(--bg-panel); color: var(--text-muted); font: 400 11.5px/1.55 var(--font-sans); }
+          .empty b { color: var(--accent-bright); font-weight: 600; }
+          .measure { display: grid; grid-template-columns: auto auto auto; gap: 4px 16px; padding: 12px 14px; border: 1px solid var(--rv-line); border-radius: 8px; color: var(--rv-t2); font: 500 10.5px/1.4 var(--font-mono); }
+          .measure em { color: var(--rv-t3); font-style: normal; }
+          .measure .good { color: var(--rv-ok); }
+        </style>
+      </helmet>
+
+      <!-- ============================ TURN 0 ============================ -->
+      <section class="dv-turn" id="t0" data-screen-label="Turn 0 Brief">
+        <div class="dv-thd"><a class="dv-tid" href="#t0">0</a><span class="dv-tname">Brief — the rebase checkbox column costs every row its width and is almost never used</span></div>
+        <p class="dv-sub">Harold, 2026-11-14: “this checkbox that only shows on mouse over is taking this entire column and chopping off the train lines.” Every lineage row reserves an 18px box plus an 8px gap between the lane gutter and the SHA, visible only on hover. In a narrow main pane the gutter is the first thing that gives way, so the lanes are clipped to make room for a control that is invisible. The wager is that no one has ever selected commits for a rebase this way. <b>Goal:</b> remove the reserved column and keep Squash, Reorder and Tidy reachable, ideally more directly than today. <b>Open decision for review:</b> 2a (start the edit from a commit’s context menu) is recommended and built in the PR that goes with this board; 2b–2d are recorded as rejected.</p>
+      </section>
+
+      <!-- ============================ TURN 1 ============================ -->
+      <section class="dv-turn" id="t1" data-screen-label="Turn 1 As built">
+        <div class="dv-thd"><a class="dv-tid" href="#t1">1</a><span class="dv-tname">As built — a hover-only box, a free selection, and a backend that accepts one shape</span></div>
+        <p class="dv-sub">The row’s gutter is capped at <b>clamp(16px, 100cqi − 230px − 14ch, 160px)</b>; the 230px budgets the checkbox, the SHA chip and the age. The checkbox is the only way to select commits. The selection bar then offers Squash, Reorder, Tidy and “Open rebase tool”.</p>
+        <div class="dv-opts">
+          <div class="dv-opt" id="1a" data-screen-label="1a Narrow pane as built">
+            <div class="dv-olabel"><a class="dv-oid" href="#1a">1a</a>A ~440px pane, hovering the third row</div>
+            <div class="stage th-light">
+              <div class="card">
+                <div class="row head">
+                  <div class="lanes" style="width:26px"><svg width="40" height="64"><line x1="10" y1="32" x2="10" y2="64" stroke="#b74c00" stroke-width="2"/><circle cx="10" cy="32" r="9" fill="#b74c00" opacity=".16"/><circle cx="10" cy="32" r="7.5" fill="none" stroke="#b74c00" stroke-width="1.5"/><circle cx="10" cy="32" r="5" fill="#b74c00" stroke="#fdfcfa" stroke-width="2"/></svg></div>
+                  <span class="chk ghost"></span>
+                  <div class="body"><div class="line"><span class="sha">968d44a</span><span class="msg">Move export paper to the docs folder</span><span class="age">1m</span></div><div class="meta"><span class="chip solid">HEAD</span><span class="chip">main</span>you</div></div>
+                </div>
+                <div class="row">
+                  <div class="lanes" style="width:26px"><svg width="40" height="64"><line x1="10" y1="0" x2="10" y2="64" stroke="#b74c00" stroke-width="2"/><path d="M10 32 C10 48, 26 48, 26 64" fill="none" stroke="#7c4dcc" stroke-width="1.5" stroke-dasharray="2 2"/><circle cx="10" cy="32" r="4" fill="#b74c00" stroke="#fdfcfa" stroke-width="2"/></svg></div>
+                  <span class="chk ghost"></span>
+                  <div class="body"><div class="line"><span class="sha">cf8e215</span><span class="msg">Add file-backed paper store</span><span class="age">5m</span></div><div class="meta">merged #6 · you</div></div>
+                </div>
+                <div class="row hover">
+                  <div class="lanes hl" style="width:26px"><svg width="40" height="64"><line x1="10" y1="0" x2="10" y2="64" stroke="#b74c00" stroke-width="2"/><path d="M26 0 L26 32" stroke="#7c4dcc" stroke-width="1.5" stroke-dasharray="2 2"/><circle cx="26" cy="32" r="5" fill="#62c882" stroke="#fdfcfa" stroke-width="2"/><path d="M26 32 C26 48, 10 48, 10 64" fill="none" stroke="#62c882" stroke-width="2" stroke-dasharray="4 3"/></svg></div>
+                  <span class="chk hl"></span>
+                  <div class="body"><div class="line"><span class="sha">1710d88</span><span class="msg">Add file-backed paper store</span><span class="age">21m</span></div><div class="meta">merged #6 · <span class="chip">origin/feat/papers</span></div></div>
+                  <span class="tag pin" style="left:24px;top:4px">1</span><span class="tag pin" style="left:40px;top:4px">2</span>
+                </div>
+                <div class="row">
+                  <div class="lanes" style="width:26px"><svg width="40" height="64"><line x1="10" y1="0" x2="10" y2="64" stroke="#b74c00" stroke-width="2"/><circle cx="10" cy="32" r="4" fill="#fdfcfa" stroke="#b74c00" stroke-width="2"/></svg></div>
+                  <span class="chk ghost"></span>
+                  <div class="body"><div class="line"><span class="sha">4bd4665</span><span class="msg">Keep editable papers in sync</span><span class="age">40m</span></div><div class="meta">Jay Pantone</div></div>
+                </div>
+              </div>
+            </div>
+            <p class="note"><span class="pin">1</span> The second lane’s dot sits at 24px; the gutter is clipped at 26px, so its halo and the branch line leaving it are cut. <span class="pin">2</span> The reserved box takes the 26px that would have shown the lane, and is blank on every row that is not hovered.</p>
+          </div>
+          <div class="dv-opt" id="1b" data-screen-label="1b Findings">
+            <div class="dv-olabel"><a class="dv-oid" href="#1b">1b</a>Findings</div>
+            <div class="find">
+              <div class="fitem"><span class="pin">1</span><div><h4>26px on every row, at every width</h4><p>18px box + 8px gap. Below a ~515px pane the gutter is what shrinks, so lanes are clipped first; above it the subject loses the 26px instead. The box is drawn even while invisible.</p></div></div>
+              <div class="fitem"><span class="pin">2</span><div><h4>Nothing leads to it</h4><p>It appears only under the pointer. The context menu, the commit card and the Rebase tab do not mention it; the tab’s empty state says “Select commits in the graph” without saying how.</p></div></div>
+              <div class="fitem"><span class="pin">3</span><div><h4>Free selection, one accepted shape</h4><p>Main’s <code>validateSelection</code> accepts only <b>the N most recent commits, contiguous, including HEAD</b>, with at least two. Any other set of boxes is refused (“Select a contiguous run of the most recent commits”) after you pick an operation. The real choice is one commit: where the run starts.</p></div></div>
+              <div class="fitem"><span class="pin">4</span><div><h4>Four steps for one decision</h4><p>Tick the HEAD row, tick each row down to the start, click Squash in the selection bar, then read the rail. Ticking rows on another lane is allowed and always fails.</p></div></div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ============================ TURN 2 ============================ -->
+      <section class="dv-turn" id="t2" data-screen-label="Turn 2 Options">
+        <div class="dv-thd"><a class="dv-tid" href="#t2">2</a><span class="dv-tname">Options — choose the start commit, not a set of commits</span></div>
+        <p class="dv-sub">Every option removes the reserved column. They differ in how the start commit is chosen. The range always ends at HEAD, so one choice is enough.</p>
+        <div class="dv-opts">
+          <div class="dv-opt" id="2a" data-screen-label="2a Context menu">
+            <div class="dv-olabel"><a class="dv-oid" href="#2a">2a</a><span class="rec">Recommended.</span> Right-click the oldest commit to include</div>
+            <div class="stage th-light" style="height:330px">
+              <div class="card">
+                <div class="row head sel">
+                  <div class="lanes" style="width:52px"><svg width="52" height="64"><line x1="10" y1="32" x2="10" y2="64" stroke="#b74c00" stroke-width="2"/><circle cx="10" cy="32" r="9" fill="#b74c00" opacity=".16"/><circle cx="10" cy="32" r="7.5" fill="none" stroke="#b74c00" stroke-width="1.5"/><circle cx="10" cy="32" r="5" fill="#b74c00" stroke="#fdfcfa" stroke-width="2"/></svg></div>
+                  <div class="body"><div class="line"><span class="sha">968d44a</span><span class="msg">Move export paper to the docs folder</span><span class="age">1m</span></div><div class="meta"><span class="chip solid">HEAD</span><span class="chip">main</span>you</div></div>
+                </div>
+                <div class="row sel">
+                  <div class="lanes" style="width:52px"><svg width="52" height="64"><line x1="10" y1="0" x2="10" y2="64" stroke="#b74c00" stroke-width="2"/><circle cx="10" cy="32" r="4" fill="#b74c00" stroke="#fdfcfa" stroke-width="2"/></svg></div>
+                  <div class="body"><div class="line"><span class="sha">cf8e215</span><span class="msg">Add file-backed paper store</span><span class="age">5m</span></div><div class="meta">you</div></div>
+                </div>
+                <div class="row sel">
+                  <div class="lanes" style="width:52px"><svg width="52" height="64"><line x1="10" y1="0" x2="10" y2="64" stroke="#b74c00" stroke-width="2"/><circle cx="10" cy="32" r="4" fill="#b74c00" stroke="#fdfcfa" stroke-width="2"/></svg></div>
+                  <div class="body"><div class="line"><span class="sha">a31c0de</span><span class="msg">Read papers from disk</span><span class="age">9m</span></div><div class="meta">you</div></div>
+                </div>
+                <div class="row">
+                  <div class="lanes" style="width:52px"><svg width="52" height="64"><line x1="10" y1="0" x2="10" y2="64" stroke="#b74c00" stroke-width="2"/><circle cx="10" cy="32" r="4" fill="#fdfcfa" stroke="#b74c00" stroke-width="2"/></svg></div>
+                  <div class="body"><div class="line"><span class="sha">4bd4665</span><span class="msg">Keep editable papers in sync</span><span class="age">40m</span></div><div class="meta">Jay Pantone</div></div>
+                </div>
+              </div>
+              <div class="menu" style="left:200px;top:100px">
+                <span>View changes</span>
+                <span>Branch from this commit…</span>
+                <hr />
+                <em>Edit history from here</em>
+                <span class="on">Squash 3 commits into one…</span>
+                <span>Reorder 3 commits…</span>
+                <span>Tidy 3 commits with an agent…</span>
+                <hr />
+                <span>Copy short SHA</span>
+              </div>
+            </div>
+            <p class="note">The heading names what all three do; each entry names the count, so the reader sees the range before choosing. Choosing selects HEAD down to this commit (rows tinted), opens the rail’s Rebase tab on that operation, and shows the selection bar so the operation can still be switched or cleared. Tidy appears only where AI history editing is on. <b>Never offered</b> on the HEAD row (one commit) or on a commit HEAD does not reach. <b>Disabled with the reason</b> when a merge sits in the run or the run reaches the repository’s first commit.</p>
+          </div>
+
+          <div class="dv-opt" id="2b" data-screen-label="2b Overlay on SHA">
+            <div class="dv-olabel"><a class="dv-oid" href="#2b">2b</a><span class="rej">Rejected.</span> Float the box over the row on hover</div>
+            <div class="find" style="width:330px">
+              <p class="note">No reserved width, but still invisible until hovered, and it sits on the SHA chip, whose hover opens the commit card. Keeps the free selection that main mostly refuses (1b ③).</p>
+            </div>
+          </div>
+          <div class="dv-opt" id="2c" data-screen-label="2c Modifier click">
+            <div class="dv-olabel"><a class="dv-oid" href="#2c">2c</a><span class="rej">Rejected for now.</span> ⇧-click a row to set the start</div>
+            <div class="find" style="width:330px">
+              <p class="note">Zero chrome, but nothing on screen says it exists, and a plain click already opens the commit. Worth adding later as an accelerator once a range exists (⇧-click moves its start).</p>
+            </div>
+          </div>
+          <div class="dv-opt" id="2d" data-screen-label="2d Rail mode">
+            <div class="dv-olabel"><a class="dv-oid" href="#2d">2d</a><span class="rej">Rejected.</span> A “Choose commits” mode in the Rebase tab</div>
+            <div class="find" style="width:330px">
+              <p class="note">Shows the column only while the mode is on. Discoverable from the tab, but the column comes back exactly when the lanes matter most, and it is a mode to leave.</p>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ============================ TURN 3 ============================ -->
+      <section class="dv-turn" id="t3" data-screen-label="Turn 3 Built">
+        <div class="dv-thd"><a class="dv-tid" href="#t3">3</a><span class="dv-tname">As built in the PR — 2a, with the 26px returned to the gutter</span></div>
+        <p class="dv-sub">The gutter cap becomes <b>clamp(16px, 100cqi − 204px − 14ch, 160px)</b> (the lane scrollbar carries the same expression). The selection bar and the Rebase tab are unchanged apart from the tab’s empty-state text.</p>
+        <div class="dv-opts">
+          <div class="dv-opt" id="3a" data-screen-label="3a Narrow pane after">
+            <div class="dv-olabel"><a class="dv-oid" href="#3a">3a</a>The 1a pane, same width, after</div>
+            <div class="stage th-light">
+              <div class="card">
+                <div class="row">
+                  <div class="lanes" style="width:52px"><svg width="52" height="64"><line x1="10" y1="0" x2="10" y2="64" stroke="#b74c00" stroke-width="2"/><path d="M10 32 C10 48, 26 48, 26 64" fill="none" stroke="#7c4dcc" stroke-width="1.5" stroke-dasharray="2 2"/><circle cx="10" cy="32" r="4" fill="#b74c00" stroke="#fdfcfa" stroke-width="2"/></svg></div>
+                  <div class="body"><div class="line"><span class="sha">cf8e215</span><span class="msg">Add file-backed paper store</span><span class="age">5m</span></div><div class="meta">merged #6 · you</div></div>
+                </div>
+                <div class="row hover">
+                  <div class="lanes" style="width:52px"><svg width="52" height="64"><line x1="10" y1="0" x2="10" y2="64" stroke="#b74c00" stroke-width="2"/><path d="M26 0 L26 32" stroke="#7c4dcc" stroke-width="1.5" stroke-dasharray="2 2"/><circle cx="26" cy="32" r="9" fill="#62c882" opacity=".16"/><circle cx="26" cy="32" r="5" fill="#62c882" stroke="#fdfcfa" stroke-width="2"/><path d="M26 32 C26 48, 10 48, 10 64" fill="none" stroke="#62c882" stroke-width="2" stroke-dasharray="4 3"/></svg></div>
+                  <div class="body"><div class="line"><span class="sha">1710d88</span><span class="msg">Add file-backed paper store</span><span class="age">21m</span></div><div class="meta">merged #6 · <span class="chip">origin/feat/papers</span></div></div>
+                </div>
+              </div>
+            </div>
+          </div>
+          <div class="dv-opt" id="3b" data-screen-label="3b Rebase tab empty">
+            <div class="dv-olabel"><a class="dv-oid" href="#3b">3b</a>Rebase tab, nothing chosen</div>
+            <div class="stage th-light">
+              <div class="empty">Right-click the oldest commit you want to change in the graph and choose <b>Squash</b>, <b>Reorder</b> or <b>Tidy</b> under “Edit history from here”. Every commit from there up to HEAD is included. You can inspect the exact plan and check it safely before changing the worktree.</div>
+            </div>
+          </div>
+          <div class="dv-opt" id="3c" data-screen-label="3c Widths">
+            <div class="dv-olabel"><a class="dv-oid" href="#3c">3c</a>Gutter cap by pane width, measured</div>
+            <div class="measure">
+              <em>pane</em><em>before</em><em>after</em>
+              <span>400px</span><span>47px</span><span class="good">73px</span>
+              <span>440px</span><span>87px</span><span class="good">113px</span>
+              <span>500px</span><span>147px</span><span class="good">160px</span>
+              <span>&#8805; 515px</span><span>160px</span><span class="good">160px</span>
+            </div>
+            <p class="note">Harness render of the real GraphRow and stylesheet (14ch of 12.5px Geist Sans measured 121px). The full 160px cap now holds down to a ~490px pane instead of ~515px. Above that the 26px goes to the subject. At 400px a four-lane graph (64px) was cut to 47px and lost its fourth lane; after, it is drawn whole.</p>
+          </div>
+        </div>
+        <div class="dv-opts" style="margin-top:28px">
+          <div class="dv-opt" id="3d" data-screen-label="3d Already pushed">
+            <div class="dv-olabel"><a class="dv-oid" href="#3d">3d</a>Review round: the run holds commits a remote already has</div>
+            <div class="stage th-light" style="width:330px;height:230px">
+              <div class="menu" style="left:18px;top:18px;width:270px">
+                <span>Tag this commit…</span>
+                <hr />
+                <em>Edit history from here</em>
+                <i>2 of these 3 are already pushed. Publishing the rewrite needs a force push.</i>
+                <span>Squash 3 commits into one…</span>
+                <span>Reorder 3 commits…</span>
+                <span>Tidy 3 commits with an agent…</span>
+              </div>
+            </div>
+          </div>
+          <div class="dv-opt" id="3e" data-screen-label="3e Decision">
+            <div class="dv-olabel"><a class="dv-oid" href="#3e">3e</a>Why a warning, not hiding the entries</div>
+            <div class="find" style="width:470px">
+              <div class="fitem"><span class="pin">1</span><div><h4>One click made rewriting shared history easy</h4><p>The checkbox needed one tick per commit; the menu offers “Squash 120 commits into one…” on any row of a pushed <b>main</b>. Code review on PR #600 flagged it.</p></div></div>
+              <div class="fitem"><span class="pin">2</span><div><h4>Warn once, under the heading</h4><p>“Pushed” is Git’s own test: reachable from any remote-tracking ref (<code>rev-list HEAD --not --remotes</code>, computed with the lanes, no Git call per right-click). The sentence sits under the group’s heading, in the warning tone, and is every entry’s accessible description, so it is said once and read with each.</p></div></div>
+              <div class="fitem"><span class="pin">3</span><div><h4>Still offered</h4><p>Nothing changes for anyone else until a force push, and tidying commits already pushed to your own feature branch is common. Hiding would remove a legitimate edit to stop an unlikely one; the dry run and Apply still stand between the click and the worktree.</p></div></div>
+            </div>
+          </div>
+        </div>
+        <p class="dv-next"><b>Next:</b> ⇧-click to move the start of an active range (2c) · preview the range while hovering a menu entry.</p>
+      </section>
+    </x-dc>
+  </body>
+</html>

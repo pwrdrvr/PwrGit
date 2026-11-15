@@ -275,6 +275,21 @@ describe("rebase tool copy", () => {
 });
 
 describe("Squash with an agent", () => {
+  // Rule: the plan is for exactly the selected run. graph:log's default
+  // window (200) cut a longer run to its newest 200 commits, which still
+  // passed main's check as a run of their own and was rewritten instead.
+  it("reads exactly the run's length and never drafts a subset of it", async () => {
+    route({
+      "graph:log": (req) => ok({ commits: log.slice(0, Number(req["limit"] ?? 200)) })
+    });
+    const gone = h("z");
+    await render("reorder", [h("c"), h("b"), gone]);
+
+    expect(calls("graph:log")[0]?.["limit"]).toBe(3);
+    const drafted = calls("rebase:draft")[0]?.["commits"] as { hash: string }[];
+    expect(drafted.map((c) => c.hash)).toEqual([h("c"), h("b"), gone]);
+  });
+
   it("drafts the message, then checks and applies whatever the box says", async () => {
     route({
       "agent:draftMessage": (req) => ok(message(String(req["requestId"]))),
