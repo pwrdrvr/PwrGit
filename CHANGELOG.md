@@ -1,5 +1,11 @@
 # Changelog
 
+## v0.59.5 - 2026-11-16
+
+- Resource usage - Added optional minute-level CPU and Git workload recording under Settings > Troubleshooting to help investigate long-running resource use. Recording is off by default, starts and stops live, and keeps a rolling day of local samples without repository paths, command arguments or output. Nothing is uploaded automatically.
+- Worktrees - Removed a repeated Git ancestry query from refreshes of non-default worktrees with related history. Default-branch counts and merged status now use the commit from the status snapshot, avoiding mixed-HEAD results if an external checkout changes HEAD during a refresh. Sync frequency is unchanged; battery savings have not been measured.
+- Source builds - Reduced React development owner-stack overhead in the Maintenance dialog without changing its layout or behavior, and added renderer-bytecode headroom checks to catch oversized functions before release.
+
 ## v0.59.4 - 2026-11-15
 
 - Bulk sync - Added independent 15-minute silence and 60-minute absolute deadlines for network transfers and read-only Git probes, starting after each command acquires its queue lock. A timed-out remote is reported as failed while remaining work continues. Missed deadlines are checked after system resume and before new output can reset the silence clock.
