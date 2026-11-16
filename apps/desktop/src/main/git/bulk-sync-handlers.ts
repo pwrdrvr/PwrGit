@@ -197,7 +197,7 @@ export function registerBulkSyncHandlers(
           }
           // Timed and bulk syncs check tags as a toolbar Fetch does: behind
           // the sync menu's switch, hourly at most, a few at a time.
-          if (fetched) tagAutoChecksFor(db).afterSync(repo.id);
+          if (fetched || result.remotes.some((remote) => remote.reason === "unchanged")) tagAutoChecksFor(db).afterSync(repo.id);
           logMain(
             result.outcome === "failed" ? "warn" : "info",
             "remote",

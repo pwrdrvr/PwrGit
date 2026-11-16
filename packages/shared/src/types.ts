@@ -2225,6 +2225,7 @@ export type BulkSyncRemoteResult = {
   outcome: "fetched" | "skipped" | "failed" | "cancelled";
   reason?:
     | "skip_fetch_all"
+    | "unchanged"
     | "authentication"
     | "fetch_failed"
     | "cancelled";

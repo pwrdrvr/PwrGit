@@ -52,6 +52,32 @@ energy trace to validate power savings. The existing hot-CPU profiler remains
 useful for sustained JavaScript load, whereas these counters capture short,
 repeated subprocess bursts over a day.
 
+## Bulk-pull change detection
+
+Bulk pull reads effective configuration and local branch/tracking refs in two
+Git processes, then checks all advertised branch tips with one `ls-remote` per
+remote. With ordinary wildcard fetch mappings, equal tip sets skip fetch;
+changed, new and deleted branches still use Git's atomic pruning fetch. An
+explicit bulk Fetch always fetches.
+
+Current, ahead-only and untracked checkouts need no per-checkout Git inspection.
+The planner checks Git's checkout ownership and operation markers from disk;
+pending, diverged or uncertain checkouts retain the full safety checks and the
+second inspection immediately before mutation. Each cycle reads current refs,
+so cleaning a blocked checkout, resetting a local branch, or changing tracking
+configuration does not depend on another remote change.
+
+Conditional includes and worktree configuration add an effective-configuration
+probe for each candidate linked checkout. Identity-only differences still use
+the shortcut; tracking differences retain the ordinary inspection path. Custom
+fetch mappings retain the ordinary fetch path. Unchanged runs skip branch-index
+and full worktree-state recomputation. Actual fetches and checkout updates keep
+the family state refresh, since moving a local default branch can affect its
+siblings' badges too. Published-tag checks retain their own hourly cadence and
+setting. The process-count oracle is
+`bulk-sync-preflight.property.test.ts`; actual energy savings still need a new
+representative recording.
+
 ## Initial investigation, November 15, 2026
 
 The reported screenshot showed instantaneous Energy Impact 0.2 and 12-hour
