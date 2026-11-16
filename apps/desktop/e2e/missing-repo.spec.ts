@@ -1,6 +1,7 @@
 import { rmSync } from "node:fs";
 import { expect, test } from "@playwright/test";
 import { launchApp, type AppHandle } from "./fixtures/electron-app";
+import { emitFocusOnMainLoop } from "./fixtures/focus-refresh";
 import { createGitSandbox, type GitSandbox } from "./fixtures/git-sandbox";
 import { addRootAndExpand, branchRow, repoGroup } from "./fixtures/steps";
 
@@ -15,16 +16,6 @@ test.afterEach(async () => {
   sandbox?.cleanup();
   sandbox = null;
 });
-
-async function triggerActiveRefresh(app: AppHandle): Promise<void> {
-  await app.app.evaluate(({ app: electronApp, BrowserWindow }) => {
-    const win = BrowserWindow.getAllWindows()[0];
-    if (win !== undefined) {
-      // The same focus hook the 15s poll shares; no private test channel.
-      electronApp.emit("browser-window-focus", {}, win);
-    }
-  });
-}
 
 // The profile rescan is throttled to once a day, and the walk of the roots
 // looks only for new folders, so a deleted repository used to stay in the
@@ -45,7 +36,8 @@ test("drops a repository from the sidebar when its folder is deleted", async () 
 
   // Windows can briefly retain a Git child process's handle to the selected repo.
   rmSync(doomed.path, { recursive: true, force: true, maxRetries: 15, retryDelay: 300 });
-  await triggerActiveRefresh(handle);
+  // The same focus hook the 15s poll shares; no private test channel.
+  await handle.app.evaluate(emitFocusOnMainLoop);
 
   await expect(repoGroup(window, "doomed")).toHaveCount(0);
   // The rescan may prune only while some repository still resolves.

@@ -89,6 +89,12 @@ agents must not repurpose a runner for an interactive lab run.
 
 ## Gotchas
 
+- **Emit simulated focus events on the next main-loop turn.** CDP evaluation
+  can interrupt native SQLite; emitting inline re-enters the connection from
+  the focus handler and throws "This database connection is busy executing a
+  query". Pass `emitFocusOnMainLoop` (`fixtures/focus-refresh.ts`) to
+  `app.evaluate`; it uses `setImmediate` and awaits the event dispatch.
+
 - **Keep both hardware video codec switches in `launchApp`, even with
   `--disable-gpu`.** GPU rendering and media codecs are separate. PwrSnap #366
   and PwrAgent #1168 measured VideoToolbox kernel-client leaks in Tart guests
