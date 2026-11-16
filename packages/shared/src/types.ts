@@ -2225,6 +2225,7 @@ export type BulkSyncRemoteResult = {
   outcome: "fetched" | "skipped" | "failed" | "cancelled";
   reason?:
     | "skip_fetch_all"
+    | "unchanged"
     | "authentication"
     | "fetch_failed"
     | "cancelled";
@@ -2264,6 +2265,8 @@ export type BulkSyncRepoResult = {
   outcome: "success" | "partial" | "skipped" | "failed" | "cancelled";
   remotes: BulkSyncRemoteResult[];
   worktrees: BulkSyncWorktreeResult[];
+  /** A successful before/after ref comparison; absent when unavailable. */
+  refsChanged?: boolean;
   message?: string;
 };
 

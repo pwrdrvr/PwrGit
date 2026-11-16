@@ -160,11 +160,12 @@ export function registerBulkSyncHandlers(
           const fetched = result.remotes.some(
             (remote) => remote.outcome === "fetched"
           );
+          const fetchedChanges = fetched && result.refsChanged !== false;
           const updated = result.worktrees.some(
             (worktree) => worktree.outcome === "updated"
           );
-          if (fetched) refreshIdentity?.(repo.id);
-          if (fetched && indexer !== undefined) {
+          if (fetchedChanges) refreshIdentity?.(repo.id);
+          if (fetchedChanges && indexer !== undefined) {
             try {
               const indexed = await operations.runRepository(repo.id, () =>
                 indexer.refreshRepoRemoteBranches(repo.id)
@@ -184,7 +185,7 @@ export function registerBulkSyncHandlers(
               );
             }
           }
-          if (fetched || updated) {
+          if (fetchedChanges || updated) {
             try {
               await refresher.refreshRepoWorktrees(repo.id);
             } catch (cause) {
@@ -197,7 +198,7 @@ export function registerBulkSyncHandlers(
           }
           // Timed and bulk syncs check tags as a toolbar Fetch does: behind
           // the sync menu's switch, hourly at most, a few at a time.
-          if (fetched) tagAutoChecksFor(db).afterSync(repo.id);
+          if (fetched || result.remotes.some((remote) => remote.reason === "unchanged")) tagAutoChecksFor(db).afterSync(repo.id);
           logMain(
             result.outcome === "failed" ? "warn" : "info",
             "remote",

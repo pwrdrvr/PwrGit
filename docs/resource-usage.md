@@ -52,6 +52,39 @@ energy trace to validate power savings. The existing hot-CPU profiler remains
 useful for sustained JavaScript load, whereas these counters capture short,
 repeated subprocess bursts over a day.
 
+## Bulk-pull change detection
+
+Bulk pull reads effective configuration and local refs in batches. Remotes
+with automatic tag following retain the ordinary atomic pruning fetch, since
+a new tag can be published without changing any branch tip. A second ref batch
+compares branch and tag names/ids to decide whether indexing and family-state
+recomputation are necessary. For an ordinary wildcard remote explicitly set to
+`tagOpt=--no-tags`, one `ls-remote` can skip fetch when branch tips are equal.
+Custom mappings and explicit tag-pruning configuration retain ordinary fetch.
+An explicit bulk Fetch always fetches.
+
+Current, ahead-only and untracked checkouts get one lightweight
+`status --porcelain=v2 --branch --untracked-files=no` under their checkout lock.
+This revalidates HEAD and its live upstream relationship after networking and
+queue waits, and detects unmerged index entries even without operation markers.
+Changed, pending, diverged or uncertain checkouts retain the full safety checks
+and the second inspection immediately before mutation. Cleaning a blocked
+checkout or resetting a local branch does not require another remote change.
+
+Conditional includes and worktree configuration add an effective-configuration
+probe for each candidate linked checkout. Identity-only differences still use
+the shortcut; tracking differences retain the ordinary inspection path. Custom
+fetch mappings retain the ordinary fetch path. Unchanged refs skip branch-index
+and full worktree-state recomputation, including after a no-change fetch.
+Changed refs (including newly followed tags), unavailable comparisons and
+checkout updates retain the family refresh, since default-branch movement can
+affect siblings' badges too. A current single-remote repository uses four Git
+processes plus one lightweight status per checkout; the explicit no-tags route
+uses three plus one per checkout. Published-tag checks retain their own hourly cadence and
+setting. The process-count oracle is
+`bulk-sync-preflight.property.test.ts`; actual energy savings still need a new
+representative recording.
+
 ## Initial investigation, November 15, 2026
 
 The reported screenshot showed instantaneous Energy Impact 0.2 and 12-hour

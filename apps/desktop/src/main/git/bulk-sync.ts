@@ -25,6 +25,10 @@ import {
   type GitOutput
 } from "./dugite";
 import { formatPullDuration, PullWatchdog } from "./pull-watchdog";
+import {
+  BULK_OPERATION_STATE_PATHS, readBulkSyncSnapshot, readBulkSyncRefs,
+  bulkSyncRefsChanged, remoteTipsUnchanged, unchangedWorktree, type BulkSyncSnapshot
+} from "./bulk-sync-preflight";
 
 export const BULK_SYNC_CONCURRENCY = 3;
 /** Each repository worker runs at most four independent checkout operations. */
@@ -166,17 +170,6 @@ type WorktreeInspection =
   | { kind: "ready"; value: ReadyWorktree }
   | { kind: "result"; value: BulkSyncWorktreeResult };
 
-// Files and directories in the worktree's git dir that exist only while an
-// operation is in progress (the set `git status` checks).
-const OPERATION_STATE_PATHS = [
-  "MERGE_HEAD",
-  "CHERRY_PICK_HEAD",
-  "REVERT_HEAD",
-  "BISECT_LOG",
-  "rebase-merge",
-  "rebase-apply"
-] as const;
-
 const authFailure = (message: string): boolean =>
   /authentication failed|terminal prompts disabled|could not read (?:username|password)|username for ['"]|password for ['"]|permission denied \(publickey|credential[^\r\n]*(?:failed|unavailable)|http basic: access denied/i.test(
     message
@@ -233,10 +226,11 @@ async function fetchConfiguredRemotes(
   git: GitExec,
   repo: BulkSyncRepoInput,
   signal: AbortSignal | undefined,
-  report: ReportProgress
+  report: ReportProgress,
+  snapshot: BulkSyncSnapshot | null
 ): Promise<Result<BulkSyncRemoteResult[]>> {
   report({ detail: "Reading remote configuration…" });
-  const listed = await configuredRemotes(git, repo.path);
+  const listed = snapshot === null ? await configuredRemotes(git, repo.path) : ok(snapshot.remotes);
   if (!listed.ok) return listed;
   const results: BulkSyncRemoteResult[] = [];
   const complete = (result: BulkSyncRemoteResult): void => {
@@ -266,27 +260,44 @@ async function fetchConfiguredRemotes(
       complete(cancelledRemote(remote.name));
       continue;
     }
-    report({ detail: `Fetching ${remote.name}…` });
-    const raw = await git(
-      ["fetch", "--atomic", "--prune", "--progress", remote.name],
-      repo.path,
-      signal === undefined ? undefined : { signal }
-    );
+    let raw: Result<GitOutput> | undefined;
+    // Ordinary fetch must retain automatic tag following even when every
+    // branch tip is unchanged. Only an explicit --no-tags remote can skip it.
+    if (snapshot !== null && snapshot.remotes.some((entry) => entry.name === remote.name && entry.standardMapping && entry.noTags)) {
+      report({ detail: `Checking ${remote.name} branch tips…` });
+      raw = await git(["ls-remote", "--heads", "--refs", remote.name], repo.path);
+      if (raw.ok && raw.value.exitCode === 0) {
+        if (remoteTipsUnchanged(snapshot, remote.name, raw.value.stdout)) {
+          if (isAborted(signal)) complete(cancelledRemote(remote.name));
+          else complete({ remote: remote.name, outcome: "skipped", reason: "unchanged", message: "Remote branch tips are unchanged." });
+          continue;
+        }
+        raw = undefined;
+      }
+    }
+    if (raw === undefined) {
+      report({ detail: `Fetching ${remote.name}…` });
+      raw = await git(
+        ["fetch", "--atomic", "--prune", "--progress", remote.name],
+        repo.path,
+        signal === undefined ? undefined : { signal }
+      );
+    }
     if (isAborted(signal)) {
       complete(cancelledRemote(remote.name));
       continue;
     }
     if (!raw.ok || raw.value.exitCode !== 0) {
       const detail = raw.ok ? `${raw.value.stderr}\n${raw.value.stdout}` : raw.error.message;
-      const timedOut = !raw.ok && ["pull_stalled", "pull_timed_out"].includes(raw.error.code);
-      const authentication = !timedOut && authFailure(detail);
+      const timeoutMessage = !raw.ok && ["pull_stalled", "pull_timed_out"].includes(raw.error.code) ? raw.error.message : null;
+      const authentication = timeoutMessage === null && authFailure(detail);
       complete({
         remote: remote.name,
         outcome: "failed",
         reason: authentication ? "authentication" : "fetch_failed",
-        message: timedOut ? raw.error.message : authentication
+        message: timeoutMessage ?? (authentication
           ? "Authentication is required; PwrGit did not open an interactive prompt."
-          : "Git could not fetch this remote. See Logs for details."
+          : "Git could not fetch this remote. See Logs for details.")
       });
       continue;
     }
@@ -363,7 +374,7 @@ async function inspectWorktree(
   // wrong both ways: AUTO_MERGE and REBASE_HEAD outlive the operation that
   // wrote them, and BISECT_START holds a branch name, so it never resolved.
   const statePaths = await git(
-    ["rev-parse", ...OPERATION_STATE_PATHS.flatMap((path) => ["--git-path", path])],
+    ["rev-parse", ...BULK_OPERATION_STATE_PATHS.flatMap((path) => ["--git-path", path])],
     worktree.path,
     NO_OPTIONAL_LOCKS
   );
@@ -491,7 +502,7 @@ async function inspectWorktree(
   }
 
   const remoteResult = fetched.get(remote);
-  if (remoteResult?.outcome !== "fetched") {
+  if (remoteResult?.outcome !== "fetched" && remoteResult?.reason !== "unchanged") {
     const reason =
       remoteResult?.reason === "authentication"
         ? "authentication"
@@ -703,7 +714,7 @@ function repoOutcome(
     remotes.some((result) => result.outcome === "failed") ||
     worktrees.some((result) => result.outcome === "failed");
   const skipped =
-    remotes.some((result) => result.outcome === "skipped") ||
+    remotes.some((result) => result.outcome === "skipped" && result.reason !== "unchanged") ||
     worktrees.some(
       (result) => result.outcome === "skipped" && !nothingToPull(result)
     );
@@ -750,7 +761,9 @@ async function syncRepo(
 ): Promise<BulkSyncRepoResult> {
   if (isAborted(options.signal)) return cancelledRepo(repo);
   const git = watchedGit(exec, options.signal);
-  const fetched = await fetchConfiguredRemotes(git, repo, options.signal, report);
+  let snapshot = options.mode === "soft-pull" && repo.worktrees.length > 0
+    ? await readBulkSyncSnapshot(git, repo.path) : null;
+  const fetched = await fetchConfiguredRemotes(git, repo, options.signal, report, snapshot);
   if (!fetched.ok) {
     if (isAborted(options.signal)) return cancelledRepo(repo);
     return {
@@ -764,7 +777,15 @@ async function syncRepo(
     };
   }
   let worktrees: BulkSyncWorktreeResult[] = [];
+  let refsChanged: boolean | undefined;
   if (options.mode === "soft-pull") {
+    // Fetch may have added, deleted or rewritten upstream tips. Read them in
+    // one batch again before selecting checkouts that actually need a pull.
+    if (snapshot !== null && fetched.value.some((remote) => remote.outcome === "fetched")) {
+      const refs = await readBulkSyncRefs(git, repo.path);
+      refsChanged = refs === null ? undefined : bulkSyncRefsChanged(snapshot.refs, refs.refs);
+      snapshot = refs === null ? null : { ...snapshot, ...refs };
+    }
     const fetchedByName = new Map(
       fetched.value.map((result) => [result.remote, result])
     );
@@ -783,9 +804,14 @@ async function syncRepo(
         worktreePath: worktree.path
       });
       reportWorktree("Waiting for another worktree operation…");
-      const result = await runWorktree(worktree.id, () =>
-        softPullWorktree(git, exec, worktree, fetchedByName, options.signal, reportWorktree)
-      );
+      const result = await runWorktree(worktree.id, async () => {
+        if (isAborted(options.signal)) return worktreeResult(worktree, {
+          outcome: "cancelled", reason: "cancelled", message: "Cancelled before this worktree was checked."
+        });
+        const unchanged = snapshot === null ? null : await unchangedWorktree(git, snapshot, worktree.path, fetchedByName);
+        if (unchanged !== null && !isAborted(options.signal)) return worktreeResult(worktree, unchanged);
+        return softPullWorktree(git, exec, worktree, fetchedByName, options.signal, reportWorktree);
+      });
       report({ worktreeResult: result });
       return result;
     });
@@ -796,7 +822,8 @@ async function syncRepo(
     path: repo.path,
     outcome: repoOutcome(options.mode, fetched.value, worktrees),
     remotes: fetched.value,
-    worktrees
+    worktrees,
+    ...(refsChanged === undefined ? {} : { refsChanged })
   };
 }
 
