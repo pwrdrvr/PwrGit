@@ -34,7 +34,7 @@ describe("renderer bytecode oracle", () => {
   it.each([false, true])("compiles without execution and finds nested/anonymous over-budget functions (oversized=%s)", async (oversized) => {
     await fixture(async (root) => {
       const entry = resolve(root, "entry.tsx");
-      const body = Array.from({ length: oversized ? 8000 : 3 }, (_, i) => `input.step(${i});`).join("\n");
+      const body = Array.from({ length: oversized ? 2600 : 3 }, (_, i) => `input.step(${i});`).join("\n");
       // Both a named nested helper and an anonymous array element must be
       // found, even though none is executed or exported on its own.
       await writeFile(entry, `import './sentinel';
@@ -52,6 +52,12 @@ describe("renderer bytecode oracle", () => {
         expect(() => enforceBudget(records, (message) => diagnostics.push(message))).toThrow("49152-byte limit");
         expect(diagnostics).toHaveLength(8);
         expect(diagnostics.every((message) => message.includes("bytes > limit 49152"))).toBe(true);
+        // Keep the oracle just above the boundary. Excess bytecode means
+        // excess disassembly in every pipeline, contending with the full CI
+        // suite. Bound that work deterministically, without timing assertions.
+        for (const record of failures) {
+          expect(record.bytes, `${record.variant} fixture size`).toBeLessThanOrEqual(BYTECODE_BUDGET + 4096);
+        }
       } else expect(() => enforceBudget(records)).not.toThrow();
       expect(globalThis.__bytecodeFixture).toBeUndefined();
       expect(globalThis.__bytecodeImportExecuted).toBeUndefined();

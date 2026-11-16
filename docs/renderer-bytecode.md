@@ -51,8 +51,11 @@ The script's oracle tests compile valid and deliberately oversized fixtures
 through every pipeline. Each fixture contains unexported named and anonymous
 nested functions. The oversized fixture must produce two budget failures in
 each variant, with module/function/size/limit diagnostics; the valid fixture
-must pass. Sentinel imports and top-level throws prove compilation never
-executes the fixture or its imports.
+must pass. Oversized fixture functions must stay within 4 KiB above the
+budget, so unnecessary disassembly does not compete with the full CI suite.
+This work bound uses bytecode lengths, not elapsed time. Sentinel imports
+and top-level throws prove compilation never executes the fixture or its
+imports.
 
 ## React development owner stacks
 
