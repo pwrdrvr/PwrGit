@@ -1,11 +1,59 @@
 import fc from "fast-check";
 import { describe, expect, it, vi } from "vitest";
-import { GitResourceUsage, ProcessResourceUsage, gitResourceCommand, gitResourceUsage, withResourceSource } from "./resource-usage";
+import { GitResourceUsage, ProcessResourceUsage, gitResourceCommand, gitResourceUsage, withResourceSource, startGitResourceRecording, observeGitResources } from "./resource-usage";
+import { EventEmitter } from "node:events";
+import type { ChildProcess } from "node:child_process";
 import { execGit, execGitBinary, execGitRecords } from "../git/dugite";
 import { tmpdir } from "node:os";
 import { limitConcurrency } from "../util/map-limit";
 
 describe("resource accounting", () => {
+  it("records only enabled sessions and ignores children crossing disable/re-enable boundaries", () => {
+    fc.assert(fc.property(fc.array(fc.constantFrom("enable", "disable", "spawn", "close"), { maxLength: 80 }), (actions) => {
+      let stop = startGitResourceRecording();
+      stop();
+      let enabled = false;
+      let generation = 0;
+      let active = 0;
+      const children: Array<{ child: EventEmitter; generation: number; counted: boolean }> = [];
+      try {
+        for (const action of actions) {
+          let started = 0;
+          let completed = 0;
+          if (action === "enable") {
+            stop = startGitResourceRecording();
+            enabled = true;
+            generation++;
+            active = 0;
+          } else if (action === "disable") {
+            stop();
+            enabled = false;
+            generation++;
+            active = 0;
+          } else if (action === "spawn") {
+            const child = new EventEmitter();
+            observeGitResources(child as ChildProcess, ["status"]);
+            if (!enabled) expect(child.listenerCount("spawn")).toBe(0);
+            child.emit("spawn");
+            children.push({ child, generation, counted: enabled });
+            if (enabled) { active++; started++; }
+          } else {
+            const child = children.shift();
+            child?.child.emit("close", 0);
+            if (enabled && child?.counted && child.generation === generation) { active--; completed++; }
+          }
+          const sample = gitResourceUsage.sample();
+          expect(sample.active).toBe(active);
+          expect(sample.buckets.reduce((n, b) => n + b.started, 0)).toBe(started);
+          expect(sample.buckets.reduce((n, b) => n + b.completed, 0)).toBe(completed);
+        }
+      } finally {
+        stop();
+        for (const child of children) child.child.emit("close", 0);
+        expect(gitResourceUsage.sample().active).toBe(0);
+      }
+    }));
+  });
   // Model invariant: every spawn and completion is counted exactly once,
   // including children spanning arbitrarily many sample boundaries. Draining
   // counters must never erase live children or change their original label.
@@ -89,6 +137,7 @@ describe("resource accounting", () => {
   // Differential oracle: all production adapters must count the actual child,
   // once, with the initiating async context even behind a shared queue.
   it("observes every production Git adapter and preserves overlapping job origins", async () => {
+    const stop = startGitResourceRecording();
     const observed = vi.spyOn(gitResourceUsage, "start");
     try {
       const run = limitConcurrency(async (adapter: number) => {
@@ -101,6 +150,7 @@ describe("resource accounting", () => {
       expect(observed.mock.calls.map((call) => call[1])).toEqual(origins);
       expect(observed.mock.calls.map((call) => gitResourceCommand(call[0]))).toEqual(["rev-parse", "rev-parse", "rev-parse"]);
     } finally {
+      stop();
       observed.mockRestore();
     }
   });

@@ -144,7 +144,6 @@ import {
 } from "./renderer-errors";
 import { watchEventLoopStalls } from "./event-loop-stalls";
 import { watchProcessIds } from "./process-ids";
-import { watchResourceUsage } from "./diagnostics/resource-monitor";
 import { withResourceSource } from "./diagnostics/resource-usage";
 import { SYSTEM_SHUTDOWN_FLUSH_MS, watchSystemShutdown } from "./system-shutdown";
 import { ensureMacKeychainAccess } from "./mac-keychain-access";
@@ -466,8 +465,6 @@ if (!gotSingleInstanceLock) {
     // The dev checkout's branch and commit as they were at launch.
     void captureDiagnosticsBuild();
     watchProcessIds();
-    const stopResourceUsage = watchResourceUsage(join(app.getPath("logs"), "resources"));
-    app.once("before-quit", stopResourceUsage);
     // Started once the log file is open, so a stall during the rest of startup
     // lands in main.log. Sleep stops the clock the heartbeat reads on some
     // platforms and not others; pausing across it keeps a closed lid from

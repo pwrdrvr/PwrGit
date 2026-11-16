@@ -2,7 +2,7 @@ import { appendFile, mkdir, readdir, unlink } from "node:fs/promises";
 import { join } from "node:path";
 import { app, BrowserWindow, powerMonitor } from "electron";
 import { logMain } from "../logs";
-import { gitResourceUsage, ProcessResourceUsage } from "./resource-usage";
+import { gitResourceUsage, ProcessResourceUsage, startGitResourceRecording } from "./resource-usage";
 
 export const RESOURCE_SAMPLE_MS = 60_000;
 const RETAIN_HOURS = 24;
@@ -24,11 +24,13 @@ export async function appendResourceSample(directory: string, at: Date, sample: 
 
 /** One unreferenced timer, no profiling or Git probes. Files contain numeric
  * counters and fixed labels only, so a day's work can be compared offline. */
-export function watchResourceUsage(directory: string): () => void {
+export function watchResourceUsage(directory: string): () => Promise<void> {
   const processes = new ProcessResourceUsage();
   processes.sample(app.getAppMetrics());
   let previous = Date.now();
   const sessionStartedAt = new Date(previous).toISOString();
+  const stopRecording = startGitResourceRecording();
+  let pendingWrite = Promise.resolve();
   let writing = false;
   let warned = false;
   const timer = setInterval(() => {
@@ -50,7 +52,7 @@ export function watchResourceUsage(directory: string): () => void {
         git: gitResourceUsage.sample()
       };
       previous = at.getTime();
-      void appendResourceSample(directory, at, sample)
+      pendingWrite = appendResourceSample(directory, at, sample)
         .catch((cause: unknown) => {
           if (!warned) logMain("warn", "resources", "resource sample write failed", cause);
           warned = true;
@@ -64,5 +66,9 @@ export function watchResourceUsage(directory: string): () => void {
   }, RESOURCE_SAMPLE_MS);
   timer.unref();
   logMain("info", "resources", "minute resource samples (24h retention):", directory);
-  return () => clearInterval(timer);
+  return () => {
+    clearInterval(timer);
+    stopRecording();
+    return pendingWrite;
+  };
 }

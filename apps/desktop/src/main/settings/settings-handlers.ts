@@ -140,6 +140,9 @@ function sanitizePatch(patch: AppSettingsPatch): {
 
   const diag = patch.diagnostics;
   if (diag !== undefined) {
+    if (typeof diag.resourceUsageEnabled === "boolean") {
+      diagnostics.resourceUsageEnabled = diag.resourceUsageEnabled;
+    }
     if (typeof diag.heapMonitorEnabled === "boolean") {
       diagnostics.heapMonitorEnabled = diag.heapMonitorEnabled;
     }

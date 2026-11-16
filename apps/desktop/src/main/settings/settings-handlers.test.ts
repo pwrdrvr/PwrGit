@@ -13,6 +13,20 @@ function freshService(): SettingsService {
 }
 
 describe("settings handlers", () => {
+  it("persists explicit resource-recording choices and rejects non-boolean patches", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "pwrgit-resource-settings-"));
+    const path = join(directory, "settings.json");
+    const service = new SettingsService(path);
+    const bus = new CommandBus();
+    registerSettingsHandlers(bus, service, { diagnosticsOutputRoot: "/diag", onChanged: () => undefined });
+    for (const enabled of [true, false]) {
+      const result = await bus.dispatch("settings:update", { patch: { diagnostics: { resourceUsageEnabled: enabled } } });
+      expect(result.ok).toBe(true);
+      expect(settingsSnapshot(new SettingsService(path), "/diag").diagnostics.resourceUsageEnabled).toBe(enabled);
+    }
+    await bus.dispatch("settings:update", { patch: { diagnostics: { resourceUsageEnabled: "yes" as never } } });
+    expect(settingsSnapshot(service, "/diag").diagnostics.resourceUsageEnabled).toBe(false);
+  });
   it("reads a fully-defaulted snapshot from empty storage", async () => {
     const bus = new CommandBus();
     registerSettingsHandlers(bus, freshService(), {
@@ -31,6 +45,7 @@ describe("settings handlers", () => {
     expect(r.value.general.searchAllProfiles).toBe(false);
     expect(r.value.experimental.lineageAllBranches).toBe(false);
     expect(r.value.diagnostics.heapMonitorEnabled).toBe(false);
+    expect(r.value.diagnostics.resourceUsageEnabled).toBe(false);
     expect(r.value.diagnostics.hotCpuProfilingTriggerMode).toBe("sustained");
     expect(r.value.updates).toEqual({
       train: "stable",

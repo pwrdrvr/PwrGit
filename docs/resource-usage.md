@@ -1,15 +1,23 @@
 # Investigating long-running CPU and energy use
 
-PwrGit writes one resource sample per minute to the `resources` subdirectory
-of its log directory (`~/Library/Logs/PwrGit/resources` on macOS). No switch or
-profiling session is needed. UTC hourly NDJSON files retain the last 24 hours
-plus the current hour. Existing `main.log` still records individual operations.
+Resource recording is **off by default**. Enable **Settings → Troubleshooting
+→ Resource Usage Recording → Record resource usage** for a representative
+session. It starts and stops live, independently of heap/CPU profiling.
+When off, it does not sample processes, retain Git counters, create a timer,
+or write resource files. Nothing is uploaded automatically.
+
+When enabled, PwrGit writes one sample per minute to `resources` under the
+diagnostics folder shown at the top of Troubleshooting (`~/Library/Application
+Support/PwrGit/diagnostics/resources` on macOS). UTC hourly NDJSON files retain
+the last 24 hours plus the current hour. Existing `main.log` still records
+individual operations. Turn recording off after collecting the session;
+existing files remain available for inspection.
 
 After leaving the build running through the workload of interest, summarize
 the last 12 hours from the repository root:
 
 ```sh
-node apps/desktop/scripts/resource-usage-report.mjs ~/Library/Logs/PwrGit/resources
+node apps/desktop/scripts/resource-usage-report.mjs "$HOME/Library/Application Support/PwrGit/diagnostics/resources"
 ```
 
 The optional second argument changes the hours. The report separates app

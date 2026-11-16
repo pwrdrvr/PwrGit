@@ -825,6 +825,8 @@ export type ForgeHostRow = {
 };
 
 export type DiagnosticsSettings = {
+  /** Record local minute-level Electron CPU and Git workload samples. */
+  resourceUsageEnabled: boolean;
   /** Sample main + renderer heaps; auto-snapshot on growth spikes. */
   heapMonitorEnabled: boolean;
   /** Arm the hot renderer CPU profiler (captures when CPU stays hot). */
@@ -861,6 +863,7 @@ export const EXPERIMENTAL_DEFAULTS: ExperimentalSettings = {
 };
 
 export const DIAGNOSTICS_DEFAULTS: DiagnosticsSettings = {
+  resourceUsageEnabled: false,
   heapMonitorEnabled: false,
   hotCpuProfilingEnabled: false,
   hotCpuProfilingStartDelayMs: 0,

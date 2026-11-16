@@ -14,6 +14,7 @@ import {
 } from "./SettingsLayout";
 import { SettingsSwitch } from "./SettingsSwitch";
 import { DeveloperToolsSection } from "./DeveloperToolsSection";
+import { ResourceUsageSection } from "./ResourceUsageSection";
 import {
   hoverTooltip,
   useViewportTooltip
@@ -61,6 +62,7 @@ export function DiagnosticsSettings(props: {
   saving: boolean;
   snapshot: AppSettingsSnapshot;
   onDeveloperModeChange: (enabled: boolean) => void;
+  onResourceUsageEnabledChange: (enabled: boolean) => void;
   onHeapMonitorEnabledChange: (enabled: boolean) => void;
   onHotCpuEnabledChange: (enabled: boolean) => void;
   onHotCpuStartDelayChange: (delayMs: HotCpuStartDelayMs) => void;
@@ -115,6 +117,12 @@ export function DiagnosticsSettings(props: {
         saving={props.saving}
         developerMode={props.snapshot.general.developerMode}
         onDeveloperModeChange={props.onDeveloperModeChange}
+      />
+
+      <ResourceUsageSection
+        enabled={diag.resourceUsageEnabled}
+        saving={props.saving}
+        onChange={props.onResourceUsageEnabledChange}
       />
 
       <SettingsSection

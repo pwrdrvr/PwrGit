@@ -600,6 +600,9 @@ function SettingsSectionBody(props: {
       onDeveloperModeChange={(enabled) => {
         update({ general: { developerMode: enabled } });
       }}
+      onResourceUsageEnabledChange={(enabled) => {
+        updateDiagnostics({ resourceUsageEnabled: enabled });
+      }}
       onHeapMonitorEnabledChange={(enabled) => {
         updateDiagnostics({ heapMonitorEnabled: enabled });
       }}

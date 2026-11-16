@@ -7,7 +7,7 @@ const source = new AsyncLocalStorage<ResourceSource>();
 
 /** Async work retains its origin through queues and completion callbacks. */
 export function withResourceSource<T>(name: ResourceSource, work: () => T): T {
-  return source.run(name, work);
+  return recording ? source.run(name, work) : work();
 }
 
 // Bounded labels only: no arguments, repository paths, ref names or URLs.
@@ -44,6 +44,13 @@ export class GitResourceUsage {
   private readonly buckets = new Map<string, GitResourceBucket>();
   private active = 0;
   private peak = 0;
+  private generation = 0;
+
+  reset(): void {
+    this.generation++;
+    this.buckets.clear();
+    this.active = this.peak = 0;
+  }
 
   start(args: readonly string[], origin: ResourceSource, at = performance.now()): (nonzero: boolean, end?: number) => void {
     const command = gitResourceCommand(args);
@@ -57,8 +64,9 @@ export class GitResourceUsage {
     bucket.active++;
     this.peak = Math.max(this.peak, ++this.active);
     let finished = false;
+    const generation = this.generation;
     return (nonzero, end = performance.now()) => {
-      if (finished) return;
+      if (finished || generation !== this.generation) return;
       finished = true;
       bucket.completed++;
       bucket.nonzero += Number(nonzero);
@@ -82,11 +90,29 @@ export class GitResourceUsage {
 }
 
 export const gitResourceUsage = new GitResourceUsage();
+let recording = false;
+let recordingGeneration = 0;
+
+/** Off by default. Stopping discards counters and detaches attribution work. */
+export function startGitResourceRecording(): () => void {
+  const generation = ++recordingGeneration;
+  gitResourceUsage.reset();
+  recording = true;
+  return () => {
+    if (generation !== recordingGeneration) return;
+    recording = false;
+    recordingGeneration++;
+    gitResourceUsage.reset();
+  };
+}
 
 /** Observe real spawns in all three Git adapters, rather than IPC requests. */
 export function observeGitResources(child: ChildProcess, args: readonly string[]): void {
+  if (!recording) return;
+  const generation = recordingGeneration;
   const origin = source.getStore() ?? "other";
   child.once("spawn", () => {
+    if (!recording || generation !== recordingGeneration) return;
     const finish = gitResourceUsage.start(args, origin);
     child.once("close", (code) => finish(code !== 0));
   });
