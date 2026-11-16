@@ -2,7 +2,7 @@ import { expect, test } from "@playwright/test";
 import { join } from "node:path";
 import { launchApp, type AppHandle } from "./fixtures/electron-app";
 import { createGitSandbox, type GitSandbox } from "./fixtures/git-sandbox";
-import { addRootAndExpand, branchRow, expandRepoGroup, primaryShortcut } from "./fixtures/steps";
+import { addRootAndExpand, branchRow, expandRepoGroup, pickPaletteHit, primaryShortcut } from "./fixtures/steps";
 
 let sandbox: GitSandbox | null = null;
 let handle: AppHandle | null = null;
@@ -306,6 +306,8 @@ test("locates old tags across repositories and keeps one prominent chip", async 
   box.makeRepo("other-project");
   handle = await launchApp({ worktreeRoot: box.worktreeRoot, theme: "dark" });
   const { window } = handle;
+  const nativeWindow = await handle.app.browserWindow(window);
+  await nativeWindow.evaluate((win) => win.setIgnoreMouseEvents(true));
   await addRootAndExpand(window, handle, box, "other-project");
   await branchRow(window, "main").click();
   await expect(window.locator(".graph-row").first()).toBeVisible();
@@ -353,10 +355,15 @@ test("locates old tags across repositories and keeps one prominent chip", async 
     await window.locator(".overlay-search input").fill(hash);
     const result = window.locator(".overlay-result").filter({ hasText: hash.slice(0, 7) });
     await expect(result).toHaveCount(1);
-    await result.click();
+    await pickPaletteHit(result);
     await expect(window.locator(".overlay-search")).toHaveCount(0);
     const revealed = window.locator(`.graph-row[data-hash="${hash}"]`);
     await expect(revealed).toBeInViewport();
+    // Closing the palette can put an author byline under the pointer. Move
+    // away and dismiss its interactive card before using the graph chrome.
+    await window.mouse.move(0, 0);
+    await window.keyboard.press("Escape");
+    await expect(window.locator(".person-card")).toHaveCount(0);
     await window.locator(".only-me").click();
     box.git(repo.path, "commit", "--allow-empty", "-m", `Refresh after searching ${hash}`);
     const refreshedHead = box.git(repo.path, "rev-parse", "HEAD");
