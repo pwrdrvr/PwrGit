@@ -603,19 +603,20 @@ export class WorktreeStateService {
       // With no common ancestor (rewritten/orphaned history), `HEAD..default`
       // counts the *entire* default branch — a misleading "behind" number. Flag
       // it as diverged instead of reporting the inflated count.
-      const mergeBase = await this.git(["merge-base", "HEAD", def.ref], wt.path);
+      const mergeBase = await this.git(["merge-base", parsed.head, def.ref], wt.path);
       const hasMergeBase = mergeBase.ok && mergeBase.value.exitCode === 0;
       if (!hasMergeBase) {
         divergedFromDefault = true;
       } else {
-        const [bd, anc] = await Promise.all([
-          this.git(["rev-list", "--count", `HEAD..${def.ref}`], wt.path),
-          this.git(["merge-base", "--is-ancestor", "HEAD", def.ref], wt.path)
-        ]);
+        const bd = await this.git(["rev-list", "--count", `${parsed.head}..${def.ref}`], wt.path);
         if (bd.ok && bd.value.exitCode === 0) {
           behindDefault = Number(bd.value.stdout.trim()) || 0;
         }
-        mergedIntoDefault = anc.ok && anc.value.exitCode === 0;
+        // HEAD is contained in default iff their best common ancestor is
+        // HEAD itself. Reuse that answer instead of spawning is-ancestor for
+        // every worktree on every refresh. Pin both walks to the status
+        // snapshot: an external checkout can move HEAD between Git calls.
+        mergedIntoDefault = mergeBase.value.stdout.trim() === parsed.head;
       }
     }
 

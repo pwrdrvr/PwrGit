@@ -5,6 +5,7 @@ import { PWRGIT_PULL_STASH_MESSAGE } from "@pwrgit/shared";
 import { launchApp, type AppHandle } from "./fixtures/electron-app";
 import { createGitSandbox, type GitSandbox } from "./fixtures/git-sandbox";
 import { addRootAndExpand } from "./fixtures/steps";
+import { triggerActiveRefresh } from "./fixtures/active-refresh";
 
 let sandbox: GitSandbox | null = null;
 let handle: AppHandle | null = null;
@@ -17,16 +18,6 @@ test.afterEach(async () => {
   sandbox?.cleanup();
   sandbox = null;
 });
-
-async function triggerActiveRefresh(app: AppHandle): Promise<void> {
-  await app.app.evaluate(({ app: electronApp, BrowserWindow }) => {
-    const win = BrowserWindow.getAllWindows()[0];
-    if (win !== undefined) {
-      // Exercise the same focus hook production uses; no private test channel.
-      electronApp.emit("browser-window-focus", {}, win);
-    }
-  });
-}
 
 test("manages the Git-native repository stash stack across worktrees", async () => {
   sandbox = createGitSandbox();
