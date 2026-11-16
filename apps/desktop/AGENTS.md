@@ -182,6 +182,7 @@ re-render storms, the profiling build only for millisecond numbers. Always:
   - `src/main/event-loop-stalls.ts` warns `(process) main event loop blocked
     for Nms` when main was held ≥2 s. Grep for it before you read a log gap as
     idle time.
+  - For 12-hour CPU/energy investigations, read [docs/resource-usage.md](../../docs/resource-usage.md): opt-in Troubleshooting recording writes minute samples under `diagnostics/resources/`, separating Electron CPU from Git counts and lifetimes.
 - `logMain` uses scoped `electron-log` loggers (as in PwrSnap/PwrAgnt):
   console, file, 2 MiB rotation (`main.old.log`), and a file hook to the Logs
   window. Info+ goes to the terminal; debug only to file and Logs window. `log-console.ts` guards closed stdio pipes. Await

@@ -1,6 +1,7 @@
 import { IterableQueueMapperSimple } from "@shutterstock/p-map-iterable";
 import { ok, type Result, type Res } from "@pwrgit/shared";
 import { VISIBLE_REPORT_CAP } from "./visible-refresh";
+import { withResourceSource } from "../diagnostics/resource-usage";
 
 export const REMOTE_VISIBLE_DEBOUNCE_MS = 500;
 export const REMOTE_VISIBLE_INTERVAL_MS = 60_000;
@@ -195,7 +196,7 @@ export class RemoteTipChecker {
       let answers: Map<string, Answer>;
       try {
         const request = { reason: batch.reason, userAction: batch.reason !== "periodic" };
-        answers = await this.deps.check(entries.map((entry) => entry.id), request);
+        answers = await withResourceSource("remote-check", () => this.deps.check(entries.map((entry) => entry.id), request));
       } catch {
         answers = new Map(entries.map((entry) => [entry.id, ok({ status: "unavailable" })]));
       }

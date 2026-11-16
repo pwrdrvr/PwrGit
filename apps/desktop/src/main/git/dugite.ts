@@ -9,6 +9,7 @@ import dugite from "dugite";
 import { err, ok, type GitReflinkSupport, type PwrGitError, type Result } from "@pwrgit/shared";
 import { cliSearchPath } from "../forge/cli-runner";
 import { logMain } from "../logs";
+import { observeGitResources } from "../diagnostics/resource-usage";
 
 let bundledDirectory = dugite.resolveEmbeddedGitDir();
 let generatedConfigDirectory: string | null = null;
@@ -397,6 +398,7 @@ function runExecFileGit(
     const child = spawn(launch.binary, args, {
       cwd, env: launch.env, ...gitProcessGroupOptions(options.signal)
     });
+    observeGitResources(child, args);
     const stdout: Buffer[] = [];
     const stderr: Buffer[] = [];
     child.stdout.on("data", (chunk: Buffer) => stdout.push(chunk));
@@ -613,6 +615,7 @@ const runGitRecords: GitRecordExec = (args, cwd, options) =>
         cwd: invocation.processCwd,
         env: launch.env
       });
+      observeGitResources(child, invocation.args);
     } catch (cause) {
       resolveResult(
         err({

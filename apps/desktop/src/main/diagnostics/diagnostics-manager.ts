@@ -25,6 +25,7 @@ import { resolveStartupCpuProfileConfig } from "./startup-cpu-profile-config";
 import { createStartupCpuProfileSession } from "./startup-cpu-profile-session";
 import { MainProcessCpuProfiler } from "./main-process-cpu-profiler";
 import { RendererStartupCpuProfiler } from "./renderer-startup-cpu-profiler";
+import { watchResourceUsage } from "./resource-monitor";
 
 const log = getDiagLogger("pwrgit:diagnostics");
 
@@ -68,6 +69,7 @@ async function discardSessionIfEmpty(
 }
 
 export class DiagnosticsManager {
+  private stopResourceMonitoring: (() => Promise<void>) | null = null;
   private readonly outputRoot: string;
   private readonly getDiagnostics: () => DiagnosticsSettings;
   /** Persist "captureHeapSnapshot off" after a session hits its snapshot
@@ -133,8 +135,9 @@ export class DiagnosticsManager {
   }
 
   /** Re-resolve configs from Settings and start/stop/restart monitors. */
-  sync(): void {
+  sync(): Promise<void> {
     this.enqueueSync(() => this.syncInner());
+    return this.syncQueue;
   }
 
   /** Stop everything. Resolves once final events/manifests are flushed —
@@ -142,6 +145,7 @@ export class DiagnosticsManager {
   shutdown(): Promise<void> {
     this.shuttingDown = true;
     this.enqueueSync(async () => {
+      await this.stopResourceUsage();
       await this.stopHeapMonitoring("app-quit");
       await this.stopHotCpuProfiling("app-quit");
     });
@@ -152,7 +156,7 @@ export class DiagnosticsManager {
    *  running, or a queued sync may be about to start one. Quit is deferred
    *  for the flush only when this is true. */
   hasPendingWork(): boolean {
-    if (this.pendingSyncs > 0 || this.mainHeapMonitor !== null) return true;
+    if (this.pendingSyncs > 0 || this.mainHeapMonitor !== null || this.stopResourceMonitoring !== null) return true;
     for (const entry of this.windows.values()) {
       if (entry.heapMonitor !== null || entry.hotCpuProfiler !== null) return true;
     }
@@ -175,6 +179,11 @@ export class DiagnosticsManager {
     if (this.shuttingDown) return;
 
     const settings = this.getDiagnostics();
+    if (settings.resourceUsageEnabled === true) {
+      this.stopResourceMonitoring ??= watchResourceUsage(path.join(this.outputRoot, "resources"));
+    } else {
+      await this.stopResourceUsage();
+    }
     const heapConfig = resolveHeapMonitorConfig({
       enabled: settings.heapMonitorEnabled,
       outputRoot: this.outputRoot
@@ -209,6 +218,12 @@ export class DiagnosticsManager {
         }
       }
     }
+  }
+
+  private async stopResourceUsage(): Promise<void> {
+    const stop = this.stopResourceMonitoring;
+    this.stopResourceMonitoring = null;
+    await stop?.();
   }
 
   private async startHeapMonitoring(

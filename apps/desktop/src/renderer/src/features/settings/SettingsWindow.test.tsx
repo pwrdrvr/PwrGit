@@ -7,6 +7,7 @@ import {
   DEFAULT_AI_PROVIDER_SETTINGS,
   FORGE_KINDS,
   GENERAL_DEFAULTS,
+  DIAGNOSTICS_DEFAULTS,
   forgeProduct,
   ok,
   type AcpAgentDiscovery,
@@ -31,6 +32,11 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock("../../lib/pwrgit", () => ({
   dispatch: mocks.dispatch,
+  dispatchOrThrow: async (name: string, req?: unknown) => {
+    const result = await mocks.dispatch(name, req);
+    if (!result.ok) throw new Error(result.error.message);
+    return result.value;
+  },
   subscribe: mocks.subscribe,
   // The Settings window is bound to no profile; `useProfiles` asks.
   windowProfileId: () => null
@@ -91,7 +97,12 @@ let root: Root;
  *  unprobed case is its own test, which never resolves the read. */
 let forges: ForgeStatus[];
 
-const SNAPSHOT = { general: GENERAL_DEFAULTS } as AppSettingsSnapshot;
+const SNAPSHOT = {
+  general: GENERAL_DEFAULTS,
+  diagnostics: DIAGNOSTICS_DEFAULTS,
+  diagnosticsEnv: { heapMonitorForcedOn: false, hotCpuProfilingForcedOn: false, startupCpuProfilingForcedOn: false },
+  diagnosticsOutputRoot: "/demo/diagnostics"
+} as AppSettingsSnapshot;
 
 const PERSONAL: Profile = {
   id: "personal",
@@ -201,6 +212,7 @@ async function answer(name: string, req?: unknown): Promise<unknown> {
   // General is the window's opening pane, so it renders in every test and
   // reads its half of the snapshot. No other pane here looks inside one.
   if (name === "settings:read") return ok(SNAPSHOT);
+  if (name === "app:readProcessIds") return ok({ line: "main=4200 renderer=4201", diagnosticsText: "Demo process IDs" });
   if (name === "forge:status") return ok({ forges });
   if (name === "forge:hosts") return ok({ hosts: [], overrides: {} });
   if (name === "git:runtimeStatus") return ok(GIT_RUNTIME);
@@ -304,6 +316,24 @@ function navButton(label: string): HTMLButtonElement {
   if (found === undefined) throw new Error(`no nav row "${label}"`);
   return found;
 }
+
+it("keeps resource recording off until explicitly toggled in Troubleshooting", async () => {
+  mocks.dispatch.mockImplementation(async (name, req) => {
+    if (name === "settings:update") {
+      return ok({ ...SNAPSHOT, diagnostics: { ...DIAGNOSTICS_DEFAULTS, ...req.patch.diagnostics } });
+    }
+    return answer(name, req);
+  });
+  await render();
+  await act(async () => navButton("Troubleshooting").click());
+  const toggle = container.querySelector<HTMLButtonElement>('[role="switch"][aria-label="Record resource usage"]');
+  expect(toggle?.getAttribute("aria-checked")).toBe("false");
+  for (const enabled of [true, false]) {
+    await act(async () => toggle!.click());
+    expect(mocks.dispatch).toHaveBeenCalledWith("settings:update", { patch: { diagnostics: { resourceUsageEnabled: enabled } } });
+    expect(toggle?.getAttribute("aria-checked")).toBe(String(enabled));
+  }
+});
 
 /** Addressed by its visible label, never its accessible name — the name is the
  *  thing under test in the rows that carry a state. */
