@@ -15,7 +15,7 @@ const mount = (page: Page, view: string, theme: string, width: number): Promise<
 
 /**
  * A live run on the sync button, in a Vite build of the real `SidebarToolbar`
- * (`harness/sync-progress`): "Pulling 12/27" on the face with its outcome
+ * (`harness/sync-progress`): "Pull recent 12/27" on the face with its outcome
  * bar, the count kept at the icon-only step, the live hover card, and the
  * running sync's hint in Sync options.
  * design/Sync Progress on the Button - UX Review.dc.html, 2a and 3a.
@@ -69,7 +69,7 @@ test("a live run's progress on the sync button", async () => {
       await shoot(`before-${theme}`, ".viewport-tooltip");
 
       await mount(page, "after", theme, 320);
-      await expect(face).toHaveText("Pulling12/27");
+      await expect(face).toHaveText("Pull recent12/27");
       await expect(face).toHaveAttribute("aria-description", "12 of 27 repositories finished, 1 failed");
       await hoverCard();
       const card = page.locator(".sync-run-card");

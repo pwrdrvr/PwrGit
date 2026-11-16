@@ -116,6 +116,16 @@ export function acceptBulkSyncProgress(
   return { key, progress };
 }
 
+/**
+ * The live run's progress, outside React state: the run reports several
+ * times per repository, and as state in the sidebar's hook every report
+ * re-rendered the whole sidebar. The toolbar subscribes alone.
+ */
+export type BulkSyncProgressStore = {
+  get: () => BulkSyncLiveProgress | null;
+  subscribe: (listener: () => void) => () => void;
+};
+
 /** The tooltip line a timed run leaves behind. */
 export function describeAutoRun(
   summary: BulkSyncSummary | null,
@@ -170,7 +180,6 @@ export function useBulkSyncRun({
   const [run, setRun] = useState<BulkSyncRun | null>(null);
   const [lastAutoRun, setLastAutoRun] = useState<string | undefined>();
   const [lastRun, setLastRun] = useState<LastBulkSyncRun | null>(null);
-  const [heldProgress, setHeldProgress] = useState<HeldBulkSyncProgress | null>(null);
   const lastRunRef = useRef(lastRun);
   lastRunRef.current = lastRun;
   const keyRef = useRef(0);
@@ -284,12 +293,32 @@ export function useBulkSyncRun({
     setRun(next);
   }, []);
 
+  // The held report, and the store the toolbar reads it through. `get`
+  // answers only for the live run, so a finished or replaced run shows
+  // nothing even before the next report.
+  const heldRef = useRef<HeldBulkSyncProgress | null>(null);
+  const listenersRef = useRef(new Set<() => void>());
+  const [progressStore] = useState<BulkSyncProgressStore>(() => ({
+    get: () => {
+      const current = runRef.current;
+      const held = heldRef.current;
+      return current !== null && !current.finished && held?.key === current.key
+        ? held.progress
+        : null;
+    },
+    subscribe: (listener) => {
+      listenersRef.current.add(listener);
+      return () => listenersRef.current.delete(listener);
+    }
+  }));
+
   /** The run component's fold, reported up so the toolbar can draw it. */
   const reportProgress = useCallback(
     (key: number, progress: BulkSyncLiveProgress) => {
-      setHeldProgress((held) =>
-        acceptBulkSyncProgress(held, runRef.current, key, progress)
-      );
+      const next = acceptBulkSyncProgress(heldRef.current, runRef.current, key, progress);
+      if (next === heldRef.current) return;
+      heldRef.current = next;
+      for (const listener of listenersRef.current) listener();
     },
     []
   );
@@ -325,10 +354,7 @@ export function useBulkSyncRun({
     verb,
     busy: run !== null && !run.finished,
     /** The live run's progress; null before its first report and after it ends. */
-    progress:
-      run !== null && !run.finished && heldProgress?.key === run.key
-        ? heldProgress.progress
-        : null,
+    progressStore,
     reportProgress,
     start,
     runFace,

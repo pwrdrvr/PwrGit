@@ -1,4 +1,11 @@
-import { useEffect, useRef, useState, type ReactElement, type ReactNode } from "react";
+import {
+  useEffect,
+  useRef,
+  useState,
+  useSyncExternalStore,
+  type ReactElement,
+  type ReactNode
+} from "react";
 import { ChevronGlyph } from "../../lib/ChevronGlyph";
 import { PlusGlyph } from "../../lib/PlusGlyph";
 import { PullGlyph } from "../../lib/PullGlyph";
@@ -8,6 +15,7 @@ import { useFitLadder } from "../../lib/useFitLadder";
 import { hoverTooltip, useViewportTooltip } from "../../lib/useViewportTooltip";
 import { ContextMenu, type MenuItem } from "../shell/ContextMenu";
 import { finishedHeadline } from "./BulkSyncToast";
+import { OutcomeBar } from "./BulkSyncStatus";
 import { formatElapsed } from "../remote/remote-activity";
 import { useSecondsClock } from "../../state/useRemoteActivity";
 import {
@@ -21,7 +29,7 @@ import {
   runningSyncHint,
   type BulkSyncLiveProgress
 } from "./bulk-sync-progress";
-import type { LastBulkSyncRun } from "./useBulkSyncRun";
+import type { BulkSyncProgressStore, LastBulkSyncRun } from "./useBulkSyncRun";
 import {
   FETCH_INTERVALS,
   fetchIntervalLabel,
@@ -126,36 +134,20 @@ export function syncFace(input: {
   if (input.busy) lines.push("Running now — click to open.");
   else if (input.lastAuto !== undefined) lines.push(input.lastAuto);
   const word = recent ? "recent" : "all";
-  // While a run is live the face says how far along it is: "Pulling 12/27".
-  // The accessible name keeps the old words, so E2E and voice control still
-  // find the button; the position goes in its description.
-  // design/Sync Progress on the Button - UX Review.dc.html, 2a.
-  if (input.busy && input.progress != null) {
-    return {
-      name: input.verb === "pull" ? `Try pull ${word}` : `Fetch ${word} repos`,
-      label: input.verb === "pull" ? "Pulling" : "Fetching",
-      tooltip: lines.join(" "),
-      count,
-      liveCount: faceCount(input.progress),
-      description: progressValueText(
-        input.progress.counts,
-        liveTotal(input.progress)
-      )
-    };
-  }
-  return input.verb === "pull"
-    ? {
-        name: `Try pull ${word}`,
-        label: `Pull ${word}`,
-        tooltip: lines.join(" "),
-        count
-      }
-    : {
-        name: `Fetch ${word} repos`,
-        label: `Fetch ${word}`,
-        tooltip: lines.join(" "),
-        count
-      };
+  const face =
+    input.verb === "pull"
+      ? { name: `Try pull ${word}`, label: `Pull ${word}`, tooltip: lines.join(" "), count }
+      : { name: `Fetch ${word} repos`, label: `Fetch ${word}`, tooltip: lines.join(" "), count };
+  // While a run is live the face says how far along it is: "Pull recent
+  // 12/27". The label keeps its words, so the accessible name still contains
+  // it (SC 2.5.3) and E2E still finds the button; the position in words goes
+  // in its description. design/Sync Progress on the Button - UX Review.dc.html, 2a.
+  if (!input.busy || input.progress == null) return face;
+  return {
+    ...face,
+    liveCount: faceCount(input.progress),
+    description: progressValueText(input.progress.counts, liveTotal(input.progress))
+  };
 }
 
 /** Show last run's second line: what it did, when, and whether you ran it. */
@@ -289,10 +281,15 @@ export function SidebarToolbar({
     ) : (
       face.tooltip
     );
-  const faceTipOpenRef = useRef(false);
-  const faceHover = hoverTooltip(tip, faceTip);
+  const faceRef = useRef<HTMLButtonElement>(null);
   useEffect(() => {
-    if (faceTipOpenRef.current) tip.update(faceTip);
+    // Only while the card on screen is the face's: the toolbar's buttons
+    // share one tooltip, and a remembered "hovered" flag outlived the card
+    // when focus moved to the wrench under a resting pointer.
+    const el = faceRef.current;
+    if (el !== null && (el.matches(":hover") || el === document.activeElement)) {
+      tip.update(faceTip);
+    }
     // `faceTip` is a new element every render; its inputs are what change.
   }, [syncBusy, syncProgress, face.tooltip, syncAuto]);
   const syncItems: MenuItem[] = [
@@ -434,28 +431,14 @@ export function SidebarToolbar({
           "down", so it swaps to the ring instead (styles/AGENTS.md). */}
       <div className="sidebar-toolbar__split">
         <button
+          ref={faceRef}
           type="button"
           className="sidebar-toolbar__btn sidebar-toolbar__sync"
           aria-label={face.name}
           aria-description={face.description}
           aria-busy={syncBusy}
           disabled={!hasProfile || face.count === 0}
-          onMouseEnter={(event) => {
-            faceTipOpenRef.current = true;
-            faceHover.onMouseEnter(event);
-          }}
-          onMouseLeave={(event) => {
-            faceTipOpenRef.current = false;
-            faceHover.onMouseLeave(event);
-          }}
-          onFocus={(event) => {
-            faceTipOpenRef.current = true;
-            faceHover.onFocus(event);
-          }}
-          onBlur={(event) => {
-            faceTipOpenRef.current = false;
-            faceHover.onBlur(event);
-          }}
+          {...hoverTooltip(tip, faceTip)}
           onClick={onSync}
         >
           {syncVerb === "fetch" ? (
@@ -497,9 +480,11 @@ export function SidebarToolbar({
           <ChevronGlyph size={10} up={syncMenu !== null} />
         </button>
         {syncBusy && syncProgress !== null && (
-          <ProgressSegments
+          <OutcomeBar
             className="sidebar-toolbar__progress"
-            progress={syncProgress}
+            counts={syncProgress.counts}
+            inFlight={syncProgress.inFlight}
+            queued={syncProgress.queued}
           />
         )}
       </div>
@@ -561,41 +546,6 @@ export function SidebarToolbar({
 }
 
 /**
- * The run's outcome bar: the dialog's own stack (done, held back, failed,
- * in flight), so a red sliver shows trouble before anything is opened.
- */
-function ProgressSegments({
-  className,
-  progress
-}: {
-  className: string;
-  progress: BulkSyncLiveProgress;
-}): ReactElement {
-  return (
-    <span className={`bulk-sync__bar ${className}`} aria-hidden="true">
-      {BULK_SYNC_OUTCOMES.map((outcome) => (
-        <i
-          key={outcome}
-          className={
-            progress.counts[outcome] === 0
-              ? `is-${outcome} is-empty`
-              : `is-${outcome}`
-          }
-          style={{ flexGrow: progress.counts[outcome] }}
-        />
-      ))}
-      <i
-        className={
-          progress.inFlight === 0 ? "is-in-flight is-empty" : "is-in-flight"
-        }
-        style={{ flexGrow: progress.inFlight }}
-      />
-      <i className="is-queued" style={{ flexGrow: progress.queued }} />
-    </span>
-  );
-}
-
-/**
  * The sync button's hover card while a run is live: what it is doing, how
  * far along, what went wrong so far, and that a click opens it. A tooltip,
  * with no controls, so nothing has to be chased with the pointer; the face
@@ -635,7 +585,12 @@ export function SyncRunCard({
         <strong>{title}</strong>
         <span className="sync-run-card__clock">{formatElapsed(elapsed)}</span>
       </span>
-      <ProgressSegments className="sync-run-card__bar" progress={progress} />
+      <OutcomeBar
+        className="sync-run-card__bar"
+        counts={progress.counts}
+        inFlight={progress.inFlight}
+        queued={progress.queued}
+      />
       <span className="sync-run-card__counts">
         <span>
           <strong>{finished}</strong> of {total}
@@ -656,4 +611,18 @@ export function SyncRunCard({
       <span className="sync-run-card__foot">{footer.join(" · ")}</span>
     </span>
   );
+}
+
+/**
+ * The toolbar with the live run's progress read from its store, so a
+ * progress report re-renders this row and not the whole sidebar.
+ */
+export function LiveSidebarToolbar({
+  progressStore,
+  ...props
+}: Omit<Parameters<typeof SidebarToolbar>[0], "syncProgress"> & {
+  progressStore: BulkSyncProgressStore;
+}): ReactElement {
+  const progress = useSyncExternalStore(progressStore.subscribe, progressStore.get);
+  return <SidebarToolbar {...props} syncProgress={progress} />;
 }

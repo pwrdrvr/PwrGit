@@ -6,7 +6,7 @@ import { prefersReducedMotion } from "../../lib/reducedMotion";
 import { hoverTooltip, useViewportTooltip } from "../../lib/useViewportTooltip";
 import { formatElapsed } from "../remote/remote-activity";
 import { useSecondsClock } from "../../state/useRemoteActivity";
-import type { BulkSyncStatusPhase } from "./BulkSyncStatus";
+import { OutcomeBar, type BulkSyncStatusPhase } from "./BulkSyncStatus";
 import {
   BULK_SYNC_OUTCOMES,
   finishedCount,
@@ -178,22 +178,12 @@ export function BulkSyncToast({
         </div>
       )}
       {total > 0 && (live || hasFailures) && (
-        <div className="bulk-sync__bar bulk-sync-toast__bar" aria-hidden="true">
-          {BULK_SYNC_OUTCOMES.map((outcome) => (
-            <i
-              key={outcome}
-              className={
-                counts[outcome] === 0 ? `is-${outcome} is-empty` : `is-${outcome}`
-              }
-              style={{ flexGrow: counts[outcome] }}
-            />
-          ))}
-          <i
-            className={inFlight === 0 ? "is-in-flight is-empty" : "is-in-flight"}
-            style={{ flexGrow: inFlight }}
-          />
-          <i className="is-queued" style={{ flexGrow: queued }} />
-        </div>
+        <OutcomeBar
+          className="bulk-sync-toast__bar"
+          counts={counts}
+          inFlight={inFlight}
+          queued={queued}
+        />
       )}
       {countdown !== null && <CountdownRail countdown={countdown} />}
       {tip.tooltipNode}

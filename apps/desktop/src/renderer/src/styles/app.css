@@ -7360,29 +7360,24 @@ button.agent-menu__item:hover {
   box-shadow: none;
 }
 /* One color per outcome, read by the bar segment, its legend swatch, and the
-   toast's bar, so the three cannot drift apart. The toast is not inside a
-   status card, which is why it is named here: scoped to the card alone, its
-   segments drew transparent and only the in-flight stripes showed. --danger-base is the failed card border's own
+   toast's bar, so the three cannot drift apart. Every `.bulk-sync__bar`
+   is named here, not each bar by its own class: scoped to the status card
+   alone, the toast's segments once drew transparent and only the in-flight
+   stripes showed. --danger-base is the failed card border's own
    base: --status-error sat too close to the light theme's warning brown to
    read as a different outcome. */
 .bulk-sync__status .is-success,
-.bulk-sync-toast__bar > .is-success,
-.sidebar-toolbar__progress > .is-success,
-.sync-run-card__bar > .is-success,
+.bulk-sync__bar > .is-success,
 .bulk-sync-toast__count.is-success {
   --bulk-sync-outcome: var(--status-ok);
 }
 .bulk-sync__status .is-partial,
-.bulk-sync-toast__bar > .is-partial,
-.sidebar-toolbar__progress > .is-partial,
-.sync-run-card__bar > .is-partial,
+.bulk-sync__bar > .is-partial,
 .bulk-sync-toast__count.is-partial {
   --bulk-sync-outcome: var(--status-warning);
 }
 .bulk-sync__status .is-skipped,
-.bulk-sync-toast__bar > .is-skipped,
-.sidebar-toolbar__progress > .is-skipped,
-.sync-run-card__bar > .is-skipped,
+.bulk-sync__bar > .is-skipped,
 .bulk-sync-toast__count.is-skipped {
   --bulk-sync-outcome: color-mix(
     in srgb,
@@ -7391,16 +7386,12 @@ button.agent-menu__item:hover {
   );
 }
 .bulk-sync__status .is-failed,
-.bulk-sync-toast__bar > .is-failed,
-.sidebar-toolbar__progress > .is-failed,
-.sync-run-card__bar > .is-failed,
+.bulk-sync__bar > .is-failed,
 .bulk-sync-toast__count.is-failed {
   --bulk-sync-outcome: var(--danger-base);
 }
 .bulk-sync__status .is-cancelled,
-.bulk-sync-toast__bar > .is-cancelled,
-.sidebar-toolbar__progress > .is-cancelled,
-.sync-run-card__bar > .is-cancelled,
+.bulk-sync__bar > .is-cancelled,
 .bulk-sync-toast__count.is-cancelled {
   --bulk-sync-outcome: var(--status-suspended);
 }

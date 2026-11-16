@@ -416,7 +416,7 @@ describe("a live run on the sync button", () => {
     path: "~/pwrdrvr/PwrAgnt"
   };
 
-  it("says Pulling 12/27 on the face and keeps the button's name", () => {
+  it("adds 12/27 to the face and keeps the button's name and label", () => {
     render({
       hasProfile: true,
       rootCount: 1,
@@ -428,7 +428,7 @@ describe("a live run on the sync button", () => {
       syncProgress: progress
     });
     const face = button("Try pull recent");
-    expect(face.textContent).toBe("Pulling12/27");
+    expect(face.textContent).toBe("Pull recent12/27");
     expect(face.getAttribute("aria-description")).toBe(
       "12 of 27 repositories finished, 1 failed"
     );
@@ -489,7 +489,7 @@ describe("syncFace while live", () => {
       })
     ).toMatchObject({
       name: "Fetch all repos",
-      label: "Fetching",
+      label: "Fetch all",
       liveCount: "1/3",
       description: "1 of 3 repositories finished"
     });

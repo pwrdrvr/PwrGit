@@ -50,7 +50,7 @@ import { LensFilter } from "./LensFilter";
 import { NewWorktreeModal } from "./NewWorktreeModal";
 import { ProfileChip } from "./ProfileChip";
 import { RepoRow } from "./RepoRow";
-import { SidebarToolbar } from "./SidebarToolbar";
+import { LiveSidebarToolbar } from "./SidebarToolbar";
 import { settleSidebarReveal, useSidebarReveal } from "./sidebar-reveal";
 import {
   applySidebarAnchor,
@@ -1263,7 +1263,8 @@ export function Sidebar({
           start screen), so the empty list here keeps one line. Design:
           design/Sidebar Header Toolbar - UX Review.dc.html, 2b and 3;
           design/New User Journey - UX Review.dc.html, 4a. */}
-      <SidebarToolbar
+      <LiveSidebarToolbar
+        progressStore={bulk.progressStore}
         hasProfile={activeProfile !== null}
         rootCount={activeProfile?.roots.length ?? 0}
         repoCount={repos.length}
@@ -1277,7 +1278,6 @@ export function Sidebar({
         syncScope={bulk.scope}
         fetchInterval={bulk.interval}
         syncBusy={bulk.busy}
-        syncProgress={bulk.progress}
         syncAuto={bulk.run?.auto ?? false}
         lastAutoRun={bulk.lastAutoRun}
         lastRun={bulk.lastRun}
