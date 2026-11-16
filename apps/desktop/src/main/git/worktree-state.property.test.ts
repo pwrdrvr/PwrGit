@@ -18,7 +18,11 @@ function git(path: string, ...args: string[]): string {
   }).trim();
 }
 
-describe("worktree default ancestry: Git oracle and subprocess budget", () => {
+// Keep all 50 generated cases, but budget ten full probes per test. On
+// Windows, 50 probes plus their independent Git oracles exceed the 20s test
+// deadline. Each property and the fixed regressions own separate fixtures so
+// a timed-out generator cannot mutate any later test's repository.
+describe.each(["regressions", 0, 1, 2, 3, 4] as const)("worktree default ancestry: Git oracle and subprocess budget (batch %s)", (batch) => {
   let root: string;
   let primary: string;
   let linked: string;
@@ -110,12 +114,15 @@ describe("worktree default ancestry: Git oracle and subprocess budget", () => {
     expect(calls.filter((args) => args[0] === "rev-list" && args[1] === "--count" && args[2]?.includes(".."))).toHaveLength(Number(related));
   }
 
-  it("agrees with git for arbitrary pairs in merged, forked, unrelated and packed history", async () => {
-    await fc.assert(fc.asyncProperty(
-      fc.integer({ min: 0, max: 6 }), fc.integer({ min: 0, max: 6 }), fc.boolean(), fc.boolean(),
-      (head, target, detached, packed) => check(commits[head]!, commits[target]!, detached, packed)
-    ), { numRuns: 50 });
-  });
+  if (batch !== "regressions") {
+    it("agrees with git for arbitrary pairs in merged, forked, unrelated and packed history", async () => {
+      await fc.assert(fc.asyncProperty(
+        fc.integer({ min: 0, max: 6 }), fc.integer({ min: 0, max: 6 }), fc.boolean(), fc.boolean(),
+        (head, target, detached, packed) => check(commits[head]!, commits[target]!, detached, packed)
+      ), { numRuns: 10 });
+    });
+    return;
+  }
 
   it("uses one ancestry child for an already-contained branch", async () => {
     await check(commits[0]!, commits[1]!, false, false);
