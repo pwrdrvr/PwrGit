@@ -16,7 +16,8 @@ import { isCliEntrypoint } from "./lib/cli-entrypoint.mjs";
 const scriptPath = fileURLToPath(import.meta.url);
 const repoRoot = resolve(dirname(scriptPath), "..");
 const desktopRoot = resolve(repoRoot, "apps/desktop");
-export const BYTECODE_BUDGET = 48 * 1024;
+// Ratchet near the current ~26 KiB maximum, below the old slow controller.
+export const BYTECODE_BUDGET = 28 * 1024;
 
 export async function discoverModules(root) {
   const files = [];
@@ -125,7 +126,8 @@ export async function* transformedModules(sourceRoot, { productionInput } = {}) 
     const environments = context.projects[0]?.vite.environments;
     if (!environments?.ssr || !environments.client) throw new Error("Vitest's transform environments are missing");
     const devConfig = await resolveConfig({ root: desktopRoot }, "serve");
-    devServer = await createServer({ ...devConfig.config.renderer, root: resolve(desktopRoot, "src/renderer"), configFile: false, server: { middlewareMode: true, watch: null, hmr: false, ws: false }, logLevel: "error" });
+    // Keep Fast Refresh's hook instrumentation; disable only its transport.
+    devServer = await createServer({ ...devConfig.config.renderer, root: resolve(desktopRoot, "src/renderer"), configFile: false, server: { middlewareMode: true, watch: null, hmr: true, ws: false }, logLevel: "error" });
     for (const path of files) {
       const file = relative(repoRoot, path).replaceAll("\\", "/");
       for (const [name, environment] of [["Vitest-SSR", environments.ssr], ["Vitest-jsdom", environments.client]]) {

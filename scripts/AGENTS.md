@@ -13,7 +13,7 @@ Repo-wide policy, license and release checks.
 
 `check-renderer-bytecode.mjs` automatically discovers renderer modules and
 checks every function, including nested and anonymous functions, against a
-48 KiB budget using actual V8 bytecode. Before changing its transforms,
+28 KiB budget using actual V8 bytecode. Before changing its transforms,
 coverage or budget, read [the procedure and limits](../docs/renderer-bytecode.md).
 
 ## Machine resource policy

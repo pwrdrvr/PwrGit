@@ -4,11 +4,16 @@ Run `pnpm check:renderer-bytecode` locally. It also runs at the end of
 `pnpm lint`, so the existing CI Typecheck job enforces it. Use the `.nvmrc`
 Node and install this checkout's dependencies first.
 
-Every compiled function must use at most **49,152 bytes (48 KiB)**. This
-leaves 12,288 bytes below the installed Node and Electron V8 defaults for
-`--max-optimized-bytecode-size` (61,440 bytes). Source lines and source-file
-size are not substitutes for this measurement. The cutoff is an eligibility
-limit, not a promise that V8 will optimize a function.
+Every compiled function must use at most **28,672 bytes (28 KiB)**. The gate
+is set near the current maximum of 25,971 bytes, leaving 2,701 bytes (10.4%)
+for growth. It rejects the original 30,437-byte MaintenanceDialog controller,
+whose development owner-stack cost reproduced below V8's optimization cutoff.
+The initial 48 KiB ceiling left too much room for that regression.
+
+Both installed Node and Electron V8 defaults for
+`--max-optimized-bytecode-size` are 61,440 bytes. That cutoff is an eligibility
+limit, not a performance target or a promise that V8 will optimize a function.
+Source lines and source-file size are not substitutes for this measurement.
 
 ## Coverage and implementation
 
@@ -24,7 +29,8 @@ at `30e49f153a5016f253e27e99bca9af95010a2b95` to PwrGit's toolchain.
   module-runner output. Match Vitest 4's strict async wrapper, including its
   CJS globals; the wrapper's context layout affects function bytecode.
 - Check the actual electron-vite development transform, including React's
-  development JSX and refresh instrumentation.
+  development JSX and Fast Refresh hook instrumentation. Keep HMR enabled in
+  the transform configuration and disable only its WebSocket transport.
 - Build the actual production renderer configuration in production mode,
   with its esbuild minifier, into memory. Check all emitted JavaScript
   chunks and worker assets, including bundled dependencies. Production

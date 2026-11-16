@@ -2,7 +2,7 @@
 
 This investigation used the isolated `mwijl0p/PwrGit` checkout at
 `e2948302` on **macOS 27.2 (26B123), arm64**. It found no renderer functions
-above the 48 KiB budget. MaintenanceDialog nevertheless showed a repeatable
+above the initial 48 KiB budget. MaintenanceDialog nevertheless showed a repeatable
 local Sparkplug cost, justifying a small render-frame extraction. These are
 single-machine measurements, not a cross-platform performance claim.
 
@@ -21,11 +21,34 @@ single-machine measurements, not a cross-platform performance claim.
 | pnpm | 12.13.0 |
 
 Both installed runtimes' `--v8-options` reported Sparkplug enabled and
-`--max-optimized-bytecode-size=61440`. The guard's 49,152-byte budget leaves
+`--max-optimized-bytecode-size=61440`. The initial 49,152-byte budget left
 12,288 bytes below that TurboFan cutoff. It does not assert that a function
 will be optimized or predict its execution time. Electron was queried and
 audited using its exact checkout-local binary with `ELECTRON_RUN_AS_NODE=1`;
 no Electron application or window was launched.
+
+## Gate ratchet after the split
+
+The failure gate is now **28,672 bytes (28 KiB)**, set near the current
+25,971-byte maximum rather than near V8's optimization cutoff. This leaves
+2,701 bytes (10.4%) of growth and rejects the original 30,437-byte slow
+MaintenanceDialog controller. The initial 48 KiB gate would have allowed that
+performance regression.
+
+The updated audit preserves Fast Refresh hook signatures, disabling only
+the WebSocket transport. All 29,717 function records across the same 977
+module/variants pass on Node. The largest development function is
+CloneRepoDialog at 23,291 bytes; MaintenanceDialog's controller is 9,979
+bytes and its render callback is 18,033 bytes. The whole-output maximum
+remains the 25,971-byte production module initializer.
+
+The original timing runs and tables below are historical. Their development
+transform omitted Fast Refresh instrumentation; the corrected development
+values are above. Vitest and production values, and the measured test
+workload, are unchanged. New deterministic regression checks fail under the
+old 48 KiB policy and HMR-disabled transform, then pass with the lower gate
+and Fast Refresh enabled. Oversized fixtures remain within 4 KiB of the new
+gate, preserving the CI work bound.
 
 No prior bytecode/function-size work or owner was found among PwrGit's open
 and recent PRs or a repository-wide issue/PR search. The reference guard's

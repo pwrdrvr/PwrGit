@@ -5,10 +5,10 @@ import {
   BYTECODE_BUDGET, budgetFailures, discoverModules, enforceBudget, measureBytecode, transformedModules,
 } from "./check-renderer-bytecode.mjs";
 
-async function fixture(run) {
+async function fixture(run, base = ".local") {
   // Keep Vite's filesystem allowlist and config resolution in this checkout.
-  await mkdir(".local", { recursive: true });
-  const root = await mkdtemp(resolve(".local/bytecode-oracle-"));
+  await mkdir(base, { recursive: true });
+  const root = await mkdtemp(resolve(base, "bytecode-oracle-"));
   try { return await run(root); } finally { await rm(root, { recursive: true, force: true }); }
 }
 
@@ -25,16 +25,39 @@ describe("renderer bytecode oracle", () => {
     });
   });
 
-  it("uses an inclusive 48 KiB budget and rejects malformed oracle records", () => {
+  it("uses an inclusive 28 KiB budget and rejects malformed oracle records", () => {
+    expect(BYTECODE_BUDGET).toBe(28 * 1024);
     expect(budgetFailures([{ bytes: BYTECODE_BUDGET }])).toEqual([]);
     const invalid = [BYTECODE_BUDGET + 1, NaN, Infinity, -1, 1.5].map((bytes) => ({ bytes }));
     expect(budgetFailures(invalid)).toEqual(invalid);
   });
 
+  it("includes Fast Refresh hook signatures in the development bytecode oracle", async () => {
+    await fixture(async (root) => {
+      const entry = resolve(root, "HookView.tsx");
+      await writeFile(entry, `import { useState } from 'react';
+        export function HookView() {
+          const [count, setCount] = useState(0);
+          return <button onClick={() => setCount(count + 1)}>{count}</button>;
+        }
+        throw new Error('APPLICATION MUST NOT EXECUTE');
+      `);
+      let development;
+      for await (const module of transformedModules(root, { productionInput: entry })) {
+        if (module.variant === "development") { development = module; break; }
+      }
+      expect(development.code).toContain("$RefreshSig$");
+      expect(development.code).toMatch(/_s\(\);/);
+      const records = await measureBytecode([development]);
+      expect(records.some((record) => record.name === "HookView")).toBe(true);
+      expect(() => enforceBudget(records)).not.toThrow();
+    }, "apps/desktop/.local");
+  });
+
   it.each([false, true])("compiles without execution and finds nested/anonymous over-budget functions (oversized=%s)", async (oversized) => {
     await fixture(async (root) => {
       const entry = resolve(root, "entry.tsx");
-      const body = Array.from({ length: oversized ? 2600 : 3 }, (_, i) => `input.step(${i});`).join("\n");
+      const body = Array.from({ length: oversized ? 1600 : 3 }, (_, i) => `input.step(${i});`).join("\n");
       // Both a named nested helper and an anonymous array element must be
       // found, even though none is executed or exported on its own.
       await writeFile(entry, `import './sentinel';
@@ -49,9 +72,9 @@ describe("renderer bytecode oracle", () => {
       const failures = budgetFailures(records);
       const diagnostics = [];
       if (oversized) {
-        expect(() => enforceBudget(records, (message) => diagnostics.push(message))).toThrow("49152-byte limit");
+        expect(() => enforceBudget(records, (message) => diagnostics.push(message))).toThrow(`${BYTECODE_BUDGET}-byte limit`);
         expect(diagnostics).toHaveLength(8);
-        expect(diagnostics.every((message) => message.includes("bytes > limit 49152"))).toBe(true);
+        expect(diagnostics.every((message) => message.includes(`bytes > limit ${BYTECODE_BUDGET}`))).toBe(true);
         // Keep the oracle just above the boundary. Excess bytecode means
         // excess disassembly in every pipeline, contending with the full CI
         // suite. Bound that work deterministically, without timing assertions.
