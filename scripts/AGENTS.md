@@ -9,6 +9,13 @@ Repo-wide policy, license and release checks.
   [lib/cli-entrypoint.mjs](lib/cli-entrypoint.mjs). Do not open-code the
   `process.argv[1]` comparison.
 
+## Renderer bytecode headroom
+
+`check-renderer-bytecode.mjs` automatically discovers renderer modules and
+checks every function, including nested and anonymous functions, against a
+48 KiB budget using actual V8 bytecode. Before changing its transforms,
+coverage or budget, read [the procedure and limits](../docs/renderer-bytecode.md).
+
 ## Machine resource policy
 
 `resource-run.mjs` wraps repository checks, builds, dev/watch commands and

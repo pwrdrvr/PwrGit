@@ -88,7 +88,8 @@ pnpm lint       # every check CI runs, cheapest-first
 ```
 
 `pnpm lint` chains `lint:syntax` → `lint:forge-kinds` → `lint:colors` →
-`deps:maturity` → `licenses:check` → `lint:boundaries` → `typecheck`.
+`deps:maturity` → `licenses:check` → `lint:boundaries` → `typecheck` →
+`check:renderer-bytecode`.
 
 - `deps:maturity` enforces the seven-day dependency cooldown;
   `licenses:check` gates every shipped license.

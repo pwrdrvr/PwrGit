@@ -1,0 +1,62 @@
+case,before_plain_1_ms,before_plain_2_ms,before_plain_3_ms,before_no-sparkplug_1_ms,before_no-sparkplug_2_ms,before_no-sparkplug_3_ms,after_plain_1_ms,after_plain_2_ms,after_plain_3_ms,after_no-sparkplug_1_ms,after_no-sparkplug_2_ms,after_no-sparkplug_3_ms
+FILE (Vitest endTime-startTime),1257.048,2007.949,1311.04,1005.634,945.016,977.886,1016.24,1056.423,1025.115,989.447,1049.517,935.941
+"maintenance dialog ends a branch review that found nothing with Close, last and in the CTA colour",101.899,97.256,100.259,99.782,104.269,113.046,104.295,101.19,84.602,117.148,107.059,104.749
+maintenance dialog offers optional worktree repair before cleanup and can run repair alone,44.257,48.883,42.447,34.088,32.587,35.184,38.007,33.677,34.843,33.461,34.549,33.403
+maintenance dialog keeps a large repair receipt folded to twenty repositories until Show all,90.291,64.45,53.826,33.373,30.202,32.238,45.902,42.052,43.688,30.275,31.897,29.726
+maintenance dialog hosts worktree review in one modal and blocks leaving while the sweep runs,38.862,34.94,31.512,20.736,20.582,19.578,24.274,22.635,23.041,18.406,20.758,18.337
+maintenance dialog explains the choices and waits for explicit start even in StrictMode,23.257,20.327,19.548,11.835,12.305,12.185,14.632,14.399,15.768,11.612,11.213,18.281
+"maintenance dialog filters progress by operation and profile, preserves the dialog during cancellation",40.937,43.209,38.058,19.887,19.248,22.815,30.042,27.395,26.96,18.225,18.713,18.983
+maintenance dialog keeps other repositories running when one parallel worker completes,30.525,30.148,31.095,16.976,15.3,16.806,21.386,21.917,20.415,15.802,15.013,14.531
+maintenance dialog requires review and branch selection before sending a deletion,74.965,81.266,75.86,29.715,30.434,34.687,56.383,51.452,51.084,29.426,30.093,30.756
+maintenance dialog shows proposing repositories first and collapses the quiet results,34.816,38.767,36.637,17.888,17.599,18.51,26.583,25.434,24.411,16.075,15.396,14.777
+maintenance dialog shows each finished branch's evidence and counts kept ones by reason,31.33,44.059,33.122,15.873,13.849,16.251,17.145,23.053,21.892,15.75,13.494,14.346
+maintenance dialog remembers the rules and drops a review they no longer describe,14.768,53.435,45.354,20.468,15.842,15.873,13.687,31.717,32.849,19.068,18.717,19.182
+"maintenance dialog shows collections that reclaimed space, largest first, and folds the rest",9.867,44.772,25.635,13.037,9.234,9.599,9.552,18.739,17.219,12.284,11.799,12.777
+maintenance dialog offers the branch review from a collection's receipt without scanning again,9.884,70.549,25.709,17.055,9.681,9.947,10.145,18.932,16.824,12.073,14.156,12.044
+"maintenance dialog opened from a repository's branch list reviews that repository on open, with the saved rules",11.524,32.698,21.269,12.684,11.435,12.859,12.029,16.331,13.578,13.418,21.789,13.212
+maintenance dialog opened from a repository's branch list invalidates a branch review when the profile scope changes,11.738,90.039,39.249,17.96,12.291,12.85,11.59,24.794,26.295,15.369,18.274,14.758
+combined maintenance workflow waits for repair before inspecting worktrees or branches,19.522,75.952,35.882,26.526,20.259,21.244,19.49,29.525,28.512,23.805,24.985,23.225
+combined maintenance workflow repair failure continues cleanup; cancellation stops it (cancelled: false),15.814,46.547,18.071,20.041,15.825,16.528,15.712,20.054,22.335,18.456,22.18,18.313
+combined maintenance workflow repair failure continues cleanup; cancellation stops it (cancelled: true),13.907,30.138,15.26,17.929,14.074,13.386,13.135,12.402,12.394,13.323,15.089,13.952
+combined maintenance workflow defaults to a checked three-step plan and does no work before Analyze,10.617,35.767,12.176,12.167,10.93,11.216,10.708,9.861,9.414,11.211,12.041,10.108
+"combined maintenance workflow restores the saved worktree rules, saves a change, and sweeps with them",14.899,40.79,18.064,14.713,15.763,16.056,14.287,14.248,12.193,15.226,17.673,15.131
+combined maintenance workflow saves the Worktrees tab's rules and sweeps with them,13.829,47.584,14.57,14.286,13.36,14.709,13.414,13.687,12.79,13.53,15.795,13.033
+combined maintenance workflow pauses at both reviews and runs GC only after an explicit continuation,16.026,26.875,18.159,18.337,15.886,16.102,15.164,15.999,14.578,16.033,20.35,14.928
+"combined maintenance workflow waits for successful pruning before branch analysis, and preserves branch receipts after GC",29.521,37.206,31.807,33.003,28.224,29.19,28.363,27.271,28.674,30.249,36.433,27.928
+"combined maintenance workflow names deletion, not review, in the rail while branches are deleted",14.228,19.468,16.121,14.605,14.85,13.933,13.742,12.511,12.162,15.109,16.434,14.13
+"combined maintenance workflow stays on worktree review, naming what failed, if a requested removal did not succeed",16.58,23.33,17.164,14.6,16.475,17.373,14.921,15.099,11.913,16.605,18.823,14.77
+"combined maintenance workflow restores Auto, enforces an age guard, and sequences scan → removal → GC",14.094,21.673,14.773,14.157,13.504,14.352,13.219,13.272,13.885,13.733,16.678,13.029
+combined maintenance workflow honors task opt-outs and saves the branch-review preference,12.619,36.464,13.35,13.86,12.353,12.298,12.147,12.268,12.22,11.738,14.316,11.352
+combined maintenance workflow does not advance after a cancelled branch scan,12.116,23.456,12.746,12.617,11.948,11.678,11.946,11.758,12.403,11.883,13.606,10.981
+combined maintenance workflow continues to GC after a failed review and reports the repository,12.706,25.211,13.572,15.142,12.75,12.746,12.019,11.469,12.856,12.659,13.738,11.551
+combined maintenance workflow continues to GC after a partial review and reports the repository,13.027,37.805,13.631,12.635,13.539,12.879,12.982,11.957,12.069,25.732,14.278,12.686
+combined maintenance workflow keeps failed reviews when auto deletes branches from successful ones,13.905,22.795,14.654,12.528,14.45,14.242,14.141,13.566,11.806,13.978,16.02,13.217
+combined maintenance workflow keeps failed reviews when review deletes branches from successful ones,12.571,30.284,13.822,12.921,13.058,13.035,13.476,12.562,12.442,13.593,15.129,13.176
+"combined maintenance workflow shows the live step's progress, not a stopped mark, while deleting after a failed review",10.773,20.689,10.236,10.659,10.318,10.197,9.516,10.393,9.222,10.708,12.744,9.88
+combined maintenance workflow runs GC after failed branch removal and puts the card above the receipt,14.872,36.98,16.988,15.417,14.192,15.733,14.903,12.759,14.306,14.681,18.012,13.418
+combined maintenance workflow runs GC after partial branch removal and puts the card above the receipt,14.751,37.961,15.306,16.043,13.47,13.623,13.802,12.956,13.642,15.49,15.759,13.282
+"combined maintenance workflow scrolls a whole batch of retained branches inside the card, under a fixed head",14.096,32.057,14.944,13.738,13.154,13.495,13.162,14.229,12.78,14.449,15.89,13.721
+combined maintenance workflow puts Git's own words behind Details,14.09,75.716,15.098,11.671,13.779,15.917,13.017,13.109,10.538,15.504,15.411,14.093
+combined maintenance workflow reports a refresh failure even when every deletion succeeded,12.571,41.938,12.937,12.301,10.981,11.755,10.88,10.842,10.509,12.311,12.75,12.358
+combined maintenance workflow stops on a cancelled deletion and keeps each retained branch's reason,11.494,37.832,12.334,11.461,10.767,11.061,11.066,10.238,9.678,11.472,12.319,10.872
+combined maintenance workflow keeps a failed review when a cancelled deletion stops the run,11.391,23.318,10.852,10.533,10.816,12.724,10.673,11.045,11.456,10.07,11.721,9.748
+combined maintenance workflow keeps a failed review when a refused deletion stops the run,10.841,25.164,11.973,13.188,10.457,11.725,10.391,10.621,10.144,9.717,11.521,9.87
+combined maintenance workflow counts a skipped deletion as skipped whether or not a review failed (failed: false),12.037,25.194,12.323,11.268,11.326,11.874,11.545,11.357,10.748,10.668,13.075,10.511
+combined maintenance workflow counts a skipped deletion as skipped whether or not a review failed (failed: true),15.698,15.723,15.986,12.3,15.511,14.949,15.169,15.25,15.883,14.666,16.798,14.482
+combined maintenance workflow names the command error when no repository results are returned,10.953,12.106,11.395,10.173,10.777,10.671,10.862,10.644,10.748,10.828,11.968,11.018
+"combined maintenance workflow reports GC failures in their own card, after the branch card",11.501,12.88,11.706,11.556,11.1,10.83,11.193,10.957,10.722,11.568,12.233,10.602
+combined maintenance workflow keeps branch failures on screen while garbage collection runs,12.104,17.726,12.788,12.865,12.051,12.194,11.053,11.367,12.181,12.074,13.762,10.829
+maintenance dialog after a window reload reattaches to worktree repair on its own tab without starting another run,10.432,11.483,10.156,12.678,9.983,10.19,9.849,9.474,15.334,9.877,10.628,9.212
+"maintenance dialog after a window reload reattaches to a live collection: same card, Escape still held, Cancel reaches main",12.434,13.724,11.576,11.888,12.605,11.957,12.165,11.872,11.585,11.43,12.098,11.223
+maintenance dialog after a window reload shows an unattended branch review as a review the reader can act on,11.36,10.828,11.902,9.429,10.78,10.952,12.12,11.428,8.331,11.076,11.286,10.403
+"maintenance dialog after a window reload keeps a one-repository review's scope, for its label and for Review again",10.618,12.563,11.401,9.452,10.556,11.14,10.737,10.34,9.561,9.728,10.95,9.567
+maintenance dialog after a window reload does not cancel a run another window started,9.192,11.549,10.184,8.582,9.254,9.23,10.091,8.594,8.796,8.859,8.73,8.317
+maintenance dialog after a window reload hands a Clones run to the Clones tab,9.929,10.996,10.311,9.725,9.568,9.476,8.683,9.01,8.575,8.856,9.273,8.491
+maintenance dialog after a window reload opens on the plan when the last receipt was already seen,8.753,13.554,10.268,10.216,9.308,9.218,9.173,8.351,8.476,8.559,9.807,8.176
+"Clones as a Combined step is checked by default and runs after branches, before garbage collection",23.159,13.741,12.347,15.22,12.102,10.953,13.228,11.508,11.99,11.663,12.619,10.765
+Clones as a Combined step passes the reader's Update main checkouts choice,25.196,13.894,13.319,12.818,11.426,10.643,11.011,10.881,10.255,11.425,12.98,10.424
+"Clones as a Combined step is unchecked and disabled on a Git that cannot re-share, and never runs",23.808,14.678,14.896,10.705,12.522,12.312,11.896,12.942,9.518,13.111,13.486,11.814
+Clones as a Combined step holds Start until the Git in use has answered,14.389,9.549,8.599,8.274,8.052,7.3,7.59,7.494,7.915,7.715,8.208,7.198
+"Clones as a Combined step the offer's plan runs exactly Clones, on open, with every other step skipped",61.249,50.118,52.399,32.21,31.067,29.562,31.12,31.851,28.473,30.493,31.25,28.43
+"Clones as a Combined step a Clones run with nothing new still counts as a step that ran, and the done line names only planned steps",24.873,18.55,25.278,14.529,11.793,10.327,11.328,11.049,12.442,11.843,11.913,10.718
+"Clones as a Combined step CLONES_ONLY_PLAN selects exactly one step, Clones; the default selects it too",9.048,8.949,9.04,4.634,4.016,3.886,4.24,4.423,4.116,4.447,4.517,3.941

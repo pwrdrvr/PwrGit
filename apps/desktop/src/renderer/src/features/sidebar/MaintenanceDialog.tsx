@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import {
   BRANCH_CLEANUP_KEEP_DAYS,
   DEFAULT_BRANCH_CLEANUP_OPTIONS,
@@ -659,880 +659,891 @@ export function MaintenanceDialog({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [autoStart, optionsLoaded, attachChecked, clonesSupport]);
 
-  const candidates =
-    action?.kind === "scan-branches" && summary !== null
-      ? summary.results.flatMap((result) => result.candidates ?? [])
-      : [];
-  /** Garbage collection's hand-off: branches its per-repository review found. */
-  const collectedFinished =
-    action?.kind === "gc" && summary !== null
-      ? summary.results.reduce(
-          (total, result) => total + (result.candidates?.length ?? 0),
-          0
-        )
-      : 0;
-  const collectedRepos =
-    action?.kind === "gc" && summary !== null
-      ? summary.results.filter((result) => (result.candidates?.length ?? 0) > 0)
-          .length
-      : 0;
-  /** Open the Local branches tab on what the collection already reviewed —
-   *  no second scan, and nothing deleted until the reader chooses. */
-  const reviewCollected = (): void => {
-    if (summary === null) return;
-    const seeded = summary.results.map(
-      (result): MaintenanceRepoResult => ({
-        repo: result.repo,
-        outcome: result.outcome,
-        message: `${result.candidates?.length ?? 0} finished · ${result.kept?.length ?? 0} kept.`,
-        ...(result.candidates === undefined
-          ? {}
-          : { candidates: result.candidates }),
-        ...(result.kept === undefined ? {} : { kept: result.kept })
-      })
-    );
-    setTab("branches");
-    setAction({ kind: "scan-branches", options });
-    setSummary({ ...summary, results: seeded });
-    setView((old) => ({ ...old, results: seeded }));
-    setSelected(
-      new Set(seeded.flatMap((result) => (result.candidates ?? []).map(branchKey)))
-    );
-  };
-  const restore = async (
-    repoId: string,
-    deleted: DeletedBranchResult
-  ): Promise<void> => {
-    const key = `${repoId}:${deleted.branch}`;
-    if (restores.get(key) === "restoring") return;
-    setRestores((old) => new Map(old).set(key, "restoring"));
-    let outcome: string;
-    try {
-      const response = await dispatch("maintenance:restoreBranch", {
-        repoId,
-        branch: deleted.branch,
-        head: deleted.head
-      });
-      outcome = response.ok ? "restored" : response.error.message;
-    } catch (cause) {
-      outcome = cause instanceof Error ? cause.message : String(cause);
-    }
-    if (!live.current) return;
-    setRestores((old) => new Map(old).set(key, outcome));
-  };
-  const counts = countOutcomes(
-    [...results.values()].map((result) => result.outcome)
-  );
-  const currentRepo = repos.find((repo) => current.has(repo.id));
-  const complete = summary !== null;
-  const scanComplete = complete && action?.kind === "scan-branches";
-  /** A single-step tab whose run is over, with nothing left to review
-   *  (a branch review that found nothing is over too). */
-  const finished = complete && tab !== "combined" && (!scanComplete || candidates.length === 0);
-  const branchScan = action?.kind === "scan-branches";
-  const collecting = action?.kind === "gc";
-  const sharing = action?.kind === "reshare";
-  const saved = (id: string): number => {
-    const row = results.get(id);
-    return row?.beforeBytes === undefined || row.afterBytes === undefined
-      ? 0
-      : row.beforeBytes - row.afterBytes;
-  };
-  /** A branch review and a collection show a card only for a repository
-   *  that is running, failed, or has something to show; the rest fold into
-   *  one quiet line. Deletion shows every repository it touched. */
-  const weight = (id: string): number => {
-    if (branchScan) return results.get(id)?.candidates?.length ?? 0;
-    if (sharing) {
-      const row = results.get(id);
-      if (row === undefined) return 0;
-      const totals = repoTotals(row);
-      // Shared but not measurable (another filesystem) still earns a card.
-      return totals.bytes ?? (totals.files > 0 ? GC_QUIET_BYTES : 0);
-    }
-    return saved(id);
-  };
-  const proposingRepos = branchScan || collecting || sharing ? [...repos].filter((repo) => current.has(repo.id) ||
-    ["failed", "partial", "cancelled"].includes(results.get(repo.id)?.outcome ?? "") ||
-    // A run that ended (cancelled or failed) without reaching a repository
-    // still shows it, as incomplete, rather than dropping it from both lists.
-    (!running && !results.has(repo.id)) ||
-    (branchScan ? weight(repo.id) > 0 : weight(repo.id) >= GC_QUIET_BYTES)).sort((a, b) =>
-      weight(b.id) - weight(a.id)) : repos;
-  const quietRepos = branchScan || collecting || sharing ? repos.filter((repo) => !proposingRepos.some((shown) => shown.id === repo.id) && results.has(repo.id)) : [];
-  const quietWithKept = quietRepos.filter((repo) => (results.get(repo.id)?.kept?.length ?? 0) > 0).length;
-  const deletedCount = branchReceipt?.results.flatMap((row) => row.branches ?? []).filter((branch) => branch.deleted).length ?? 0;
-  const collectedBefore = gcReceipt?.results.reduce((sum, row) => sum + (row.beforeBytes ?? 0), 0) ?? 0;
-  const collectedAfter = gcReceipt?.results.reduce((sum, row) => sum + (row.afterBytes ?? 0), 0) ?? 0;
-  const deleting = action?.kind === "delete-branches";
-  const repairing = action?.kind === "repair-worktrees";
-  const repairIssues = stepResults.repair?.issues ?? [];
-  const branchIssues = stepResults.branches?.issues ?? [];
-  const gcIssues = stepResults.gc?.issues ?? [];
-  const clonesIssues = stepResults.clones?.issues ?? [];
-  const hasIssues = repairIssues.length > 0 || branchIssues.length > 0 || clonesIssues.length > 0 || gcIssues.length > 0;
-  const gcAfter: GcAfter = workflowStep === "gc" ? "running"
-    : stepResults.gc !== undefined && stepResults.gc.state !== "failed" ? "ran" : "none";
-  const branchCard = branchCardCopy(branchIssues, deletedCount, gcAfter, gcIssues.length > 0);
-  const gcCard = gcCardCopy(gcIssues, gcReceipt?.results.filter((row) => row.outcome === "success").length ?? 0);
-  const clonesCard = clonesCardCopy(clonesIssues);
-  /** Each repository the Clones step shared something in, largest first. */
-  const clonesRows = (clonesReceipt?.results ?? [])
-    .map((row) => ({ row, totals: repoTotals(row) }))
-    .filter(({ totals }) => totals.worktrees > 0)
-    .sort((a, b) => (b.totals.bytes ?? 0) - (a.totals.bytes ?? 0));
-  const clonesShared = clonesTotals(clonesReceipt?.results ?? []).bytes ?? 0;
-  /** The finished line counts only what the plan ran. */
-  const doneCounts = [
-    runPlan.worktrees ? `${stepResults.worktrees?.items?.length ?? 0} ${stepResults.worktrees?.items?.length === 1 ? "worktree" : "worktrees"}` : null,
-    runPlan.branches ? `${deletedCount} ${deletedCount === 1 ? "branch" : "branches"}` : null,
-    clonesShared > 0 ? `${bytes(clonesShared)} of file data now shared` : null,
-    collectedBefore > collectedAfter ? `${bytes(collectedBefore - collectedAfter)} of object storage` : null
-  ].filter((part): part is string => part !== null);
-  /** Each step that left something behind reports with the shared outcome
-   *  card, in step order, above the receipt (or under the live status card
-   *  while a later step runs). */
-  const problems = hasIssues && <div className="maintenance__problems">
-    {repairIssues.length > 0 && <ProblemCard headline="Worktree link repair needs attention" sub="See each repository’s result below." listLabel="Worktree repair problems">
-      {repairIssues.map((issue, index) => <IssueRow key={`${issue.path ?? issue.repo}:${index}`} issue={issue} />)}
-    </ProblemCard>}
-    {branchIssues.length > 0 && <ProblemCard headline={branchCard.headline} sub={branchCard.sub} listLabel={branchCard.listLabel}>
-      {branchIssues.map((issue, index) => <IssueRow key={`${issue.path ?? issue.repo}:${issue.branch ?? ""}:${index}`} issue={issue} />)}
-    </ProblemCard>}
-    {clonesIssues.length > 0 && <ProblemCard headline={clonesCard.headline} sub={clonesCard.sub} listLabel={clonesCard.listLabel}>
-      {clonesIssues.map((issue, index) => <IssueRow key={`${issue.path ?? issue.repo}:${index}`} issue={issue} />)}
-    </ProblemCard>}
-    {gcIssues.length > 0 && <ProblemCard headline={gcCard.headline} sub={gcCard.sub} listLabel={gcCard.listLabel}>
-      {gcIssues.map((issue, index) => <IssueRow key={`${issue.path ?? issue.repo}:${index}`} issue={issue} />)}
-    </ProblemCard>}
-  </div>;
-  const receiptRows = (key: StepKey): number =>
-    key === "repair" ? stepResults.repair?.items?.length ?? 0 : key === "branches" ? deletedCount : key === "gc" ? gcReceipt?.results.length ?? 0 : key === "clones" ? clonesRows.length : 0;
-  /** A receipt step lists its first FINISHED_SLICE rows until "Show all":
-   *  382 deleted branches must not bury the garbage-collection card. */
-  const sliceReceipt = <T,>(key: StepKey, rows: T[]): T[] =>
-    receiptAll.has(key) ? rows : rows.slice(0, FINISHED_SLICE);
-  const proposingCount =
-    summary?.results.filter((row) => (row.candidates?.length ?? 0) > 0).length ?? 0;
-  /** The current rail cell's line: the verb is whatever is running now. */
-  const railProgress =
-    workflowStep === "worktrees"
-      ? worktreeCandidateCount === null
-        ? "scanning"
-        : `review · ${worktreeCandidateCount} finished`
-      : running
-        ? `${repairing ? "repairing" : deleting ? "deleting" : collecting ? "collecting" : sharing ? "sharing" : "reviewing"} ${results.size} of ${repos.length}`
-        : workflowStep === "branches" && scanComplete
-          ? `review · ${candidates.length} in ${proposingCount} repos`
-          : "running";
-  const toggleBranch = (key: string): void =>
-    setSelected((old) => {
-      const next = new Set(old);
-      if (next.has(key)) next.delete(key);
-      else next.add(key);
-      return next;
-    });
+  // The stable child invokes the render callback after this controller frame
+  // returns. Development JSX captures an owner stack for every element.
+  return <MaintenanceRenderFrame render={renderMaintenanceDialog} />;
 
-  return (
-    <div
-      className="overlay-backdrop bulk-sync-backdrop"
-      onClick={running || worktreesBusy ? undefined : onClose}
-    >
-      <section
-        ref={modalRef}
-        tabIndex={-1}
-        className="modal bulk-sync maintenance"
-        role="dialog"
-        aria-modal="true"
-        aria-label="Repository maintenance"
-        onClick={(event) => event.stopPropagation()}
+  function renderMaintenanceDialog(): ReactNode {
+    const candidates =
+      action?.kind === "scan-branches" && summary !== null
+        ? summary.results.flatMap((result) => result.candidates ?? [])
+        : [];
+    /** Garbage collection's hand-off: branches its per-repository review found. */
+    const collectedFinished =
+      action?.kind === "gc" && summary !== null
+        ? summary.results.reduce(
+            (total, result) => total + (result.candidates?.length ?? 0),
+            0
+          )
+        : 0;
+    const collectedRepos =
+      action?.kind === "gc" && summary !== null
+        ? summary.results.filter((result) => (result.candidates?.length ?? 0) > 0)
+            .length
+        : 0;
+    /** Open the Local branches tab on what the collection already reviewed —
+     *  no second scan, and nothing deleted until the reader chooses. */
+    const reviewCollected = (): void => {
+      if (summary === null) return;
+      const seeded = summary.results.map(
+        (result): MaintenanceRepoResult => ({
+          repo: result.repo,
+          outcome: result.outcome,
+          message: `${result.candidates?.length ?? 0} finished · ${result.kept?.length ?? 0} kept.`,
+          ...(result.candidates === undefined
+            ? {}
+            : { candidates: result.candidates }),
+          ...(result.kept === undefined ? {} : { kept: result.kept })
+        })
+      );
+      setTab("branches");
+      setAction({ kind: "scan-branches", options });
+      setSummary({ ...summary, results: seeded });
+      setView((old) => ({ ...old, results: seeded }));
+      setSelected(
+        new Set(seeded.flatMap((result) => (result.candidates ?? []).map(branchKey)))
+      );
+    };
+    const restore = async (
+      repoId: string,
+      deleted: DeletedBranchResult
+    ): Promise<void> => {
+      const key = `${repoId}:${deleted.branch}`;
+      if (restores.get(key) === "restoring") return;
+      setRestores((old) => new Map(old).set(key, "restoring"));
+      let outcome: string;
+      try {
+        const response = await dispatch("maintenance:restoreBranch", {
+          repoId,
+          branch: deleted.branch,
+          head: deleted.head
+        });
+        outcome = response.ok ? "restored" : response.error.message;
+      } catch (cause) {
+        outcome = cause instanceof Error ? cause.message : String(cause);
+      }
+      if (!live.current) return;
+      setRestores((old) => new Map(old).set(key, outcome));
+    };
+    const counts = countOutcomes(
+      [...results.values()].map((result) => result.outcome)
+    );
+    const currentRepo = repos.find((repo) => current.has(repo.id));
+    const complete = summary !== null;
+    const scanComplete = complete && action?.kind === "scan-branches";
+    /** A single-step tab whose run is over, with nothing left to review
+     *  (a branch review that found nothing is over too). */
+    const finished = complete && tab !== "combined" && (!scanComplete || candidates.length === 0);
+    const branchScan = action?.kind === "scan-branches";
+    const collecting = action?.kind === "gc";
+    const sharing = action?.kind === "reshare";
+    const saved = (id: string): number => {
+      const row = results.get(id);
+      return row?.beforeBytes === undefined || row.afterBytes === undefined
+        ? 0
+        : row.beforeBytes - row.afterBytes;
+    };
+    /** A branch review and a collection show a card only for a repository
+     *  that is running, failed, or has something to show; the rest fold into
+     *  one quiet line. Deletion shows every repository it touched. */
+    const weight = (id: string): number => {
+      if (branchScan) return results.get(id)?.candidates?.length ?? 0;
+      if (sharing) {
+        const row = results.get(id);
+        if (row === undefined) return 0;
+        const totals = repoTotals(row);
+        // Shared but not measurable (another filesystem) still earns a card.
+        return totals.bytes ?? (totals.files > 0 ? GC_QUIET_BYTES : 0);
+      }
+      return saved(id);
+    };
+    const proposingRepos = branchScan || collecting || sharing ? [...repos].filter((repo) => current.has(repo.id) ||
+      ["failed", "partial", "cancelled"].includes(results.get(repo.id)?.outcome ?? "") ||
+      // A run that ended (cancelled or failed) without reaching a repository
+      // still shows it, as incomplete, rather than dropping it from both lists.
+      (!running && !results.has(repo.id)) ||
+      (branchScan ? weight(repo.id) > 0 : weight(repo.id) >= GC_QUIET_BYTES)).sort((a, b) =>
+        weight(b.id) - weight(a.id)) : repos;
+    const quietRepos = branchScan || collecting || sharing ? repos.filter((repo) => !proposingRepos.some((shown) => shown.id === repo.id) && results.has(repo.id)) : [];
+    const quietWithKept = quietRepos.filter((repo) => (results.get(repo.id)?.kept?.length ?? 0) > 0).length;
+    const deletedCount = branchReceipt?.results.flatMap((row) => row.branches ?? []).filter((branch) => branch.deleted).length ?? 0;
+    const collectedBefore = gcReceipt?.results.reduce((sum, row) => sum + (row.beforeBytes ?? 0), 0) ?? 0;
+    const collectedAfter = gcReceipt?.results.reduce((sum, row) => sum + (row.afterBytes ?? 0), 0) ?? 0;
+    const deleting = action?.kind === "delete-branches";
+    const repairing = action?.kind === "repair-worktrees";
+    const repairIssues = stepResults.repair?.issues ?? [];
+    const branchIssues = stepResults.branches?.issues ?? [];
+    const gcIssues = stepResults.gc?.issues ?? [];
+    const clonesIssues = stepResults.clones?.issues ?? [];
+    const hasIssues = repairIssues.length > 0 || branchIssues.length > 0 || clonesIssues.length > 0 || gcIssues.length > 0;
+    const gcAfter: GcAfter = workflowStep === "gc" ? "running"
+      : stepResults.gc !== undefined && stepResults.gc.state !== "failed" ? "ran" : "none";
+    const branchCard = branchCardCopy(branchIssues, deletedCount, gcAfter, gcIssues.length > 0);
+    const gcCard = gcCardCopy(gcIssues, gcReceipt?.results.filter((row) => row.outcome === "success").length ?? 0);
+    const clonesCard = clonesCardCopy(clonesIssues);
+    /** Each repository the Clones step shared something in, largest first. */
+    const clonesRows = (clonesReceipt?.results ?? [])
+      .map((row) => ({ row, totals: repoTotals(row) }))
+      .filter(({ totals }) => totals.worktrees > 0)
+      .sort((a, b) => (b.totals.bytes ?? 0) - (a.totals.bytes ?? 0));
+    const clonesShared = clonesTotals(clonesReceipt?.results ?? []).bytes ?? 0;
+    /** The finished line counts only what the plan ran. */
+    const doneCounts = [
+      runPlan.worktrees ? `${stepResults.worktrees?.items?.length ?? 0} ${stepResults.worktrees?.items?.length === 1 ? "worktree" : "worktrees"}` : null,
+      runPlan.branches ? `${deletedCount} ${deletedCount === 1 ? "branch" : "branches"}` : null,
+      clonesShared > 0 ? `${bytes(clonesShared)} of file data now shared` : null,
+      collectedBefore > collectedAfter ? `${bytes(collectedBefore - collectedAfter)} of object storage` : null
+    ].filter((part): part is string => part !== null);
+    /** Each step that left something behind reports with the shared outcome
+     *  card, in step order, above the receipt (or under the live status card
+     *  while a later step runs). */
+    const problems = hasIssues && <div className="maintenance__problems">
+      {repairIssues.length > 0 && <ProblemCard headline="Worktree link repair needs attention" sub="See each repository’s result below." listLabel="Worktree repair problems">
+        {repairIssues.map((issue, index) => <IssueRow key={`${issue.path ?? issue.repo}:${index}`} issue={issue} />)}
+      </ProblemCard>}
+      {branchIssues.length > 0 && <ProblemCard headline={branchCard.headline} sub={branchCard.sub} listLabel={branchCard.listLabel}>
+        {branchIssues.map((issue, index) => <IssueRow key={`${issue.path ?? issue.repo}:${issue.branch ?? ""}:${index}`} issue={issue} />)}
+      </ProblemCard>}
+      {clonesIssues.length > 0 && <ProblemCard headline={clonesCard.headline} sub={clonesCard.sub} listLabel={clonesCard.listLabel}>
+        {clonesIssues.map((issue, index) => <IssueRow key={`${issue.path ?? issue.repo}:${index}`} issue={issue} />)}
+      </ProblemCard>}
+      {gcIssues.length > 0 && <ProblemCard headline={gcCard.headline} sub={gcCard.sub} listLabel={gcCard.listLabel}>
+        {gcIssues.map((issue, index) => <IssueRow key={`${issue.path ?? issue.repo}:${index}`} issue={issue} />)}
+      </ProblemCard>}
+    </div>;
+    const receiptRows = (key: StepKey): number =>
+      key === "repair" ? stepResults.repair?.items?.length ?? 0 : key === "branches" ? deletedCount : key === "gc" ? gcReceipt?.results.length ?? 0 : key === "clones" ? clonesRows.length : 0;
+    /** A receipt step lists its first FINISHED_SLICE rows until "Show all":
+     *  382 deleted branches must not bury the garbage-collection card. */
+    const sliceReceipt = <T,>(key: StepKey, rows: T[]): T[] =>
+      receiptAll.has(key) ? rows : rows.slice(0, FINISHED_SLICE);
+    const proposingCount =
+      summary?.results.filter((row) => (row.candidates?.length ?? 0) > 0).length ?? 0;
+    /** The current rail cell's line: the verb is whatever is running now. */
+    const railProgress =
+      workflowStep === "worktrees"
+        ? worktreeCandidateCount === null
+          ? "scanning"
+          : `review · ${worktreeCandidateCount} finished`
+        : running
+          ? `${repairing ? "repairing" : deleting ? "deleting" : collecting ? "collecting" : sharing ? "sharing" : "reviewing"} ${results.size} of ${repos.length}`
+          : workflowStep === "branches" && scanComplete
+            ? `review · ${candidates.length} in ${proposingCount} repos`
+            : "running";
+    const toggleBranch = (key: string): void =>
+      setSelected((old) => {
+        const next = new Set(old);
+        if (next.has(key)) next.delete(key);
+        else next.add(key);
+        return next;
+      });
+
+    return (
+      <div
+        className="overlay-backdrop bulk-sync-backdrop"
+        onClick={running || worktreesBusy ? undefined : onClose}
       >
-        <div className="bulk-sync__head">
-          <div>
-            <h2>Repository maintenance</h2>
-            <p>
-              Clean up finished worktrees, leftover local branches and Git storage
-              across your repositories.
-            </p>
-          </div>
-          {action !== null && (
-            <span className="bulk-sync__count">
-              {tab === "combined" && workflowStep === "done" ? scopeRepoCount ?? repos.length : results.size} / {tab === "combined" && workflowStep === "done" ? scopeRepoCount ?? repos.length : repos.length}
-            </span>
-          )}
-        </div>
-        <div
-          className="maintenance__tabs"
-          role="group"
-          aria-label="Maintenance task"
+        <section
+          ref={modalRef}
+          tabIndex={-1}
+          className="modal bulk-sync maintenance"
+          role="dialog"
+          aria-modal="true"
+          aria-label="Repository maintenance"
+          onClick={(event) => event.stopPropagation()}
         >
-          {repoScope === undefined && (
-            <button aria-pressed={tab === "combined"}
-              disabled={running || worktreesBusy || workflowActive}
-              onClick={() => { setTab("combined"); restartWorkflow(); }}>
-              Combined
-            </button>
-          )}
-          {repoScope === undefined && (
-            <button aria-pressed={tab === "repair"}
-              disabled={running || worktreesBusy || workflowActive}
-              onClick={() => { setTab("repair"); reset(); }}>Repair links</button>
-          )}
-          {repoScope === undefined && (
-            <button aria-pressed={tab === "worktrees"}
-              disabled={running || worktreesBusy || workflowActive}
-              onClick={() => setTab("worktrees")}>Worktrees</button>
-          )}
-          {repoScope === undefined && (
-            <button aria-pressed={tab === "clones"}
-              disabled={running || worktreesBusy || workflowActive}
-              onClick={() => setTab("clones")}>Clones</button>
-          )}
-          <button
-            aria-pressed={tab === "branches"}
-            disabled={running || worktreesBusy || workflowActive}
-            onClick={() => {
-              setTab("branches");
-              reset();
-            }}
-          >
-            Local branches
-          </button>
-          <button aria-pressed={tab === "gc"} disabled={running || worktreesBusy || workflowActive}
-            onClick={() => { setTab("gc"); reset(); }}>Garbage collection</button>
-        </div>
-        {tab === "combined" && workflowStep !== "setup" && workflowStep !== "done" &&
-          <MaintenanceSteps plan={runPlan} current={workflowStep} results={stepResults} branchMode={branchMode}
-            gcMode={mode} progress={railProgress} clonesAvailable={clonesSupport === "available"} />}
-        {!attachChecked ? (
-          <div className="maintenance__body" aria-busy="true" />
-        ) : tab === "combined" && workflowStep === "setup" ? (
-          <>
-            <MaintenancePlanForm plan={plan} onChange={setPlan}
-              branchMode={branchMode} onBranchMode={changeBranchMode}
-              options={combinedOptions()} onOptions={changeOptions}
-              gcMode={mode} onGcMode={setMode} {...worktreeRules} lastKeepDays={lastKeepDays}
-              clonesSupport={clonesSupport} gitVersion={gitVersion} updateMain={updateMain} onUpdateMain={setUpdateMain}
-              onOpenGitSettings={openGitSettings} />
-            {error !== null && <div className="modal__error">{error}</div>}
-            <div className="modal__actions">
-              <span className="maintenance__footer-lead">{scopeRepoCount === null ? "This profile" : `${scopeRepoCount} ${scopeRepoCount === 1 ? "repository" : "repositories"}`} · {plan.worktrees && plan.branches && branchMode === "review" ? "stops twice for you" : plan.worktrees || plan.branches && branchMode === "review" ? "stops once for you" : "runs without stopping"}</span>
-              <button className="modal__cancel" onClick={onClose}>Close</button>
-              <button className="modal__create"
-                disabled={!optionsLoaded || !canStart}
-                onClick={analyze}>Start</button>
-            </div>
-          </>
-        ) : tab === "clones" ? (
-          <ClonesPanel profileId={profileId} platform={platform} onClose={onClose} onBusyChange={setClonesBusy} />
-        ) : tab === "worktrees" || (tab === "combined" && workflowStep === "worktrees") ? (
-          <PruneWorktreesPanel
-            profileId={profileId}
-            onRemove={onRemoveWorktrees}
-            onClose={onClose}
-            onBusyChange={setWorktreesBusy}
-            onCandidateCount={setWorktreeCandidateCount}
-            autoStart={tab === "combined"}
-            step={tab === "combined"}
-            {...worktreeRules}
-            {...(tab === "combined" ? { onContinue: (count: number, size: string, items: { label: string; detail: string }[]) => {
-              recordStep("worktrees", { state: count > 0 ? "done" : "skipped", summary: count > 0 ? `${count} removed · ${size}` : "Skipped", items });
-              void continueAfterWorktrees();
-            }, onChangeRules: restartWorkflow } : {})}
-          />
-        ) : (
-          <>
-        {tab === "combined" && workflowStep === "done" ? <>
-          <div className={`maintenance__done-status${workflowStopped || hasIssues ? " is-stopped" : ""}`}><StatusMark mark={workflowStopped || hasIssues ? "failed" : "ok"} /><div><strong>{workflowStopped ? "Maintenance stopped" : hasIssues ? "Maintenance finished with errors" : "Maintenance finished"}</strong><small>{Object.values(stepResults).filter((result) => result?.state === "done" || result?.state === "partial").length} of {Object.values(runPlan).filter(Boolean).length} steps{doneCounts.length > 0 ? ` · ${doneCounts.join(", ")}` : ""}</small></div><time>took {workflowDurationMs >= 60_000 ? `${Math.floor(workflowDurationMs / 60_000)}m ` : ""}{Math.round(workflowDurationMs % 60_000 / 1000)}s</time></div>
-          <div className="maintenance__body">
-            {problems}
-            <div className="maintenance__receipt-steps">
-              {STEP_ORDER.filter((key) => key === "repair" ? runPlan.repair : key === "clones" ? runPlan.clones || clonesSupport === "available" : true).map((key, index) => {
-                const result = stepResults[key];
-                const state = result?.state ?? (runPlan[key] ? "not-started" : "skipped");
-                const title = key === "repair" ? "Repair links" : key === "gc" ? "Garbage collection" : key === "branches" ? "Local branches" : key === "clones" ? "Clones" : "Worktrees";
-                const expandedNow = receiptExpanded.has(key);
-                const listed = key === "worktrees" || key === "repair" ? result?.items?.length ?? 0 : receiptRows(key);
-                return <article key={key} className={`maintenance__receipt-step is-${state}${(result?.issues?.length ?? 0) > 0 ? " has-issues" : ""}`}>
-                  <div className="maintenance__receipt-head"><span className="maintenance__step-num">{index + 1}</span><strong>{title}</strong><span>{result?.summary !== undefined ? <StepLine line={result.summary} /> : state === "not-started" ? "Not started" : "Skipped"}</span>
-                    {result !== undefined && (result.state === "done" || result.state === "partial") && listed > 0 && <button onClick={() => setReceiptExpanded((old) => { const next = new Set(old); if (next.has(key)) next.delete(key); else next.add(key); return next; })}>{expandedNow ? "Hide" : "Show"}</button>}
-                  </div>
-                  {expandedNow && key === "branches" && sliceReceipt(key, branchReceipt?.results.flatMap((row) => (row.branches ?? []).filter((branch) => branch.deleted).map((branch) => ({ row, branch }))) ?? []).map(({ row, branch }) => {
-                    const state = restores.get(`${row.repo.id}:${branch.branch}`);
-                    return <div className="maintenance__receipt-row" key={`${row.repo.id}:${branch.branch}`}><strong>{row.repo.name} · {branch.branch}</strong><code>{branch.head.slice(0, 8)}</code><button className="maintenance__restore" disabled={state === "restored" || state === "restoring"} onClick={() => void restore(row.repo.id, branch)}>{state === "restored" ? "Restored" : state === "restoring" ? "Restoring…" : state ?? "Restore"}</button></div>;
-                  })}
-                  {expandedNow && key === "clones" && sliceReceipt(key, clonesRows).map(({ row, totals }) => <div className="maintenance__receipt-row" key={row.repo.id}><strong>{row.repo.name} · {totals.worktrees} {totals.worktrees === 1 ? "worktree" : "worktrees"}</strong><span>{totals.bytes === null ? row.message : bytes(totals.bytes)}</span></div>)}
-                  {expandedNow && key === "gc" && sliceReceipt(key, [...(gcReceipt?.results ?? [])].sort((a, b) => ((b.beforeBytes ?? 0) - (b.afterBytes ?? 0)) - ((a.beforeBytes ?? 0) - (a.afterBytes ?? 0)))).map((row) => <div className="maintenance__receipt-row" key={row.repo.id}><strong>{row.repo.name}</strong><span>{row.beforeBytes !== undefined && row.afterBytes !== undefined ? `${bytes(row.beforeBytes)} → ${bytes(row.afterBytes)}` : row.message}</span></div>)}
-                  {expandedNow && (key === "worktrees" || key === "repair") && (key === "repair" ? sliceReceipt(key, result?.items ?? []) : result?.items ?? []).map((item) => <div className="maintenance__receipt-row" key={item.detail}><strong>{item.label}</strong><code className="selectable">{displayPath(item.detail, platform)}</code></div>)}
-                  {expandedNow && receiptRows(key) > FINISHED_SLICE && <div className="maintenance__receipt-more"><button onClick={() => setReceiptAll((old) => { const next = new Set(old); if (next.has(key)) next.delete(key); else next.add(key); return next; })}>{receiptAll.has(key) ? "Show fewer" : `Show all ${receiptRows(key)}`}</button></div>}
-                </article>;
-              })}
-            </div>
-            {(runPlan.branches || runPlan.worktrees) && <p className="maintenance__help">Restore recreates a branch at the tip it had when it was deleted, for as long as Git still holds that commit. Removed worktrees cannot be restored.</p>}
-          </div>
-          <div className="modal__actions"><button className="modal__cancel" onClick={() => {
-            // The offer ran Clones alone; a new plan starts from the usual one.
-            if (initialPlan !== undefined) setPlan(DEFAULT_MAINTENANCE_PLAN);
-            restartWorkflow();
-          }}>New plan</button><button ref={footerFocus} className="modal__create" onClick={onClose}>Close</button></div>
-        </> : <>
-        {(running || complete) && (
-          <BulkSyncStatus
-            compactWhenFinished
-            phase={
-              running
-                ? cancelling
-                  ? "cancelling"
-                  : "running"
-                : summary?.cancelled
-                  ? "cancelled"
-                  : "finished"
-            }
-            hasFailures={counts.failed + counts.partial > 0}
-            title={
-              running
-                ? cancelling
-                  ? "Stopping after active repository operations…"
-                  : current.size > 1
-                    ? `${repairing ? "Repairing worktree links in" : collecting ? "Collecting" : deleting ? "Deleting branches in" : sharing ? "Refreshing clones in" : "Reviewing"} ${current.size} repositories`
-                    : currentRepo
-                      ? `${repairing ? "Repairing worktree links in" : collecting ? "Collecting" : branchScan ? "Reviewing" : sharing ? "Refreshing clones in" : "Deleting branches in"} ${currentRepo.name}`
-                      : "Waiting for the next repository…"
-                : summary?.cancelled
-                  ? "Cancelled"
-                  : scanComplete
-                    ? `${candidates.length} finished ${candidates.length === 1 ? "branch" : "branches"} in ${proposingCount} of ${repos.length} ${repos.length === 1 ? "repository" : "repositories"}`
-                    : "Finished"
-            }
-            detail={
-              running
-                ? currentRepo
-                  ? {
-                      kind: "path",
-                      text:
-                        current.size > 1
-                          ? repos
-                              .filter((repo) => current.has(repo.id))
-                              .map((repo) => repo.name)
-                              .join(" · ")
-                          : displayPath(currentRepo.path, platform)
-                    }
-                  : null
-                : {
-                    kind: "summary",
-                    text: scanComplete ? `${repos.length} reviewed · ${counts.failed + counts.partial} need attention · ${summary?.results.reduce((total, row) => total + (row.kept?.length ?? 0), 0) ?? 0} kept` : `${counts.success} succeeded · ${counts.skipped} skipped · ${counts.failed + counts.partial} need attention`
-                  }
-            }
-            counts={counts}
-            inFlight={current.size}
-            queued={Math.max(0, repos.length - results.size - current.size)}
-            startedAt={startedAt}
-            durationMs={
-              summary === null
-                ? null
-                : Date.parse(summary.finishedAt) - Date.parse(summary.startedAt)
-            }
-          />
-        )}
-        <div className="maintenance__body">
-          {tab === "combined" && problems}
-          {tab !== "combined" && <>
-          {repoScope === undefined ? (
-            <>
-              <label className="maintenance__scope">
-                <input
-                  type="checkbox"
-                  checked={allProfiles}
-                  disabled={running}
-                  onChange={(event) => {
-                    setAllProfiles(event.target.checked);
-                    reset();
-                  }}
-                />{" "}
-                Include all profiles
-              </label>
-              <p className="maintenance__help">
-                {allProfiles
-                  ? "Every known repository across all profiles."
-                  : "Every known repository in this window’s profile."}{" "}
-                Shared object stores are processed once per scan or collection.
+          <div className="bulk-sync__head">
+            <div>
+              <h2>Repository maintenance</h2>
+              <p>
+                Clean up finished worktrees, leftover local branches and Git storage
+                across your repositories.
               </p>
-            </>
-          ) : (
-            <p className="maintenance__help">
-              Only <strong>{repoScope.name}</strong>, from its branch list.
-            </p>
-          )}
-          {taskTab === "repair" ? <p className="maintenance__help">Reconnect known worktrees after their repository moves. Files and branches stay unchanged. Missing folders remain registered; a worktree that also moved needs its new location supplied to Git.</p> : taskTab === "gc" ? (
-            <fieldset
-              className="maintenance__options"
-              disabled={running}
-              hidden={action !== null}
+            </div>
+            {action !== null && (
+              <span className="bulk-sync__count">
+                {tab === "combined" && workflowStep === "done" ? scopeRepoCount ?? repos.length : results.size} / {tab === "combined" && workflowStep === "done" ? scopeRepoCount ?? repos.length : repos.length}
+              </span>
+            )}
+          </div>
+          <div
+            className="maintenance__tabs"
+            role="group"
+            aria-label="Maintenance task"
+          >
+            {repoScope === undefined && (
+              <button aria-pressed={tab === "combined"}
+                disabled={running || worktreesBusy || workflowActive}
+                onClick={() => { setTab("combined"); restartWorkflow(); }}>
+                Combined
+              </button>
+            )}
+            {repoScope === undefined && (
+              <button aria-pressed={tab === "repair"}
+                disabled={running || worktreesBusy || workflowActive}
+                onClick={() => { setTab("repair"); reset(); }}>Repair links</button>
+            )}
+            {repoScope === undefined && (
+              <button aria-pressed={tab === "worktrees"}
+                disabled={running || worktreesBusy || workflowActive}
+                onClick={() => setTab("worktrees")}>Worktrees</button>
+            )}
+            {repoScope === undefined && (
+              <button aria-pressed={tab === "clones"}
+                disabled={running || worktreesBusy || workflowActive}
+                onClick={() => setTab("clones")}>Clones</button>
+            )}
+            <button
+              aria-pressed={tab === "branches"}
+              disabled={running || worktreesBusy || workflowActive}
+              onClick={() => {
+                setTab("branches");
+                reset();
+              }}
             >
-              <legend>Garbage collection options</legend>
-              <label>
-                <input
-                  type="radio"
-                  name="gc-mode"
-                  checked={mode === "standard"}
-                  onChange={() => setMode("standard")}
-                />
-                <span>
-                  <strong>Standard (recommended)</strong>
-                  <small>
-                    <code>git gc</code> repacks objects and expires unused
-                    history according to your Git retention settings. Start here
-                    for routine cleanup.
-                  </small>
-                </span>
-              </label>
-              <label>
-                <input
-                  type="radio"
-                  name="gc-mode"
-                  checked={mode === "keep-largest"}
-                  onChange={() => setMode("keep-largest")}
-                />
-                <span>
-                  <strong>Keep the largest pack</strong>
-                  <small>
-                    <code>--keep-largest-pack</code> leaves the largest pack
-                    intact to reduce repacking work. It may leave more storage
-                    in use.
-                  </small>
-                </span>
-              </label>
-              <label>
-                <input
-                  type="radio"
-                  name="gc-mode"
-                  checked={mode === "aggressive"}
-                  onChange={() => setMode("aggressive")}
-                />
-                <span>
-                  <strong>Aggressive compression</strong>
-                  <small>
-                    <code>--aggressive</code> recalculates compression more
-                    thoroughly. It can take much longer and use more CPU and
-                    memory, with no guaranteed size reduction.
-                  </small>
-                </span>
-              </label>
-            </fieldset>
+              Local branches
+            </button>
+            <button aria-pressed={tab === "gc"} disabled={running || worktreesBusy || workflowActive}
+              onClick={() => { setTab("gc"); reset(); }}>Garbage collection</button>
+          </div>
+          {tab === "combined" && workflowStep !== "setup" && workflowStep !== "done" &&
+            <MaintenanceSteps plan={runPlan} current={workflowStep} results={stepResults} branchMode={branchMode}
+              gcMode={mode} progress={railProgress} clonesAvailable={clonesSupport === "available"} />}
+          {!attachChecked ? (
+            <div className="maintenance__body" aria-busy="true" />
+          ) : tab === "combined" && workflowStep === "setup" ? (
+            <>
+              <MaintenancePlanForm plan={plan} onChange={setPlan}
+                branchMode={branchMode} onBranchMode={changeBranchMode}
+                options={combinedOptions()} onOptions={changeOptions}
+                gcMode={mode} onGcMode={setMode} {...worktreeRules} lastKeepDays={lastKeepDays}
+                clonesSupport={clonesSupport} gitVersion={gitVersion} updateMain={updateMain} onUpdateMain={setUpdateMain}
+                onOpenGitSettings={openGitSettings} />
+              {error !== null && <div className="modal__error">{error}</div>}
+              <div className="modal__actions">
+                <span className="maintenance__footer-lead">{scopeRepoCount === null ? "This profile" : `${scopeRepoCount} ${scopeRepoCount === 1 ? "repository" : "repositories"}`} · {plan.worktrees && plan.branches && branchMode === "review" ? "stops twice for you" : plan.worktrees || plan.branches && branchMode === "review" ? "stops once for you" : "runs without stopping"}</span>
+                <button className="modal__cancel" onClick={onClose}>Close</button>
+                <button className="modal__create"
+                  disabled={!optionsLoaded || !canStart}
+                  onClick={analyze}>Start</button>
+              </div>
+            </>
+          ) : tab === "clones" ? (
+            <ClonesPanel profileId={profileId} platform={platform} onClose={onClose} onBusyChange={setClonesBusy} />
+          ) : tab === "worktrees" || (tab === "combined" && workflowStep === "worktrees") ? (
+            <PruneWorktreesPanel
+              profileId={profileId}
+              onRemove={onRemoveWorktrees}
+              onClose={onClose}
+              onBusyChange={setWorktreesBusy}
+              onCandidateCount={setWorktreeCandidateCount}
+              autoStart={tab === "combined"}
+              step={tab === "combined"}
+              {...worktreeRules}
+              {...(tab === "combined" ? { onContinue: (count: number, size: string, items: { label: string; detail: string }[]) => {
+                recordStep("worktrees", { state: count > 0 ? "done" : "skipped", summary: count > 0 ? `${count} removed · ${size}` : "Skipped", items });
+                void continueAfterWorktrees();
+              }, onChangeRules: restartWorkflow } : {})}
+            />
           ) : (
             <>
+          {tab === "combined" && workflowStep === "done" ? <>
+            <div className={`maintenance__done-status${workflowStopped || hasIssues ? " is-stopped" : ""}`}><StatusMark mark={workflowStopped || hasIssues ? "failed" : "ok"} /><div><strong>{workflowStopped ? "Maintenance stopped" : hasIssues ? "Maintenance finished with errors" : "Maintenance finished"}</strong><small>{Object.values(stepResults).filter((result) => result?.state === "done" || result?.state === "partial").length} of {Object.values(runPlan).filter(Boolean).length} steps{doneCounts.length > 0 ? ` · ${doneCounts.join(", ")}` : ""}</small></div><time>took {workflowDurationMs >= 60_000 ? `${Math.floor(workflowDurationMs / 60_000)}m ` : ""}{Math.round(workflowDurationMs % 60_000 / 1000)}s</time></div>
+            <div className="maintenance__body">
+              {problems}
+              <div className="maintenance__receipt-steps">
+                {STEP_ORDER.filter((key) => key === "repair" ? runPlan.repair : key === "clones" ? runPlan.clones || clonesSupport === "available" : true).map((key, index) => {
+                  const result = stepResults[key];
+                  const state = result?.state ?? (runPlan[key] ? "not-started" : "skipped");
+                  const title = key === "repair" ? "Repair links" : key === "gc" ? "Garbage collection" : key === "branches" ? "Local branches" : key === "clones" ? "Clones" : "Worktrees";
+                  const expandedNow = receiptExpanded.has(key);
+                  const listed = key === "worktrees" || key === "repair" ? result?.items?.length ?? 0 : receiptRows(key);
+                  return <article key={key} className={`maintenance__receipt-step is-${state}${(result?.issues?.length ?? 0) > 0 ? " has-issues" : ""}`}>
+                    <div className="maintenance__receipt-head"><span className="maintenance__step-num">{index + 1}</span><strong>{title}</strong><span>{result?.summary !== undefined ? <StepLine line={result.summary} /> : state === "not-started" ? "Not started" : "Skipped"}</span>
+                      {result !== undefined && (result.state === "done" || result.state === "partial") && listed > 0 && <button onClick={() => setReceiptExpanded((old) => { const next = new Set(old); if (next.has(key)) next.delete(key); else next.add(key); return next; })}>{expandedNow ? "Hide" : "Show"}</button>}
+                    </div>
+                    {expandedNow && key === "branches" && sliceReceipt(key, branchReceipt?.results.flatMap((row) => (row.branches ?? []).filter((branch) => branch.deleted).map((branch) => ({ row, branch }))) ?? []).map(({ row, branch }) => {
+                      const state = restores.get(`${row.repo.id}:${branch.branch}`);
+                      return <div className="maintenance__receipt-row" key={`${row.repo.id}:${branch.branch}`}><strong>{row.repo.name} · {branch.branch}</strong><code>{branch.head.slice(0, 8)}</code><button className="maintenance__restore" disabled={state === "restored" || state === "restoring"} onClick={() => void restore(row.repo.id, branch)}>{state === "restored" ? "Restored" : state === "restoring" ? "Restoring…" : state ?? "Restore"}</button></div>;
+                    })}
+                    {expandedNow && key === "clones" && sliceReceipt(key, clonesRows).map(({ row, totals }) => <div className="maintenance__receipt-row" key={row.repo.id}><strong>{row.repo.name} · {totals.worktrees} {totals.worktrees === 1 ? "worktree" : "worktrees"}</strong><span>{totals.bytes === null ? row.message : bytes(totals.bytes)}</span></div>)}
+                    {expandedNow && key === "gc" && sliceReceipt(key, [...(gcReceipt?.results ?? [])].sort((a, b) => ((b.beforeBytes ?? 0) - (b.afterBytes ?? 0)) - ((a.beforeBytes ?? 0) - (a.afterBytes ?? 0)))).map((row) => <div className="maintenance__receipt-row" key={row.repo.id}><strong>{row.repo.name}</strong><span>{row.beforeBytes !== undefined && row.afterBytes !== undefined ? `${bytes(row.beforeBytes)} → ${bytes(row.afterBytes)}` : row.message}</span></div>)}
+                    {expandedNow && (key === "worktrees" || key === "repair") && (key === "repair" ? sliceReceipt(key, result?.items ?? []) : result?.items ?? []).map((item) => <div className="maintenance__receipt-row" key={item.detail}><strong>{item.label}</strong><code className="selectable">{displayPath(item.detail, platform)}</code></div>)}
+                    {expandedNow && receiptRows(key) > FINISHED_SLICE && <div className="maintenance__receipt-more"><button onClick={() => setReceiptAll((old) => { const next = new Set(old); if (next.has(key)) next.delete(key); else next.add(key); return next; })}>{receiptAll.has(key) ? "Show fewer" : `Show all ${receiptRows(key)}`}</button></div>}
+                  </article>;
+                })}
+              </div>
+              {(runPlan.branches || runPlan.worktrees) && <p className="maintenance__help">Restore recreates a branch at the tip it had when it was deleted, for as long as Git still holds that commit. Removed worktrees cannot be restored.</p>}
+            </div>
+            <div className="modal__actions"><button className="modal__cancel" onClick={() => {
+              // The offer ran Clones alone; a new plan starts from the usual one.
+              if (initialPlan !== undefined) setPlan(DEFAULT_MAINTENANCE_PLAN);
+              restartWorkflow();
+            }}>New plan</button><button ref={footerFocus} className="modal__create" onClick={onClose}>Close</button></div>
+          </> : <>
+          {(running || complete) && (
+            <BulkSyncStatus
+              compactWhenFinished
+              phase={
+                running
+                  ? cancelling
+                    ? "cancelling"
+                    : "running"
+                  : summary?.cancelled
+                    ? "cancelled"
+                    : "finished"
+              }
+              hasFailures={counts.failed + counts.partial > 0}
+              title={
+                running
+                  ? cancelling
+                    ? "Stopping after active repository operations…"
+                    : current.size > 1
+                      ? `${repairing ? "Repairing worktree links in" : collecting ? "Collecting" : deleting ? "Deleting branches in" : sharing ? "Refreshing clones in" : "Reviewing"} ${current.size} repositories`
+                      : currentRepo
+                        ? `${repairing ? "Repairing worktree links in" : collecting ? "Collecting" : branchScan ? "Reviewing" : sharing ? "Refreshing clones in" : "Deleting branches in"} ${currentRepo.name}`
+                        : "Waiting for the next repository…"
+                  : summary?.cancelled
+                    ? "Cancelled"
+                    : scanComplete
+                      ? `${candidates.length} finished ${candidates.length === 1 ? "branch" : "branches"} in ${proposingCount} of ${repos.length} ${repos.length === 1 ? "repository" : "repositories"}`
+                      : "Finished"
+              }
+              detail={
+                running
+                  ? currentRepo
+                    ? {
+                        kind: "path",
+                        text:
+                          current.size > 1
+                            ? repos
+                                .filter((repo) => current.has(repo.id))
+                                .map((repo) => repo.name)
+                                .join(" · ")
+                            : displayPath(currentRepo.path, platform)
+                      }
+                    : null
+                  : {
+                      kind: "summary",
+                      text: scanComplete ? `${repos.length} reviewed · ${counts.failed + counts.partial} need attention · ${summary?.results.reduce((total, row) => total + (row.kept?.length ?? 0), 0) ?? 0} kept` : `${counts.success} succeeded · ${counts.skipped} skipped · ${counts.failed + counts.partial} need attention`
+                    }
+              }
+              counts={counts}
+              inFlight={current.size}
+              queued={Math.max(0, repos.length - results.size - current.size)}
+              startedAt={startedAt}
+              durationMs={
+                summary === null
+                  ? null
+                  : Date.parse(summary.finishedAt) - Date.parse(summary.startedAt)
+              }
+            />
+          )}
+          <div className="maintenance__body">
+            {tab === "combined" && problems}
+            {tab !== "combined" && <>
+            {repoScope === undefined ? (
+              <>
+                <label className="maintenance__scope">
+                  <input
+                    type="checkbox"
+                    checked={allProfiles}
+                    disabled={running}
+                    onChange={(event) => {
+                      setAllProfiles(event.target.checked);
+                      reset();
+                    }}
+                  />{" "}
+                  Include all profiles
+                </label>
+                <p className="maintenance__help">
+                  {allProfiles
+                    ? "Every known repository across all profiles."
+                    : "Every known repository in this window’s profile."}{" "}
+                  Shared object stores are processed once per scan or collection.
+                </p>
+              </>
+            ) : (
+              <p className="maintenance__help">
+                Only <strong>{repoScope.name}</strong>, from its branch list.
+              </p>
+            )}
+            {taskTab === "repair" ? <p className="maintenance__help">Reconnect known worktrees after their repository moves. Files and branches stay unchanged. Missing folders remain registered; a worktree that also moved needs its new location supplied to Git.</p> : taskTab === "gc" ? (
               <fieldset
                 className="maintenance__options"
                 disabled={running}
                 hidden={action !== null}
               >
-                <legend>Finished branches</legend>
+                <legend>Garbage collection options</legend>
                 <label>
                   <input
-                    type="checkbox"
-                    checked={options.prProof}
-                    onChange={(event) =>
-                      changeOptions({ ...options, prProof: event.target.checked })
-                    }
+                    type="radio"
+                    name="gc-mode"
+                    checked={mode === "standard"}
+                    onChange={() => setMode("standard")}
                   />
                   <span>
-                    <strong>Count a merged pull request as proof</strong>
+                    <strong>Standard (recommended)</strong>
                     <small>
-                      Finds squash and rebase merges. Offered only when the
-                      branch’s tip is the pull request’s final head commit, so
-                      nothing added after merging is lost.
+                      <code>git gc</code> repacks objects and expires unused
+                      history according to your Git retention settings. Start here
+                      for routine cleanup.
                     </small>
                   </span>
                 </label>
-                <div className="maintenance__option">
+                <label>
                   <input
-                    id="maintenance-keep-guard"
-                    type="checkbox"
-                    checked={options.keepDays !== null}
-                    onChange={(event) =>
-                      changeOptions({
-                        ...options,
-                        keepDays: event.target.checked ? lastKeepDays : null
-                      })
-                    }
+                    type="radio"
+                    name="gc-mode"
+                    checked={mode === "keep-largest"}
+                    onChange={() => setMode("keep-largest")}
                   />
                   <span>
-                    <span className="maintenance__inline">
-                      <label htmlFor="maintenance-keep-guard">
-                        <strong>Keep branches touched in the last</strong>
-                      </label>
-                      <select
-                        aria-label="Age guard"
-                        value={options.keepDays ?? lastKeepDays}
-                        disabled={running || options.keepDays === null}
-                        onChange={(event) =>
-                          changeOptions({
-                            ...options,
-                            keepDays: Number(
-                              event.target.value
-                            ) as BranchCleanupKeepDays
-                          })
-                        }
-                      >
-                        {BRANCH_CLEANUP_KEEP_DAYS.map((days) => (
-                          <option key={days} value={days}>
-                            {days} {days === 1 ? "day" : "days"}
-                          </option>
-                        ))}
-                      </select>
-                    </span>
+                    <strong>Keep the largest pack</strong>
                     <small>
-                      Touched is the newest of the last commit and the last
-                      checkout. Remembered for next time.
+                      <code>--keep-largest-pack</code> leaves the largest pack
+                      intact to reduce repacking work. It may leave more storage
+                      in use.
                     </small>
                   </span>
-                </div>
+                </label>
+                <label>
+                  <input
+                    type="radio"
+                    name="gc-mode"
+                    checked={mode === "aggressive"}
+                    onChange={() => setMode("aggressive")}
+                  />
+                  <span>
+                    <strong>Aggressive compression</strong>
+                    <small>
+                      <code>--aggressive</code> recalculates compression more
+                      thoroughly. It can take much longer and use more CPU and
+                      memory, with no guaranteed size reduction.
+                    </small>
+                  </span>
+                </label>
               </fieldset>
-              {action === null && (
-                <div className="maintenance__never">
-                  <em>Never offered</em>
-                  <span>
-                    Branches that were never pushed, or have commits no merged
-                    pull request or HEAD contains
-                  </span>
-                  <span>Branches checked out in any worktree</span>
-                  <span>
-                    main, master, trunk, develop, and each remote’s default
-                    branch
-                  </span>
-                </div>
-              )}
-              {action === null && (
-                <p className="maintenance__help">
-                  Only local branch names are removed; nothing on a remote is
-                  deleted. Each branch is checked again at its reviewed tip just
-                  before deletion. Fetch all repos first if remote information
-                  is stale — PwrGit’s fetches prune deleted remote branches,
-                  which is what marks a branch gone.
-                </p>
-              )}
-            </>
-          )}
-          {taskTab === "gc" && action === null && (
-            <details className="maintenance__help">
-              <summary>What gets cleaned up?</summary>
-              <p>
-                Pack files compress commits, file contents, and directory
-                information. Repacking reorganizes them; pruning expires
-                unreachable objects. Files in retained history still take space
-                even if you deleted them in a later commit.
-              </p>
-              <p>
-                Git normally runs some maintenance automatically. PwrGit runs
-                collection in the foreground with up to four repositories at a
-                time, capped at half the available CPU cores (at least one). It
-                preserves missing-worktree registrations. It does not request
-                immediate object pruning or force a competing collection. Your
-                existing Git retention configuration still applies.
-              </p>
-              <p>
-                Storage figures measure loose objects and pack files, not free
-                disk space. Temporary repacking needs extra space; snapshots and
-                shared blocks can delay space returning to the volume. Garbage
-                collection does not remove local branch names.
-              </p>
-            </details>
-          )}
-          </>}
-          {action?.kind === "gc" && (
-            <p className="maintenance__help">
-              {mode === "standard"
-                ? "Standard collection"
-                : mode === "keep-largest"
-                  ? "Keeping the largest pack"
-                  : "Aggressive compression"}
-              . Git retention settings apply; missing-worktree registrations are
-              preserved. Sizes measure object storage, not free disk space.
-            </p>
-          )}
-          {tab !== "combined" && collectedFinished > 0 && !running && (
-            <div className="maintenance__offer">
-              <div>
-                <strong>
-                  {collectedFinished} finished local{" "}
-                  {collectedFinished === 1 ? "branch" : "branches"} across{" "}
-                  {collectedRepos}{" "}
-                  {collectedRepos === 1 ? "repository" : "repositories"}
-                </strong>
-                <small>
-                  Their pull requests merged or their commits are already in
-                  HEAD. Garbage collection never removes branch names.
-                </small>
-              </div>
-              <button className="modal__create" onClick={reviewCollected}>
-                Review…
-              </button>
-            </div>
-          )}
-          {error !== null && (
-            <div className="modal__error" role="alert">
-              {error}
-            </div>
-          )}
-          {scanComplete && (
-            <MaintenanceRulesApplied kind="branches" branchOptions={tab === "combined" ? combinedOptions() : action.options ?? options} onChange={() => {
-              if (tab === "combined") restartWorkflow(); else reset();
-            }} />
-          )}
-          {scanComplete && candidates.length > 0 && (
-            <label className="maintenance__scope">
-              <input
-                type="checkbox"
-                checked={selected.size === candidates.length}
-                onChange={(event) =>
-                  setSelected(
-                    event.target.checked
-                      ? new Set(candidates.map(branchKey))
-                      : new Set()
-                  )
-                }
-              />{" "}
-              Select all {candidates.length} finished{" "}
-              {candidates.length === 1 ? "branch" : "branches"}
-            </label>
-          )}
-          {complete && repos.length === 0 && (
-            <p className="maintenance__help">
-              No known repositories in the selected scope.
-            </p>
-          )}
-          {scanComplete && candidates.length === 0 && (
-            <p className="maintenance__help">
-              {counts.failed > 0 || summary?.cancelled
-                ? "No eligible branches were reported by completed reviews. Resolve failures or cancellation and review again."
-                : "No finished branches found. Fetch first if remote information is stale; each kept branch says why it was kept."}
-            </p>
-          )}
-          <div className="maintenance__results" aria-label="Repository results">
-            {(showQuietRepos ? [...proposingRepos, ...quietRepos] : proposingRepos).map((repo) => {
-              const result = results.get(repo.id);
-              const status =
-                result?.outcome ??
-                (current.has(repo.id)
-                  ? "running"
-                  : running
-                    ? "queued"
-                    : "incomplete");
-              return (
-                <article
-                  className={`bulk-sync__repo is-${status}`}
-                  key={repo.id}
+            ) : (
+              <>
+                <fieldset
+                  className="maintenance__options"
+                  disabled={running}
+                  hidden={action !== null}
                 >
-                  <div className="bulk-sync__repo-head">
-                    <div>
-                      <strong>
-                        {repo.name}
-                        {allProfiles ? ` · ${repo.profileName}` : ""}
-                      </strong>
-                      <small className="selectable">
-                        {displayPath(repo.path, platform)}
+                  <legend>Finished branches</legend>
+                  <label>
+                    <input
+                      type="checkbox"
+                      checked={options.prProof}
+                      onChange={(event) =>
+                        changeOptions({ ...options, prProof: event.target.checked })
+                      }
+                    />
+                    <span>
+                      <strong>Count a merged pull request as proof</strong>
+                      <small>
+                        Finds squash and rebase merges. Offered only when the
+                        branch’s tip is the pull request’s final head commit, so
+                        nothing added after merging is lost.
                       </small>
-                    </div>
-                    {scanComplete && (result?.candidates?.length ?? 0) > 0 ? <span className="maintenance__repo-count">{(result?.candidates ?? []).filter((branch) => selected.has(branchKey(branch))).length} of {result?.candidates?.length ?? 0} selected</span> : <span className={`bulk-sync__repo-status is-${status}`}>{status}</span>}
-                  </div>
-                  {!(scanComplete && (result?.candidates?.length ?? 0) + (result?.kept?.length ?? 0) > 0) && <p className="selectable">
-                    {result?.message ??
-                      details.get(repo.id) ??
-                      (current.has(repo.id)
-                        ? "Git is working…"
-                        : running
-                          ? "Queued"
-                          : "No result received.")}
-                  </p>}
-                  {result?.beforeBytes !== undefined &&
-                    result.afterBytes !== undefined && (
-                      <p>
-                        Object storage: {bytes(result.beforeBytes)} →{" "}
-                        {bytes(result.afterBytes)}
-                      </p>
-                    )}
-                  {scanComplete && result !== undefined && (
-                    <BranchReview
-                      result={result}
-                      now={now()}
-                      keepDays={options.keepDays}
-                      selected={selected}
-                      onToggle={toggleBranch}
-                      showAll={expanded.has(`finished:${repo.id}`)}
-                      showKept={expanded.has(`kept:${repo.id}`)}
-                      onExpand={(what) =>
-                        setExpanded((old) => {
-                          const next = new Set(old);
-                          const key = `${what}:${repo.id}`;
-                          if (next.has(key)) next.delete(key);
-                          else next.add(key);
-                          return next;
+                    </span>
+                  </label>
+                  <div className="maintenance__option">
+                    <input
+                      id="maintenance-keep-guard"
+                      type="checkbox"
+                      checked={options.keepDays !== null}
+                      onChange={(event) =>
+                        changeOptions({
+                          ...options,
+                          keepDays: event.target.checked ? lastKeepDays : null
                         })
                       }
                     />
-                  )}
-                  {result?.branches !== undefined && (
-                    <ul className="bulk-sync__details maintenance__receipt">
-                      {(expanded.has(`deleted:${repo.id}`) ? result.branches : result.branches.slice(0, FINISHED_SLICE)).map((branch) => {
-                        const state = restores.get(`${repo.id}:${branch.branch}`);
-                        return (
-                          <li key={branch.branch}>
-                            <strong>{branch.branch}</strong>
-                            {branch.deleted ? (
-                              <code className="selectable">
-                                {branch.head.slice(0, 8)}
-                              </code>
-                            ) : (
-                              <span className="maintenance__restore-error">
-                                {branch.message}
-                              </span>
-                            )}
-                            {state !== undefined &&
-                              state !== "restoring" &&
-                              state !== "restored" && (
-                                <span className="maintenance__restore-error">
-                                  {state}
-                                </span>
-                              )}
-                            {branch.deleted && (
-                              <button
-                                className="maintenance__restore"
-                                disabled={
-                                  state === "restoring" || state === "restored"
-                                }
-                                aria-label={`Restore ${branch.branch} at ${branch.head.slice(0, 8)}`}
-                                onClick={() => void restore(repo.id, branch)}
-                              >
-                                {state === "restored"
-                                  ? "Restored"
-                                  : state === "restoring"
-                                    ? "Restoring…"
-                                    : "Restore"}
-                              </button>
-                            )}
-                          </li>
-                        );
-                      })}
-                      {result.branches.length > FINISHED_SLICE && (
-                        <li className="maintenance__receipt-more">
-                          <button onClick={() => setExpanded((old) => {
+                    <span>
+                      <span className="maintenance__inline">
+                        <label htmlFor="maintenance-keep-guard">
+                          <strong>Keep branches touched in the last</strong>
+                        </label>
+                        <select
+                          aria-label="Age guard"
+                          value={options.keepDays ?? lastKeepDays}
+                          disabled={running || options.keepDays === null}
+                          onChange={(event) =>
+                            changeOptions({
+                              ...options,
+                              keepDays: Number(
+                                event.target.value
+                              ) as BranchCleanupKeepDays
+                            })
+                          }
+                        >
+                          {BRANCH_CLEANUP_KEEP_DAYS.map((days) => (
+                            <option key={days} value={days}>
+                              {days} {days === 1 ? "day" : "days"}
+                            </option>
+                          ))}
+                        </select>
+                      </span>
+                      <small>
+                        Touched is the newest of the last commit and the last
+                        checkout. Remembered for next time.
+                      </small>
+                    </span>
+                  </div>
+                </fieldset>
+                {action === null && (
+                  <div className="maintenance__never">
+                    <em>Never offered</em>
+                    <span>
+                      Branches that were never pushed, or have commits no merged
+                      pull request or HEAD contains
+                    </span>
+                    <span>Branches checked out in any worktree</span>
+                    <span>
+                      main, master, trunk, develop, and each remote’s default
+                      branch
+                    </span>
+                  </div>
+                )}
+                {action === null && (
+                  <p className="maintenance__help">
+                    Only local branch names are removed; nothing on a remote is
+                    deleted. Each branch is checked again at its reviewed tip just
+                    before deletion. Fetch all repos first if remote information
+                    is stale — PwrGit’s fetches prune deleted remote branches,
+                    which is what marks a branch gone.
+                  </p>
+                )}
+              </>
+            )}
+            {taskTab === "gc" && action === null && (
+              <details className="maintenance__help">
+                <summary>What gets cleaned up?</summary>
+                <p>
+                  Pack files compress commits, file contents, and directory
+                  information. Repacking reorganizes them; pruning expires
+                  unreachable objects. Files in retained history still take space
+                  even if you deleted them in a later commit.
+                </p>
+                <p>
+                  Git normally runs some maintenance automatically. PwrGit runs
+                  collection in the foreground with up to four repositories at a
+                  time, capped at half the available CPU cores (at least one). It
+                  preserves missing-worktree registrations. It does not request
+                  immediate object pruning or force a competing collection. Your
+                  existing Git retention configuration still applies.
+                </p>
+                <p>
+                  Storage figures measure loose objects and pack files, not free
+                  disk space. Temporary repacking needs extra space; snapshots and
+                  shared blocks can delay space returning to the volume. Garbage
+                  collection does not remove local branch names.
+                </p>
+              </details>
+            )}
+            </>}
+            {action?.kind === "gc" && (
+              <p className="maintenance__help">
+                {mode === "standard"
+                  ? "Standard collection"
+                  : mode === "keep-largest"
+                    ? "Keeping the largest pack"
+                    : "Aggressive compression"}
+                . Git retention settings apply; missing-worktree registrations are
+                preserved. Sizes measure object storage, not free disk space.
+              </p>
+            )}
+            {tab !== "combined" && collectedFinished > 0 && !running && (
+              <div className="maintenance__offer">
+                <div>
+                  <strong>
+                    {collectedFinished} finished local{" "}
+                    {collectedFinished === 1 ? "branch" : "branches"} across{" "}
+                    {collectedRepos}{" "}
+                    {collectedRepos === 1 ? "repository" : "repositories"}
+                  </strong>
+                  <small>
+                    Their pull requests merged or their commits are already in
+                    HEAD. Garbage collection never removes branch names.
+                  </small>
+                </div>
+                <button className="modal__create" onClick={reviewCollected}>
+                  Review…
+                </button>
+              </div>
+            )}
+            {error !== null && (
+              <div className="modal__error" role="alert">
+                {error}
+              </div>
+            )}
+            {scanComplete && (
+              <MaintenanceRulesApplied kind="branches" branchOptions={tab === "combined" ? combinedOptions() : action.options ?? options} onChange={() => {
+                if (tab === "combined") restartWorkflow(); else reset();
+              }} />
+            )}
+            {scanComplete && candidates.length > 0 && (
+              <label className="maintenance__scope">
+                <input
+                  type="checkbox"
+                  checked={selected.size === candidates.length}
+                  onChange={(event) =>
+                    setSelected(
+                      event.target.checked
+                        ? new Set(candidates.map(branchKey))
+                        : new Set()
+                    )
+                  }
+                />{" "}
+                Select all {candidates.length} finished{" "}
+                {candidates.length === 1 ? "branch" : "branches"}
+              </label>
+            )}
+            {complete && repos.length === 0 && (
+              <p className="maintenance__help">
+                No known repositories in the selected scope.
+              </p>
+            )}
+            {scanComplete && candidates.length === 0 && (
+              <p className="maintenance__help">
+                {counts.failed > 0 || summary?.cancelled
+                  ? "No eligible branches were reported by completed reviews. Resolve failures or cancellation and review again."
+                  : "No finished branches found. Fetch first if remote information is stale; each kept branch says why it was kept."}
+              </p>
+            )}
+            <div className="maintenance__results" aria-label="Repository results">
+              {(showQuietRepos ? [...proposingRepos, ...quietRepos] : proposingRepos).map((repo) => {
+                const result = results.get(repo.id);
+                const status =
+                  result?.outcome ??
+                  (current.has(repo.id)
+                    ? "running"
+                    : running
+                      ? "queued"
+                      : "incomplete");
+                return (
+                  <article
+                    className={`bulk-sync__repo is-${status}`}
+                    key={repo.id}
+                  >
+                    <div className="bulk-sync__repo-head">
+                      <div>
+                        <strong>
+                          {repo.name}
+                          {allProfiles ? ` · ${repo.profileName}` : ""}
+                        </strong>
+                        <small className="selectable">
+                          {displayPath(repo.path, platform)}
+                        </small>
+                      </div>
+                      {scanComplete && (result?.candidates?.length ?? 0) > 0 ? <span className="maintenance__repo-count">{(result?.candidates ?? []).filter((branch) => selected.has(branchKey(branch))).length} of {result?.candidates?.length ?? 0} selected</span> : <span className={`bulk-sync__repo-status is-${status}`}>{status}</span>}
+                    </div>
+                    {!(scanComplete && (result?.candidates?.length ?? 0) + (result?.kept?.length ?? 0) > 0) && <p className="selectable">
+                      {result?.message ??
+                        details.get(repo.id) ??
+                        (current.has(repo.id)
+                          ? "Git is working…"
+                          : running
+                            ? "Queued"
+                            : "No result received.")}
+                    </p>}
+                    {result?.beforeBytes !== undefined &&
+                      result.afterBytes !== undefined && (
+                        <p>
+                          Object storage: {bytes(result.beforeBytes)} →{" "}
+                          {bytes(result.afterBytes)}
+                        </p>
+                      )}
+                    {scanComplete && result !== undefined && (
+                      <BranchReview
+                        result={result}
+                        now={now()}
+                        keepDays={options.keepDays}
+                        selected={selected}
+                        onToggle={toggleBranch}
+                        showAll={expanded.has(`finished:${repo.id}`)}
+                        showKept={expanded.has(`kept:${repo.id}`)}
+                        onExpand={(what) =>
+                          setExpanded((old) => {
                             const next = new Set(old);
-                            const key = `deleted:${repo.id}`;
+                            const key = `${what}:${repo.id}`;
                             if (next.has(key)) next.delete(key);
                             else next.add(key);
                             return next;
-                          })}>
-                            {expanded.has(`deleted:${repo.id}`) ? "Show fewer" : `Show all ${result.branches.length}`}
-                          </button>
-                        </li>
-                      )}
-                    </ul>
-                  )}
-                </article>
-              );
-            })}
-            {quietRepos.length > 0 && <div className="maintenance__quiet"><strong>{quietRepos.length}</strong> {quietRepos.length === 1 ? "repository" : "repositories"} {collecting ? "with less than 1 MiB to reclaim" : sharing ? "with less than 1 MiB newly shared" : <>with nothing to delete · <strong>{quietWithKept}</strong> of them keep branches</>} <button onClick={() => setShowQuietRepos((old) => !old)}>{showQuietRepos ? "Hide" : "Show"}</button></div>}
+                          })
+                        }
+                      />
+                    )}
+                    {result?.branches !== undefined && (
+                      <ul className="bulk-sync__details maintenance__receipt">
+                        {(expanded.has(`deleted:${repo.id}`) ? result.branches : result.branches.slice(0, FINISHED_SLICE)).map((branch) => {
+                          const state = restores.get(`${repo.id}:${branch.branch}`);
+                          return (
+                            <li key={branch.branch}>
+                              <strong>{branch.branch}</strong>
+                              {branch.deleted ? (
+                                <code className="selectable">
+                                  {branch.head.slice(0, 8)}
+                                </code>
+                              ) : (
+                                <span className="maintenance__restore-error">
+                                  {branch.message}
+                                </span>
+                              )}
+                              {state !== undefined &&
+                                state !== "restoring" &&
+                                state !== "restored" && (
+                                  <span className="maintenance__restore-error">
+                                    {state}
+                                  </span>
+                                )}
+                              {branch.deleted && (
+                                <button
+                                  className="maintenance__restore"
+                                  disabled={
+                                    state === "restoring" || state === "restored"
+                                  }
+                                  aria-label={`Restore ${branch.branch} at ${branch.head.slice(0, 8)}`}
+                                  onClick={() => void restore(repo.id, branch)}
+                                >
+                                  {state === "restored"
+                                    ? "Restored"
+                                    : state === "restoring"
+                                      ? "Restoring…"
+                                      : "Restore"}
+                                </button>
+                              )}
+                            </li>
+                          );
+                        })}
+                        {result.branches.length > FINISHED_SLICE && (
+                          <li className="maintenance__receipt-more">
+                            <button onClick={() => setExpanded((old) => {
+                              const next = new Set(old);
+                              const key = `deleted:${repo.id}`;
+                              if (next.has(key)) next.delete(key);
+                              else next.add(key);
+                              return next;
+                            })}>
+                              {expanded.has(`deleted:${repo.id}`) ? "Show fewer" : `Show all ${result.branches.length}`}
+                            </button>
+                          </li>
+                        )}
+                      </ul>
+                    )}
+                  </article>
+                );
+              })}
+              {quietRepos.length > 0 && <div className="maintenance__quiet"><strong>{quietRepos.length}</strong> {quietRepos.length === 1 ? "repository" : "repositories"} {collecting ? "with less than 1 MiB to reclaim" : sharing ? "with less than 1 MiB newly shared" : <>with nothing to delete · <strong>{quietWithKept}</strong> of them keep branches</>} <button onClick={() => setShowQuietRepos((old) => !old)}>{showQuietRepos ? "Hide" : "Show"}</button></div>}
+            </div>
           </div>
-        </div>
-        <div className="modal__actions">
-          {running ? (
-            <button
-              ref={footerFocus}
-              className="modal__cancel"
-              aria-disabled={cancelling || foreign}
-              title={foreign ? "Started in another window, which alone can cancel it." : undefined}
-              onClick={() => void cancel()}
-            >
-              {cancelling ? "Cancelling…" : "Cancel"}
-            </button>
-          ) : tab === "combined" ? (
-            <>
-              {workflowStep === "branches" && scanComplete && <span className="maintenance__footer-lead">{selected.size} selected · {runPlan.clones ? "then clones" : runPlan.gc ? "then garbage collection" : "last step"}</span>}
-              {!scanComplete && <button ref={footerFocus} className="modal__cancel" onClick={onClose}>Close</button>}
-              {workflowStep === "branches" && scanComplete ? (
-                <>
-                  <button className="modal__cancel" onClick={() => {
-                    skipBranches("Skipped deletion");
-                    void finishWorkflow();
-                  }}>Skip branches</button>
-                  <button className="modal__create" disabled={selected.size === 0} onClick={() => void removeBranchesAndContinue(
-                    candidates.filter((branch) => selected.has(branchKey(branch)))
-                  )}>{selected.size === 0 ? "Delete branches and continue" : `Delete ${selected.size} ${selected.size === 1 ? "branch" : "branches"} and continue`}</button>
-                </>
-              ) : null}
-            </>
-          ) : finished ? (
-            // The job is done: running it again is secondary, and Close is
-            // the primary, last and in the CTA colour.
-            <>
-              {tab === "gc" && <button className="modal__cancel" onClick={reset}>Change options</button>}
-              <button className="modal__cancel" onClick={() => void run(
-                taskTab === "repair" ? { kind: "repair-worktrees" }
-                  : taskTab === "gc" ? { kind: "gc", mode, branchOptions: options }
-                    : { kind: "scan-branches", options }
-              )}>{taskTab === "repair" ? "Repair worktree links" : taskTab === "gc" ? "Run garbage collection" : "Review again"}</button>
-              <button ref={footerFocus} className="modal__create" onClick={onClose}>Close</button>
-            </>
-          ) : (
-            <>
+          <div className="modal__actions">
+            {running ? (
               <button
                 ref={footerFocus}
                 className="modal__cancel"
-                onClick={onClose}
+                aria-disabled={cancelling || foreign}
+                title={foreign ? "Started in another window, which alone can cancel it." : undefined}
+                onClick={() => void cancel()}
               >
-                Close
+                {cancelling ? "Cancelling…" : "Cancel"}
               </button>
-              {action !== null && tab === "gc" && (
-                <button className="modal__cancel" onClick={reset}>
-                  Change options
-                </button>
-              )}
-              {taskTab === "repair" ? <button className="modal__create" onClick={() => void run({ kind: "repair-worktrees" })}>Repair worktree links</button> : taskTab === "gc" ? (
+            ) : tab === "combined" ? (
+              <>
+                {workflowStep === "branches" && scanComplete && <span className="maintenance__footer-lead">{selected.size} selected · {runPlan.clones ? "then clones" : runPlan.gc ? "then garbage collection" : "last step"}</span>}
+                {!scanComplete && <button ref={footerFocus} className="modal__cancel" onClick={onClose}>Close</button>}
+                {workflowStep === "branches" && scanComplete ? (
+                  <>
+                    <button className="modal__cancel" onClick={() => {
+                      skipBranches("Skipped deletion");
+                      void finishWorkflow();
+                    }}>Skip branches</button>
+                    <button className="modal__create" disabled={selected.size === 0} onClick={() => void removeBranchesAndContinue(
+                      candidates.filter((branch) => selected.has(branchKey(branch)))
+                    )}>{selected.size === 0 ? "Delete branches and continue" : `Delete ${selected.size} ${selected.size === 1 ? "branch" : "branches"} and continue`}</button>
+                  </>
+                ) : null}
+              </>
+            ) : finished ? (
+              // The job is done: running it again is secondary, and Close is
+              // the primary, last and in the CTA colour.
+              <>
+                {tab === "gc" && <button className="modal__cancel" onClick={reset}>Change options</button>}
+                <button className="modal__cancel" onClick={() => void run(
+                  taskTab === "repair" ? { kind: "repair-worktrees" }
+                    : taskTab === "gc" ? { kind: "gc", mode, branchOptions: options }
+                      : { kind: "scan-branches", options }
+                )}>{taskTab === "repair" ? "Repair worktree links" : taskTab === "gc" ? "Run garbage collection" : "Review again"}</button>
+                <button ref={footerFocus} className="modal__create" onClick={onClose}>Close</button>
+              </>
+            ) : (
+              <>
                 <button
-                  className="modal__create"
-                  onClick={() =>
-                    void run({ kind: "gc", mode, branchOptions: options })
-                  }
+                  ref={footerFocus}
+                  className="modal__cancel"
+                  onClick={onClose}
                 >
-                  Run garbage collection
+                  Close
                 </button>
-              ) : (
-                <>
-                  <button
-                    className={scanComplete ? "modal__cancel" : "modal__create"}
-                    onClick={() => void run({ kind: "scan-branches", options })}
-                  >
-                    {action === null ? "Review local branches" : "Review again"}
+                {action !== null && tab === "gc" && (
+                  <button className="modal__cancel" onClick={reset}>
+                    Change options
                   </button>
-                  {scanComplete && (
+                )}
+                {taskTab === "repair" ? <button className="modal__create" onClick={() => void run({ kind: "repair-worktrees" })}>Repair worktree links</button> : taskTab === "gc" ? (
+                  <button
+                    className="modal__create"
+                    onClick={() =>
+                      void run({ kind: "gc", mode, branchOptions: options })
+                    }
+                  >
+                    Run garbage collection
+                  </button>
+                ) : (
+                  <>
                     <button
-                      className="modal__create"
-                      disabled={selected.size === 0}
-                      onClick={() =>
-                        void run({
-                          kind: "delete-branches",
-                          branches: candidates.filter((branch) =>
-                            selected.has(branchKey(branch))
-                          ),
-                          options
-                        })
-                      }
+                      className={scanComplete ? "modal__cancel" : "modal__create"}
+                      onClick={() => void run({ kind: "scan-branches", options })}
                     >
-                      Delete {selected.size} selected local{" "}
-                      {selected.size === 1 ? "branch" : "branches"}
+                      {action === null ? "Review local branches" : "Review again"}
                     </button>
-                  )}
-                </>
-              )}
+                    {scanComplete && (
+                      <button
+                        className="modal__create"
+                        disabled={selected.size === 0}
+                        onClick={() =>
+                          void run({
+                            kind: "delete-branches",
+                            branches: candidates.filter((branch) =>
+                              selected.has(branchKey(branch))
+                            ),
+                            options
+                          })
+                        }
+                      >
+                        Delete {selected.size} selected local{" "}
+                        {selected.size === 1 ? "branch" : "branches"}
+                      </button>
+                    )}
+                  </>
+                )}
+              </>
+            )}
+          </div>
+          </>}
             </>
           )}
-        </div>
-        </>}
-          </>
-        )}
-      </section>
-    </div>
-  );
+        </section>
+      </div>
+    );
+  }
+}
+
+/** Keep this component at module scope so updates preserve its mounted tree. */
+function MaintenanceRenderFrame({ render }: { render: () => ReactNode }): ReactNode {
+  return render();
 }
 
 /**
