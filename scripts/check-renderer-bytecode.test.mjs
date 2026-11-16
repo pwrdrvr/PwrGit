@@ -74,10 +74,12 @@ describe("renderer bytecode oracle", () => {
   it("includes Fast Refresh hook signatures in the development bytecode oracle", async () => {
     await fixture(async (root) => {
       const entry = resolve(root, "HookView.tsx");
-      await writeFile(entry, `import { useState } from 'react';
+      // A local custom hook exercises the same Refresh signature transform
+      // without awaiting React/JSX dependency prebundling in this compile-only
+      // regression test.
+      await writeFile(entry, `function useCount() { return 0; }
         export function HookView() {
-          const [count, setCount] = useState(0);
-          return <button onClick={() => setCount(count + 1)}>{count}</button>;
+          return useCount();
         }
         throw new Error('APPLICATION MUST NOT EXECUTE');
       `);
