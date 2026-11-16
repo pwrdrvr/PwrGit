@@ -1,5 +1,11 @@
 # Changelog
 
+## v0.59.4 - 2026-11-15
+
+- Bulk sync - Added independent 15-minute silence and 60-minute absolute deadlines for network transfers and read-only Git probes, starting after each command acquires its queue lock. A timed-out remote is reported as failed while remaining work continues. Missed deadlines are checked after system resume and before new output can reset the silence clock.
+- Cancellation - Fixed Git commands remaining unsettled when a helper kept their output pipes open after Git exited. On macOS and Linux, cancellation also stops helpers in the command's process group while preserving external shared SSH owners; Windows retains direct-child termination and bounded pipe cleanup. Cancel stops queued work, transfers, and probes, but waits for an active fast-forward checkout or filter and final HEAD verification to finish under the worktree lock.
+- Sync progress - Added live counts and an outcome bar to the sync button, including hidden automatic runs and narrow icon-only layouts. Its hover card shows the current repository, elapsed time, and an estimated time remaining; Sync options also shows a live-run summary. Clicking the button during a run now opens the progress dialog instead of reopening a remembered toast.
+
 ## v0.59.3 - 2026-11-15
 
 - File lists - Added the Changes folder tree to commit Files and PR Changes, with compact folder paths, subtree counts and folding, and automatic reveal of the open file. Large folders containing only added files now start folded in these lists and in staged Changes; folders with modified files stay open by default. File names are shorter visually while accessible labels retain the full path.
