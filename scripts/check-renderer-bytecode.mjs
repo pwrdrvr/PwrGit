@@ -12,6 +12,7 @@ import { fileURLToPath } from "node:url";
 import { setFlagsFromString } from "node:v8";
 import * as vm from "node:vm";
 import { isCliEntrypoint } from "./lib/cli-entrypoint.mjs";
+import { nodeHeapArguments } from "./tool-resource-policy.mjs";
 
 const scriptPath = fileURLToPath(import.meta.url);
 const repoRoot = resolve(dirname(scriptPath), "..");
@@ -59,10 +60,10 @@ async function compileModules() {
   }
 }
 
-export async function measureBytecode(modules) {
-  const child = spawn(process.execPath, ["--no-lazy", "--experimental-vm-modules", scriptPath, "--compile"], {
+export async function measureBytecode(modules, { spawnCompiler = spawn } = {}) {
+  const child = spawnCompiler(process.execPath, [...nodeHeapArguments(process.env.NODE_OPTIONS, process.execArgv), "--no-lazy", "--experimental-vm-modules", scriptPath, "--compile"], {
     cwd: repoRoot, stdio: ["pipe", "pipe", "pipe"],
-    // NODE_OPTIONS must not silently override the compilation oracle's tiers.
+    // Isolate tier and preload settings, retaining inherited heap limits in argv.
     env: { ...process.env, NODE_OPTIONS: "" },
   });
   const finished = once(child, "close");

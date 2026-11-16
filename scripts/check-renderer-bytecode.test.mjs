@@ -1,6 +1,9 @@
-import { mkdtemp, mkdir, writeFile, rm } from "node:fs/promises";
+import { spawn, spawnSync } from "node:child_process";
+import { mkdtemp, mkdir, readFile, writeFile, rm } from "node:fs/promises";
 import { resolve, relative } from "node:path";
-import { describe, expect, it } from "vitest";
+import { pathToFileURL } from "node:url";
+import { describe, expect, it, vi } from "vitest";
+import { nodeHeapArguments } from "./tool-resource-policy.mjs";
 import {
   BYTECODE_BUDGET, budgetFailures, discoverModules, enforceBudget, measureBytecode, transformedModules,
 } from "./check-renderer-bytecode.mjs";
@@ -13,6 +16,42 @@ async function fixture(run, base = ".local") {
 }
 
 describe("renderer bytecode oracle", () => {
+  it("preserves the compiler heap limit while removing tier and preload settings", async () => {
+    await fixture(async (root) => {
+      const heapFile = resolve(root, "heap.json");
+      const probe = resolve(root, "heap-probe.mjs");
+      await writeFile(probe, `import { writeFileSync } from 'node:fs';
+        import { getHeapStatistics } from 'node:v8';
+        writeFileSync(${JSON.stringify(heapFile)}, JSON.stringify({
+          limit: getHeapStatistics().heap_size_limit,
+          options: process.env.NODE_OPTIONS
+        }));`);
+      vi.stubEnv("NODE_OPTIONS", "--max-old-space-size=2048 --jitless --require=/must-not-load.cjs");
+      try {
+        const heapArgs = nodeHeapArguments(process.env.NODE_OPTIONS, process.execArgv);
+        // A real Node process with the inherited heap settings is the oracle;
+        // heap_size_limit also includes young-generation space, so do not
+        // compare it with a guessed byte total for a 2048 MiB old-space cap.
+        const control = spawnSync(process.execPath, [...heapArgs, "-p", "require('node:v8').getHeapStatistics().heap_size_limit"], {
+          env: { ...process.env, NODE_OPTIONS: "" }, encoding: "utf8"
+        });
+        expect(control.status).toBe(0);
+        let compilerArgs;
+        await measureBytecode([{ file: "heap-oracle.js", variant: "test", code: "globalThis.__heapProbe = () => 1;" }], {
+          spawnCompiler(executable, args, options) {
+            compilerArgs = args;
+            return spawn(executable, ["--import", pathToFileURL(probe).href, ...args], options);
+          }
+        });
+        const actual = JSON.parse(await readFile(heapFile, "utf8"));
+        expect(actual.limit).toBe(Number(control.stdout.trim()));
+        expect(actual.options).toBe("");
+        expect(compilerArgs.slice(0, heapArgs.length)).toEqual(heapArgs);
+      } finally {
+        vi.unstubAllEnvs();
+      }
+    });
+  });
   it("automatically discovers new modules and workers, excluding only test/declaration surfaces", async () => {
     await fixture(async (root) => {
       const included = ["App.tsx", "new/helper.ts", "pixel.worker.ts", "plain.js", "common.cts", "module.mts", "view.jsx"];

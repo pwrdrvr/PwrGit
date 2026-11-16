@@ -41,7 +41,11 @@ at `30e49f153a5016f253e27e99bca9af95010a2b95` to PwrGit's toolchain.
   application modules or executing imports. Eager compilation finds nested,
   anonymous, arrow and method functions without a component-name allowlist.
   A unique trailing comment prevents V8's compilation cache from hiding
-  identical client/SSR variants.
+  identical client/SSR variants. Forward inherited heap-limit settings from
+  `NODE_OPTIONS` and parent Node arguments to the compiler's arguments, with
+  command-line precedence preserved. Clear other inherited Node options so
+  tier flags and preloads cannot alter the oracle; the resource launcher's
+  2,048 MiB old-space cap remains in force on constrained machines.
 - Stream and reduce bytecode disassembly into function lengths. Keep only
   records, bounded compiler stderr and the largest twelve diagnostics; never
   buffer the disassembly. Missing bytecode or transforms fail closed.
