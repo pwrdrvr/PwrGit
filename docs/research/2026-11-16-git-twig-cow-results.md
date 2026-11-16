@@ -6,6 +6,9 @@
 `8eeb9f2a9e87e67e54edf75630dd57074a0627ff`. That document is copied unchanged.
 The source comparison is the starting point; the evidence here adds execution.
 
+A later [OpenClaw follow-up](2026-11-16-git-twig-cow-openclaw.md) applies the
+same protocol to a 65,500-path real repository, preserving its attributes.
+
 **Both native paths saved working-tree allocation. Their speed depended on
 file shape. The shipped PwrGit binary also reproduced its documented donor
 correctness gap: a stat-invisible mmap edit became a new worktree's bytes.**

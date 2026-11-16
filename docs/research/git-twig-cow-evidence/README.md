@@ -96,3 +96,11 @@ public-index debug field. Neither affects its timed create operation. The
 separate lifecycle/public reruns exercise those additions; original raw
 records are retained rather than backfilled. The final supplement adds the
 literal-drift case after the first corrected supplement run.
+
+The [OpenClaw follow-up](../2026-11-16-git-twig-cow-openclaw.md) uses the same
+protocol via `--public-url`, `--public-name`, `--public-revision`,
+`--public-depth 2`, `--public-only`, and `--age-public-index`.
+`--public-reshare` adds a private child, byte-checked re-share, and hard reset.
+The shallow clone pins its revision at clone time so a moving remote branch
+cannot change the requested two-commit fixture. Sharing-probe invocations are
+batched into 256 paths to stay below macOS's argument-size limit on large trees.

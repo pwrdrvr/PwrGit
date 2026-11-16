@@ -1,0 +1,47 @@
+$ node scripts/resource-run.mjs pnpm lint:syntax && node scripts/resource-run.mjs pnpm lint:forge-kinds && node scripts/resource-run.mjs pnpm lint:colors && node scripts/resource-run.mjs pnpm deps:maturity && node scripts/resource-run.mjs pnpm licenses:check && node scripts/resource-run.mjs pnpm lint:boundaries && node scripts/resource-run.mjs pnpm typecheck && node scripts/resource-run.mjs pnpm check:renderer-bytecode
+$ node scripts/resource-run.mjs oxlint
+$ node scripts/resource-run.mjs node ./scripts/check-forge-kind-branching.mjs
+forge-kind branching lint passed (3 kinds: github, gitlab, gitcafe)
+$ node scripts/resource-run.mjs node ./scripts/lint-renderer-colors.mjs
+renderer color lint passed (4 stylesheets)
+$ node scripts/resource-run.mjs node ./scripts/check-dependency-maturity.mjs
+[check-dependency-maturity] ok — 709 locked package versions checked against a 7.0-day cooldown, 11 excluded.
+[check-dependency-maturity] note: minimumReleaseAgeExclude "glob@14.0.2" is prunable — glob@14.0.2 has matured past the window.
+[check-dependency-maturity] note: minimumReleaseAgeExclude "minimatch@11.0.1" is prunable — minimatch@11.0.1 has matured past the window.
+[check-dependency-maturity] note: minimumReleaseAgeExclude "path-scurry@3.0.0" is prunable — path-scurry@3.0.0 has matured past the window.
+[check-dependency-maturity] note: minimumReleaseAgeExclude "electron@44.9.3" is prunable — electron@44.9.3 has matured past the window.
+[check-dependency-maturity] note: minimumReleaseAgeExclude "@shutterstock/p-map-iterable@1.2.0" is prunable — @shutterstock/p-map-iterable@1.2.0 has matured past the window.
+[check-dependency-maturity] note: minimumReleaseAgeExclude "zod@4.5.1" is prunable — nothing in the lockfile resolves it.
+$ node scripts/resource-run.mjs node scripts/check-mcp-rust-licenses.mjs && node scripts/resource-run.mjs node ./scripts/check-package-license-policy.mjs && node scripts/resource-run.mjs node ./scripts/check-third-party-license-allowlist.mjs && node scripts/resource-run.mjs node ./scripts/generate-third-party-licenses.mjs --check
+MCP Rust license policy and snapshot passed
+package license policy check passed
+third-party license allowlist check passed
+third-party license notice check passed
+$ node scripts/resource-run.mjs depcruise --config .dependency-cruiser.cjs packages/ apps/desktop/src/
+
+✔ no dependency violations found (1290 modules, 5389 dependencies cruised)
+
+$ node scripts/resource-run.mjs pnpm -r --if-present typecheck
+packages/mcp-server typecheck$ node ../../scripts/resource-run.mjs node ../../scripts/typecheck.mjs --noEmit -p tsconfig.json
+packages/shared typecheck$ node ../../scripts/resource-run.mjs node ../../scripts/typecheck.mjs --noEmit -p tsconfig.json
+packages/shared typecheck: Done
+packages/mcp-server typecheck: Done
+apps/desktop typecheck$ node ../../scripts/resource-run.mjs node ../../scripts/typecheck.mjs --noEmit -p tsconfig.json
+apps/desktop typecheck: Done
+$ node scripts/resource-run.mjs node scripts/check-renderer-bytecode.mjs
+
+ RUN  v4.1.12 /Users/huntharo/.codex/worktrees/mwjfpnl7/PwrGit
+
+production/assets/index-BBXn5e1Q.js: (anonymous) #1 (production): 25982 bytes; limit 28672
+apps/desktop/src/renderer/src/features/sidebar/CloneRepoDialog.tsx: CloneRepoDialog #4 (Vitest-SSR): 25328 bytes; limit 28672
+apps/desktop/src/renderer/src/features/sidebar/CloneRepoDialog.tsx: CloneRepoDialog #4 (Vitest-jsdom): 25328 bytes; limit 28672
+apps/desktop/src/renderer/src/features/sidebar/CloneRepoDialog.tsx: CloneRepoDialog #7 (development): 23291 bytes; limit 28672
+production/assets/index-BBXn5e1Q.js: b6 #3052 (production): 22840 bytes; limit 28672
+apps/desktop/src/renderer/src/features/contributions/ContributionScreen.tsx: ContributionScreen #6 (Vitest-SSR): 22735 bytes; limit 28672
+apps/desktop/src/renderer/src/features/contributions/ContributionScreen.tsx: ContributionScreen #6 (Vitest-jsdom): 22735 bytes; limit 28672
+apps/desktop/src/renderer/src/features/sidebar/ForkRepoDialog.tsx: ForkRepoDialog #4 (Vitest-SSR): 20773 bytes; limit 28672
+apps/desktop/src/renderer/src/features/sidebar/ForkRepoDialog.tsx: ForkRepoDialog #4 (Vitest-jsdom): 20773 bytes; limit 28672
+apps/desktop/src/renderer/src/features/contributions/ContributionScreen.tsx: ContributionScreen #7 (development): 20706 bytes; limit 28672
+production/assets/index-BBXn5e1Q.js: M3 #4533 (production): 19230 bytes; limit 28672
+apps/desktop/src/renderer/src/features/sidebar/MaintenanceDialog.tsx: renderMaintenanceDialog #81 (Vitest-SSR): 19192 bytes; limit 28672
+Renderer bytecode passed: 29736 functions, 980 module/variants; Node v24.22.1, V8 13.6.233.17-node.58

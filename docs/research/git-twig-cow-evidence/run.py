@@ -32,6 +32,11 @@ parser.add_argument('--probe', type=Path, required=True)
 parser.add_argument('--public-only', action='store_true')
 parser.add_argument('--age-public-index', action='store_true')
 parser.add_argument('--lifecycle-only', action='store_true')
+parser.add_argument('--public-url', default='https://github.com/leostera/git-twig')
+parser.add_argument('--public-revision', default='112840639a5d80b05d1d5426723be49f2a16dd83')
+parser.add_argument('--public-name', default='public-twig')
+parser.add_argument('--public-depth', type=int)
+parser.add_argument('--public-reshare', action='store_true')
 args = parser.parse_args()
 args.root.mkdir()  # Refuse to reuse a previous test tree.
 args.output.mkdir(parents=True, exist_ok=True)
@@ -168,7 +173,9 @@ def verify(repo, expected, label):
 def probes(paths):
     if not paths:
         return {}
-    lines = run([args.probe, *paths]).stdout.decode().splitlines()
+    lines = []
+    for offset in range(0, len(paths), 256):
+        lines.extend(run([args.probe, *paths[offset:offset + 256]]).stdout.decode().splitlines())
     return {line.split('\t', 2)[2]: dict(first_block=int(line.split('\t')[0]),
                                        private_bytes=int(line.split('\t')[1])) for line in lines}
 
@@ -247,19 +254,26 @@ try:
     fixtures = [] if args.public_only else [fixture('file-heavy', 4096, 1024)]
     if not args.public_only and not args.lifecycle_only:
         fixtures.append(fixture('byte-heavy', 32, 8 * 1024**2))
-    public = args.root / 'public-twig'
-    git(args.root, 'clone', '--quiet', 'https://github.com/leostera/git-twig', public)
-    git(public, 'checkout', '--detach', '112840639a5d80b05d1d5426723be49f2a16dd83')
+    public = args.root / args.public_name
+    depth = ['--depth', str(args.public_depth)] if args.public_depth else []
+    clone_revision = ['--revision', args.public_revision] if args.public_depth else []
+    git(args.root, 'clone', '--quiet', *depth, *clone_revision, args.public_url, public)
+    git(public, 'checkout', '--detach', args.public_revision)
     if args.age_public_index:
         aged = time.time_ns() - 20_000_000_000
         for path in public.rglob('*'):
             if '.git' not in path.parts and (path.is_file() or path.is_symlink()):
                 os.utime(path, ns=(aged, aged), follow_symlinks=False)
         git(public, 'update-index', '--refresh')
-    results['public_index'] = dict(aged=args.age_public_index,
+    index_probe = 'Cargo.toml' if (public / 'Cargo.toml').is_file() else next(
+        name for name in git(public, 'ls-files', '-z').stdout.decode().strip('\0').split('\0')
+        if (public / name).is_file() and not (public / name).is_symlink())
+    results['public_source'] = dict(url=args.public_url, requested_revision=args.public_revision,
+                                    depth=args.public_depth)
+    results['public_index'] = dict(aged=args.age_public_index, probe_path=index_probe,
         index_mtime_ns=(public / '.git/index').stat().st_mtime_ns,
-        cargo_stat=[(public / 'Cargo.toml').stat().st_mtime_ns, (public / 'Cargo.toml').stat().st_ctime_ns],
-        debug=git(public, 'ls-files', '--debug', 'Cargo.toml').stdout.decode())
+        path_stat=[(public / index_probe).stat().st_mtime_ns, (public / index_probe).stat().st_ctime_ns],
+        debug=git(public, 'ls-files', '--debug', index_probe).stdout.decode())
     fixtures.append((public, git(public, 'rev-parse', 'HEAD^').stdout.decode().strip(),
                      git(public, 'rev-parse', 'HEAD').stdout.decode().strip()))
     for repo, old, head in fixtures:
@@ -290,6 +304,18 @@ try:
                                                before=start, after=end, delta=end-start))
             for child in children:
                 remove(repo, child)
+        save()
+
+    if args.public_reshare:
+        expected = tree_oracle(public, 'HEAD')
+        child, _ = create(public, 'HEAD', 'off', 'public-private-reshare')
+        results['operations'].append(dict(label='public-before-reshare', sharing=sharing(public, child, expected)))
+        reshare(child, expected, 'public-private-reshare')
+        verify(child, expected, 'public-private-reshare')
+        results['operations'].append(dict(label='public-after-reshare', sharing=sharing(public, child, expected)))
+        git(child, 'reset', '--hard', 'HEAD', arm='on', timed=True)
+        verify(child, expected, 'public-reset-after-reshare')
+        remove(public, child)
         save()
 
     if args.public_only:
