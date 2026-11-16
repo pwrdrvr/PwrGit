@@ -1,9 +1,25 @@
 import { readFile } from "node:fs/promises";
 import { describe, expect, it } from "vitest";
-import { GIB, cappedNodeOptions, getToolResourcePolicy, readCgroupMemoryLimits, resourceCommand, resourceEnvironment } from "./tool-resource-policy.mjs";
+import { GIB, cappedNodeOptions, getToolResourcePolicy, nodeHeapArguments, readCgroupMemoryLimits, resourceCommand, resourceEnvironment } from "./tool-resource-policy.mjs";
 
 const low = { constrained: true };
 const high = { constrained: false };
+
+describe("heap arguments for isolated compiler processes", () => {
+  it.each([
+    ["", [], []],
+    ["--jitless --max-old-space-size=2048 --trace-warnings", [], ["--max-old-space-size=2048"]],
+    ['--max_old_space_size "2048" --require "a b.cjs"', [], ["--max_old_space_size", "2048"]],
+    ['"--max-old-space-size=2048"', [], ["--max-old-space-size=2048"]],
+    ['--max-old-space-size="2048"', [], ["--max-old-space-size=2048"]],
+    ["--title --max-old-space-size=6144 --max-old-space-size=2048", [], ["--max-old-space-size=2048"]],
+    ["--max-old-space-size=4096", ["--max_old_space_size", "2048", "--jitless"], ["--max-old-space-size=4096", "--max_old_space_size", "2048"]],
+    ["--max-old-space-size-percentage=50", ["--max-old-space-size-percentage", "25"], ["--max-old-space-size-percentage=50", "--max-old-space-size-percentage", "25"]],
+    ["--require --max-old-space-size=6144", ["--title", "--max-old-space-size=6144", "--max-old-space-size=2048"], ["--max-old-space-size=2048"]],
+  ])("selects only real heap options from %s and %j", (options, execArgv, expected) => {
+    expect(nodeHeapArguments(options, execArgv)).toEqual(expected);
+  });
+});
 
 describe("machine capacity", () => {
   it.each([

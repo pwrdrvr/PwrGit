@@ -115,6 +115,35 @@ afterEach(async () => {
 });
 
 describe("maintenance dialog", () => {
+  it("constructs owner stacks after the controller returns and preserves the mounted dialog", async () => {
+    const stacks: string[] = [];
+    const NativeError = globalThis.Error;
+    const record = (error: Error, args: unknown[]): Error => {
+      if (args[0] === "react-stack-top-frame") stacks.push(error.stack ?? "");
+      return error;
+    };
+    // React's development JSX Error is the oracle for the expensive stack
+    // capture. No wall-clock threshold or optimization-tier assumptions.
+    vi.stubGlobal("Error", new Proxy(NativeError, {
+      apply: (target, receiver, args) => record(Reflect.apply(target, receiver, args), args),
+      construct: (target, args) => record(Reflect.construct(target, args), args)
+    }));
+    const dialog = container.querySelector('[role="dialog"]');
+    try {
+      await act(async () => root.render(
+        <StrictMode>
+          <MaintenanceDialog initialTab="gc" onRemoveWorktrees={async () => ({ removed: [], keptDirty: [], failed: [] })} profileId="one" platform="linux" onClose={onClose} />
+        </StrictMode>
+      ));
+      expect(stacks.length).toBeGreaterThan(2);
+      // StrictMode calls the controller twice. Only its small child element
+      // may capture that frame; the dialog's JSX must run after it returns.
+      expect(stacks.filter((stack) => /\bat MaintenanceDialog \(/.test(stack))).toHaveLength(2);
+      expect(container.querySelector('[role="dialog"]')).toBe(dialog);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
   it("ends a branch review that found nothing with Close, last and in the CTA colour", async () => {
     dispatch.mockImplementation(async (name: string) => name === "maintenance:run"
       ? { ok: true, value: summary([{ repo, outcome: "success", message: "Reviewed", candidates: [] }]) }

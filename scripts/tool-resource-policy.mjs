@@ -101,12 +101,14 @@ const NODE_VALUE_OPTIONS = new Set([
   "--unhandled-rejections", "--use-largepages", "--v8-pool-size", "--watch-kill-signal", "--watch-path",
 ]);
 
-function removeHeapOptions(tokens) {
+function partitionHeapOptions(tokens) {
   const retained = [];
+  const heap = [];
   for (let i = 0; i < tokens.length; i++) {
     const token = tokens[i].replace(/^"|"$/g, "");
     if (HEAP_FLAG.test(token)) {
-      if (!token.includes("=") && i + 1 < tokens.length && !tokens[i + 1].startsWith("--")) i++;
+      heap.push(tokens[i]);
+      if (!token.includes("=") && i + 1 < tokens.length && !tokens[i + 1].startsWith("--")) heap.push(tokens[++i]);
     } else {
       retained.push(tokens[i]);
       // A flag-looking value belongs to its option, not to V8's startup
@@ -114,7 +116,18 @@ function removeHeapOptions(tokens) {
       if (NODE_VALUE_OPTIONS.has(token) && i + 1 < tokens.length) retained.push(tokens[++i]);
     }
   }
-  return retained;
+  return { retained, heap };
+}
+
+export function nodeHeapArguments(options = "", execArgv = []) {
+  const tokens = options.match(/(?:[^\s"]|"(?:\\.|[^"\\])*")+/g) ?? [];
+  // NODE_OPTIONS is applied before CLI arguments. Preserve that precedence,
+  // but remove its quoting when forwarding numeric heap options as argv.
+  return [...partitionHeapOptions(tokens).heap.map((token) => token.replaceAll('"', "")), ...partitionHeapOptions(execArgv).heap];
+}
+
+function removeHeapOptions(tokens) {
+  return partitionHeapOptions(tokens).retained;
 }
 
 export function cappedNodeOptions(options = "", heapMiB = 2048) {
