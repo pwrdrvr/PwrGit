@@ -247,3 +247,37 @@ export function StatusMark({ mark }: { mark: StatusMarkKind }): ReactElement {
     </span>
   );
 }
+
+/**
+ * The run's outcome stack without the status card around it: the toast's
+ * bar, the sync button's edge and its hover card. One markup, so every bar
+ * stacks the same segments in the same order.
+ */
+export function OutcomeBar({
+  className,
+  counts,
+  inFlight,
+  queued
+}: {
+  className: string;
+  counts: BulkSyncOutcomeCounts;
+  inFlight: number;
+  queued: number;
+}): ReactElement {
+  return (
+    <span className={`bulk-sync__bar ${className}`} aria-hidden="true">
+      {BULK_SYNC_OUTCOMES.map((outcome) => (
+        <i
+          key={outcome}
+          className={segmentClass(outcome, counts[outcome])}
+          style={{ flexGrow: counts[outcome] }}
+        />
+      ))}
+      <i
+        className={segmentClass("in-flight", inFlight)}
+        style={{ flexGrow: inFlight }}
+      />
+      <i className="is-queued" style={{ flexGrow: queued }} />
+    </span>
+  );
+}

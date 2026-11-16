@@ -215,7 +215,22 @@ match the face. Verb, scope, interval and view live in
   while a run is live, Escape and a backdrop click **minimise**, never
   cancel. Once it has finished they close, as before.
 - **One run at a time** (`nextBulkSyncRun`, pure and tested). A click on a
-  live run shows it instead of starting another; a timed tick skips it.
+  live run opens it **in the dialog**, whatever view it is in or was
+  remembered, instead of starting another; a timed tick skips it. Its hover
+  card says "Click to open"; reopening a remembered toast (or doing nothing
+  on a run already in one) broke that (`useBulkSyncRun.property.test.ts`).
+- **The face shows the live run's position**: "Pull recent 12/27", with the
+  dialog's outcome bar along the split's bottom edge, a live hover card
+  (`SyncRunCard`) and a hint on Show the running sync. All read one value:
+  `BulkSyncDialog` reports its own fold through `onProgress`, hidden runs
+  included, and `acceptBulkSyncProgress` keeps only the live run's report.
+  Don't subscribe to `remote:bulkSyncProgress` a second time for the
+  toolbar. The report goes into `progressStore`, not React state:
+  `LiveSidebarToolbar` subscribes alone, so a report never re-renders the
+  sidebar. The label keeps its words (the name must contain it, SC 2.5.3);
+  the count goes beside it and in `aria-description`, and
+  `.sidebar-toolbar__count` survives the icon step.
+  Design: `design/Sync Progress on the Button - UX Review.dc.html`, 2a and 3a.
 - **The view is remembered.** Minimising writes `toast`, expanding writes
   `dialog`. With nothing written yet, the first dialog minimises itself
   after `FIRST_RUN_MINIMIZE_MS` unless the pointer moved or a key was

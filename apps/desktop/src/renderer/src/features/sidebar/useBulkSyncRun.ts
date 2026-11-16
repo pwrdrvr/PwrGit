@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { BulkSyncMode, BulkSyncSummary, Repo } from "@pwrgit/shared";
 import type { BulkSyncPresentation } from "./BulkSyncDialog";
+import type { BulkSyncLiveProgress } from "./bulk-sync-progress";
 import {
   readBulkSyncView,
   readFetchInterval,
@@ -47,8 +48,11 @@ export type LastBulkSyncRun = {
  * Decides how a new request meets the run already there. Pure, so the
  * one-run-at-a-time rules are tested without a timer or a DOM.
  *
- * - A live run is never doubled. A click on a live run that nobody can see
- *   shows it in the remembered view; a timed tick leaves it alone.
+ * - A live run is never doubled. A click on a live run opens it in the
+ *   dialog, whatever view it is in or was remembered; a timed tick leaves it
+ *   alone. The face's hover card promises "click to open", and a click that
+ *   reopened a toast (or did nothing on a run already in one) broke it.
+ *   design/Sync Progress on the Button - UX Review.dc.html, 3a.
  * - A finished run is replaced by a click. A timed tick skips while a
  *   finished run is still on screen, so it never closes what is being read.
  * - A recent run (fetch or pull) with nothing in the Focused list starts
@@ -67,8 +71,11 @@ export function nextBulkSyncRun(
   }
 ): BulkSyncRun | null {
   if (current !== null && !current.finished) {
-    if (request.auto || current.view !== "hidden") return current;
-    return { ...current, view: request.remembered ?? "dialog" };
+    if (request.auto) return current;
+    // Already watched in the dialog: nothing to change. A first run's dialog
+    // that would minimise itself stays put once someone asks to see it.
+    if (current.view === "dialog" && !current.autoMinimize) return current;
+    return { ...current, view: "dialog", autoMinimize: false };
   }
   // A finished run still on screen is being read (a failure toast stays
   // until dismissed); a timed tick must not swap it for a hidden run.
@@ -90,6 +97,34 @@ export function nextBulkSyncRun(
     finished: false
   };
 }
+
+/** The progress held for the run on screen, keyed by the run it came from. */
+export type HeldBulkSyncProgress = { key: number; progress: BulkSyncLiveProgress };
+
+/**
+ * Take a progress report only from the live run it describes. A report keyed
+ * to an earlier run (its dialog still unmounting) or to a finished one is
+ * dropped, so the face never shows another run's count.
+ */
+export function acceptBulkSyncProgress(
+  held: HeldBulkSyncProgress | null,
+  run: BulkSyncRun | null,
+  key: number,
+  progress: BulkSyncLiveProgress
+): HeldBulkSyncProgress | null {
+  if (run === null || run.finished || run.key !== key) return held;
+  return { key, progress };
+}
+
+/**
+ * The live run's progress, outside React state: the run reports several
+ * times per repository, and as state in the sidebar's hook every report
+ * re-rendered the whole sidebar. The toolbar subscribes alone.
+ */
+export type BulkSyncProgressStore = {
+  get: () => BulkSyncLiveProgress | null;
+  subscribe: (listener: () => void) => () => void;
+};
 
 /** The tooltip line a timed run leaves behind. */
 export function describeAutoRun(
@@ -258,6 +293,36 @@ export function useBulkSyncRun({
     setRun(next);
   }, []);
 
+  // The held report, and the store the toolbar reads it through. `get`
+  // answers only for the live run, so a finished or replaced run shows
+  // nothing even before the next report.
+  const heldRef = useRef<HeldBulkSyncProgress | null>(null);
+  const listenersRef = useRef(new Set<() => void>());
+  const [progressStore] = useState<BulkSyncProgressStore>(() => ({
+    get: () => {
+      const current = runRef.current;
+      const held = heldRef.current;
+      return current !== null && !current.finished && held?.key === current.key
+        ? held.progress
+        : null;
+    },
+    subscribe: (listener) => {
+      listenersRef.current.add(listener);
+      return () => listenersRef.current.delete(listener);
+    }
+  }));
+
+  /** The run component's fold, reported up so the toolbar can draw it. */
+  const reportProgress = useCallback(
+    (key: number, progress: BulkSyncLiveProgress) => {
+      const next = acceptBulkSyncProgress(heldRef.current, runRef.current, key, progress);
+      if (next === heldRef.current) return;
+      heldRef.current = next;
+      for (const listener of listenersRef.current) listener();
+    },
+    []
+  );
+
   // A run belongs to the profile that started it, and so does its record.
   useEffect(
     () => () => {
@@ -288,6 +353,9 @@ export function useBulkSyncRun({
     lastRun,
     verb,
     busy: run !== null && !run.finished,
+    /** The live run's progress; null before its first report and after it ends. */
+    progressStore,
+    reportProgress,
     start,
     runFace,
     pick,

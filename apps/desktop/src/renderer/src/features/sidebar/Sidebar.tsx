@@ -50,7 +50,7 @@ import { LensFilter } from "./LensFilter";
 import { NewWorktreeModal } from "./NewWorktreeModal";
 import { ProfileChip } from "./ProfileChip";
 import { RepoRow } from "./RepoRow";
-import { SidebarToolbar } from "./SidebarToolbar";
+import { LiveSidebarToolbar } from "./SidebarToolbar";
 import { settleSidebarReveal, useSidebarReveal } from "./sidebar-reveal";
 import {
   applySidebarAnchor,
@@ -604,6 +604,8 @@ export function Sidebar({
     repos,
     recentRepos
   });
+  // The run a progress report belongs to; the hook drops any other's.
+  const bulkRunKey = bulk.run?.key ?? -1;
   // Where a window with no remembered lens lands, decided once — the first
   // time repos actually arrive, because until then every count is 0 and
   // "empty" and "not read yet" look identical.
@@ -1261,7 +1263,8 @@ export function Sidebar({
           start screen), so the empty list here keeps one line. Design:
           design/Sidebar Header Toolbar - UX Review.dc.html, 2b and 3;
           design/New User Journey - UX Review.dc.html, 4a. */}
-      <SidebarToolbar
+      <LiveSidebarToolbar
+        progressStore={bulk.progressStore}
         hasProfile={activeProfile !== null}
         rootCount={activeProfile?.roots.length ?? 0}
         repoCount={repos.length}
@@ -1275,6 +1278,7 @@ export function Sidebar({
         syncScope={bulk.scope}
         fetchInterval={bulk.interval}
         syncBusy={bulk.busy}
+        syncAuto={bulk.run?.auto ?? false}
         lastAutoRun={bulk.lastAutoRun}
         lastRun={bulk.lastRun}
         onShowRun={bulk.showRun}
@@ -1492,6 +1496,7 @@ export function Sidebar({
           {...(bulk.run.replay === undefined ? {} : { replay: bulk.run.replay })}
           onViewChange={bulk.setView}
           onFinished={bulk.finish}
+          onProgress={(progress) => bulk.reportProgress(bulkRunKey, progress)}
           onClose={bulk.close}
         />
       )}

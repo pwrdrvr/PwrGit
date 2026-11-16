@@ -6,6 +6,7 @@ import fc from "fast-check";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { BulkSyncSummary } from "@pwrgit/shared";
 import { SidebarToolbar, addMenuReasons, lastRunHint, syncFace } from "./SidebarToolbar";
+import { countOutcomes, type BulkSyncLiveProgress } from "./bulk-sync-progress";
 
 (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT: boolean })
   .IS_REACT_ACT_ENVIRONMENT = true;
@@ -398,5 +399,99 @@ describe("lastRunHint", () => {
       } as unknown as BulkSyncSummary
     });
     expect(hint).toMatch(/^Fetched 3 of 83 repositories · cancelled · \d/);
+  });
+});
+
+/**
+ * A live run's position on the face, in the hover card and in the menu, so a
+ * timed run nobody opened still says how far along it is.
+ * design/Sync Progress on the Button - UX Review.dc.html, 2a and 3a.
+ */
+describe("a live run on the sync button", () => {
+  const progress: BulkSyncLiveProgress = {
+    counts: { ...countOutcomes([]), success: 10, skipped: 1, failed: 1 },
+    inFlight: 2,
+    queued: 13,
+    startedAt: Date.now() - 42_000,
+    path: "~/pwrdrvr/PwrAgnt"
+  };
+
+  it("adds 12/27 to the face and keeps the button's name and label", () => {
+    render({
+      hasProfile: true,
+      rootCount: 1,
+      repoCount: 40,
+      recentCount: 27,
+      syncVerb: "pull",
+      syncScope: "recent",
+      syncBusy: true,
+      syncProgress: progress
+    });
+    const face = button("Try pull recent");
+    expect(face.textContent).toBe("Pull recent12/27");
+    expect(face.getAttribute("aria-description")).toBe(
+      "12 of 27 repositories finished, 1 failed"
+    );
+    expect(container.querySelector(".sidebar-toolbar__progress")).not.toBeNull();
+  });
+
+  it("draws nothing extra until the run reports, or once it is over", () => {
+    render({ hasProfile: true, rootCount: 1, repoCount: 3, syncVerb: "pull", syncBusy: true });
+    expect(button("Try pull all").textContent).toBe("Pull all");
+    expect(container.querySelector(".sidebar-toolbar__progress")).toBeNull();
+    render({ hasProfile: true, rootCount: 1, repoCount: 3, syncVerb: "pull", syncProgress: progress });
+    expect(container.querySelector(".sidebar-toolbar__count")).toBeNull();
+  });
+
+  it("draws the run, not the setup, in the hover card", () => {
+    render({
+      hasProfile: true,
+      rootCount: 1,
+      repoCount: 40,
+      recentCount: 27,
+      syncVerb: "pull",
+      syncScope: "recent",
+      fetchInterval: 5,
+      syncBusy: true,
+      syncAuto: true,
+      syncProgress: progress
+    });
+    act(() => {
+      button("Try pull recent").dispatchEvent(new MouseEvent("mouseover", { bubbles: true }));
+    });
+    const card = document.querySelector(".sync-run-card");
+    expect(card?.textContent).toContain("Pulling the Focused list");
+    expect(card?.textContent).toContain("12 of 27");
+    expect(card?.textContent).toContain("1 failed");
+    expect(card?.textContent).toContain("~/pwrdrvr/PwrAgnt");
+    expect(card?.textContent).toContain("Automatic · every 5 minutes");
+    expect(card?.textContent).toContain("Click to open");
+  });
+});
+
+describe("syncFace while live", () => {
+  it("counts the run once it reports", () => {
+    expect(
+      syncFace({
+        verb: "fetch",
+        scope: "all",
+        repoCount: 3,
+        recentCount: 1,
+        interval: 0,
+        busy: true,
+        progress: {
+          counts: { ...countOutcomes([]), success: 1 },
+          inFlight: 1,
+          queued: 1,
+          startedAt: 0,
+          path: null
+        }
+      })
+    ).toMatchObject({
+      name: "Fetch all repos",
+      label: "Fetch all",
+      liveCount: "1/3",
+      description: "1 of 3 repositories finished"
+    });
   });
 });

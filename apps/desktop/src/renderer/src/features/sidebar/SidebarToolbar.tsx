@@ -1,4 +1,11 @@
-import { useRef, useState, type ReactElement } from "react";
+import {
+  useEffect,
+  useRef,
+  useState,
+  useSyncExternalStore,
+  type ReactElement,
+  type ReactNode
+} from "react";
 import { ChevronGlyph } from "../../lib/ChevronGlyph";
 import { PlusGlyph } from "../../lib/PlusGlyph";
 import { PullGlyph } from "../../lib/PullGlyph";
@@ -8,7 +15,21 @@ import { useFitLadder } from "../../lib/useFitLadder";
 import { hoverTooltip, useViewportTooltip } from "../../lib/useViewportTooltip";
 import { ContextMenu, type MenuItem } from "../shell/ContextMenu";
 import { finishedHeadline } from "./BulkSyncToast";
-import type { LastBulkSyncRun } from "./useBulkSyncRun";
+import { OutcomeBar } from "./BulkSyncStatus";
+import { formatElapsed } from "../remote/remote-activity";
+import { useSecondsClock } from "../../state/useRemoteActivity";
+import {
+  BULK_SYNC_OUTCOMES,
+  estimateRemainingMs,
+  faceCount,
+  finishedCount,
+  formatRemaining,
+  liveTotal,
+  progressValueText,
+  runningSyncHint,
+  type BulkSyncLiveProgress
+} from "./bulk-sync-progress";
+import type { BulkSyncProgressStore, LastBulkSyncRun } from "./useBulkSyncRun";
 import {
   FETCH_INTERVALS,
   fetchIntervalLabel,
@@ -82,7 +103,18 @@ export function syncFace(input: {
   busy: boolean;
   /** The last timed run's result, when it is worth a line. */
   lastAuto?: string | undefined;
-}): { name: string; label: string; tooltip: string; count: number } {
+  /** The live run's progress, once it has reported. */
+  progress?: BulkSyncLiveProgress | null;
+}): {
+  name: string;
+  label: string;
+  tooltip: string;
+  count: number;
+  /** "12/27" while a run is live; kept at the icon-only step. */
+  liveCount?: string;
+  /** The position in words, for `aria-description`: the name stays put. */
+  description?: string;
+} {
   const recent = input.scope === "recent";
   const count = recent ? input.recentCount : input.repoCount;
   const where = recent
@@ -99,22 +131,23 @@ export function syncFace(input: {
       `${input.verb === "pull" ? "Pulling" : "Fetching"} automatically ${every}.`
     );
   }
-  if (input.busy) lines.push("Running now — click to watch.");
+  if (input.busy) lines.push("Running now — click to open.");
   else if (input.lastAuto !== undefined) lines.push(input.lastAuto);
   const word = recent ? "recent" : "all";
-  return input.verb === "pull"
-    ? {
-        name: `Try pull ${word}`,
-        label: `Pull ${word}`,
-        tooltip: lines.join(" "),
-        count
-      }
-    : {
-        name: `Fetch ${word} repos`,
-        label: `Fetch ${word}`,
-        tooltip: lines.join(" "),
-        count
-      };
+  const face =
+    input.verb === "pull"
+      ? { name: `Try pull ${word}`, label: `Pull ${word}`, tooltip: lines.join(" "), count }
+      : { name: `Fetch ${word} repos`, label: `Fetch ${word}`, tooltip: lines.join(" "), count };
+  // While a run is live the face says how far along it is: "Pull recent
+  // 12/27". The label keeps its words, so the accessible name still contains
+  // it (SC 2.5.3) and E2E still finds the button; the position in words goes
+  // in its description. design/Sync Progress on the Button - UX Review.dc.html, 2a.
+  if (!input.busy || input.progress == null) return face;
+  return {
+    ...face,
+    liveCount: faceCount(input.progress),
+    description: progressValueText(input.progress.counts, liveTotal(input.progress))
+  };
 }
 
 /** Show last run's second line: what it did, when, and whether you ran it. */
@@ -154,6 +187,8 @@ export function SidebarToolbar({
   syncScope = "all",
   fetchInterval = 0,
   syncBusy = false,
+  syncProgress = null,
+  syncAuto = false,
   lastAutoRun,
   lastRun = null,
   tagCheckAfterSync = null,
@@ -179,6 +214,10 @@ export function SidebarToolbar({
   fetchInterval?: FetchInterval;
   /** A run is in flight, possibly a timed fetch nobody is watching. */
   syncBusy?: boolean;
+  /** The live run's progress, from the run's own fold. */
+  syncProgress?: BulkSyncLiveProgress | null;
+  /** The live run was started by the timer. */
+  syncAuto?: boolean;
   lastAutoRun?: string | undefined;
   /** The newest finished run, for Sync options → Show last run. */
   lastRun?: LastBulkSyncRun | null;
@@ -225,8 +264,34 @@ export function SidebarToolbar({
     recentCount,
     interval: fetchInterval,
     busy: syncBusy,
-    lastAuto: lastAutoRun
+    lastAuto: lastAutoRun,
+    progress: syncProgress
   });
+  // While a run is live the hover card draws the run, not the setup; it is
+  // replaced in place as reports arrive, so it never blinks.
+  const faceTip: ReactNode =
+    syncBusy && syncProgress !== null ? (
+      <SyncRunCard
+        progress={syncProgress}
+        verb={syncVerb}
+        scope={syncScope}
+        interval={fetchInterval}
+        auto={syncAuto}
+      />
+    ) : (
+      face.tooltip
+    );
+  const faceRef = useRef<HTMLButtonElement>(null);
+  useEffect(() => {
+    // Only while the card on screen is the face's: the toolbar's buttons
+    // share one tooltip, and a remembered "hovered" flag outlived the card
+    // when focus moved to the wrench under a resting pointer.
+    const el = faceRef.current;
+    if (el !== null && (el.matches(":hover") || el === document.activeElement)) {
+      tip.update(faceTip);
+    }
+    // `faceTip` is a new element every render; its inputs are what change.
+  }, [syncBusy, syncProgress, face.tooltip, syncAuto]);
   const syncItems: MenuItem[] = [
     ...SYNC_ACTIONS.map(({ verb, scope }): MenuItem => {
       const recent = scope === "recent";
@@ -289,6 +354,15 @@ export function SidebarToolbar({
           type: "item",
           label: "Show the running sync",
           inset: true,
+          ...(syncProgress === null
+            ? {}
+            : {
+                hint: runningSyncHint(
+                  syncProgress,
+                  syncAuto,
+                  formatElapsed(Math.max(0, Date.now() - syncProgress.startedAt))
+                )
+              }),
           onSelect: () => onShowRun?.()
         }
       : lastRun === null
@@ -357,12 +431,14 @@ export function SidebarToolbar({
           "down", so it swaps to the ring instead (styles/AGENTS.md). */}
       <div className="sidebar-toolbar__split">
         <button
+          ref={faceRef}
           type="button"
           className="sidebar-toolbar__btn sidebar-toolbar__sync"
           aria-label={face.name}
+          aria-description={face.description}
           aria-busy={syncBusy}
           disabled={!hasProfile || face.count === 0}
-          {...hoverTooltip(tip, face.tooltip)}
+          {...hoverTooltip(tip, faceTip)}
           onClick={onSync}
         >
           {syncVerb === "fetch" ? (
@@ -373,6 +449,9 @@ export function SidebarToolbar({
             <PullGlyph size={12} />
           )}
           <span className="sidebar-toolbar__label">{face.label}</span>
+          {face.liveCount !== undefined && (
+            <span className="sidebar-toolbar__count">{face.liveCount}</span>
+          )}
         </button>
         <button
           ref={syncMenuRef}
@@ -400,6 +479,14 @@ export function SidebarToolbar({
               (lib/ChevronGlyph.tsx). */}
           <ChevronGlyph size={10} up={syncMenu !== null} />
         </button>
+        {syncBusy && syncProgress !== null && (
+          <OutcomeBar
+            className="sidebar-toolbar__progress"
+            counts={syncProgress.counts}
+            inFlight={syncProgress.inFlight}
+            queued={syncProgress.queued}
+          />
+        )}
       </div>
       <button
         ref={lastRef}
@@ -456,4 +543,86 @@ export function SidebarToolbar({
       {tip.tooltipNode}
     </div>
   );
+}
+
+/**
+ * The sync button's hover card while a run is live: what it is doing, how
+ * far along, what went wrong so far, and that a click opens it. A tooltip,
+ * with no controls, so nothing has to be chased with the pointer; the face
+ * itself opens the dialog. design/Sync Progress on the Button - UX
+ * Review.dc.html, 3a.
+ */
+export function SyncRunCard({
+  progress,
+  verb,
+  scope,
+  interval,
+  auto
+}: {
+  progress: BulkSyncLiveProgress;
+  verb: SyncVerb;
+  scope: FetchScope;
+  interval: FetchInterval;
+  auto: boolean;
+}): ReactElement {
+  const now = useSecondsClock(true);
+  const elapsed = Math.max(0, now - progress.startedAt);
+  const finished = finishedCount(progress.counts);
+  const total = liveTotal(progress);
+  const remaining = estimateRemainingMs(elapsed, finished, total);
+  const every = fetchIntervalPhrase(interval);
+  const title = `${verb === "pull" ? "Pulling" : "Fetching"} ${
+    scope === "recent" ? "the Focused list" : "every repository"
+  }`;
+  const footer = [
+    auto ? `Automatic${every === null ? "" : ` · ${every}`}` : "Started by you",
+    remaining === null ? null : formatRemaining(remaining),
+    "Click to open"
+  ].filter((part) => part !== null);
+  return (
+    <span className="sync-run-card">
+      <span className="sync-run-card__head">
+        <strong>{title}</strong>
+        <span className="sync-run-card__clock">{formatElapsed(elapsed)}</span>
+      </span>
+      <OutcomeBar
+        className="sync-run-card__bar"
+        counts={progress.counts}
+        inFlight={progress.inFlight}
+        queued={progress.queued}
+      />
+      <span className="sync-run-card__counts">
+        <span>
+          <strong>{finished}</strong> of {total}
+        </span>
+        {BULK_SYNC_OUTCOMES.filter((outcome) => progress.counts[outcome] > 0).map(
+          (outcome) => (
+            <span key={outcome} className={`sync-run-card__count is-${outcome}`}>
+              <strong>{progress.counts[outcome]}</strong> {outcome}
+            </span>
+          )
+        )}
+        {progress.inFlight > 0 && <span>{progress.inFlight} running</span>}
+        {progress.queued > 0 && <span>{progress.queued} queued</span>}
+      </span>
+      {progress.path !== null && (
+        <span className="sync-run-card__path">{progress.path}</span>
+      )}
+      <span className="sync-run-card__foot">{footer.join(" · ")}</span>
+    </span>
+  );
+}
+
+/**
+ * The toolbar with the live run's progress read from its store, so a
+ * progress report re-renders this row and not the whole sidebar.
+ */
+export function LiveSidebarToolbar({
+  progressStore,
+  ...props
+}: Omit<Parameters<typeof SidebarToolbar>[0], "syncProgress"> & {
+  progressStore: BulkSyncProgressStore;
+}): ReactElement {
+  const progress = useSyncExternalStore(progressStore.subscribe, progressStore.get);
+  return <SidebarToolbar {...props} syncProgress={progress} />;
 }
