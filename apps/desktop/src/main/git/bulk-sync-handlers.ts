@@ -2,6 +2,7 @@ import { err, ok } from "@pwrgit/shared";
 import type { CommandBus } from "../command-bus";
 import { emitEvent } from "../ipc";
 import { logMain } from "../logs";
+import { withResourceSource } from "../diagnostics/resource-usage";
 import type { DB } from "../persistence/db";
 import { bulkSyncRepositories, type BulkSyncRepoInput } from "./bulk-sync";
 import { execGit, sanitizeGitLogDetail } from "./dugite";
@@ -145,7 +146,7 @@ export function registerBulkSyncHandlers(
       `bulk ${req.mode} started for profile ${req.profileId}: ${repos.length} repositories`
     );
     try {
-      const summary = await bulkSyncRepositories(execGit, repos, {
+      const summary = await withResourceSource(req.mode === "fetch" ? "bulk-fetch" : "bulk-pull", () => bulkSyncRepositories(execGit, repos, {
         operationId: req.operationId,
         mode: req.mode,
         signal: controller.signal,
@@ -203,7 +204,7 @@ export function registerBulkSyncHandlers(
             `bulk ${req.mode} ${result.outcome} for ${repo.path}`
           );
         }
-      });
+      }));
       logMain(
         summary.cancelled ? "warn" : "info",
         "remote",

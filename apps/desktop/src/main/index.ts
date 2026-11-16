@@ -144,6 +144,8 @@ import {
 } from "./renderer-errors";
 import { watchEventLoopStalls } from "./event-loop-stalls";
 import { watchProcessIds } from "./process-ids";
+import { watchResourceUsage } from "./diagnostics/resource-monitor";
+import { withResourceSource } from "./diagnostics/resource-usage";
 import { SYSTEM_SHUTDOWN_FLUSH_MS, watchSystemShutdown } from "./system-shutdown";
 import { ensureMacKeychainAccess } from "./mac-keychain-access";
 import { openDatabase } from "./persistence/db";
@@ -464,6 +466,8 @@ if (!gotSingleInstanceLock) {
     // The dev checkout's branch and commit as they were at launch.
     void captureDiagnosticsBuild();
     watchProcessIds();
+    const stopResourceUsage = watchResourceUsage(join(app.getPath("logs"), "resources"));
+    app.once("before-quit", stopResourceUsage);
     // Started once the log file is open, so a stall during the rest of startup
     // lands in main.log. Sleep stops the clock the heartbeat reads on some
     // platforms and not others; pausing across it keeps a closed lid from
@@ -923,7 +927,7 @@ if (!gotSingleInstanceLock) {
     const rootDiscovery = createRootDiscovery({
       profiles: () => profiles.list(),
       indexer,
-      rescan: (profile, { force }) => rescanInBackground(profile, { force }),
+      rescan: (profile, { force }) => withResourceSource("root-discovery", () => rescanInBackground(profile, { force })),
       onFound: (profile, dirs) =>
         logMain(
           "info",
@@ -1637,10 +1641,13 @@ if (!gotSingleInstanceLock) {
         logMain("error", "stash", "stash watch failed:", cause)
     });
     const refreshActive = (): void => {
-      if (activeWorktreeId === null) return;
-      void refresher.refreshWorktree(activeWorktreeId);
-      announceChangeSetMoves(activeWorktreeId);
-      announceStashMoves(activeWorktreeId);
+      const id = activeWorktreeId;
+      if (id === null) return;
+      withResourceSource("active-refresh", () => {
+        void refresher.refreshWorktree(id);
+        announceChangeSetMoves(id);
+        announceStashMoves(id);
+      });
     };
     app.on("browser-window-focus", () => {
       refreshActive();
@@ -1654,7 +1661,7 @@ if (!gotSingleInstanceLock) {
     // what is due (see VisibleWorktreeRefresher) and is usually a few stats.
     const visibleStatePoll = setInterval(() => {
       remoteTipChecker.tick();
-      void visibleRefresher.tick().catch((cause: unknown) =>
+      void withResourceSource("visible-refresh", () => visibleRefresher.tick()).catch((cause: unknown) =>
         logMain("warn", "state", "visible-row refresh failed:", cause)
       );
     }, 5_000);
@@ -1665,8 +1672,7 @@ if (!gotSingleInstanceLock) {
     const sweepAuthored = (): void => {
       if (authoredSweeping) return;
       authoredSweeping = true;
-      void stateService
-        .sweepAuthored()
+      void withResourceSource("authored-sweep", () => stateService.sweepAuthored())
         .then((moved) => {
           for (const [profileId, repoIds] of moved) {
             emitEvent("repo:changed", { profileId, repoIds });
