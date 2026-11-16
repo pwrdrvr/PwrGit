@@ -2,13 +2,14 @@ import { readFile, stat, access } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import type { BulkSyncRemoteResult, BulkSyncWorktreeResult } from "@pwrgit/shared";
 import { NO_OPTIONAL_LOCKS, type GitExec } from "./dugite";
+import { parseStatus } from "./worktree-state";
 
 export const BULK_OPERATION_STATE_PATHS = [
   "MERGE_HEAD", "CHERRY_PICK_HEAD", "REVERT_HEAD", "BISECT_LOG", "rebase-merge", "rebase-apply"
 ] as const;
 
 type Ref = { name: string; oid: string; upstream: string; remote: string; track: string; path: string; symbolic: string };
-type Remote = { name: string; skipFetchAll: boolean; configError: boolean; standardMapping: boolean };
+type Remote = { name: string; skipFetchAll: boolean; configError: boolean; standardMapping: boolean; noTags: boolean };
 export type BulkSyncSnapshot = {
   path: string;
   refs: Map<string, Ref>;
@@ -70,7 +71,9 @@ export async function readBulkSyncSnapshot(git: GitExec, cwd: string): Promise<B
     const mappings = config.get(`remote.${name}.fetch`) ?? [];
     remotes.push({
       name, skipFetchAll, configError: false,
-      standardMapping: mappings.length === 1 && mappings[0] === `+refs/heads/*:refs/remotes/${name}/*`
+      standardMapping: mappings.length === 1 && mappings[0] === `+refs/heads/*:refs/remotes/${name}/*`,
+      noTags: config.get(`remote.${name}.tagopt`)?.at(-1) === "--no-tags" &&
+        !config.has("fetch.prunetags") && !config.has(`remote.${name}.prunetags`)
     });
   }
   const refs = await readBulkSyncRefs(git, cwd);
@@ -88,7 +91,7 @@ export async function readBulkSyncSnapshot(git: GitExec, cwd: string): Promise<B
 export async function readBulkSyncRefs(git: GitExec, cwd: string): Promise<Pick<BulkSyncSnapshot, "refs" | "checkouts"> | null> {
   const raw = await git([
     "for-each-ref", "--format=%(refname)%00%(objectname)%00%(upstream)%00%(upstream:remotename)%00%(upstream:trackshort)%00%(worktreepath)%00%(symref)",
-    "refs/heads", "refs/remotes"
+    "refs/heads", "refs/remotes", "refs/tags"
   ], cwd, NO_OPTIONAL_LOCKS);
   if (!raw.ok || raw.value.exitCode !== 0) return null;
   const refs = new Map<string, Ref>();
@@ -104,6 +107,15 @@ export async function readBulkSyncRefs(git: GitExec, cwd: string): Promise<Pick<
     if (path !== "") checkouts.set(resolve(path), ref);
   }
   return { refs, checkouts };
+}
+
+/** Include tag names/ids and symbolic refs: a newly followed tag or a changed
+ * default-branch alias must still invalidate the repository's displayed state. */
+export function bulkSyncRefsChanged(before: BulkSyncSnapshot["refs"], after: BulkSyncSnapshot["refs"]): boolean {
+  return before.size !== after.size || [...before].some(([name, ref]) => {
+    const next = after.get(name);
+    return next === undefined || ref.oid !== next.oid || ref.symbolic !== next.symbolic;
+  });
 }
 
 /** Only the ordinary wildcard mapping can use this shortcut. Unusual refspecs
@@ -131,7 +143,7 @@ export async function unchangedWorktree(
   snapshot: BulkSyncSnapshot,
   path: string,
   remotes: ReadonlyMap<string, BulkSyncRemoteResult>
-): Promise<Pick<BulkSyncWorktreeResult, "branch" | "outcome" | "reason" | "beforeHead" | "afterHead"> | null> {
+): Promise<Pick<BulkSyncWorktreeResult, "branch" | "outcome" | "reason" | "message" | "beforeHead" | "afterHead"> | null> {
   const ref = snapshot.checkouts.get(resolve(path));
   if (ref === undefined) return null;
   const remote = remotes.get(ref.remote);
@@ -158,6 +170,23 @@ export async function unchangedWorktree(
     if (operating.some(Boolean)) return null;
   } catch { return null; }
   const branch = ref.name.slice("refs/heads/".length);
+  // This runs under the checkout lock, after networking and queue waits.
+  // Git resolves the live HEAD/upstream relationship and reads unmerged index
+  // stages, including stash-pop conflicts that have no operation marker.
+  // Omitting untracked enumeration avoids the expensive full safety scan;
+  // any uncertain or changed answer goes through that scan before mutation.
+  const raw = await git(["status", "--porcelain=v2", "--branch", "--untracked-files=no"], path, NO_OPTIONAL_LOCKS);
+  if (!raw.ok || raw.value.exitCode !== 0) return null;
+  const lines = raw.value.stdout.split("\n");
+  if (lines.some((line) => line.startsWith("u "))) return {
+    branch, outcome: "skipped", reason: "conflicts", message: "The worktree has unresolved conflicts."
+  };
+  const live = parseStatus(raw.value.stdout);
+  const upstreamName = lines.find((line) => line.startsWith("# branch.upstream "))?.slice(18).trim() ?? "";
+  const expectedUpstream = ref.upstream.replace(/^refs\/(?:remotes|heads)\//, "");
+  if (live.branch !== branch || live.head !== ref.oid || live.upstreamGone || upstreamName !== expectedUpstream) return null;
+  if (current && (live.ahead !== 0 || live.behind !== 0)) return null;
+  if (ahead && (live.ahead <= 0 || live.behind !== 0)) return null;
   if (current) return { branch, outcome: "up_to_date", beforeHead: ref.oid, afterHead: ref.oid };
   return { branch, outcome: "skipped", reason: ahead ? "ahead" : "no_upstream" };
 }

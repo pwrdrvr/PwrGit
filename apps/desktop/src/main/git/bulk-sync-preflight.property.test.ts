@@ -1,5 +1,5 @@
 import { execFileSync } from "node:child_process";
-import { appendFileSync, cpSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { appendFileSync, cpSync, existsSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import fc from "fast-check";
@@ -79,11 +79,82 @@ function fixture() {
 }
 
 describe("bulk pull remote preflight, with Git as the oracle", () => {
-  // Rule: unchanged remote tips and current/untracked checkouts need no fetch
-  // or per-checkout Git probes, regardless of sibling count or loose files.
+  it.each(["network", "worktree-lock"])("revalidates a same-branch reset during %s before reporting current", async (phase) => {
+    const f = fixture();
+    git(f.path, "config", "remote.origin.tagOpt", "--no-tags");
+    const before = git(f.path, "rev-parse", "HEAD");
+    const target = f.advance();
+    await f.run();
+    let reset = false;
+    const resetOnce = () => {
+      if (reset) return;
+      reset = true;
+      git(f.path, "reset", "--hard", before);
+    };
+    const exec: GitExec = async (args, cwd, options) => {
+      if (phase === "network" && ["ls-remote", "fetch"].includes(args[0]!)) resetOnce();
+      return f.exec(args, cwd, options);
+    };
+    const result = await bulkSyncRepositories(exec, [f.input], {
+      operationId: "reset-during-pull", mode: "soft-pull",
+      runWorktree: async (_id, operation) => {
+        if (phase === "worktree-lock") resetOnce();
+        return operation();
+      }
+    });
+    expect(reset).toBe(true);
+    expect(git(f.path, "rev-parse", "HEAD")).toBe(target);
+    expect(result.counts.worktrees.updated).toBe(1);
+  });
+
+  it("revalidates an upstream moved by an external fetch while waiting for the checkout lock", async () => {
+    const f = fixture();
+    let target = "";
+    const result = await bulkSyncRepositories(f.exec, [f.input], {
+      operationId: "upstream-during-pull", mode: "soft-pull",
+      runWorktree: async (_id, operation) => {
+        target = f.advance();
+        await systemGit(["fetch", "origin"], f.path);
+        return operation();
+      }
+    });
+    expect(result.counts.worktrees.updated).toBe(1);
+    expect(git(f.path, "rev-parse", "HEAD")).toBe(target);
+  });
+
+  it("reports conflicted stash-pop index entries even when HEAD matches its upstream", async () => {
+    const f = fixture();
+    writeFileSync(join(f.path, "file.txt"), "stashed changes\n");
+    git(f.path, "stash", "push");
+    const target = f.advance();
+    await f.run();
+    expect(() => git(f.path, "stash", "pop")).toThrow();
+    expect(git(f.path, "ls-files", "--unmerged")).not.toBe("");
+    for (const marker of ["MERGE_HEAD", "CHERRY_PICK_HEAD", "REVERT_HEAD", "BISECT_LOG", "rebase-merge", "rebase-apply"])
+      expect(existsSync(join(f.path, ".git", marker))).toBe(false);
+    expect(git(f.path, "rev-parse", "HEAD")).toBe(target);
+    const result = await f.run();
+    expect(result.results[0]?.worktrees[0]?.reason).toBe("conflicts");
+    expect(result.results[0]?.outcome).toBe("skipped");
+    expect(git(f.path, "ls-files", "--unmerged")).not.toBe("");
+  });
+
+  it.each([false, true])("follows a newly published reachable tag without a branch change (annotated: %s)", async (annotated) => {
+    const f = fixture();
+    git(f.publisher, "tag", ...(annotated ? ["-a", "-m", "new release"] : []), "new-release");
+    git(f.publisher, "push", "origin", "refs/tags/new-release");
+    const result = await f.run();
+    expect(result.counts.repos.success).toBe(1);
+    expect(git(f.path, "for-each-ref", "--format=%(objectname)", "refs/tags/new-release"))
+      .toBe(git(f.publisher, "rev-parse", "refs/tags/new-release"));
+    expect(f.calls.some((c) => c.args.some((arg) => ["--tags", "--force", "--prune-tags"].includes(arg)))).toBe(false);
+  });
+
+  // Rule: an unchanged cycle performs one tag-following fetch per remote and
+  // one lightweight verification per checkout, without full safety scans.
   // Six real-Git runs cover generated layouts without multiplying Windows'
   // process-start cost by fast-check's default 100 runs.
-  it("keeps unchanged-cycle process count independent of worktree count", async () => {
+  it("bounds unchanged-cycle work to one lightweight verification per checkout", async () => {
     await fc.assert(fc.asyncProperty(
       fc.integer({ min: 1, max: 5 }), fc.boolean(), fc.boolean(),
       async (siblings, dirty, packed) => {
@@ -98,10 +169,13 @@ describe("bulk pull remote preflight, with Git as the oracle", () => {
         if (packed) git(f.path, "pack-refs", "--all");
         const result = await f.run();
         expect(result.counts.repos.success).toBe(1);
-        expect(f.calls.filter((c) => c.args[0] === "fetch")).toHaveLength(0);
-        expect(f.calls.filter((c) => c.args[0] === "status")).toHaveLength(0);
-        expect(f.calls.filter((c) => c.args[0] === "ls-remote")).toHaveLength(1);
-        expect(f.calls.length).toBeLessThanOrEqual(5);
+        expect(f.calls.filter((c) => c.args[0] === "fetch")).toHaveLength(1);
+        const probes = f.calls.filter((c) => c.args[0] === "status");
+        expect(probes).toHaveLength(f.input.worktrees.length);
+        expect(probes.every((c) => c.args.includes("--branch") && c.args.includes("--untracked-files=no"))).toBe(true);
+        expect(f.calls.filter((c) => c.args[0] === "ls-remote")).toHaveLength(0);
+        expect(f.calls.length).toBe(f.input.worktrees.length + 4);
+        expect(result.results[0]?.refsChanged).toBe(false);
         for (const wt of f.input.worktrees) expect(git(wt.path, "rev-parse", "HEAD")).toBe(git(f.publisher, "rev-parse", "HEAD"));
       }
     ), { numRuns: 6 });
@@ -118,17 +192,30 @@ describe("bulk pull remote preflight, with Git as the oracle", () => {
     const pulled = await f.run();
     expect(pulled.counts.worktrees.updated).toBe(1);
     expect(git(f.path, "rev-parse", "HEAD")).toBe(target);
-    expect(f.calls.some((c) => c.args[0] === "fetch")).toBe(false);
+    expect(f.calls.filter((c) => c.args[0] === "fetch")).toHaveLength(1);
+    expect(pulled.results[0]?.refsChanged).toBe(false);
     expect(f.calls.some((c) => c.args[0] === "status")).toBe(true);
   });
 
-  it("checks one current checkout with three processes and no worktree probes", async () => {
+  it("checks one current checkout with five processes, including live verification and tag following", async () => {
     const f = fixture();
     const result = await f.run();
     expect(result.counts.worktrees.upToDate).toBe(1);
-    expect(result.counts.remotes.fetched).toBe(0);
+    expect(result.counts.remotes.fetched).toBe(1);
+    expect(result.results[0]?.refsChanged).toBe(false);
+    expect(f.calls.map((call) => call.args[0])).toEqual(["config", "for-each-ref", "fetch", "for-each-ref", "status"]);
+  });
+
+  it("skips fetching only when ordinary tag following is explicitly disabled", async () => {
+    const f = fixture();
+    git(f.path, "config", "remote.origin.tagOpt", "--no-tags");
+    git(f.publisher, "tag", "do-not-follow");
+    git(f.publisher, "push", "origin", "refs/tags/do-not-follow");
+    const result = await f.run();
     expect(result.results[0]?.remotes[0]?.reason).toBe("unchanged");
-    expect(f.calls.map((call) => call.args[0])).toEqual(["config", "for-each-ref", "ls-remote"]);
+    expect(result.results[0]?.refsChanged).toBeUndefined();
+    expect(f.calls.map((c) => c.args[0])).toEqual(["config", "for-each-ref", "ls-remote", "status"]);
+    expect(git(f.path, "tag", "-l", "do-not-follow")).toBe("");
   });
 
   it("inspects only the checkout whose upstream moved", async () => {
@@ -144,7 +231,8 @@ describe("bulk pull remote preflight, with Git as the oracle", () => {
     expect(result.counts.worktrees.updated).toBe(1);
     expect(result.counts.worktrees.upToDate).toBe(1);
     expect(git(f.path, "rev-parse", "HEAD")).toBe(target);
-    expect(f.calls.filter((c) => c.args[0] === "status").map((c) => c.cwd)).toEqual([f.path, f.path]);
+    expect(f.calls.filter((c) => c.args[0] === "status" && c.args.includes("--untracked-files=all")).map((c) => c.cwd)).toEqual([f.path, f.path]);
+    expect(f.calls.filter((c) => c.args[0] === "status" && c.args.includes("--untracked-files=no")).map((c) => c.cwd)).toEqual([path]);
   });
 
   it("notices an external reset even after an unchanged check", async () => {
@@ -156,7 +244,7 @@ describe("bulk pull remote preflight, with Git as the oracle", () => {
     f.calls.length = 0;
     expect((await f.run()).counts.worktrees.updated).toBe(1);
     expect(git(f.path, "rev-parse", "HEAD")).toBe(target);
-    expect(f.calls.some((c) => c.args[0] === "fetch")).toBe(false);
+    expect(f.calls.filter((c) => c.args[0] === "fetch")).toHaveLength(1);
   });
 
   it("fetches and prunes when the remote deletes a tracked branch", async () => {
@@ -217,7 +305,7 @@ describe("bulk pull remote preflight, with Git as the oracle", () => {
     const result = await f.run();
     expect(result.results[0]?.worktrees[1]?.outcome).toBe("updated");
     expect(git(path, "rev-parse", "HEAD")).toBe(target);
-    expect(f.calls.filter((c) => c.args[0] === "ls-remote")).toHaveLength(1);
+    expect(f.calls.filter((c) => c.args[0] === "ls-remote")).toHaveLength(0);
   });
 
   it("observes new tracking configuration without a stale cached answer", async () => {
@@ -242,7 +330,10 @@ describe("bulk pull remote preflight, with Git as the oracle", () => {
     git(f.path, "config", "extensions.worktreeConfig", "true");
     const result = await f.run();
     expect(result.counts.worktrees.upToDate).toBe(2);
-    expect(f.calls.map((c) => c.args[0])).toEqual(["config", "for-each-ref", "ls-remote", "config"]);
+    expect(f.calls.filter((c) => c.args[0] === "config")).toHaveLength(2);
+    expect(f.calls.filter((c) => c.args[0] === "status")).toHaveLength(2);
+    expect(f.calls.filter((c) => c.args[0] === "fetch")).toHaveLength(1);
+    expect(f.calls).toHaveLength(7);
   });
 
   it("resolves conditional branch tracking in the checkout that owns it", async () => {
@@ -279,6 +370,7 @@ describe("bulk pull remote preflight, with Git as the oracle", () => {
   it("interprets skipFetchAll booleans like Git, including empty and valueless settings", async () => {
     await fc.assert(fc.asyncProperty(fc.constantFrom("", "true", "false", "yes", "no", "2", "-1", null), async (value) => {
       const f = fixture();
+      git(f.path, "config", "remote.origin.tagOpt", "--no-tags");
       if (value === null) appendFileSync(join(f.path, ".git", "config"), '\n[remote "origin"]\n\tskipFetchAll\n');
       else git(f.path, "config", "remote.origin.skipFetchAll", value);
       const skip = git(f.path, "config", "--bool", "--get", "remote.origin.skipFetchAll") === "true";
@@ -288,13 +380,19 @@ describe("bulk pull remote preflight, with Git as the oracle", () => {
     }), { numRuns: 10, examples: [[""], [null], ["2"], ["-1"]] });
   });
 
-  it.each([false, true])("refreshes family state only for an actual change (pending pull: %s)", async (pending) => {
+  it.each(["current", "pending", "tag-only"])("refreshes family state only for an actual change (%s)", async (scenario) => {
     const f = fixture();
+    const pending = scenario === "pending";
+    const tagOnly = scenario === "tag-only";
     if (pending) {
       f.advance();
       writeFileSync(join(f.path, "file.txt"), "local work\n");
       await f.run();
       git(f.path, "restore", "file.txt");
+    }
+    if (tagOnly) {
+      git(f.publisher, "tag", "followed");
+      git(f.publisher, "push", "origin", "refs/tags/followed");
     }
     const db = openDatabase(":memory:");
     try {
@@ -320,17 +418,19 @@ describe("bulk pull remote preflight, with Git as the oracle", () => {
       if (result.ok) {
         expect(result.value.results.map((repo) => repo.repoId)).toEqual([f.input.id]);
         expect(result.value.counts.worktrees.updated).toBe(Number(pending));
+        expect(result.value.results[0]?.refsChanged).toBe(tagOnly);
       }
-      expect(f.calls.some((c) => c.args[0] === "fetch")).toBe(false);
-      expect(indexer.refreshRepoRemoteBranches).not.toHaveBeenCalled();
-      expect(identity).not.toHaveBeenCalled();
-      expect(refresher.refreshRepoWorktrees.mock.calls).toEqual(pending ? [[f.input.id]] : []);
+      expect(f.calls.filter((c) => c.args[0] === "fetch")).toHaveLength(1);
+      expect(indexer.refreshRepoRemoteBranches.mock.calls).toEqual(tagOnly ? [[f.input.id]] : []);
+      expect(identity.mock.calls).toEqual(tagOnly ? [[f.input.id]] : []);
+      expect(refresher.refreshRepoWorktrees.mock.calls).toEqual(pending || tagOnly ? [[f.input.id]] : []);
       expect(refresher.refreshWorktree).not.toHaveBeenCalled();
     } finally { db.close(); }
   });
 
   it("bounds a silent remote advertisement with the same watchdog as a fetch", async () => {
     const f = fixture();
+    git(f.path, "config", "remote.origin.tagOpt", "--no-tags");
     let reached!: () => void;
     const checking = new Promise<void>((resolve) => { reached = resolve; });
     const exec: GitExec = async (args, cwd, options) => {

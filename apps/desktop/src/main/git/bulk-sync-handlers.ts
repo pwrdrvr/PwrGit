@@ -160,11 +160,12 @@ export function registerBulkSyncHandlers(
           const fetched = result.remotes.some(
             (remote) => remote.outcome === "fetched"
           );
+          const fetchedChanges = fetched && result.refsChanged !== false;
           const updated = result.worktrees.some(
             (worktree) => worktree.outcome === "updated"
           );
-          if (fetched) refreshIdentity?.(repo.id);
-          if (fetched && indexer !== undefined) {
+          if (fetchedChanges) refreshIdentity?.(repo.id);
+          if (fetchedChanges && indexer !== undefined) {
             try {
               const indexed = await operations.runRepository(repo.id, () =>
                 indexer.refreshRepoRemoteBranches(repo.id)
@@ -184,7 +185,7 @@ export function registerBulkSyncHandlers(
               );
             }
           }
-          if (fetched || updated) {
+          if (fetchedChanges || updated) {
             try {
               await refresher.refreshRepoWorktrees(repo.id);
             } catch (cause) {

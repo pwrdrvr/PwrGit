@@ -54,26 +54,33 @@ repeated subprocess bursts over a day.
 
 ## Bulk-pull change detection
 
-Bulk pull reads effective configuration and local branch/tracking refs in two
-Git processes, then checks all advertised branch tips with one `ls-remote` per
-remote. With ordinary wildcard fetch mappings, equal tip sets skip fetch;
-changed, new and deleted branches still use Git's atomic pruning fetch. An
-explicit bulk Fetch always fetches.
+Bulk pull reads effective configuration and local refs in batches. Remotes
+with automatic tag following retain the ordinary atomic pruning fetch, since
+a new tag can be published without changing any branch tip. A second ref batch
+compares branch and tag names/ids to decide whether indexing and family-state
+recomputation are necessary. For an ordinary wildcard remote explicitly set to
+`tagOpt=--no-tags`, one `ls-remote` can skip fetch when branch tips are equal.
+Custom mappings and explicit tag-pruning configuration retain ordinary fetch.
+An explicit bulk Fetch always fetches.
 
-Current, ahead-only and untracked checkouts need no per-checkout Git inspection.
-The planner checks Git's checkout ownership and operation markers from disk;
-pending, diverged or uncertain checkouts retain the full safety checks and the
-second inspection immediately before mutation. Each cycle reads current refs,
-so cleaning a blocked checkout, resetting a local branch, or changing tracking
-configuration does not depend on another remote change.
+Current, ahead-only and untracked checkouts get one lightweight
+`status --porcelain=v2 --branch --untracked-files=no` under their checkout lock.
+This revalidates HEAD and its live upstream relationship after networking and
+queue waits, and detects unmerged index entries even without operation markers.
+Changed, pending, diverged or uncertain checkouts retain the full safety checks
+and the second inspection immediately before mutation. Cleaning a blocked
+checkout or resetting a local branch does not require another remote change.
 
 Conditional includes and worktree configuration add an effective-configuration
 probe for each candidate linked checkout. Identity-only differences still use
 the shortcut; tracking differences retain the ordinary inspection path. Custom
-fetch mappings retain the ordinary fetch path. Unchanged runs skip branch-index
-and full worktree-state recomputation. Actual fetches and checkout updates keep
-the family state refresh, since moving a local default branch can affect its
-siblings' badges too. Published-tag checks retain their own hourly cadence and
+fetch mappings retain the ordinary fetch path. Unchanged refs skip branch-index
+and full worktree-state recomputation, including after a no-change fetch.
+Changed refs (including newly followed tags), unavailable comparisons and
+checkout updates retain the family refresh, since default-branch movement can
+affect siblings' badges too. A current single-remote repository uses four Git
+processes plus one lightweight status per checkout; the explicit no-tags route
+uses three plus one per checkout. Published-tag checks retain their own hourly cadence and
 setting. The process-count oracle is
 `bulk-sync-preflight.property.test.ts`; actual energy savings still need a new
 representative recording.

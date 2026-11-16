@@ -27,7 +27,7 @@ import {
 import { formatPullDuration, PullWatchdog } from "./pull-watchdog";
 import {
   BULK_OPERATION_STATE_PATHS, readBulkSyncSnapshot, readBulkSyncRefs,
-  remoteTipsUnchanged, unchangedWorktree, type BulkSyncSnapshot
+  bulkSyncRefsChanged, remoteTipsUnchanged, unchangedWorktree, type BulkSyncSnapshot
 } from "./bulk-sync-preflight";
 
 export const BULK_SYNC_CONCURRENCY = 3;
@@ -261,7 +261,9 @@ async function fetchConfiguredRemotes(
       continue;
     }
     let raw: Result<GitOutput> | undefined;
-    if (snapshot !== null && snapshot.remotes.find((entry) => entry.name === remote.name)?.standardMapping) {
+    // Ordinary fetch must retain automatic tag following even when every
+    // branch tip is unchanged. Only an explicit --no-tags remote can skip it.
+    if (snapshot !== null && snapshot.remotes.some((entry) => entry.name === remote.name && entry.standardMapping && entry.noTags)) {
       report({ detail: `Checking ${remote.name} branch tips…` });
       raw = await git(["ls-remote", "--heads", "--refs", remote.name], repo.path);
       if (raw.ok && raw.value.exitCode === 0) {
@@ -775,11 +777,13 @@ async function syncRepo(
     };
   }
   let worktrees: BulkSyncWorktreeResult[] = [];
+  let refsChanged: boolean | undefined;
   if (options.mode === "soft-pull") {
     // Fetch may have added, deleted or rewritten upstream tips. Read them in
     // one batch again before selecting checkouts that actually need a pull.
     if (snapshot !== null && fetched.value.some((remote) => remote.outcome === "fetched")) {
       const refs = await readBulkSyncRefs(git, repo.path);
+      refsChanged = refs === null ? undefined : bulkSyncRefsChanged(snapshot.refs, refs.refs);
       snapshot = refs === null ? null : { ...snapshot, ...refs };
     }
     const fetchedByName = new Map(
@@ -818,7 +822,8 @@ async function syncRepo(
     path: repo.path,
     outcome: repoOutcome(options.mode, fetched.value, worktrees),
     remotes: fetched.value,
-    worktrees
+    worktrees,
+    ...(refsChanged === undefined ? {} : { refsChanged })
   };
 }
 

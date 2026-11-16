@@ -2265,6 +2265,8 @@ export type BulkSyncRepoResult = {
   outcome: "success" | "partial" | "skipped" | "failed" | "cancelled";
   remotes: BulkSyncRemoteResult[];
   worktrees: BulkSyncWorktreeResult[];
+  /** A successful before/after ref comparison; absent when unavailable. */
+  refsChanged?: boolean;
   message?: string;
 };
 

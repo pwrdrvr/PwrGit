@@ -100,14 +100,14 @@ type Op =
   | { kind: "recut"; name: string; annotated: boolean; advance: boolean }
   | { kind: "orphan"; name: string }
   | { kind: "delete"; name: string }
-  | { kind: "sync"; how: "fetch" | "fetchNamed" | "fetchAll" | "pull" | "bulk" };
+  | { kind: "sync"; how: "fetch" | "fetchNamed" | "fetchAll" | "pull" | "bulk" | "bulkPull" };
 
 const tagName = fc.constantFrom("v1", "v2", "v3");
 const op: fc.Arbitrary<Op> = fc.oneof(
   fc.record({ kind: fc.constant("recut" as const), name: tagName, annotated: fc.boolean(), advance: fc.boolean() }),
   fc.record({ kind: fc.constant("orphan" as const), name: fc.constantFrom("legacy/a", "legacy/b") }),
   fc.record({ kind: fc.constant("delete" as const), name: tagName }),
-  fc.record({ kind: fc.constant("sync" as const), how: fc.constantFrom("fetch", "fetchNamed", "fetchAll", "pull", "bulk") })
+  fc.record({ kind: fc.constant("sync" as const), how: fc.constantFrom("fetch", "fetchNamed", "fetchAll", "pull", "bulk", "bulkPull") })
 );
 
 /** A publisher-side change, made the way a maintainer would: with git, then pushed. */
@@ -134,10 +134,10 @@ function publish(publisher: string, change: Exclude<Op, { kind: "sync" }>, orpha
 }
 
 async function sync(local: string, how: Extract<Op, { kind: "sync" }>["how"]): Promise<void> {
-  if (how === "bulk") {
+  if (how === "bulk" || how === "bulkPull") {
     await bulkSyncRepositories(systemGit, [
       { id: "repo", name: "local", path: local, worktrees: [{ id: "main", branch: "main", path: local }] }
-    ], { operationId: "property", mode: "fetch" });
+    ], { operationId: "property", mode: how === "bulk" ? "fetch" : "soft-pull" });
     return;
   }
   const result =
