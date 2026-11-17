@@ -125,6 +125,7 @@ function reorderProps(over: Partial<RepoIndexReorder> = {}): RepoIndexReorder {
     target: null,
     seamAim: null,
     seamProps: {},
+    pinSlot: null,
     isPostDragClick: () => false,
     moveKey: (event) =>
       event.metaKey && event.shiftKey && event.key === "ArrowDown"

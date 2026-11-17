@@ -662,8 +662,12 @@ As PwrAgnt's project index: pins first, a seam, then the rest. Rules in
 - **The seam is a drop target** (`.repo-seam`, `.repo-index__seam`; `PIN_SEAM`
   in `Sidebar`). A drop among the pins moves or pins; a pin dropped on or
   below the seam is unpinned, and the seam lights instead of a row line. Two
-  repositories below the seam refuse each other. Rows drag only while
-  something is pinned; the first pin is the star.
+  repositories below the seam refuse each other.
+- **With nothing pinned, a held repository opens the ghost Pin slot**
+  (`.repo-pin-slot`, `.repo-index__pin-slot`; `PIN_SLOT`), stuck to the top of
+  both columns. Only a drop inside it pins. It mounts a frame after
+  `dragstart`, because it moves every row down, and sits in `.sidebar__list`,
+  not in the tree.
 - **The tree's seam is labelled "Repositories" only when rows follow it.**
   Grouped, or in a lens that lists only pins, it is a bare hairline.
 - **Only a pin draws the grip and takes ⌘⇧↑/↓** (`arrangeable` is

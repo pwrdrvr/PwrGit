@@ -25,6 +25,7 @@ import {
   type RepoSpy
 } from "./repo-index";
 import type { ListReorder, ReorderTarget } from "./useListReorder";
+import { PinIcon } from "./WorktreeRow";
 
 export type RepoIndexEntry = {
   id: string;
@@ -62,6 +63,8 @@ export type RepoIndexReorder = {
     ReturnType<ListReorder["rowProps"]>,
     "draggable" | "onDragStart" | "onDragEnd"
   >;
+  /** The ghost Pin slot, while a name is held and nothing is pinned. */
+  pinSlot: { aimed: boolean; props: RepoIndexReorder["seamProps"] } | null;
   isPostDragClick: () => boolean;
   /** The move a key asks for (⌘⇧↑/↓, Ctrl off the Mac), or null. */
   moveKey: (event: ReactKeyboardEvent) => "up" | "down" | null;
@@ -353,6 +356,19 @@ export function RepoIndex({
       }}
       onDragStartCapture={tip.hide}
     >
+      {reorder?.pinSlot != null && (
+        <div className="repo-index__pin-slot-row" aria-hidden="true">
+          <div
+            className={`repo-index__pin-slot${
+              reorder.pinSlot.aimed ? " is-drop-target" : ""
+            }`}
+            {...reorder.pinSlot.props}
+          >
+            <PinIcon filled={false} size={10} />
+            Pin
+          </div>
+        </div>
+      )}
       {groups.map((group) => {
         const lastPin = group.entries.findLastIndex((entry) => entry.pinned);
         return (

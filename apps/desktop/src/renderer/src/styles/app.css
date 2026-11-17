@@ -1481,6 +1481,58 @@ textarea,
   border-radius: 999px;
   background: var(--accent);
 }
+/* The ghost Pin slot a held repository opens while nothing is pinned, above
+   the tree and above the index: PwrAgnt's `.directories-pin-slot` and
+   `.project-index__pin-slot`. Mounted only during the drag, and only a drop
+   inside its own box pins. It is the only target while it is open, so it
+   sticks to the top of a scrolled list instead of opening out of view. */
+.repo-pin-slot,
+.repo-index__pin-slot {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  border: 1.5px dashed color-mix(in srgb, var(--accent) 45%, transparent);
+  color: var(--text-muted);
+  font: 600 var(--sidebar-eyebrow-size) / 1 var(--font-sans);
+  text-transform: uppercase;
+}
+.repo-pin-slot > svg,
+.repo-index__pin-slot > svg {
+  flex: 0 0 auto;
+}
+.repo-pin-slot {
+  position: sticky;
+  top: 2px;
+  z-index: 6;
+  min-height: 34px;
+  margin: 2px 2px 6px;
+  border-radius: 8px;
+  background: var(--bg-sidebar);
+}
+.repo-index__pin-slot-row {
+  position: sticky;
+  /* The column has 2px of top padding: stick over it, and give it back. */
+  top: -2px;
+  z-index: 1;
+  padding: 4px 4px 4px 6px;
+  background: var(--bg-sidebar);
+}
+.repo-index__pin-slot {
+  gap: 5px;
+  min-height: 26px;
+  border-radius: 6px;
+}
+.repo-pin-slot.is-drop-target,
+.repo-index__pin-slot.is-drop-target {
+  border-style: solid;
+  border-color: var(--accent);
+  /* The tint over the sidebar, opaque: the stuck slot covers rows. */
+  background:
+    linear-gradient(color-mix(in srgb, var(--accent) 9%, transparent) 0 0),
+    var(--bg-sidebar);
+  color: var(--text-primary);
+}
 .repo-seam {
   display: flex;
   align-items: center;

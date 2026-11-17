@@ -133,6 +133,13 @@ const INVENTORY: Record<string, { containers: string[]; compensated?: string }> 
   ".repo-row": { containers: [".sidebar__list"] },
   ".wt-row.is-selected": { containers: [".sidebar__list"] },
   ".repo-group__head": { containers: [".sidebar__list"] },
+  ".repo-pin-slot": { containers: [".sidebar__list"] },
+  ".repo-index__pin-slot-row": {
+    containers: [".repo-index"],
+    // The column's 2px top padding: the row sticks at -2px and carries the
+    // 2px back as its own padding, in the sidebar's fill.
+    compensated: "top: -2px, and 2px more top padding in the row's fill"
+  },
   ".log-window__line-number": { containers: [".log-window__viewport"] },
   ".diff-file__head": {
     containers: [".diff-pane__body", ".cr-view__body", ".file-insight-pane__body"]

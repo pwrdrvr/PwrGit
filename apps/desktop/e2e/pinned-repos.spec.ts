@@ -68,9 +68,10 @@ test("pinned repositories lead every lens, above one seam, in both columns", asy
     const page = await app.firstWindow();
     await page.waitForFunction(() => "__harness" in window);
     await page.evaluate(() => (window as unknown as { __harness: Harness }).__harness.ready);
-    const shoot = async (name: string): Promise<void> => {
+    const shoot = async (name: string, park = true): Promise<void> => {
       if (!shots) return;
-      await page.mouse.move(0, 0);
+      // Parked off the list, except mid-drag, where a move is a `dragleave`.
+      if (park) await page.mouse.move(0, 0);
       await page.screenshot({
         path: join(shots, `${name}.png`),
         clip: { x: 0, y: 0, width: 430, height: 520 }
@@ -106,6 +107,37 @@ test("pinned repositories lead every lens, above one seam, in both columns", asy
     expect(await calls(page)).toEqual(["pin:atlas:false"]);
     expect((await column(page, tree)).slice(0, 4)).toEqual(["quartz-cli", "tidepool", "—", "atlas"]);
     expect((await column(page, index)).slice(0, 4)).toEqual(["quartz-cli", "tidepool", "—", "atlas"]);
+
+    // Nothing pinned: holding a repository opens the ghost Pin slot above
+    // both columns, and a drop inside it pins. Playwright intercepts the
+    // drag, so this proves the slot and its drop, not how the OS drag copes
+    // with rows moving under it (Sidebar opens the slot a frame late for that).
+    for (const id of ["quartz-cli", "tidepool"]) {
+      await page.locator(`.repo-row[data-repo-id="${id}"] .pin`).click();
+    }
+    await expect(page.locator(".repo-seam")).toHaveCount(0);
+    expect(await page.locator(".repo-pin-slot, .repo-index__pin-slot").count()).toBe(0);
+    const held = (await page.locator('.repo-index__item[data-index-id="ember"]').boundingBox())!;
+    await page.mouse.move(held.x + 20, held.y + held.height / 2);
+    await page.mouse.down();
+    await page.mouse.move(held.x + 24, held.y + held.height / 2 + 6, { steps: 4 });
+    const treeSlot = page.locator(".repo-pin-slot");
+    const indexSlot = page.locator(".repo-index__pin-slot");
+    await expect(treeSlot).toBeVisible();
+    await expect(indexSlot).toBeVisible();
+    await expect(page.locator('.repo-index__item[data-index-id="ember"]')).toHaveClass(/is-dragging/);
+    const slotBox = (await treeSlot.boundingBox())!;
+    await page.mouse.move(slotBox.x + slotBox.width / 2, slotBox.y + slotBox.height / 2, { steps: 8 });
+    // Chromium sends `dragenter` on the move that arrives and `dragover` on
+    // the next one, so settle inside the slot.
+    await page.mouse.move(slotBox.x + slotBox.width / 2 + 3, slotBox.y + slotBox.height / 2 + 1, { steps: 2 });
+    await expect(treeSlot).toHaveClass(/is-drop-target/);
+    await expect(indexSlot).toHaveClass(/is-drop-target/);
+    await shoot("pin-slot-dark", false);
+    await page.mouse.up();
+    await expect(treeSlot).toHaveCount(0);
+    expect((await calls(page)).at(-1)).toBe("pin:ember:true");
+    expect((await column(page, tree)).slice(0, 3)).toEqual(["ember", "—", "atlas"]);
 
     // Grouped by folder: a Pinned group above the folders, pins out of them.
     await page.mouse.move(0, 0);

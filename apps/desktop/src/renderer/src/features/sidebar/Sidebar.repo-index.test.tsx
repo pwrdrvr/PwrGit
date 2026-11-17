@@ -200,10 +200,9 @@ describe("Moving repositories from the index", () => {
     };
   }
 
-  it("drags names in every lens, once something is pinned", () => {
-    // Nothing pinned: nowhere to drop, so nothing drags.
+  it("drags names in every lens, pinned or not", () => {
     render("atlas:wt0", () => undefined);
-    expect(indexItem("atlas").getAttribute("draggable")).not.toBe("true");
+    expect(indexItem("atlas").getAttribute("draggable")).toBe("true");
 
     for (const lens of ["All", "Pinned", "Focused"]) {
       window.localStorage.setItem("pwrgit.lens", lens);
@@ -212,6 +211,58 @@ describe("Moving repositories from the index", () => {
       render("atlas:wt0", () => undefined, { repos: PINNED });
       expect(indexItem("atlas").getAttribute("draggable")).toBe("true");
     }
+  });
+
+  describe("the ghost Pin slot, with nothing pinned", () => {
+    const slots = (): Element[] => [
+      ...container.querySelectorAll(".repo-pin-slot, .repo-index__pin-slot")
+    ];
+    beforeEach(() => {
+      // The slot opens a frame after the drag starts.
+      vi.spyOn(window, "requestAnimationFrame").mockImplementation((cb) => {
+        cb(0);
+        return 1;
+      });
+    });
+
+    it("opens in both columns while a repository is held, and closes after", () => {
+      render("atlas:wt0", () => undefined);
+      expect(slots()).toHaveLength(0);
+      const fire = dragger();
+      fire(indexItem("beacon"), "dragstart");
+      expect(slots().map((slot) => slot.textContent)).toEqual(["Pin", "Pin"]);
+      // Outside the tree, which may own only rows and groups.
+      expect(container.querySelector('[role="tree"] .repo-pin-slot')).toBeNull();
+      fire(indexItem("beacon"), "dragend");
+      expect(slots()).toHaveLength(0);
+    });
+
+    it("pins on a drop inside the slot, from either column, and nowhere else", () => {
+      const persist = vi.fn();
+      const pin = vi.fn();
+      render("atlas:wt0", () => undefined, { onPersistRepoOrder: persist, onSetRepoPin: pin });
+      const fire = dragger();
+      fire(indexItem("beacon"), "dragstart");
+      fire(indexItem("cinder"), "dragover");
+      fire(indexItem("cinder"), "drop");
+      expect(pin).not.toHaveBeenCalled();
+
+      fire(container.querySelector('.repo-row[data-repo-id="beacon"]')!, "dragstart");
+      const slot = container.querySelector(".repo-index__pin-slot")!;
+      fire(slot, "dragover");
+      expect(slot.className).toContain("is-drop-target");
+      expect(container.querySelector(".repo-pin-slot")!.className).toContain("is-drop-target");
+      fire(slot, "drop");
+      expect(pin).toHaveBeenCalledExactlyOnceWith("beacon", true);
+      expect(persist).not.toHaveBeenCalled();
+    });
+
+    it("is not offered once something is pinned: the seam is the target", () => {
+      render("atlas:wt0", () => undefined, { repos: PINNED.map((r, i) => (i === 0 ? r : { ...r, pinned: false })) });
+      const fire = dragger();
+      fire(indexItem("beacon"), "dragstart");
+      expect(slots()).toHaveLength(0);
+    });
   });
 
   describe("across the seam", () => {

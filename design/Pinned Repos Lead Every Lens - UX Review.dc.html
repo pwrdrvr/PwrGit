@@ -105,6 +105,8 @@
           .div.bare { height: 9px; }
           .div.aim { color: var(--accent-bright); }
           .div.aim::before, .div.aim::after { height: 3px; border-radius: 999px; background: var(--accent); box-shadow: 0 0 10px rgba(255, 138, 31, 0.5); }
+          .slot { display: flex; align-items: center; justify-content: center; gap: 5px; border: 1.5px dashed rgba(255, 138, 31, 0.45); color: var(--text-muted); font: 600 8.5px/1 var(--font-sans); text-transform: uppercase; }
+          .slot.lit { border-style: solid; border-color: var(--accent); background: rgba(255, 138, 31, 0.09); color: var(--text-primary); }
           .tag { font: 600 8.5px/1 var(--font-sans); text-transform: uppercase; color: var(--accent-bright); margin-left: 6px; }
         </style>
       </helmet>
@@ -326,8 +328,30 @@
             <p class="note">Anywhere at or below the seam lights the seam, not a line between rows: the repository returns to its place by name, wherever it was released. The tree&#8217;s divider reads &#8220;Unpin&#8221; while lit; both lines grow to 3px <code>--accent</code>.</p>
           </div>
 
+          <div class="dv-opt" id="3d">
+            <div class="dv-olabel"><span class="dv-oid">3d</span>Nothing pinned: a held repository opens the ghost Pin slot</div>
+            <div class="stage"><div class="sb" style="height:200px">
+              <nav class="ix">
+                <div style="padding:4px 4px 4px 6px"><div class="slot lit" style="height:26px;border-radius:6px">&#9734; Pin</div></div>
+                <div class="ixw"><div class="ixi cur sel">agent-kit</div></div>
+                <div class="ixw drag"><div class="ixi inv">codex</div></div>
+                <div class="ixw"><div class="ixi inv">disktree</div></div>
+                <div class="ixw"><div class="ixi inv">tart</div></div>
+              </nav>
+              <div class="tr">
+                <div class="slot lit" style="height:34px;margin:2px 2px 6px;border-radius:8px">&#9734; Pin</div>
+                <div class="rr sel"><span class="n">agent-kit</span><span class="o">&#9734;</span></div>
+                <div class="rr drag"><span class="n">codex</span><span class="o">&#9734;</span></div>
+                <div class="rr"><span class="n">disktree</span><span class="o">&#9734;</span></div>
+                <div class="rr"><span class="n">tart</span><span class="o">&#9734;</span></div>
+              </div>
+              <div class="ghost" style="left:150px;top:10px">codex</div>
+              <svg class="cursor" style="left:190px;top:18px" viewBox="0 0 14 18"><path d="M1 1l11 9-5 .6 3 6-2 1-3-6-4 3z" fill="#fff" stroke="#000" stroke-width="1"/></svg>
+            </div></div>
+            <p class="note">Operator, 2026-11-17: &#8220;we should have that from PwrAgent too&#8221;. PwrAgnt&#8217;s <code>.directories-pin-slot</code> (34px) and <code>.project-index__pin-slot</code> (26px): a 1.5px dashed accent outline, mounted only while a repository is held, stuck to the top of each column. Only a drop inside its box pins; lit, the outline goes solid on an accent tint. With a pin already there it is not offered: the seam is the target (3b).</p>
+          </div>
+
           <div class="find" style="width:340px">
-            <div class="fitem"><span class="pin">&#8211;</span><div><h4>Not in this round: the ghost Pin slot</h4><p>PwrAgnt opens a dashed &#8220;Pin&#8221; slot while a name is held and nothing is pinned. PwrGit&#8217;s star is on every row at rest, so the first pin is one click. Can follow if dragging turns out to be how people pin.</p></div></div>
             <div class="fitem"><span class="pin">&#8211;</span><div><h4>Not in this round: tilted card, drop flash</h4><p>PwrAgnt&#8217;s pointer drag draws a tilted card and flashes the dropped name. PwrGit keeps one drag style across repositories and worktrees.</p></div></div>
           </div>
 

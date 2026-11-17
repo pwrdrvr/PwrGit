@@ -50,6 +50,7 @@ import { LensFilter } from "./LensFilter";
 import { NewWorktreeModal } from "./NewWorktreeModal";
 import { ProfileChip } from "./ProfileChip";
 import { RepoRow } from "./RepoRow";
+import { PinIcon } from "./WorktreeRow";
 import { LiveSidebarToolbar } from "./SidebarToolbar";
 import { settleSidebarReveal, useSidebarReveal } from "./sidebar-reveal";
 import {
@@ -122,6 +123,8 @@ import {
 const PINNED_GROUP = "\u0000pinned";
 /** The seam's id as a drop target. Not a repository id. */
 const PIN_SEAM = "\u0000pin-seam";
+/** The ghost Pin slot's id as a drop target. Not a repository id. */
+const PIN_SLOT = "\u0000pin-slot";
 /** Distinguishes repo drags from worktree drags (see useListReorder). */
 const REPO_MIME = "application/x-pwrgit-repo";
 
@@ -814,11 +817,18 @@ export function Sidebar({
   const repoDrag = useListReorder({
     mime: REPO_MIME,
     canDrop: (dragId, targetId) =>
-      targetId === PIN_SEAM || shownPinIds.has(targetId) || shownPinIds.has(dragId),
+      targetId === PIN_SEAM ||
+      targetId === PIN_SLOT ||
+      shownPinIds.has(targetId) ||
+      shownPinIds.has(dragId),
     onCommit: (dragId, targetId, position) => {
       // A drag leaves the ids untouched and only moves them, so the held order
       // would silently undo the drop the user just made.
       held.release();
+      if (targetId === PIN_SLOT) {
+        onSetRepoPin(dragId, true);
+        return;
+      }
       const dragPinned = shownPinIds.has(dragId);
       if (shownPinIds.has(targetId)) {
         if (!dragPinned) onSetRepoPin(dragId, true);
@@ -836,9 +846,28 @@ export function Sidebar({
       onPersistRepoOrder(movePin(repos, dragId, last.id, "after"));
     }
   });
-  // Rows drag only while there is somewhere to drop: with nothing pinned the
-  // star is the way in (the board leaves PwrAgnt's ghost Pin slot out).
-  const canDragRepos = shownPins.length > 0;
+  // With nothing pinned there is no seam to drop on, so a held repository
+  // opens a ghost Pin slot above the list, in both columns, as PwrAgnt's
+  // project index does. Only a drop inside the slot pins.
+  //
+  // It opens a frame after the drag starts, never in `dragstart` itself: the
+  // slot pushes every row down, and an HTML drag whose source moves while
+  // the drag is being set up can end at once.
+  const offersPinSlot = repoDrag.dragId !== null && shownPins.length === 0;
+  const [pinSlotOpen, setPinSlotOpen] = useState(false);
+  useEffect(() => {
+    if (!offersPinSlot) {
+      setPinSlotOpen(false);
+      return undefined;
+    }
+    const frame = window.requestAnimationFrame(() => setPinSlotOpen(true));
+    return () => window.cancelAnimationFrame(frame);
+  }, [offersPinSlot]);
+  const { draggable: _slotDraggable, onDragStart: _slotDragStart, onDragEnd: _slotDragEnd, ...pinSlotDropProps } =
+    repoDrag.rowProps(PIN_SLOT, true);
+  const pinSlot = pinSlotOpen && offersPinSlot
+    ? { aimed: repoDrag.target?.id === PIN_SLOT, props: pinSlotDropProps }
+    : null;
   // The seam lights for both drops that end on it; a line between rows is
   // drawn only among the pins, the one place a position is kept.
   const dragTarget = repoDrag.target;
@@ -977,11 +1006,12 @@ export function Sidebar({
   // The index moves names with the tree's own drag and key move, so held and
   // aimed state shows in both columns and the two can never disagree.
   const indexReorder: RepoIndexReorder = {
-    rowProps: (id) => repoDrag.rowProps(id, canDragRepos),
+    rowProps: (id) => repoDrag.rowProps(id, true),
     dragId: repoDrag.dragId,
     target: lineTarget,
     seamAim,
     seamProps: seamDropProps,
+    pinSlot,
     isPostDragClick: repoDrag.isPostDragClick,
     moveKey: moveKeyDirection,
     onMove: moveRepo
@@ -1238,7 +1268,7 @@ export function Sidebar({
         }
         arrangeable={repoLeads(repo)}
         showPinVia={lens === "Pinned"}
-        dragProps={repoDrag.rowProps(repo.id, canDragRepos)}
+        dragProps={repoDrag.rowProps(repo.id, true)}
         dragging={repoDrag.dragId === repo.id}
         dropPosition={lineTarget?.id === repo.id ? lineTarget.position : null}
         focusable={repoTabStopId === repo.id}
@@ -1448,6 +1478,18 @@ export function Sidebar({
                 message={repoLoadState.message}
                 onRetry={onRetryRepos}
               />
+            )}
+            {/* The ghost Pin slot: in the scrollport, not the tree, which
+                may own only treeitems and groups. */}
+            {pinSlot !== null && (
+              <div
+                className={`repo-pin-slot${pinSlot.aimed ? " is-drop-target" : ""}`}
+                aria-hidden="true"
+                {...pinSlot.props}
+              >
+                <PinIcon filled={false} size={11} />
+                Pin
+              </div>
             )}
             <div
               className="sidebar__tree"
