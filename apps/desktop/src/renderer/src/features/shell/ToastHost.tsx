@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { Repo } from "@pwrgit/shared";
 import { AppUpdateToast } from "../update/AppUpdateToast";
 import { ReleaseNotesLink } from "../update/ReleaseNotesLink";
@@ -6,6 +6,7 @@ import { RemoteActivityToast } from "../remote/RemoteActivityToast";
 import { CodexVersionNotice } from "../settings/CodexVersionNotice";
 import { GitIdentityNotice } from "../identity/GitIdentityNotice";
 import { dispatch, subscribe } from "../../lib/pwrgit";
+import { AppNoticeToast } from "./AppNoticeToast";
 import { cpuProfileNotice } from "./cpu-profile-notice";
 import {
   dismissToast,
@@ -86,8 +87,6 @@ export function ToastHost({
                 key={`group:${group.key}`}
                 group={group}
                 toasts={toasts.filter((item) => item.sticky === true && item.dismissGroup?.key === group.key)}
-                repos={repos}
-                onReveal={onReveal}
               />
             );
           }
@@ -116,11 +115,9 @@ export function ToastHost({
 }
 
 /** One standing card per group, with every capture reachable in order. */
-function ToastGroup({ group, toasts, repos, onReveal }: {
+function ToastGroup({ group, toasts }: {
   group: NonNullable<Toast["dismissGroup"]>;
   toasts: readonly Toast[];
-  repos: readonly Repo[];
-  onReveal: (repoId: string, remote: string | null) => void;
 }) {
   const [activeId, setActiveId] = useState<number>();
   const lastIndex = useRef(0);
@@ -141,23 +138,19 @@ function ToastGroup({ group, toasts, repos, onReveal }: {
     setActiveId(next.id);
   };
 
-  return <ToastCard
-    toast={active}
-    subject={active.subject === undefined ? null : resolveSubject(active.subject, repos)}
-    onReveal={onReveal}
-    navigation={
-      <nav className="app-toast__navigation" aria-label={group.label}>
-        <div className="app-toast__pages">
-          <button className="app-toast__button" type="button" aria-label="Previous notice" disabled={index === 0} onClick={() => select(index - 1)}>Previous</button>
-          <span className="app-toast__position">{index + 1} of {toasts.length}</span>
-          <button className="app-toast__button" type="button" aria-label="Next notice" disabled={index === toasts.length - 1} onClick={() => select(index + 1)}>Next</button>
-        </div>
-        {toasts.length > 1 && <button className="app-toast__button" type="button" onClick={() => {
-          dismissToastGroup(group.key);
-          for (const toast of toasts) toast.onDismiss?.();
-        }} aria-label={`Dismiss all ${group.label}`}>Dismiss all {group.label}</button>}
-      </nav>
-    }
+  return <AppNoticeToast
+    notice={active}
+    onDismiss={() => { dismissToast(active.id); active.onDismiss?.(); }}
+    navigation={{
+      current: index + 1,
+      total: toasts.length,
+      ...(index > 0 ? { onPrevious: () => select(index - 1) } : {}),
+      ...(index < toasts.length - 1 ? { onNext: () => select(index + 1) } : {}),
+      ...(toasts.length > 1 ? { dismissAll: { label: group.label, onDismiss: () => {
+        dismissToastGroup(group.key);
+        for (const toast of toasts) toast.onDismiss?.();
+      } } } : {})
+    }}
   />;
 }
 
@@ -199,13 +192,11 @@ function resolveSubject(
 function ToastCard({
   toast,
   subject,
-  onReveal,
-  navigation
+  onReveal
 }: {
   toast: Toast;
   subject: NamedSubject | null;
   onReveal: (repoId: string, remote: string | null) => void;
-  navigation?: ReactNode;
 }) {
   const tip = useViewportTooltip();
   const [paused, setPaused] = useState(false);
@@ -258,7 +249,7 @@ function ToastCard({
             className="app-toast__button app-toast__button--primary"
             type="button"
             onClick={() => {
-              if (toast.action?.dismiss !== false) dismissToast(toast.id);
+              dismissToast(toast.id);
               toast.action?.run();
             }}
           >
@@ -311,7 +302,6 @@ function ToastCard({
           <CloseGlyph size={12} />
         </button>
       </div>
-      {navigation}
       {/* Keyed by id so a replacement restarts the countdown animation, which
           runs on mount, in step with the timer effect above. A sticky toast
           has no countdown, so it shows no bar draining toward one. */}

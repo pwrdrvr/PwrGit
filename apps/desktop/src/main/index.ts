@@ -1,3 +1,4 @@
+import { hostname } from "node:os";
 import { mkdirSync } from "node:fs";
 import { join } from "node:path";
 import {
@@ -25,7 +26,7 @@ import {
   type Profile,
   type BranchReveal
 } from "@pwrgit/shared";
-import { registerAppIdentityHandlers } from "./app-identity";
+import { readAppIdentity, registerAppIdentityHandlers } from "./app-identity";
 import { registerAppDocumentHandlers } from "./app-document-handlers";
 import { registerAgentHandlers } from "./ai/agent-handlers";
 import { LocalAgentSession } from "./ai/agent-session";
@@ -549,6 +550,8 @@ if (!gotSingleInstanceLock) {
     // a call site that forgets it silently broadcasts the wrong release feed
     // to every window rather than failing.
     const appVersion = app.getVersion();
+    const cpuCaptureIdentity = readAppIdentity();
+    const cpuCaptureHostname = hostname();
     const mcpPolicy = new McpPolicyStore(
       join(app.getPath("userData"), "mcp-policy.json")
     );
@@ -558,7 +561,7 @@ if (!gotSingleInstanceLock) {
         settingsSnapshot(settings, diagnosticsOutputRoot, appVersion)
           .diagnostics,
       onHotCpuProfileCaptured: (event, profileId) => {
-        emitEvent("diagnostics:cpuProfileCaptured", { ...event, profileId });
+        emitEvent("diagnostics:cpuProfileCaptured", { ...event, profileId, sourceHostname: cpuCaptureHostname, appIdentity: cpuCaptureIdentity });
       },
       onHotCpuHeapSnapshotLimitReached: () => {
         // Mirror PwrAgnt: a session that hits its heap-snapshot cap turns the

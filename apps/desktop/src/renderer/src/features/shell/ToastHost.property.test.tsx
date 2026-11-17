@@ -4,7 +4,6 @@ import { createRoot, type Root } from "react-dom/client";
 import fc from "fast-check";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { ok, type EventPayload } from "@pwrgit/shared";
-import { dispatch } from "../../lib/pwrgit";
 import { ToastHost } from "./ToastHost";
 import { dismissToast, showInfoToast, subscribeToasts, type Toast } from "../../lib/toast";
 
@@ -25,6 +24,7 @@ function capture(index: number, profileId: string | null): EventPayload<"diagnos
   return {
     profileId, target: profileId === null ? "main" as const : "renderer" as const,
     capturedAt: "2026-11-16T12:00:00.000Z", heapSnapshotArtifacts: [],
+    sourceHostname: "cpu-lab.example",
     profileFilename: "cpu-0001.cpuprofile", // Same basename in different sessions.
     profilePath: `/demo/hot-cpu-${index}/cpu-0001.cpuprofile`,
     sessionDirectory: `/demo/hot-cpu-${index}`, sessionDirectoryName: `hot-cpu-${index}`,
@@ -88,7 +88,7 @@ it("pages and dismisses CPU captures as a group without clearing other notices o
     for (let i = 1; i < count; i++) await act(async () => button("Next notice").click());
     expect(cpuCard().textContent).toContain(`${count} of ${count}`);
     expect(cpuCard().textContent).toContain(`hot-cpu-${count - 1}`);
-    await act(async () => button("Dismiss").click());
+    await act(async () => button("Dismiss notice").click());
     expect(current.filter((toast) => toast.key !== "unrelated")).toHaveLength(count - 1);
     expect(cpuCard().textContent).toContain(`${count - 1} of ${count - 1}`);
     await act(async () => button("Dismiss all CPU profile notices").click());
@@ -100,7 +100,7 @@ it("pages and dismisses CPU captures as a group without clearing other notices o
   }), { numRuns: 12 });
 });
 
-it("copies complete capture paths and opens its folder without dismissing the notice", async () => {
+it("copies PwrAgnt-style capture details without dismissing the notice", async () => {
   const writeText = vi.fn(async (_value: string) => {});
   Object.defineProperty(navigator, "clipboard", { configurable: true, value: { writeText } });
   const event = capture(1, null);
@@ -110,14 +110,27 @@ it("copies complete capture paths and opens its folder without dismissing the no
       root.render(<ToastHost profileId="profile-a" repos={[]} onReveal={() => {}} />);
     });
     await act(async () => emitCapture(event));
-    const copy = container.querySelector<HTMLButtonElement>('[aria-label="Copy profile details"]')!;
+    const copy = container.querySelector<HTMLButtonElement>('[aria-label="Copy notice"]')!;
     await act(async () => copy.click());
     expect(writeText).toHaveBeenCalledExactlyOnceWith(expect.stringContaining(event.profilePath));
     expect(writeText.mock.calls[0]?.[0]).toContain(event.sessionDirectory);
     expect(writeText.mock.calls[0]?.[0]).toContain(event.heapSnapshotArtifacts[0]!.path);
-    const open = [...container.querySelectorAll<HTMLButtonElement>("button")].find((button) => button.textContent === "Open folder")!;
-    await act(async () => open.click());
-    expect(dispatch).toHaveBeenCalledWith("shell:revealPath", { path: event.profilePath });
+    expect(writeText.mock.calls[0]?.[0]).toContain("Source: Local app on cpu-lab.example");
+    expect(writeText.mock.calls[0]?.[0]).toContain(`CPU profile basename: ${event.profileFilename}`);
+    expect(container.querySelector("dt")?.textContent).toBe("Source");
     expect(current).toHaveLength(1);
   } finally { Reflect.deleteProperty(navigator, "clipboard"); }
+});
+
+it("uses PwrAgnt's compact icon controls and short group dismissal label", async () => {
+  await act(async () => root.render(<ToastHost profileId="profile-a" repos={[]} onReveal={() => {}} />));
+  await act(async () => { emitCapture(capture(1, null)); emitCapture(capture(2, null)); });
+  const card = container.querySelector('[data-toast-group="hot-cpu-profile"]')!;
+  for (const label of ["Previous notice", "Next notice", "Copy notice", "Dismiss notice"]) {
+    const button = card.querySelector<HTMLButtonElement>(`[aria-label="${label}"]`);
+    expect(button, label).not.toBeNull();
+    expect(button!.textContent, label).toBe("");
+    expect(button!.querySelector("svg"), label).not.toBeNull();
+  }
+  expect(card.querySelector('[aria-label="Dismiss all CPU profile notices"]')?.textContent).toBe("Dismiss all");
 });

@@ -11,6 +11,8 @@ export type Toast = {
   title: string;
   message: string;
   detail?: string;
+  /** Label/value diagnostics, as in PwrAgnt notices. */
+  facts?: readonly { label: string; value: string }[];
   /** Optional action payload, separate from the explanatory card text. */
   copyText?: string;
   copyLabel?: string;
@@ -40,9 +42,8 @@ export type Toast = {
   showLogsAction?: boolean;
   /** Offer a copy action (default true for errors). */
   showCopyAction?: boolean;
-  /** The next action dismisses the card by default. Diagnostic navigation
-   *  can keep a durable notice available until the reader closes it. */
-  action?: { label: string; run: () => void; dismiss?: boolean };
+  /** The next action also dismisses the card. */
+  action?: { label: string; run: () => void };
   /** Runs when the reader closes the card by hand (×), not when its action
    *  runs or a key replaces it: for an offer that records its answer. */
   onDismiss?: () => void;

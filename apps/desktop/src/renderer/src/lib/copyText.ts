@@ -42,3 +42,18 @@ export function elideMiddle(text: string, maxLength = 72): string {
 export function copyHint(value: string, maxLength = 72): string {
   return `${elideMiddle(value, maxLength)}\nClick to copy`;
 }
+
+/** PwrAgnt's notice copy format: plain text plus a literal rich-text block. */
+export async function copyTextAsCodeBlock(text: string): Promise<void> {
+  if (typeof navigator !== "undefined" && typeof navigator.clipboard?.write === "function" && typeof ClipboardItem !== "undefined") {
+    const escaped = text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+    try {
+      await navigator.clipboard.write([new ClipboardItem({
+        "text/plain": new Blob([text], { type: "text/plain" }),
+        "text/html": new Blob([`<pre><code>${escaped}</code></pre>`], { type: "text/html" })
+      })]);
+      return;
+    } catch { /* Plain text remains available when rich copy is unsupported. */ }
+  }
+  await copyText(text);
+}
