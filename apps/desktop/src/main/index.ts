@@ -557,6 +557,9 @@ if (!gotSingleInstanceLock) {
       getDiagnostics: () =>
         settingsSnapshot(settings, diagnosticsOutputRoot, appVersion)
           .diagnostics,
+      onHotCpuProfileCaptured: (event, profileId) => {
+        emitEvent("diagnostics:cpuProfileCaptured", { ...event, profileId });
+      },
       onHotCpuHeapSnapshotLimitReached: () => {
         // Mirror PwrAgnt: a session that hits its heap-snapshot cap turns the
         // capture flag off so the next arm doesn't silently refill the disk.
@@ -1169,7 +1172,7 @@ if (!gotSingleInstanceLock) {
       }
       const opened = windows.open(profileId);
       if (opened.created) {
-        diagnostics.attachWindow(opened.window);
+        diagnostics.attachWindow(opened.window, profileId);
         // The Window menu lists open profile windows off macOS.
         opened.window.once("closed", () => refreshMenu());
         if (startupCpuWindowPending) {

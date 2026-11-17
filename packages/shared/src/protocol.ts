@@ -10,6 +10,7 @@
 // milestones extend `Commands`/`Events` with worktree-state, changes, remote,
 // graph, and rebase entries.
 
+import type { HotCpuProfileCapturedEvent } from "./hot-cpu-profile";
 import type { ForgeHostMap } from "./forge-remote";
 import type { ContributionIdentity, ContributionSnapshot } from "./contributions";
 import type { GhDefaultRepository, HookRun, IgnoreDestination, IgnoreOptions, IgnorePatternChoice, IgnoredSummary, RepositorySetup, SetupIgnoreTest } from "./git-discovery";
@@ -2880,6 +2881,8 @@ export interface Events {
    *  one — so the copy is confirmed even when Settings, Logs or nothing has
    *  focus. */
   "ui:copyDiagnostics": { profileId: string | null; copied: boolean };
+  /** Main captures are app-wide (null); renderer captures belong to one profile. */
+  "diagnostics:cpuProfileCaptured": HotCpuProfileCapturedEvent & { profileId: string | null };
   /** App settings changed (any window) — payload is the fresh snapshot. */
   "settings:changed": AppSettingsSnapshot;
   /** Git identity config changed through PwrGit, or a launch notice was

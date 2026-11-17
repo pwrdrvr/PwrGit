@@ -1,13 +1,16 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import type { Repo } from "@pwrgit/shared";
 import { AppUpdateToast } from "../update/AppUpdateToast";
 import { ReleaseNotesLink } from "../update/ReleaseNotesLink";
 import { RemoteActivityToast } from "../remote/RemoteActivityToast";
 import { CodexVersionNotice } from "../settings/CodexVersionNotice";
 import { GitIdentityNotice } from "../identity/GitIdentityNotice";
-import { dispatch } from "../../lib/pwrgit";
+import { dispatch, subscribe } from "../../lib/pwrgit";
+import { cpuProfileNotice } from "./cpu-profile-notice";
 import {
   dismissToast,
+  dismissToastGroup,
+  showInfoToast,
   subscribeToasts,
   type Toast,
   type ToastSubject
@@ -53,6 +56,12 @@ export function ToastHost({
   const [toasts, setToasts] = useState<Toast[]>([]);
 
   useEffect(() => subscribeToasts(setToasts), []);
+  useEffect(() => subscribe("diagnostics:cpuProfileCaptured", (event) => {
+    if (event.profileId !== null && event.profileId !== profileId) return;
+    showInfoToast(cpuProfileNotice(event));
+  }), [profileId]);
+
+  const seenGroups = new Set<string>();
 
   return (
     <div className="toast-host">
@@ -67,18 +76,34 @@ export function ToastHost({
           them still. */}
       {[...toasts]
         .sort((a, b) => Number(a.sticky === true) - Number(b.sticky === true))
-        .map((toast) => (
-          <ToastCard
-            key={toast.key ?? toast.id}
-            toast={toast}
-            subject={
-              toast.subject === undefined
-                ? null
-                : resolveSubject(toast.subject, repos)
-            }
-            onReveal={onReveal}
-          />
-        ))}
+        .map((toast) => {
+          if (toast.sticky === true && toast.dismissGroup !== undefined) {
+            const group = toast.dismissGroup;
+            if (seenGroups.has(group.key)) return null;
+            seenGroups.add(group.key);
+            return (
+              <ToastGroup
+                key={`group:${group.key}`}
+                group={group}
+                toasts={toasts.filter((item) => item.sticky === true && item.dismissGroup?.key === group.key)}
+                repos={repos}
+                onReveal={onReveal}
+              />
+            );
+          }
+          return (
+            <ToastCard
+              key={toast.key ?? toast.id}
+              toast={toast}
+              subject={
+                toast.subject === undefined
+                  ? null
+                  : resolveSubject(toast.subject, repos)
+              }
+              onReveal={onReveal}
+            />
+          );
+        })}
       {/* Live operations sit below the transient notices and above the update
           card, for the reason the sort above gives: they outlive the come-and-go
           and must not be shoved around by it. */}
@@ -88,6 +113,52 @@ export function ToastHost({
       <AppUpdateToast />
     </div>
   );
+}
+
+/** One standing card per group, with every capture reachable in order. */
+function ToastGroup({ group, toasts, repos, onReveal }: {
+  group: NonNullable<Toast["dismissGroup"]>;
+  toasts: readonly Toast[];
+  repos: readonly Repo[];
+  onReveal: (repoId: string, remote: string | null) => void;
+}) {
+  const [activeId, setActiveId] = useState<number>();
+  const lastIndex = useRef(0);
+  const foundIndex = toasts.findIndex((toast) => toast.id === activeId);
+  const index = foundIndex >= 0 ? foundIndex : Math.min(lastIndex.current, toasts.length - 1);
+  const active = toasts[index];
+
+  useEffect(() => {
+    lastIndex.current = index;
+    if (active !== undefined && active.id !== activeId) setActiveId(active.id);
+  }, [active, activeId, index]);
+  if (active === undefined) return null;
+
+  const select = (position: number) => {
+    const next = toasts[position];
+    if (next === undefined) return;
+    lastIndex.current = position;
+    setActiveId(next.id);
+  };
+
+  return <ToastCard
+    toast={active}
+    subject={active.subject === undefined ? null : resolveSubject(active.subject, repos)}
+    onReveal={onReveal}
+    navigation={
+      <nav className="app-toast__navigation" aria-label={group.label}>
+        <div className="app-toast__pages">
+          <button className="app-toast__button" type="button" aria-label="Previous notice" disabled={index === 0} onClick={() => select(index - 1)}>Previous</button>
+          <span className="app-toast__position">{index + 1} of {toasts.length}</span>
+          <button className="app-toast__button" type="button" aria-label="Next notice" disabled={index === toasts.length - 1} onClick={() => select(index + 1)}>Next</button>
+        </div>
+        {toasts.length > 1 && <button className="app-toast__button" type="button" onClick={() => {
+          dismissToastGroup(group.key);
+          for (const toast of toasts) toast.onDismiss?.();
+        }} aria-label={`Dismiss all ${group.label}`}>Dismiss all {group.label}</button>}
+      </nav>
+    }
+  />;
 }
 
 /** A subject with its repository found: what the chips draw. */
@@ -128,11 +199,13 @@ function resolveSubject(
 function ToastCard({
   toast,
   subject,
-  onReveal
+  onReveal,
+  navigation
 }: {
   toast: Toast;
   subject: NamedSubject | null;
   onReveal: (repoId: string, remote: string | null) => void;
+  navigation?: ReactNode;
 }) {
   const tip = useViewportTooltip();
   const [paused, setPaused] = useState(false);
@@ -146,6 +219,7 @@ function ToastCard({
   return (
     <aside
       className={toast.layout === "stacked" ? "app-toast app-toast--stacked" : "app-toast"}
+      data-toast-group={toast.dismissGroup?.key}
       role="status"
       aria-live="polite"
       onMouseEnter={() => setPaused(true)}
@@ -184,7 +258,7 @@ function ToastCard({
             className="app-toast__button app-toast__button--primary"
             type="button"
             onClick={() => {
-              dismissToast(toast.id);
+              if (toast.action?.dismiss !== false) dismissToast(toast.id);
               toast.action?.run();
             }}
           >
@@ -237,6 +311,7 @@ function ToastCard({
           <CloseGlyph size={12} />
         </button>
       </div>
+      {navigation}
       {/* Keyed by id so a replacement restarts the countdown animation, which
           runs on mount, in step with the timer effect above. A sticky toast
           has no countdown, so it shows no bar draining toward one. */}

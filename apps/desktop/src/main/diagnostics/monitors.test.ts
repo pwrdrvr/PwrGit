@@ -8,10 +8,10 @@ import type {
   HotCpuProfileSample,
   HotCpuProfileSession
 } from "./hot-cpu-profile-session";
+import type { HotCpuProfileCapturedEvent } from "@pwrgit/shared";
 import { MainProcessHeapMonitor } from "./main-process-heap-monitor";
 import {
-  HotCpuProfiler,
-  type HotCpuProfileCapturedEvent
+  HotCpuProfiler
 } from "./hot-cpu-profiler";
 
 // Trigger-logic tests for the machinery ported from PwrAgnt, driven through

@@ -4,30 +4,11 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import type { Profiler } from "node:inspector";
 import type { ProcessMetric } from "electron";
+import type { HotCpuProfileCapturedEvent, HotCpuProfileHeapSnapshotArtifact } from "@pwrgit/shared";
 import type { HotCpuProfileConfig } from "./hot-cpu-profile-config";
 import type { HotCpuProfileSession } from "./hot-cpu-profile-session";
 import { getDiagLogger } from "./diag-log";
 import { joinCpuProfiles } from "./cpu-profile-history";
-
-export type HotCpuProfileHeapSnapshotArtifact = {
-  filename: string;
-  path: string;
-  phase: string;
-};
-
-export type HotCpuProfileCapturedEvent = {
-  target?: "main" | "renderer";
-  capturedAt: string;
-  heapSnapshotArtifacts: HotCpuProfileHeapSnapshotArtifact[];
-  profileFilename: string;
-  profilePath: string;
-  sessionDirectory: string;
-  sessionDirectoryName: string;
-  triggerConsecutiveSamples: number;
-  triggerCpuPercent: number;
-  triggerMode: string;
-  triggerThresholdPercent: number;
-};
 
 const CHROME_DEBUGGER_PROTOCOL_VERSION = "1.3";
 // Rotate only after evaluating the CPU sample, and retain the last complete

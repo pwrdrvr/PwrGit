@@ -144,6 +144,14 @@ records triggers, failures, pre-trigger duration, and shutdown. Open
 inspect JavaScript stacks. Settings changes and app shutdown flush triggered
 profiles; untriggered recordings do not produce a `.cpuprofile`.
 
+Completed captures produce a standing CPU notice with Open folder and Copy
+profile details actions. Notices remain until explicitly dismissed in that
+window; they are not persisted across window closure or app restart. Previous
+and Next page through the captures, and Dismiss all CPU profile notices clears
+only that group. Later captures produce new notices. Renderer captures notify
+their producing profile; main captures are app-wide. Saved profile files remain
+available in the diagnostics folder after a notice is dismissed.
+
 Main-process recording is shared across windows. Startup profiling owns the
 main V8 profiler until it finishes; automatic recording waits for that owner
 to release it. Heap monitoring or an attached debugger can prevent renderer

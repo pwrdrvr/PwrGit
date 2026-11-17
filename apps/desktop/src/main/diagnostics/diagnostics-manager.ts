@@ -6,7 +6,7 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { writeHeapSnapshot } from "node:v8";
 import { app, type BrowserWindow } from "electron";
-import type { DiagnosticsSettings } from "@pwrgit/shared";
+import type { DiagnosticsSettings, HotCpuProfileCapturedEvent } from "@pwrgit/shared";
 import { getDiagLogger } from "./diag-log";
 import {
   resolveHeapMonitorConfig,
@@ -41,6 +41,7 @@ function versions(): HeapSessionVersions {
 
 type WindowEntry = {
   window: BrowserWindow;
+  profileId: string | null;
   heapMonitor: RendererHeapMonitor | null;
   heapSessionDir: string | null;
   hotCpuProfiler: HotCpuProfiler | null;
@@ -73,6 +74,7 @@ export class DiagnosticsManager {
   private stopResourceMonitoring: (() => Promise<void>) | null = null;
   private readonly outputRoot: string;
   private readonly getDiagnostics: () => DiagnosticsSettings;
+  private readonly onHotCpuProfileCaptured: ((event: HotCpuProfileCapturedEvent, profileId: string | null) => void | Promise<void>) | undefined;
   /** Persist "captureHeapSnapshot off" after a session hits its snapshot
    *  limit (mirrors PwrAgnt's auto-disable so the next arm doesn't refill). */
   private readonly onHotCpuHeapSnapshotLimitReached: () => void;
@@ -93,21 +95,24 @@ export class DiagnosticsManager {
   constructor(options: {
     outputRoot: string;
     getDiagnostics: () => DiagnosticsSettings;
+    onHotCpuProfileCaptured?: (event: HotCpuProfileCapturedEvent, profileId: string | null) => void | Promise<void>;
     onHotCpuHeapSnapshotLimitReached: () => void;
   }) {
     this.outputRoot = options.outputRoot;
     this.getDiagnostics = options.getDiagnostics;
+    this.onHotCpuProfileCaptured = options.onHotCpuProfileCaptured;
     this.onHotCpuHeapSnapshotLimitReached =
       options.onHotCpuHeapSnapshotLimitReached;
   }
 
   /** Track a profile window; start monitors on it if diagnostics are live. */
-  attachWindow(window: BrowserWindow): void {
+  attachWindow(window: BrowserWindow, profileId: string | null = null): void {
     const id = window.webContents.id;
     if (this.windows.has(id)) return;
 
     const entry: WindowEntry = {
       window,
+      profileId,
       heapMonitor: null,
       heapSessionDir: null,
       hotCpuProfiler: null,
@@ -342,7 +347,8 @@ export class DiagnosticsManager {
     this.mainHotCpuProfiler = new HotCpuProfiler({
       config, session: created.session,
       getAppMetrics: () => app.getAppMetrics(),
-      target: createMainProcessHotCpuTarget()
+      target: createMainProcessHotCpuTarget(),
+      onProfileWritten: (event) => this.onHotCpuProfileCaptured?.(event, null)
     });
     log.info("main hot CPU session directory", { directory: created.session.directoryPath });
     await this.mainHotCpuProfiler.start();
@@ -378,6 +384,7 @@ export class DiagnosticsManager {
         isDestroyed: () => contents.isDestroyed(),
         takeHeapSnapshot: (filePath) => contents.takeHeapSnapshot(filePath)
       },
+      onProfileWritten: (event) => this.onHotCpuProfileCaptured?.(event, entry.profileId),
       onHeapSnapshotLimitReached: () => {
         this.onHotCpuHeapSnapshotLimitReached();
       }

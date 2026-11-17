@@ -32,15 +32,17 @@ export type Toast = {
    *  conditions that stay true until acted on, where auto-hiding would just
    *  un-report an unresolved problem. */
   sticky?: boolean;
+  /** Sticky notices share one paged card and an action to dismiss this group. */
+  dismissGroup?: { key: string; label: string };
   /** Put long instructions above their actions, leaving the full card width. */
   layout?: "stacked";
   /** Offer an "Open Logs" action (default true for errors). */
   showLogsAction?: boolean;
   /** Offer a copy action (default true for errors). */
   showCopyAction?: boolean;
-  /** The one thing to do next, drawn as the card's leading button. Running it
-   *  also dismisses the card. */
-  action?: { label: string; run: () => void };
+  /** The next action dismisses the card by default. Diagnostic navigation
+   *  can keep a durable notice available until the reader closes it. */
+  action?: { label: string; run: () => void; dismiss?: boolean };
   /** Runs when the reader closes the card by hand (×), not when its action
    *  runs or a key replaces it: for an offer that records its answer. */
   onDismiss?: () => void;
@@ -114,6 +116,12 @@ export function showInfoToast(input: Omit<Toast, "id" | "tone">): void {
     ...input,
     tone: "info"
   });
+}
+
+/** Remove the currently queued sticky notices in a group; future notices are unaffected. */
+export function dismissToastGroup(key: string): void {
+  toasts = toasts.filter((toast) => toast.sticky !== true || toast.dismissGroup?.key !== key);
+  notify();
 }
 
 export function dismissToast(id: number): void {
