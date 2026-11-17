@@ -32,6 +32,8 @@ export type RepoIndexEntry = {
   /** Holds what is on screen (`selectionHolder`: the selected worktree, or
    *  the change request shown): drawn in the accent, like its tree row. */
   containsSelection: boolean;
+  /** Pinned: listed above the hairline, in the reader's order. */
+  pinned: boolean;
 };
 
 export type RepoIndexGroup = {
@@ -44,17 +46,26 @@ export type RepoIndexGroup = {
 /**
  * Moving names, as the tree's repo rows move: the same drag (one
  * `useListReorder`, so held and aimed state shows in both views and a name
- * can land on a tree row) and the same ⌘⇧↑/↓. Passed only while the lens is
- * arranged by hand. Design: `design/Repo Index Reorder - UX Review.dc.html`.
+ * can land on a tree row) and the same ⌘⇧↑/↓. Pins move among the pins; a
+ * drop across the hairline pins or unpins, as in PwrAgnt's project index.
+ * Design: `design/Pinned Repos Lead Every Lens - UX Review.dc.html`, turn 3.
  */
 export type RepoIndexReorder = {
   rowProps: (id: string) => ReturnType<ListReorder["rowProps"]>;
   dragId: string | null;
+  /** The pin a line is drawn beside, or null. */
   target: ReorderTarget | null;
+  /** What a drop on or below the hairline would do, or null. */
+  seamAim: "pin" | "unpin" | null;
+  /** The hairline's drop handlers. */
+  seamProps: Omit<
+    ReturnType<ListReorder["rowProps"]>,
+    "draggable" | "onDragStart" | "onDragEnd"
+  >;
   isPostDragClick: () => boolean;
   /** The move a key asks for (⌘⇧↑/↓, Ctrl off the Mac), or null. */
   moveKey: (event: ReactKeyboardEvent) => "up" | "down" | null;
-  /** Move one step inside its folder group. False when it cannot move. */
+  /** Move a pin one step. False when it cannot move. */
   onMove: (id: string, direction: "up" | "down") => boolean;
 };
 
@@ -266,7 +277,7 @@ export function RepoIndex({
     const target = event.target as HTMLElement;
     const at = ids.indexOf(target.dataset["indexId"] ?? "");
     if (at === -1) return;
-    const direction = reorder?.moveKey(event) ?? null;
+    const direction = entries[at]?.pinned ? reorder?.moveKey(event) ?? null : null;
     if (direction !== null) {
       event.preventDefault();
       const id = ids[at] as string;
@@ -353,12 +364,12 @@ export function RepoIndex({
             className="repo-index__list"
             {...(group.label === null ? {} : { "aria-label": group.label })}
           >
-            {group.entries.map((entry) => {
+            {group.entries.map((entry, index) => {
               const current = entry.id === spy.current;
               const cut = truncatedTooltip(tip, entry.name);
               const drop =
                 reorder?.target?.id === entry.id ? reorder.target.position : null;
-              return (
+              const row = (
                 <li
                   key={entry.id}
                   {...(drop === null ? {} : { className: `is-drop-${drop}` })}
@@ -393,6 +404,21 @@ export function RepoIndex({
                   </button>
                 </li>
               );
+              // The hairline where the pins end: a mark for the eye and a
+              // drop target for the pointer, hidden from screen readers.
+              return index === lastPinnedAt(group.entries)
+                ? [
+                    row,
+                    <li
+                      key="__seam"
+                      className={`repo-index__seam${
+                        reorder?.seamAim == null ? "" : " is-drop-target"
+                      }`}
+                      aria-hidden="true"
+                      {...reorder?.seamProps}
+                    />
+                  ]
+                : row;
             })}
           </ul>
         </div>
@@ -412,6 +438,10 @@ export function RepoIndex({
     />
     </>
   );
+}
+
+function lastPinnedAt(entries: readonly RepoIndexEntry[]): number {
+  return entries.findLastIndex((entry) => entry.pinned);
 }
 
 /** Compared, never interpolated into a selector: ids carry whatever a path

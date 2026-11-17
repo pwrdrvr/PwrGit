@@ -627,12 +627,10 @@ pages").
   `RepoIndex`, so a scroll re-renders only the column.
 - **The hover hold spans index and tree** (`held.containerProps` on
   `.sidebar__body`), so Focused cannot re-sort under a moving pointer.
-- **Names move only where tree rows move** (the Pinned lens), by drag and
-  ⌘⇧↑/↓, inside their folder group. The index gets the tree's own
+- **Names move as tree rows move** (below). The index gets the tree's own
   `repoDrag` instance and `moveRepo`, never a second hook: held and aimed
   state shows in both views, a name drops on a tree row, and the two can
-  never order repositories differently. Design:
-  `design/Repo Index Reorder - UX Review.dc.html`, 2a.
+  never order repositories differently.
 - **Accessibility:** a `nav` named "Repository index", outside `role="tree"`,
   with a list per folder and a button per repository. The spy item has
   `aria-current="location"`. One roving tab stop: ↑/↓, Home/End, typeahead,
@@ -641,6 +639,38 @@ pages").
   enabled index is not showing.
 
 Design: `design/Sidebar Repo Index - UX Review.dc.html`, 3a and turn 4.
+
+## Pinned repositories lead every lens, in one order
+
+As PwrAgnt's project index: pins first, a seam, then the rest. Rules in
+`repo-view.ts` (`splitPins`, `filterReposByLens`, `movePin`), held by
+`repo-view.pins.property.test.ts`.
+
+- **A pin is the repository's own star** (`repoLeads`). A pinned worktree or
+  branch admits its repository to the Pinned lens, below the seam.
+- **No lens puts an unpinned repository above a pinned one.** Through 0.59.7
+  All was strictly A-Z and Focused led with the current repository. The rest
+  keeps the lens's order: Focused's ladder, by name elsewhere.
+- **The pins' order is one list** (`order`, then name), the same in every
+  lens and both columns. A lens may list only some pins, so a move goes
+  through `movePin` over the profile's whole order; never renumber the pins
+  on screen.
+- **`Sidebar` splits again after the hover hold**, so a star pressed under
+  the pointer crosses the seam at once.
+- **Grouped by folder, the pins form a Pinned group above the folders**
+  (`PINNED_GROUP`), so they stay one list and lead there too.
+- **The seam is a drop target** (`.repo-seam`, `.repo-index__seam`; `PIN_SEAM`
+  in `Sidebar`). A drop among the pins moves or pins; a pin dropped on or
+  below the seam is unpinned, and the seam lights instead of a row line. Two
+  repositories below the seam refuse each other. Rows drag only while
+  something is pinned; the first pin is the star.
+- **Only a pin draws the grip and takes ⌘⇧↑/↓** (`arrangeable` is
+  `repo.pinned`). `showPinVia` is the Pinned lens's "via wt" badge.
+- **The seam is `aria-hidden` in both columns**: a `tree` owns only treeitems
+  and groups, and each row's star already says it.
+
+Design: `design/Pinned Repos Lead Every Lens - UX Review.dc.html` (1c, turn 3,
+4a). It reverses `Repo Index Reorder`, 2b.
 
 ## One object, one menu
 

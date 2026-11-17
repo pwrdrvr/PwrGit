@@ -131,16 +131,32 @@ test("the platform reorder shortcut moves a pinned repo without the mouse", asyn
   expect(await repoNames(window)).toEqual(["bravo", "charlie", "alpha"]);
 });
 
-test("the computed lenses stay computed — no drag handle outside Pinned", async () => {
+test("a pin keeps its place and its grip in every lens, above the seam", async () => {
   const window = await pinnedSandbox();
   await expect(
     window.locator(".repo-row").first()
   ).toHaveClass(/is-arrangeable/);
 
+  // Arrange in Pinned, then unpin one: All lists the pins in that order,
+  // then the seam, then the rest by name.
+  await window.locator(".repo-row", { hasText: "alpha" }).focus();
+  await window.keyboard.press(primaryShortcut("Shift", "ArrowDown"));
+  expect(await repoNames(window)).toEqual(["bravo", "alpha", "charlie"]);
+
   await lensChip(window, "All").click();
   await expect(window.locator(".repo-row__name")).toHaveCount(3);
-  await expect(window.locator(".repo-row.is-arrangeable")).toHaveCount(0);
-  await expect(window.locator(".repo-row__handle")).toHaveCount(0);
+  expect(await repoNames(window)).toEqual(["bravo", "alpha", "charlie"]);
+  await expect(window.locator(".repo-row.is-arrangeable")).toHaveCount(3);
+
+  await window.locator(".repo-row", { hasText: "alpha" }).locator(".pin").click();
+  await expect(window.locator(".repo-row.is-arrangeable")).toHaveCount(2);
+  expect(await repoNames(window)).toEqual(["bravo", "charlie", "alpha"]);
+  await expect(window.locator(".repo-seam")).toHaveCount(1);
+  expect(
+    await window
+      .locator(".repo-row, .repo-seam")
+      .evaluateAll((els) => els.map((el) => el.getAttribute("data-repo-id") === null))
+  ).toEqual([false, false, true, false]);
 });
 
 test("the drag grip clears the caret, and stays inside the scrollport", async () => {

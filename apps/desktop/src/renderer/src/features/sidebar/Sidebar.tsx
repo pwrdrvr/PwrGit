@@ -95,11 +95,12 @@ import {
   focusedRepos,
   focusReasonForRepo,
   groupReposByRoot,
+  splitPins,
+  type RepoGroup,
   LENS_EMPTY_COPY,
   LENSES,
   lensCounts,
-  lensIsArrangeable,
-  reorder,
+  movePin,
   SORT_CYCLE,
   type SelectionModifiers
 } from "./repo-view";
@@ -116,6 +117,10 @@ import {
   useWorktreeBatch
 } from "./worktree-batch";
 
+/** The Pinned group's `root`, when the tree is grouped by folder. Not a path. */
+const PINNED_GROUP = "\u0000pinned";
+/** The seam's id as a drop target. Not a repository id. */
+const PIN_SEAM = "\u0000pin-seam";
 /** Distinguishes repo drags from worktree drags (see useListReorder). */
 const REPO_MIME = "application/x-pwrgit-repo";
 
@@ -657,13 +662,20 @@ export function Sidebar({
       })()
     : lensRepos;
   const focusedPage = focusedRepoPage(allFiltered, showAllFocused);
-  const filtered = lens === "Focused" ? focusedPage.repos : allFiltered;
+  // Pins lead, in their one order, then the lens's own (design: Pinned Repos
+  // Lead Every Lens, turn 2). `filterReposByLens` already answers that way;
+  // split again here because a held order predates a star pressed under the
+  // pointer, and a pin must cross the seam at once: the star is how you ask.
+  const { pins: shownPins, rest: shownRest } = splitPins(
+    lens === "Focused" ? focusedPage.repos : allFiltered
+  );
+  const filtered = [...shownPins, ...shownRest];
+  const shownPinIds = new Set(shownPins.map((repo) => repo.id));
   const hiddenFocused = lens === "Focused" ? focusedPage.hidden : 0;
   const showFocusNote =
     lens === "Focused" &&
     repos.length > 0 &&
     repoLoadState.status !== "loading";
-  const arrangeable = lensIsArrangeable(lens);
   /** What "Fork…" should open on: the repository holding the current
    *  selection. Computed here rather than in App because the sidebar is what
    *  owns the notion of a selected row. */
@@ -766,7 +778,16 @@ export function Sidebar({
   const roots = activeProfile?.roots ?? [];
   const canGroup = roots.length > 1;
   const grouped = groupByFolder && canGroup;
-  const groups = grouped ? groupReposByRoot(filtered, roots) : [];
+  // Grouped, the pins leave their folders for a Pinned group above them, so
+  // "pins lead" holds there too and the pins stay one list (turn 4a).
+  const groups: RepoGroup[] = !grouped
+    ? []
+    : [
+        ...(shownPins.length === 0
+          ? []
+          : [{ root: PINNED_GROUP, label: "Pinned", repos: shownPins }]),
+        ...groupReposByRoot(shownRest, roots)
+      ];
   // Built only while the column is drawn: it scans every worktree.
   const indexSource = grouped
     ? groups.map((g) => ({ key: g.root || "__other", label: g.label, repos: g.repos }))
@@ -779,33 +800,60 @@ export function Sidebar({
         entries: groupRepos.map((repo) => ({
           id: repo.id,
           name: repo.name,
-          containsSelection: repo.id === holderRepoId
+          containsSelection: repo.id === holderRepoId,
+          pinned: shownPinIds.has(repo.id)
         }))
       }));
 
-  // Which folder group each repo renders under, so a drag can be kept inside
-  // its own group. Dragging across groups would reorder the flat list while the
-  // row visibly snaps back under its own heading — the arrangement would be
-  // real but invisible.
-  const groupOfRepo = new Map<string, string>();
-  for (const group of groups) {
-    for (const repo of group.repos) groupOfRepo.set(repo.id, group.root);
-  }
-
+  // What a drop does, as PwrAgnt's project index (`directory-pin-drop.ts`):
+  // among the pins it moves one; an unpinned repository dropped on a pin, or
+  // on the seam, is pinned there; a pin dropped on or below the seam is
+  // unpinned. Two unpinned repositories have nothing to say to each other:
+  // the rest is in the lens's order.
   const repoDrag = useListReorder({
     mime: REPO_MIME,
     canDrop: (dragId, targetId) =>
-      !grouped || groupOfRepo.get(dragId) === groupOfRepo.get(targetId),
-    // Commit over the whole filtered list even when grouped: a group is a view
-    // of the flat order, so numbering the full list keeps one coherent
-    // arrangement instead of per-group indices that collide.
+      targetId === PIN_SEAM || shownPinIds.has(targetId) || shownPinIds.has(dragId),
     onCommit: (dragId, targetId, position) => {
       // A drag leaves the ids untouched and only moves them, so the held order
       // would silently undo the drop the user just made.
       held.release();
-      onPersistRepoOrder(reorder(filteredIds, dragId, targetId, position));
+      const dragPinned = shownPinIds.has(dragId);
+      if (shownPinIds.has(targetId)) {
+        if (!dragPinned) onSetRepoPin(dragId, true);
+        onPersistRepoOrder(movePin(repos, dragId, targetId, position));
+        return;
+      }
+      if (dragPinned) {
+        onSetRepoPin(dragId, false);
+        return;
+      }
+      // An unpinned repository on the seam itself joins the pins shown, last.
+      const last = shownPins.at(-1);
+      if (last === undefined) return;
+      onSetRepoPin(dragId, true);
+      onPersistRepoOrder(movePin(repos, dragId, last.id, "after"));
     }
   });
+  // Rows drag only while there is somewhere to drop: with nothing pinned the
+  // star is the way in (the board leaves PwrAgnt's ghost Pin slot out).
+  const canDragRepos = shownPins.length > 0;
+  // The seam lights for both drops that end on it; a line between rows is
+  // drawn only among the pins, the one place a position is kept.
+  const dragTarget = repoDrag.target;
+  const dragIsPin = repoDrag.dragId !== null && shownPinIds.has(repoDrag.dragId);
+  const seamAim: "pin" | "unpin" | null =
+    dragTarget === null || repoDrag.dragId === null || shownPinIds.has(dragTarget.id)
+      ? null
+      : dragIsPin
+        ? "unpin"
+        : dragTarget.id === PIN_SEAM
+          ? "pin"
+          : null;
+  const lineTarget =
+    dragTarget !== null && shownPinIds.has(dragTarget.id) ? dragTarget : null;
+  const { draggable: _seamDraggable, onDragStart: _seamDragStart, onDragEnd: _seamDragEnd, ...seamDropProps } =
+    repoDrag.rowProps(PIN_SEAM, true);
 
   // Roving tabindex across the repo list — one tab stop, arrows to move.
   const [focusedRepoId, setFocusedRepoId] = useState<string | null>(null);
@@ -901,58 +949,42 @@ export function Sidebar({
   };
 
   /**
-   * ⌘⇧↑/↓ on a repository, from its tree row or its index name: one step to
-   * the nearest neighbour in its own folder group, so a key move obeys the
-   * boundary the drag does. False when there is nowhere to go.
+   * ⌘⇧↑/↓ on a pinned repository, from its tree row or its index name: one
+   * step among the pins shown. False when there is nowhere to go, and for a
+   * repository that is not pinned (the rest is in the lens's order).
    */
   const moveRepo = (repoId: string, direction: "up" | "down"): boolean => {
-    const index = filteredIds.indexOf(repoId);
+    const index = shownPins.findIndex((repo) => repo.id === repoId);
     if (index === -1) return false;
-    const step = direction === "up" ? -1 : 1;
-    let to = index + step;
-    if (grouped) {
-      while (
-        filteredIds[to] !== undefined &&
-        groupOfRepo.get(filteredIds[to] as string) !== groupOfRepo.get(repoId)
-      ) {
-        to += step;
-      }
-    }
-    const neighbor = filteredIds[to];
+    const neighbor = shownPins[index + (direction === "up" ? -1 : 1)];
     if (neighbor === undefined) return false;
-    const moved = reorder(
-      filteredIds,
-      repoId,
-      neighbor,
-      direction === "up" ? "before" : "after"
-    );
     // Same reason as the drag's onCommit: the move is the user's, so it is
     // shown even if the pointer happens to be parked on the list.
     held.release();
-    onPersistRepoOrder(moved);
+    onPersistRepoOrder(
+      movePin(repos, repoId, neighbor.id, direction === "up" ? "before" : "after")
+    );
     // Focus stays on what moved, so nothing is re-announced on its own — see
-    // lib/announce (SC 4.1.3). Announce against the group the repository is
-    // actually listed in, which is what its posinset counts within.
-    const siblings = grouped
-      ? moved.filter((id) => groupOfRepo.get(id) === groupOfRepo.get(repoId))
-      : moved;
-    const name = filtered.find((r) => r.id === repoId)?.name ?? repoId;
-    announce(movedMessage(name, siblings.indexOf(repoId) + 1, siblings.length));
+    // lib/announce (SC 4.1.3).
+    const name = shownPins[index]?.name ?? repoId;
+    announce(
+      movedMessage(name, index + (direction === "up" ? 0 : 2), shownPins.length)
+    );
     return true;
   };
 
-  // The index moves names with the tree's own drag and key move, only where
-  // the tree's rows move (the Pinned lens).
-  const indexReorder: RepoIndexReorder | undefined = arrangeable
-    ? {
-        rowProps: (id) => repoDrag.rowProps(id, true),
-        dragId: repoDrag.dragId,
-        target: repoDrag.target,
-        isPostDragClick: repoDrag.isPostDragClick,
-        moveKey: moveKeyDirection,
-        onMove: moveRepo
-      }
-    : undefined;
+  // The index moves names with the tree's own drag and key move, so held and
+  // aimed state shows in both columns and the two can never disagree.
+  const indexReorder: RepoIndexReorder = {
+    rowProps: (id) => repoDrag.rowProps(id, canDragRepos),
+    dragId: repoDrag.dragId,
+    target: lineTarget,
+    seamAim,
+    seamProps: seamDropProps,
+    isPostDragClick: repoDrag.isPostDragClick,
+    moveKey: moveKeyDirection,
+    onMove: moveRepo
+  };
 
   const handleRepoKeyDown = (repo: Repo, event: ReactKeyboardEvent): void => {
     // Keydown from the pin button (or anything else focusable inside the row)
@@ -966,7 +998,7 @@ export function Sidebar({
     if (index === -1) return;
     if (hasPrimaryModifier(event, platform) && event.shiftKey) {
       const direction = moveKeyDirection(event);
-      if (direction === null || !arrangeable) return;
+      if (direction === null || !repo.pinned) return;
       if (!moveRepo(repo.id, direction)) return;
       event.preventDefault();
       // Keep focus on the row that moved, not the slot it left.
@@ -1203,12 +1235,11 @@ export function Sidebar({
             ...(changeRequest === undefined ? {} : { changeRequest })
           })
         }
-        arrangeable={arrangeable}
-        dragProps={repoDrag.rowProps(repo.id, arrangeable)}
+        arrangeable={repo.pinned}
+        showPinVia={lens === "Pinned"}
+        dragProps={repoDrag.rowProps(repo.id, canDragRepos)}
         dragging={repoDrag.dragId === repo.id}
-        dropPosition={
-          repoDrag.target?.id === repo.id ? repoDrag.target.position : null
-        }
+        dropPosition={lineTarget?.id === repo.id ? lineTarget.position : null}
         focusable={repoTabStopId === repo.id}
         onRowKeyDown={(event) => handleRepoKeyDown(repo, event)}
         onRowFocus={() => setFocusedRepoId(repo.id)}
@@ -1217,6 +1248,29 @@ export function Sidebar({
       />
     );
   };
+
+  /**
+   * Where the pins end. PwrAgnt's Directories divider: a labelled hairline
+   * ungrouped, bare above a folder heading. It is the drop target that
+   * unpins, and lights for it. Hidden from the tree's accessibility tree: a
+   * `tree` owns treeitems and groups only, and the star says the same thing.
+   */
+  const pinSeam = (bare: boolean) => (
+    <div
+      key="__pin-seam"
+      className={`repo-seam${bare ? " repo-seam--bare" : ""}${
+        seamAim === null ? "" : " is-drop-target"
+      }`}
+      aria-hidden="true"
+      {...seamDropProps}
+    >
+      {(!bare || seamAim !== null) && (
+        <span>
+          {seamAim === "unpin" ? "Unpin" : seamAim === "pin" ? "Pin" : "Repositories"}
+        </span>
+      )}
+    </div>
+  );
 
   return (
     <FinishedAfterDaysContext.Provider value={finishedAfterDays}>
@@ -1379,7 +1433,7 @@ export function Sidebar({
             listRef={listRef}
             treeId={REPO_TREE_ID}
             onJump={jumpToRepo}
-            {...(indexReorder === undefined ? {} : { reorder: indexReorder })}
+            reorder={indexReorder}
           />
         )}
         <div className="sidebar__tree-pane">
@@ -1415,16 +1469,26 @@ export function Sidebar({
                     >
                       <div
                         className="repo-group__head"
-                        {...hoverTooltip(tip, g.root || "Not under any added folder")}
+                        {...hoverTooltip(
+                          tip,
+                          g.root === PINNED_GROUP
+                            ? "Pinned repositories, in your order"
+                            : g.root || "Not under any added folder"
+                        )}
                         aria-hidden="true"
                       >
                         <span className="repo-group__label">{g.label}</span>
                         <span className="repo-group__count">{g.repos.length}</span>
                       </div>
                       {g.repos.map(renderRepo)}
+                      {g.root === PINNED_GROUP && pinSeam(true)}
                     </div>
                   ))
-                : filtered.map(renderRepo)}
+                : filtered.flatMap((repo, index, list) =>
+                    index === shownPins.length - 1
+                      ? [renderRepo(repo, index, list), pinSeam(false)]
+                      : [renderRepo(repo, index, list)]
+                  )}
             </div>
 
             {filtered.length === 0 && (

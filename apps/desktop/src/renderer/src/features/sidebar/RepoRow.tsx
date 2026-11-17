@@ -159,6 +159,7 @@ export function RepoRow({
   onHideRepo,
   onRemoveRepo,
   arrangeable,
+  showPinVia = false,
   dragProps,
   dragging,
   dropPosition,
@@ -229,8 +230,11 @@ export function RepoRow({
   onHideRepo?: (() => void) | undefined;
   /** Open the guided removal review for this repository. */
   onRemoveRepo?: (() => void) | undefined;
-  /** The current lens is one the user can arrange by hand (Pinned only). */
+  /** The repository is pinned, so it has a place in the hand order: it
+   *  draws the grip and moves by ⌘⇧↑/↓, in every lens. */
   arrangeable: boolean;
+  /** The Pinned lens: say why a repository whose star is unlit is listed. */
+  showPinVia?: boolean;
   /** Repo-level drag handlers from the sidebar's useListReorder. */
   dragProps: {
     draggable: boolean;
@@ -782,7 +786,7 @@ export function RepoRow({
     // Include the identity facts in the row description, independently of
     // the visibility button that refreshes them.
     repo.identity === undefined ? null : identityDescription(repo.identity),
-    arrangeable && pinVia !== null ? pinVia.description : null,
+    showPinVia && pinVia !== null ? pinVia.description : null,
     focusReason === undefined
       ? null
       : FOCUS_REASON_COPY[focusReason].description
@@ -848,9 +852,8 @@ export function RepoRow({
           });
         }}
       >
-        {/* Only the arrangeable lens gets a handle: everywhere else the list
-            order is computed, so a grip would promise a gesture that has
-            nowhere to persist to. */}
+        {/* Only a pin gets a handle: below the seam the order is the lens's,
+            so a grip would promise a gesture that has nowhere to persist. */}
         {arrangeable && (
           <span
             className="repo-row__handle"
@@ -950,7 +953,7 @@ export function RepoRow({
         {/* Present only via a pinned worktree: the repo's own star is unlit, so
             without this marker the row looks like it doesn't belong in the
             Pinned lens it's sitting in. */}
-        {arrangeable && pinVia !== null && (
+        {showPinVia && pinVia !== null && (
           <span
             className="repo-row__pin-via"
             {...hoverTooltip(tip, pinVia.description)}
