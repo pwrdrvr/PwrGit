@@ -108,7 +108,7 @@ import {
 } from "./repo-view";
 import { AiFeaturesSwitch } from "./AiFeaturesSwitch";
 import { useHoverStableOrder } from "./useHoverStableOrder";
-import { useListReorder } from "./useListReorder";
+import { useListReorder, type ListReorder } from "./useListReorder";
 import { FinishedAfterDaysContext, useFinishedAfterDaysSetting } from "./finished-after";
 import { useChangeRequestSelection } from "../change-request/change-request-selection";
 import {
@@ -125,6 +125,16 @@ const PINNED_GROUP = "\u0000pinned";
 const PIN_SEAM = "\u0000pin-seam";
 /** The ghost Pin slot's id as a drop target. Not a repository id. */
 const PIN_SLOT = "\u0000pin-slot";
+/** A drop target's half of `rowProps`: the seam and the Pin slot take drops
+ *  and are never dragged. */
+function dropOnly(props: ReturnType<ListReorder["rowProps"]>) {
+  const { onDragOver, onDragLeave, onDrop } = props;
+  return {
+    ...(onDragOver === undefined ? {} : { onDragOver }),
+    ...(onDragLeave === undefined ? {} : { onDragLeave }),
+    ...(onDrop === undefined ? {} : { onDrop })
+  };
+}
 /** Distinguishes repo drags from worktree drags (see useListReorder). */
 const REPO_MIME = "application/x-pwrgit-repo";
 
@@ -850,9 +860,10 @@ export function Sidebar({
   // opens a ghost Pin slot above the list, in both columns, as PwrAgnt's
   // project index does. Only a drop inside the slot pins.
   //
-  // It opens a frame after the drag starts, never in `dragstart` itself: the
+  // It opens a task after the drag starts, never in `dragstart` itself: the
   // slot pushes every row down, and an HTML drag whose source moves while
-  // the drag is being set up can end at once.
+  // the drag is being set up can end at once. A timer, not a frame: a window
+  // that is not painting runs no frames, and the slot is the only target.
   const offersPinSlot = repoDrag.dragId !== null && shownPins.length === 0;
   const [pinSlotOpen, setPinSlotOpen] = useState(false);
   useEffect(() => {
@@ -860,11 +871,10 @@ export function Sidebar({
       setPinSlotOpen(false);
       return undefined;
     }
-    const frame = window.requestAnimationFrame(() => setPinSlotOpen(true));
-    return () => window.cancelAnimationFrame(frame);
+    const timer = window.setTimeout(() => setPinSlotOpen(true), 0);
+    return () => window.clearTimeout(timer);
   }, [offersPinSlot]);
-  const { draggable: _slotDraggable, onDragStart: _slotDragStart, onDragEnd: _slotDragEnd, ...pinSlotDropProps } =
-    repoDrag.rowProps(PIN_SLOT, true);
+  const pinSlotDropProps = dropOnly(repoDrag.rowProps(PIN_SLOT, true));
   const pinSlot = pinSlotOpen && offersPinSlot
     ? { aimed: repoDrag.target?.id === PIN_SLOT, props: pinSlotDropProps }
     : null;
@@ -882,8 +892,7 @@ export function Sidebar({
           : null;
   const lineTarget =
     dragTarget !== null && shownPinIds.has(dragTarget.id) ? dragTarget : null;
-  const { draggable: _seamDraggable, onDragStart: _seamDragStart, onDragEnd: _seamDragEnd, ...seamDropProps } =
-    repoDrag.rowProps(PIN_SEAM, true);
+  const seamDropProps = dropOnly(repoDrag.rowProps(PIN_SEAM, true));
 
   // Roving tabindex across the repo list — one tab stop, arrows to move.
   const [focusedRepoId, setFocusedRepoId] = useState<string | null>(null);
@@ -1186,6 +1195,50 @@ export function Sidebar({
     });
   };
 
+  /**
+   * The star moves its row across the seam (and, grouped, into another
+   * group), and Chromium drops focus from a node that is moved or remounted.
+   * Focus that was in the row goes back to its star, so a keyboard toggle
+   * does not land on <body> (SC 2.4.3).
+   */
+  const toggleRepoPin = (repo: Repo): void => {
+    const row = document.querySelector<HTMLElement>(`[data-repo-id="${repo.id}"]`);
+    const hadFocus = row !== null && row.contains(document.activeElement);
+    onSetRepoPin(repo.id, !repo.pinned);
+    if (!hadFocus) return;
+    window.requestAnimationFrame(() => {
+      const moved = document.querySelector<HTMLElement>(`[data-repo-id="${repo.id}"]`);
+      if (moved === null || moved.contains(document.activeElement)) return;
+      (moved.querySelector<HTMLElement>(".pin") ?? moved).focus({ preventScroll: true });
+    });
+  };
+
+  const lastShownPinId = shownPins.at(-1)?.id ?? null;
+  /**
+   * Where the pins end. PwrAgnt's Directories divider: a hairline labelled
+   * "Repositories" when rows follow it ungrouped; bare above a folder heading
+   * or at the end of a lens that lists only pins, where the label would head
+   * nothing. It is the drop target that unpins, and lights for it. Hidden
+   * from assistive technology, and drawn inside the last pin's block
+   * (`RepoRow`'s `after`), never as a child of the `tree` itself.
+   */
+  const seamLabelled = !grouped && shownRest.length > 0;
+  const pinSeam = (
+    <div
+      className={`repo-seam${seamLabelled ? "" : " repo-seam--bare"}${
+        seamAim === null ? "" : " is-drop-target"
+      }`}
+      aria-hidden="true"
+      {...seamDropProps}
+    >
+      {(seamLabelled || seamAim !== null) && (
+        <span>
+          {seamAim === "unpin" ? "Unpin" : seamAim === "pin" ? "Pin" : "Repositories"}
+        </span>
+      )}
+    </div>
+  );
+
   const renderRepo = (repo: Repo, index: number, list: Repo[]) => {
     // Live, not held — unlike the row's position. The selected tint below
     // (`containsSelection`) follows the selection immediately and cannot
@@ -1216,7 +1269,7 @@ export function Sidebar({
         focusContext={held.context}
         {...(focusReason === null ? {} : { focusReason })}
         onToggleExpand={() => toggleExpand(repo)}
-        onToggleRepoPin={() => onSetRepoPin(repo.id, !repo.pinned)}
+        onToggleRepoPin={() => toggleRepoPin(repo)}
         refreshing={refreshingRepoIds.has(repo.id)}
         onRefreshWorktrees={() => onRefreshRepo(repo)}
         onRefreshPullRequest={(branch) =>
@@ -1268,6 +1321,7 @@ export function Sidebar({
         }
         arrangeable={repoLeads(repo)}
         showPinVia={lens === "Pinned"}
+        after={repo.id === lastShownPinId ? pinSeam : undefined}
         dragProps={repoDrag.rowProps(repo.id, true)}
         dragging={repoDrag.dragId === repo.id}
         dropPosition={lineTarget?.id === repo.id ? lineTarget.position : null}
@@ -1279,31 +1333,6 @@ export function Sidebar({
       />
     );
   };
-
-  /**
-   * Where the pins end. PwrAgnt's Directories divider: a hairline labelled
-   * "Repositories" when rows follow it ungrouped; bare above a folder heading
-   * or at the end of a lens that lists only pins, where the label would head
-   * nothing. It is the drop target that unpins, and lights for it. Hidden
-   * from assistive technology, and always inside a `group` (the pins'),
-   * never a child of the `tree` itself.
-   */
-  const pinSeam = (labelled: boolean) => (
-    <div
-      key="__pin-seam"
-      className={`repo-seam${labelled ? "" : " repo-seam--bare"}${
-        seamAim === null ? "" : " is-drop-target"
-      }`}
-      aria-hidden="true"
-      {...seamDropProps}
-    >
-      {(labelled || seamAim !== null) && (
-        <span>
-          {seamAim === "unpin" ? "Unpin" : seamAim === "pin" ? "Pin" : "Repositories"}
-        </span>
-      )}
-    </div>
-  );
 
   return (
     <FinishedAfterDaysContext.Provider value={finishedAfterDays}>
@@ -1526,31 +1555,9 @@ export function Sidebar({
                         <span className="repo-group__count">{g.repos.length}</span>
                       </div>
                       {g.repos.map(renderRepo)}
-                      {g.root === PINNED_GROUP && pinSeam(false)}
                     </div>
                   ))
-                : [
-                    // A `tree` may own only treeitems and groups, so the seam
-                    // cannot be its child: the pins are a group that ends
-                    // with it, as the folder groups hold their headings.
-                    // Positions stay stated over the whole list.
-                    shownPins.length > 0 && (
-                      <div
-                        className="repo-pins"
-                        key="__pins"
-                        role="group"
-                        aria-label={`Pinned (${shownPins.length} ${
-                          shownPins.length === 1 ? "repo" : "repos"
-                        })`}
-                      >
-                        {shownPins.map((repo, index) => renderRepo(repo, index, filtered))}
-                        {pinSeam(shownRest.length > 0)}
-                      </div>
-                    ),
-                    ...shownRest.map((repo, index) =>
-                      renderRepo(repo, shownPins.length + index, filtered)
-                    )
-                  ]}
+                : filtered.map(renderRepo)}
             </div>
 
             {filtered.length === 0 && (

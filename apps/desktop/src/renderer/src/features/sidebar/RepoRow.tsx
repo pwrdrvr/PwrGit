@@ -5,7 +5,8 @@ import {
   useState,
   type DragEvent,
   type KeyboardEvent as ReactKeyboardEvent,
-  type MouseEvent as ReactMouseEvent
+  type MouseEvent as ReactMouseEvent,
+  type ReactNode
 } from "react";
 import {
   RECENT_DAYS,
@@ -160,6 +161,7 @@ export function RepoRow({
   onRemoveRepo,
   arrangeable,
   showPinVia = false,
+  after,
   dragProps,
   dragging,
   dropPosition,
@@ -235,6 +237,10 @@ export function RepoRow({
   arrangeable: boolean;
   /** The Pinned lens: say why a repository whose star is unlit is listed. */
   showPinVia?: boolean;
+  /** Drawn at the end of this repository's block, after its sections: the
+   *  seam that follows the last pin. In the block, not beside it, so the
+   *  tree's children stay rows and groups and no row changes parent. */
+  after?: ReactNode;
   /** Repo-level drag handlers from the sidebar's useListReorder. */
   dragProps: {
     draggable: boolean;
@@ -1279,6 +1285,7 @@ export function RepoRow({
           </div>
         </div>
       )}
+      {after}
       {tip.tooltipNode}
     </div>
   );

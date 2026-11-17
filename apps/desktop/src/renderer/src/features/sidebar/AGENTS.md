@@ -665,17 +665,21 @@ As PwrAgnt's project index: pins first, a seam, then the rest. Rules in
   repositories below the seam refuse each other.
 - **With nothing pinned, a held repository opens the ghost Pin slot**
   (`.repo-pin-slot`, `.repo-index__pin-slot`; `PIN_SLOT`), stuck to the top of
-  both columns. Only a drop inside it pins. It mounts a frame after
-  `dragstart`, because it moves every row down, and sits in `.sidebar__list`,
+  both columns. Only a drop inside it pins. It mounts a task after
+  `dragstart` (a timer: an unpainted window runs no frames), because it moves every row down, and sits in `.sidebar__list`,
   not in the tree.
 - **The tree's seam is labelled "Repositories" only when rows follow it.**
   Grouped, or in a lens that lists only pins, it is a bare hairline.
 - **Only a pin draws the grip and takes ⌘⇧↑/↓** (`arrangeable` is
-  `repo.pinned`). `showPinVia` is the Pinned lens's "via wt" badge.
+  `repoLeads(repo)`). `showPinVia` is the Pinned lens's "via wt" badge.
 - **The seam is `aria-hidden` in both columns, and never a child of the
-  `tree`**, which may own only treeitems and groups. Ungrouped, the pins sit
-  in a `group` (`.repo-pins`, "Pinned (N repos)") that ends with the seam.
-  `e2e/repo-reorder.spec.ts` ("valid, nested roles") holds this.
+  `tree`**, which may own only treeitems and groups
+  (`e2e/repo-reorder.spec.ts`, "valid, nested roles"). The last pin's
+  `RepoRow` draws it at the end of its `.repo-block` (`after`). Do not wrap
+  the pins in a group instead: a row that crosses the seam would change
+  parent, and React would remount it with its open sections.
+- **The star puts focus back on itself** (`toggleRepoPin`): its row moves,
+  and Chromium drops focus from a moved node.
 
 Design: `design/Pinned Repos Lead Every Lens - UX Review.dc.html` (1c, turn 3,
 4a). It reverses `Repo Index Reorder`, 2b.

@@ -108,6 +108,33 @@ test("pinned repositories lead every lens, above one seam, in both columns", asy
     expect((await column(page, tree)).slice(0, 4)).toEqual(["quartz-cli", "tidepool", "—", "atlas"]);
     expect((await column(page, index)).slice(0, 4)).toEqual(["quartz-cli", "tidepool", "—", "atlas"]);
 
+    // A keyboard toggle moves the row across the seam, and Chromium drops
+    // focus from a moved node: it must come back to the star (SC 2.4.3).
+    // Expanded first: the row must move, not remount, so its sections stay.
+    const nimbus = page.locator('.repo-row[data-repo-id="nimbus"]');
+    await nimbus.click();
+    await expect(nimbus).toHaveAttribute("aria-expanded", "true");
+    await page.evaluate(() => {
+      (window as unknown as { __nimbus: Element | null }).__nimbus = document.querySelector(
+        '.repo-row[data-repo-id="nimbus"]'
+      );
+    });
+    await nimbus.locator(".pin").focus();
+    await page.keyboard.press("Enter");
+    expect((await column(page, tree)).slice(0, 4)).toEqual(["quartz-cli", "tidepool", "nimbus", "—"]);
+    await expect(nimbus.locator(".pin")).toBeFocused();
+    expect(
+      await page.evaluate(
+        () =>
+          (window as unknown as { __nimbus: Element | null }).__nimbus ===
+          document.querySelector('.repo-row[data-repo-id="nimbus"]')
+      ),
+      "the row is the same element after crossing the seam"
+    ).toBe(true);
+    await page.keyboard.press("Enter");
+    await expect(nimbus.locator(".pin")).toBeFocused();
+    await nimbus.click();
+
     // Nothing pinned: holding a repository opens the ghost Pin slot above
     // both columns, and a drop inside it pins. Playwright intercepts the
     // drag, so this proves the slot and its drop, not how the OS drag copes
