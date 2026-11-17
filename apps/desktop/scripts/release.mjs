@@ -460,7 +460,7 @@ if (!signStageOnly) {
   step("electron-vite build");
   runChecked("pnpm", ["--filter", "@pwrgit/desktop", "build"], { cwd: repoRoot });
   step("native MCP relay (universal on macOS)");
-  runChecked("pnpm", ["--filter", "@pwrgit/desktop", "build:mcp", "--universal"], { cwd: repoRoot });
+  runChecked("pnpm", ["--filter", "@pwrgit/desktop", "build:native", "--universal"], { cwd: repoRoot });
 
   // 3. Materialize the release stage. Windows must include electron-builder in
   // the staged tree: its protected signing job receives only this tree, and

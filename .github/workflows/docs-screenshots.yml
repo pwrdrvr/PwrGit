@@ -46,6 +46,9 @@ jobs:
           cache-electron: "true"
           cache-key-suffix: pwrgit-store-d416c1c78119b25fe03ee3ef78b75af0d69b10a7-v1
 
+      - name: Build native MCP helper
+        run: pnpm build:native
+
       # The capture drives the BUILT app (out/main/index.js); the script's
       # pretest:docs-shots hook builds it, exactly as pretest:e2e does for the
       # normal suite. No separate build step, so local and CI runs cannot drift.

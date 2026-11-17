@@ -85,6 +85,7 @@ git fetch origin <release-branch> --tags
 pnpm distribution:audit --output <ignored-directory>/distribution-audit.json
 RELEASE_TAG=vX.Y.Z pnpm release:check
 pnpm lint
+pnpm build:native
 pnpm test
 pnpm build
 ```

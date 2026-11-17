@@ -2,6 +2,15 @@
 
 Read the root `AGENTS.md` for setup and conventions.
 
+## Rust MCP helper
+
+Run `pnpm build:native` explicitly for the host helper. Install, Dev, ordinary
+JavaScript builds and test hooks never invoke Rust. After Rust source changes,
+rebuild before testing native MCP. CI builds it explicitly before transport
+tests; release staging passes `--universal`. Missing Cargo on an explicit native
+build is an error; do not add automatic compilation or missing-tool fallbacks
+to setup or Dev.
+
 ## The main bundle is strict ESM — default-import CommonJS deps
 
 `src/main/**` runs as ESM. A **named** import from a CommonJS package
