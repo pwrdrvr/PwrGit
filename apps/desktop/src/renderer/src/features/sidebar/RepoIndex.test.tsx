@@ -57,16 +57,16 @@ const GROUPS: RepoIndexGroup[] = [
     key: "code",
     label: "code",
     entries: [
-      { id: "atlas", name: "atlas-api", containsSelection: false },
-      { id: "beacon", name: "beacon-web", containsSelection: true }
+      { id: "atlas", name: "atlas-api", containsSelection: false, pinned: true },
+      { id: "beacon", name: "beacon-web", containsSelection: true, pinned: true }
     ]
   },
   {
     key: "oss",
     label: "oss",
     entries: [
-      { id: "cinder", name: "cinder", containsSelection: false },
-      { id: "delta", name: "delta-svc", containsSelection: false }
+      { id: "cinder", name: "cinder", containsSelection: false, pinned: true },
+      { id: "delta", name: "delta-svc", containsSelection: false, pinned: true }
     ]
   }
 ];
@@ -123,6 +123,9 @@ function reorderProps(over: Partial<RepoIndexReorder> = {}): RepoIndexReorder {
     rowProps: () => ({ draggable: true }),
     dragId: null,
     target: null,
+    seamAim: null,
+    seamProps: {},
+    pinSlot: null,
     isPostDragClick: () => false,
     moveKey: (event) =>
       event.metaKey && event.shiftKey && event.key === "ArrowDown"
@@ -307,7 +310,7 @@ describe("RepoIndex", () => {
       expect(item(nav, "beacon-web").className).toContain("is-dragging");
       expect(item(nav, "atlas-api").className).not.toContain("is-dragging");
       expect(item(nav, "atlas-api").parentElement!.className).toBe("is-drop-after");
-      expect(nav.querySelectorAll("li[class]")).toHaveLength(1);
+      expect(nav.querySelectorAll('li[class^="is-drop"]')).toHaveLength(1);
     });
 
     it("does not jump on the click a drag release fires", () => {
@@ -381,6 +384,79 @@ describe("RepoIndex", () => {
         oss
       ]);
       expect(document.activeElement).toBe(item(nav, "cinder"));
+    });
+
+    describe("the seam where the pins end", () => {
+      const MIXED: RepoIndexGroup[] = [
+        {
+          key: "__all",
+          label: null,
+          entries: [
+            { id: "beacon", name: "beacon-web", containsSelection: false, pinned: true },
+            { id: "atlas", name: "atlas-api", containsSelection: false, pinned: true },
+            { id: "cinder", name: "cinder", containsSelection: false, pinned: false },
+            { id: "delta", name: "delta-svc", containsSelection: false, pinned: false }
+          ]
+        }
+      ];
+      const rows = (nav: HTMLElement): string[] =>
+        [...nav.querySelectorAll("li")].map((li) =>
+          li.classList.contains("repo-index__seam") ? "—" : li.textContent ?? ""
+        );
+
+      it("is drawn once, after the last pin, hidden from screen readers", () => {
+        const nav = render(() => undefined, reorderProps(), MIXED);
+        expect(rows(nav)).toEqual([
+          "beacon-web",
+          "atlas-api",
+          "—",
+          "cinder",
+          "delta-svc"
+        ]);
+        expect(
+          nav.querySelector(".repo-index__seam")?.getAttribute("aria-hidden")
+        ).toBe("true");
+      });
+
+      it("is not drawn with nothing pinned", () => {
+        const nav = render(() => undefined, reorderProps(), [
+          {
+            key: "__all",
+            label: null,
+            entries: MIXED[0]!.entries.map((entry) => ({ ...entry, pinned: false }))
+          }
+        ]);
+        expect(nav.querySelector(".repo-index__seam")).toBeNull();
+      });
+
+      it("lights when a drop on it would pin or unpin", () => {
+        const nav = render(
+          () => undefined,
+          reorderProps({ dragId: "atlas", seamAim: "unpin" }),
+          MIXED
+        );
+        expect(
+          nav.querySelector(".repo-index__seam")?.classList.contains("is-drop-target")
+        ).toBe(true);
+      });
+
+      it("leaves the move chord unclaimed on a name below it", () => {
+        const onMove = vi.fn(() => true);
+        const nav = render(() => undefined, reorderProps({ onMove }), MIXED);
+        act(() => item(nav, "cinder").focus());
+        act(() => {
+          item(nav, "cinder").dispatchEvent(
+            new KeyboardEvent("keydown", {
+              key: "ArrowUp",
+              metaKey: true,
+              shiftKey: true,
+              bubbles: true
+            })
+          );
+        });
+        expect(onMove).not.toHaveBeenCalled();
+        expect(document.activeElement).toBe(item(nav, "cinder"));
+      });
     });
   });
 });

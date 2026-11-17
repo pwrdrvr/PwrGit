@@ -515,35 +515,49 @@ export function formatLensCount(count: number): string {
 }
 
 /**
- * Only the Pinned lens is a list the user owns. Focused/Behind/Stale answer a
- * question ("what changed", "what's out of date"), so a hand order there would
- * fight the answer the lens exists to give — hence `orderedByHand` rather than
- * a manual order applied everywhere.
+ * Whether a repository leads its lens: its own star. A pinned worktree or
+ * branch admits its repository to the Pinned lens (`repoIsPinned`) but does
+ * not lift it above the seam, because the row's star is not lit.
  */
-export function lensIsArrangeable(lens: Lens): boolean {
-  return lens === "Pinned";
+export function repoLeads(r: Repo): boolean {
+  return r.pinned;
+}
+
+/** The pins' one order: arranged by hand first, in that order; pins never
+ *  dragged follow by name. */
+const byHand = (a: Repo, b: Repo): number => {
+  const ao = a.order ?? Number.MAX_SAFE_INTEGER;
+  const bo = b.order ?? Number.MAX_SAFE_INTEGER;
+  return ao !== bo ? ao - bo : byName(a, b);
+};
+
+/**
+ * The pins of a list in their hand order, and the rest as it came. The pins
+ * are the same sequence in every lens and in both sidebar columns, as in
+ * PwrAgnt's project index; a lens only decides which of them it lists.
+ */
+export function splitPins(list: readonly Repo[]): { pins: Repo[]; rest: Repo[] } {
+  return {
+    pins: list.filter(repoLeads).sort(byHand),
+    rest: list.filter((r) => !repoLeads(r))
+  };
+}
+
+/** Pins lead; the rest keeps its incoming order. */
+export function pinsFirst(list: readonly Repo[]): Repo[] {
+  const { pins, rest } = splitPins(list);
+  return [...pins, ...rest];
 }
 
 /**
- * Sort by the user's arrangement: repos carrying an `order` lead, in it; the
- * rest follow in their incoming order (pinned-first, then name, from SQL).
- * A repo the user has never dragged therefore never jumps around because a
- * neighbor was dragged.
- */
-function orderedByHand(list: Repo[]): Repo[] {
-  return [...list].sort((a, b) => {
-    const ao = a.order ?? Number.MAX_SAFE_INTEGER;
-    const bo = b.order ?? Number.MAX_SAFE_INTEGER;
-    return ao - bo;
-  });
-}
-
-/**
- * Filter by lens, then order it by whatever that lens is *for*.
+ * Filter by lens, then order it: the lens's pins lead in their hand order,
+ * and the rest follows in the order the lens is *for*.
  *
- * Focused is the working set described by `focusedRepos`; All remains the
- * exhaustive alphabetical index. Behind and Stale keep their pinned-first
- * float because they are short answer-lists rather than indexes.
+ * Focused keeps the ladder described by `focusedRepos` for its rest; every
+ * other lens lists its rest by name. No lens may put an unpinned repository
+ * above a pinned one: All did (strictly A-Z), so a starred repository was
+ * wherever its name fell among the profile's.
+ * Design: `design/Pinned Repos Lead Every Lens - UX Review.dc.html`, 1c and 2.
  */
 export function filterReposByLens(
   repos: Repo[],
@@ -555,7 +569,7 @@ export function filterReposByLens(
 ): Repo[] {
   let list = repos;
   if (lens === "Focused") {
-    return focusedRepos(repos, focus, now);
+    return pinsFirst(focusedRepos(repos, focus, now));
   } else if (lens === "Behind") {
     list = repos.filter((r) => r.worktrees.some((w) => w.behind > 0));
   } else if (lens === "Pinned") {
@@ -563,11 +577,23 @@ export function filterReposByLens(
   } else if (lens === "Stale") {
     list = repos.filter((r) => repoHasPrunable(r, now, finishedAfterDays));
   }
-  if (lens === "All") return [...list].sort(byName);
-  const byPin = [...list].sort(
-    (a, b) => (b.pinned ? 1 : 0) - (a.pinned ? 1 : 0)
-  );
-  return lensIsArrangeable(lens) ? orderedByHand(byPin) : byPin;
+  return pinsFirst([...list].sort(byName));
+}
+
+/**
+ * The profile's whole pin order with one repository moved beside `targetId`.
+ * A lens may list only some pins, so a move is made in the full order, never
+ * by renumbering the pins on screen: that gave two pins the same index.
+ * `dragId` need not be a pin yet (a drop that pins it).
+ */
+export function movePin(
+  repos: readonly Repo[],
+  dragId: string,
+  targetId: string,
+  position: DropPosition
+): string[] {
+  const ids = splitPins(repos).pins.map((r) => r.id);
+  return reorder(ids.includes(dragId) ? ids : [...ids, dragId], dragId, targetId, position);
 }
 
 export const SORT_CYCLE: Record<Exclude<WorktreeSort, "custom">, WorktreeSort> = {

@@ -17,7 +17,7 @@ import {
   LENS_EMPTY_COPY,
   lensIsAvailable,
   linkedWorktreeCount,
-  lensIsArrangeable,
+  movePin,
   orderWorktrees,
   partitionFocusedWorktrees,
   reorder,
@@ -91,19 +91,18 @@ describe("lensCounts / filterReposByLens", () => {
     ]);
   });
 
-  it("All lens is a strict alphabetical index — pins do not jump the queue", () => {
-    // "a" is the pinned one. It leads here because of its NAME, so prove the
-    // ordering with a pinned repo that sorts last: an index whose positions
-    // move when you pin something is not an index.
+  it("All lists its pins first, then the rest by name", () => {
+    // Through 0.59.7 this test asserted alpha, mike, zulu: All was strictly
+    // A-Z, so a starred repository sat wherever its name fell.
     const shuffled = [
       repo({ id: "zulu", name: "zulu", pinned: true }),
       repo({ id: "alpha", name: "alpha" }),
       repo({ id: "mike", name: "mike" })
     ];
     expect(filterReposByLens(shuffled, "All").map((r) => r.id)).toEqual([
+      "zulu",
       "alpha",
-      "mike",
-      "zulu"
+      "mike"
     ]);
   });
 
@@ -211,9 +210,16 @@ describe("Focused lens", () => {
       "viewed",
       "authored"
     ]);
+    expect(focusedRepos(rows, context, NOW).map((r) => r.id)).toEqual([
+      "current",
+      "pinned",
+      "viewed",
+      "authored"
+    ]);
+    // The lens lists its pins first; the ladder orders the rest.
     expect(
       filterReposByLens(rows, "Focused", NOW, context).map((r) => r.id)
-    ).toEqual(["current", "pinned", "viewed", "authored"]);
+    ).toEqual(["pinned", "current", "viewed", "authored"]);
     expect(focusReasonForRepo(rows[4] as Repo, context, NOW)).toBeNull();
   });
 
@@ -683,13 +689,6 @@ describe("hand-arranged repo order", () => {
     repo({ id: "m", pinned: true, order: 1 })
   ];
 
-  it("only the Pinned lens is arrangeable", () => {
-    expect(lensIsArrangeable("Pinned")).toBe(true);
-    for (const lens of ["Focused", "Behind", "Stale", "All"] as const) {
-      expect(lensIsArrangeable(lens)).toBe(false);
-    }
-  });
-
   it("applies the arrangement in the Pinned lens", () => {
     expect(filterReposByLens(repos, "Pinned").map((r) => r.id)).toEqual([
       "z",
@@ -709,14 +708,35 @@ describe("hand-arranged repo order", () => {
     ]);
   });
 
-  it("ignores the arrangement in computed lenses", () => {
-    // "All" answers a question; a manual order there would fight the answer.
-    // The arrangement would give z, m, a — alphabetical gives a, m, z.
-    expect(filterReposByLens(repos, "All").map((r) => r.id)).toEqual([
-      "a",
-      "m",
-      "z"
-    ]);
+  it("applies the same arrangement in every lens", () => {
+    for (const lens of ["Focused", "Pinned", "All"] as const) {
+      expect(filterReposByLens(repos, lens).map((r) => r.id)).toEqual([
+        "z",
+        "m",
+        "a"
+      ]);
+    }
+  });
+
+  it("keeps a repository held only by a pinned worktree below the pins", () => {
+    const viaWorktree = repo({
+      id: "aa",
+      name: "aa",
+      worktrees: [wt({ id: "aa1", branch: "main", pinned: true })]
+    });
+    expect(
+      filterReposByLens([viaWorktree, ...repos], "Pinned").map((r) => r.id)
+    ).toEqual(["z", "m", "a", "aa"]);
+  });
+
+  it("moves a pin in the whole order, not among the pins a lens shows", () => {
+    // Behind might list only z and a; moving a before z must keep m placed.
+    expect(movePin(repos, "a", "z", "before")).toEqual(["a", "z", "m"]);
+  });
+
+  it("places a repository that a drop pins", () => {
+    const all = [...repos, repo({ id: "new" })];
+    expect(movePin(all, "new", "z", "after")).toEqual(["z", "new", "m", "a"]);
   });
 });
 

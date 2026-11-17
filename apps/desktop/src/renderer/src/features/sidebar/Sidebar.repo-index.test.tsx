@@ -90,9 +90,14 @@ afterEach(() => {
 function render(
   selected: string,
   onSelect: (repo: Repo, w: Worktree) => void,
-  { repos = REPOS, onPersistRepoOrder = () => undefined }: {
+  {
+    repos = REPOS,
+    onPersistRepoOrder = () => undefined,
+    onSetRepoPin = () => undefined
+  }: {
     repos?: Repo[];
     onPersistRepoOrder?: (ids: string[]) => void;
+    onSetRepoPin?: (repoId: string, pinned: boolean) => void;
   } = {}
 ): void {
   const noop = () => undefined;
@@ -109,7 +114,7 @@ function render(
         onRetryRepos={noop}
         selectedWorktreeId={selected}
         onSelectWorktree={onSelect}
-        onSetRepoPin={noop}
+        onSetRepoPin={onSetRepoPin}
         onSetWorktreePin={noop}
         onSetBranchPin={noop}
         onRemoveWorktree={noop}
@@ -195,15 +200,199 @@ describe("Moving repositories from the index", () => {
     };
   }
 
-  it("drags names only in the Pinned lens, where tree rows drag", () => {
-    render("atlas:wt0", () => undefined, { repos: PINNED });
-    expect(indexItem("atlas").getAttribute("draggable")).toBeNull();
-
-    window.localStorage.setItem("pwrgit.lens", "Pinned");
-    act(() => root.unmount());
-    root = createRoot(container);
-    render("atlas:wt0", () => undefined, { repos: PINNED });
+  it("drags names in every lens, pinned or not", () => {
+    render("atlas:wt0", () => undefined);
     expect(indexItem("atlas").getAttribute("draggable")).toBe("true");
+
+    for (const lens of ["All", "Pinned", "Focused"]) {
+      window.localStorage.setItem("pwrgit.lens", lens);
+      act(() => root.unmount());
+      root = createRoot(container);
+      render("atlas:wt0", () => undefined, { repos: PINNED });
+      expect(indexItem("atlas").getAttribute("draggable")).toBe("true");
+    }
+  });
+
+  describe("the ghost Pin slot, with nothing pinned", () => {
+    const slots = (): Element[] => [
+      ...container.querySelectorAll(".repo-pin-slot, .repo-index__pin-slot")
+    ];
+    /** The slot opens a task after the drag starts. */
+    const settle = (): Promise<void> =>
+      act(async () => {
+        await new Promise((resolve) => setTimeout(resolve, 0));
+      });
+
+    it("opens in both columns while a repository is held, and closes after", async () => {
+      render("atlas:wt0", () => undefined);
+      expect(slots()).toHaveLength(0);
+      const fire = dragger();
+      fire(indexItem("beacon"), "dragstart");
+      // Not in `dragstart` itself: it moves every row down.
+      expect(slots()).toHaveLength(0);
+      await settle();
+      expect(slots().map((slot) => slot.textContent)).toEqual(["Pin", "Pin"]);
+      // Outside the tree, which may own only rows and groups.
+      expect(container.querySelector('[role="tree"] .repo-pin-slot')).toBeNull();
+      fire(indexItem("beacon"), "dragend");
+      expect(slots()).toHaveLength(0);
+    });
+
+    it("pins on a drop inside the slot, from either column, and nowhere else", async () => {
+      const persist = vi.fn();
+      const pin = vi.fn();
+      render("atlas:wt0", () => undefined, { onPersistRepoOrder: persist, onSetRepoPin: pin });
+      const fire = dragger();
+      fire(indexItem("beacon"), "dragstart");
+      fire(indexItem("cinder"), "dragover");
+      fire(indexItem("cinder"), "drop");
+      expect(pin).not.toHaveBeenCalled();
+
+      fire(container.querySelector('.repo-row[data-repo-id="beacon"]')!, "dragstart");
+      await settle();
+      const slot = container.querySelector(".repo-index__pin-slot")!;
+      fire(slot, "dragover");
+      expect(slot.className).toContain("is-drop-target");
+      expect(container.querySelector(".repo-pin-slot")!.className).toContain("is-drop-target");
+      fire(slot, "drop");
+      expect(pin).toHaveBeenCalledExactlyOnceWith("beacon", true);
+      expect(persist).not.toHaveBeenCalled();
+    });
+
+    it("is not offered once something is pinned: the seam is the target", async () => {
+      render("atlas:wt0", () => undefined, { repos: PINNED.map((r, i) => (i === 0 ? r : { ...r, pinned: false })) });
+      const fire = dragger();
+      fire(indexItem("beacon"), "dragstart");
+      await settle();
+      expect(slots()).toHaveLength(0);
+    });
+  });
+
+  describe("across the seam", () => {
+    // beacon and cinder are pinned, in that order; atlas and delta are not.
+    const MIXED = [
+      ...REPOS,
+      { ...(REPOS[0] as Repo), id: "delta", name: "delta", path: "/code/delta", worktrees: [] }
+    ].map((repo) =>
+      repo.id === "cinder"
+        ? { ...repo, pinned: true, order: 1 }
+        : repo.id === "beacon"
+          ? { ...repo, pinned: true, order: 0 }
+          : repo
+    );
+    const order = (selector: string, attribute: string): string[] =>
+      [...container.querySelectorAll(selector)].map(
+        (el) => el.getAttribute(attribute) ?? "seam"
+      );
+
+    it("lists the pins first in both columns, with one seam after them", () => {
+      render("atlas:wt0", () => undefined, { repos: MIXED });
+      expect(
+        order(".repo-index__item, .repo-index__seam", "data-index-id").slice(0, 4)
+      ).toEqual(["beacon", "cinder", "seam", "atlas"]);
+      expect(order(".repo-row, .repo-seam", "data-repo-id").slice(0, 4)).toEqual([
+        "beacon",
+        "cinder",
+        "seam",
+        "atlas"
+      ]);
+      // The seam is never a child of the tree: the last pin's block holds it,
+      // so every row stays a direct child and none changes parent on a pin.
+      const tree = container.querySelector('[role="tree"]')!;
+      expect(
+        [...tree.children].every((child) => child.classList.contains("repo-block"))
+      ).toBe(true);
+      expect(
+        container
+          .querySelector(".repo-seam")!
+          .parentElement!.querySelector(".repo-row")!
+          .getAttribute("data-repo-id")
+      ).toBe("cinder");
+      // Only pins carry the grip.
+      expect(
+        [...container.querySelectorAll(".repo-row.is-arrangeable")].map((row) =>
+          row.getAttribute("data-repo-id")
+        )
+      ).toEqual(["beacon", "cinder"]);
+    });
+
+    it("pins an unpinned repository where it is dropped among the pins", () => {
+      const persist = vi.fn();
+      const pin = vi.fn();
+      render("atlas:wt0", () => undefined, {
+        repos: MIXED,
+        onPersistRepoOrder: persist,
+        onSetRepoPin: pin
+      });
+      const fire = dragger();
+      fire(indexItem("delta"), "dragstart");
+      fire(indexItem("beacon"), "dragover");
+      fire(indexItem("beacon"), "drop");
+      expect(pin).toHaveBeenCalledExactlyOnceWith("delta", true);
+      expect(persist).toHaveBeenCalledExactlyOnceWith(["beacon", "delta", "cinder"]);
+    });
+
+    it("unpins a pin dropped on the seam or below it, and lights the seam", () => {
+      const persist = vi.fn();
+      const pin = vi.fn();
+      render("atlas:wt0", () => undefined, {
+        repos: MIXED,
+        onPersistRepoOrder: persist,
+        onSetRepoPin: pin
+      });
+      const fire = dragger();
+      const row = container.querySelector('.repo-row[data-repo-id="atlas"]')!;
+      fire(indexItem("beacon"), "dragstart");
+      fire(row, "dragover");
+      // No line between two rows below the seam: nothing lands there.
+      expect(row.className).not.toContain("is-drop-");
+      expect(container.querySelector(".repo-seam")!.className).toContain("is-drop-target");
+      expect(container.querySelector(".repo-seam")!.textContent).toBe("Unpin");
+      expect(container.querySelector(".repo-index__seam")!.className).toContain(
+        "is-drop-target"
+      );
+      fire(row, "drop");
+      expect(pin).toHaveBeenCalledExactlyOnceWith("beacon", false);
+      expect(persist).not.toHaveBeenCalled();
+
+      fire(indexItem("cinder"), "dragstart");
+      fire(container.querySelector(".repo-index__seam")!, "dragover");
+      fire(container.querySelector(".repo-index__seam")!, "drop");
+      expect(pin).toHaveBeenLastCalledWith("cinder", false);
+    });
+
+    it("refuses a drop between two repositories below the seam", () => {
+      const persist = vi.fn();
+      const pin = vi.fn();
+      render("atlas:wt0", () => undefined, {
+        repos: MIXED,
+        onPersistRepoOrder: persist,
+        onSetRepoPin: pin
+      });
+      const fire = dragger();
+      fire(indexItem("delta"), "dragstart");
+      fire(indexItem("atlas"), "dragover");
+      fire(indexItem("atlas"), "drop");
+      expect(pin).not.toHaveBeenCalled();
+      expect(persist).not.toHaveBeenCalled();
+    });
+
+    it("pins at the end of the pins on a drop on the seam itself", () => {
+      const persist = vi.fn();
+      const pin = vi.fn();
+      render("atlas:wt0", () => undefined, {
+        repos: MIXED,
+        onPersistRepoOrder: persist,
+        onSetRepoPin: pin
+      });
+      const fire = dragger();
+      fire(indexItem("atlas"), "dragstart");
+      fire(container.querySelector(".repo-seam")!, "dragover");
+      expect(container.querySelector(".repo-seam")!.textContent).toBe("Pin");
+      fire(container.querySelector(".repo-seam")!, "drop");
+      expect(pin).toHaveBeenCalledExactlyOnceWith("atlas", true);
+      expect(persist).toHaveBeenCalledExactlyOnceWith(["beacon", "cinder", "atlas"]);
+    });
   });
 
   it("drops a name through the tree's own reorder, and the tree shows the aim", () => {
@@ -317,16 +506,33 @@ describe("Moving repositories from the index", () => {
       });
     };
 
-    it("stops a key move at its folder's edge, from the index and the tree", () => {
+    it("gathers the pins in a Pinned group above the folders", () => {
+      renderGrouped(() => undefined);
+      expect(
+        [...container.querySelectorAll(".repo-group")].map((group) =>
+          group.getAttribute("aria-label")
+        )
+      ).toEqual(["Pinned (3 repos)"]);
+      expect(container.querySelectorAll(".repo-seam")).toHaveLength(1);
+    });
+
+    it("moves a pin past one from another folder: the pins are one list", () => {
       const persist = vi.fn();
       renderGrouped(persist);
+      // beacon is under /code, cinder under /oss.
       chord(indexItem("beacon"), "ArrowDown");
-      chord(container.querySelector('.repo-row[data-repo-id="beacon"]')!, "ArrowDown");
-      chord(indexItem("cinder"), "ArrowUp");
+      expect(persist).toHaveBeenCalledExactlyOnceWith(["atlas", "cinder", "beacon"]);
+    });
+
+    it("stops a key move at the ends of the pins, from the index and the tree", () => {
+      const persist = vi.fn();
+      renderGrouped(persist);
+      chord(indexItem("cinder"), "ArrowDown");
+      chord(container.querySelector('.repo-row[data-repo-id="atlas"]')!, "ArrowUp");
       expect(persist).not.toHaveBeenCalled();
     });
 
-    it("moves a tree row inside its folder, as before the index could", () => {
+    it("moves a tree row among the pins", () => {
       const persist = vi.fn();
       renderGrouped(persist);
       chord(container.querySelector('.repo-row[data-repo-id="beacon"]')!, "ArrowUp");

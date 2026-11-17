@@ -1,0 +1,429 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <script src="./support.js"></script>
+  </head>
+  <body>
+    <x-dc>
+      <helmet data-dc-atomics>
+        <meta name="design_doc_mode" content="canvas" />
+        <link href="https://fonts.googleapis.com/css2?family=Geist:wght@400..700&amp;family=Geist+Mono:wght@400..700&amp;display=swap" rel="stylesheet" />
+        <style>
+          :root {
+            --rv-bg: #050505; --rv-line: rgba(247, 243, 235, 0.1);
+            --rv-t1: #f7f3eb; --rv-t2: #b8b0a5; --rv-t3: #8c857a; --rv-tsub: rgba(247, 243, 235, 0.54);
+            --rv-acc: #ff8a1f; --rv-accb: #ffb35c;
+            --rv-bad: #b94232; --rv-ok: #5fa969;
+            --font-sans: "Geist", "SF Pro Text", "Inter", system-ui, sans-serif;
+            --font-mono: "Geist Mono", "SF Mono", "JetBrains Mono", Consolas, monospace;
+
+            /* The app's own dark tokens (styles/tokens.css). */
+            --bg-stage: #000000; --bg-panel: #0a0a0a; --bg-panel-elevated: #101010;
+            --bg-panel-hover: #151515; --bg-hover-strong: #1f1a12;
+            --border-subtle: rgba(247, 243, 235, 0.1); --border-strong: rgba(247, 243, 235, 0.2);
+            --text-primary: #f7f3eb; --text-secondary: #b8b0a5; --text-muted: #8c857a; --text-subtle: rgba(247, 243, 235, 0.54);
+            --accent: #ff8a1f; --accent-bright: #ffb35c;
+            --focus-ring: #ff8a1f;
+          }
+          *, *::before, *::after { box-sizing: border-box; }
+          html { background: var(--rv-bg); }
+          body { margin: 0; background: var(--rv-bg); font-family: var(--font-sans); }
+
+          /* ---- review chrome (house convention) ---- */
+          .dv-turn { padding: 40px 44px 32px; background: var(--rv-bg); border-bottom: 1px solid var(--rv-line); }
+          .dv-thd { display: flex; align-items: baseline; gap: 10px; margin: 0 0 6px; }
+          .dv-tid { font: 600 10px var(--font-mono); padding: 3px 7px; background: var(--rv-t1); color: var(--rv-bg); border-radius: 4px; }
+          .dv-tname { font: 600 13px/1.2 var(--font-sans); color: var(--rv-t1); }
+          .dv-sub { margin: 0 0 22px; font: 400 11.5px/1.5 var(--font-sans); color: var(--rv-t3); max-width: 860px; text-wrap: pretty; }
+          .dv-sub b { color: var(--rv-t2); font-weight: 600; }
+          .dv-sub code, .note code, .fitem code, td code { font: 500 10px/1.4 var(--font-mono); color: var(--rv-t2); }
+          .dv-opts { display: flex; flex-wrap: wrap; gap: 28px; align-items: flex-start; }
+          .dv-opt { flex: none; display: flex; flex-direction: column; gap: 9px; width: 340px; }
+          .dv-oid { font: 600 10.5px var(--font-mono); padding: 3px 7px; background: rgba(247, 243, 235, 0.08); color: var(--rv-t1); border-radius: 5px; }
+          .dv-olabel { display: flex; align-items: baseline; gap: 8px; font: 400 11px/1.3 var(--font-sans); color: var(--rv-tsub); }
+          .dv-olabel b { color: var(--rv-accb); font-weight: 600; }
+          .dv-opt.rec .dv-oid { background: var(--rv-acc); color: #160a00; }
+          .dv-opt.no { opacity: 0.72; }
+          .note { margin: 0; font: 400 10.5px/1.5 var(--font-sans); color: var(--rv-t3); text-wrap: pretty; }
+          .note b { color: var(--rv-t2); font-weight: 600; }
+          .pin { display: inline-flex; align-items: center; justify-content: center; flex: none; width: 15px; height: 15px; border-radius: 999px; background: var(--rv-bad); color: #fff; font: 700 9px/1 var(--font-mono); }
+          .pin.ok { background: var(--rv-ok); color: #050505; }
+          .find { width: 440px; display: flex; flex-direction: column; gap: 14px; padding: 16px; border: 1px solid var(--rv-line); border-radius: 9px; background: #0a0a0a; }
+          .fitem { display: grid; grid-template-columns: 15px minmax(0, 1fr); gap: 9px; align-items: start; }
+          .fitem h4 { margin: 0 0 3px; font: 650 11.5px/1.3 var(--font-sans); color: var(--rv-t1); }
+          .fitem p { margin: 0; font: 400 10.5px/1.5 var(--font-sans); color: var(--rv-t3); }
+          .fitem b { color: var(--rv-t2); font-weight: 600; }
+          .quote { margin: 0; padding: 2px 0 2px 12px; border-left: 2px solid var(--rv-acc); font: 400 11.5px/1.5 var(--font-sans); color: var(--rv-t2); }
+          table.cmp { border-collapse: collapse; width: 820px; font: 400 10.5px/1.45 var(--font-sans); color: var(--rv-t3); }
+          table.cmp th { text-align: left; font: 600 10px var(--font-mono); color: var(--rv-t2); padding: 6px 10px; border-bottom: 1px solid var(--rv-line); }
+          table.cmp td { vertical-align: top; padding: 7px 10px; border-bottom: 1px solid var(--rv-line); }
+          table.cmp td:first-child { color: var(--rv-t1); font-weight: 600; width: 150px; }
+          table.cmp b { color: var(--rv-t2); font-weight: 600; }
+
+          /* ---- the sidebar specimen: index column + tree ---- */
+          .stage { position: relative; padding: 14px; border-radius: 10px; background: var(--bg-stage); }
+          .sb { position: relative; display: flex; width: 312px; height: 262px; overflow: hidden; border: 1px solid var(--border-subtle); border-radius: 8px; background: var(--bg-panel); font: 500 11.5px/1.25 var(--font-sans); }
+          .lens { display: flex; gap: 2px; padding: 6px 8px; border-bottom: 1px solid var(--border-subtle); font: 600 9.5px/1 var(--font-sans); color: var(--text-muted); }
+          .lens span { padding: 4px 6px; border-radius: 5px; }
+          .lens .on { background: var(--bg-hover-strong); color: var(--accent); }
+          .col { display: flex; flex-direction: column; min-width: 0; }
+          .ix { flex: none; width: 96px; padding: 2px 0 10px; border-right: 1px solid var(--border-subtle); font: 500 10.5px/1.25 var(--font-sans); }
+          .ixl { padding: 9px 8px 3px 11px; font: 700 8.5px/1 var(--font-sans); letter-spacing: 0.07em; text-transform: uppercase; color: var(--text-muted); }
+          .ixi { position: relative; padding: 4px 8px 4px 11px; border-radius: 0 6px 6px 0; color: var(--text-secondary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+          .ixi::before { content: ""; position: absolute; left: 3px; top: 0; bottom: 0; width: 2px; }
+          .ixi.inv::before { background: var(--border-strong); }
+          .ixi.cur { color: var(--text-primary); }
+          .ixi.cur::before { background: var(--accent); }
+          .ixi.sel { background: var(--bg-hover-strong); color: var(--accent); }
+          .ixw { position: relative; }
+          .ixw.drag .ixi { background: var(--bg-hover-strong); color: var(--text-subtle); }
+          .rr.drag { background: var(--bg-hover-strong); opacity: 0.6; }
+          .lb::after, .la::after { content: ""; position: absolute; left: 0; right: 0; height: 2px; border-radius: 999px; background: var(--accent); z-index: 4; }
+          .lb::after { top: -1px; }
+          .la::after { bottom: -1px; }
+          .ixw.lb::after, .ixw.la::after { left: 6px; right: 4px; }
+          .tr { flex: 1; min-width: 0; }
+          .gh { padding: 7px 10px 4px; font: 700 8.5px/1 var(--font-sans); letter-spacing: 0.07em; text-transform: uppercase; color: var(--text-muted); background: var(--bg-panel); box-shadow: 0 1px 0 var(--border-subtle); }
+          .rr { position: relative; display: flex; align-items: center; gap: 6px; height: 26px; padding: 0 8px 0 12px; color: var(--text-primary); font-weight: 600; }
+          .rr .n { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+          .rr .c { color: var(--text-muted); font: 500 9.5px/1 var(--font-mono); }
+          .rr .s { color: var(--accent); font-size: 10px; }
+          .rr .o { color: var(--text-muted); font-size: 10px; }
+          .rr.sel .n { color: var(--accent); }
+          .ghost { position: absolute; z-index: 9; padding: 4px 8px; border-radius: 4px; border: 1px solid var(--border-strong); background: rgba(31, 26, 18, 0.94); box-shadow: 0 6px 18px rgba(0,0,0,0.55); color: var(--accent); font: 500 10.5px/1.25 var(--font-sans); white-space: nowrap; pointer-events: none; }
+          .cursor { position: absolute; z-index: 10; width: 14px; height: 18px; pointer-events: none; }
+
+          /* The seam: PwrAgnt's .project-index__seam (index) and
+             .directories-pinned-divider (list), in PwrGit's tokens. */
+          .seam { height: 9px; position: relative; }
+          .seam::after { content: ""; position: absolute; top: 4px; right: 8px; left: 11px; height: 1px; background: var(--border-subtle); }
+          .seam.aim::after { top: 3px; right: 4px; left: 6px; height: 3px; border-radius: 999px; background: var(--accent); box-shadow: 0 0 10px rgba(255, 138, 31, 0.5); }
+          .div { display: flex; align-items: center; gap: 8px; margin: 2px 6px; height: 16px; color: var(--text-muted); font: 700 8.5px/1 var(--font-sans); letter-spacing: 0.07em; text-transform: uppercase; }
+          .div::before, .div::after { content: ""; flex: 1; min-width: 16px; height: 1px; background: var(--border-subtle); }
+          .div.bare { height: 9px; }
+          .div.aim { color: var(--accent-bright); }
+          .div.aim::before, .div.aim::after { height: 3px; border-radius: 999px; background: var(--accent); box-shadow: 0 0 10px rgba(255, 138, 31, 0.5); }
+          .slot { display: flex; align-items: center; justify-content: center; gap: 5px; border: 1.5px dashed rgba(255, 138, 31, 0.45); color: var(--text-muted); font: 600 8.5px/1 var(--font-sans); text-transform: uppercase; }
+          .slot.lit { border-style: solid; border-color: var(--accent); background: rgba(255, 138, 31, 0.09); color: var(--text-primary); }
+          .tag { font: 600 8.5px/1 var(--font-sans); text-transform: uppercase; color: var(--accent-bright); margin-left: 6px; }
+        </style>
+      </helmet>
+
+      <!-- ================================================================ -->
+      <section class="dv-turn" id="t0" data-screen-label="Turn 0 Brief">
+        <div class="dv-thd"><span class="dv-tid">0</span><span class="dv-tname">The ask, and what this round assumes</span></div>
+        <p class="dv-sub">Operator, 2026-11-17. This board reverses the decision recorded in <b>Repo Index Reorder</b>, 2b (&#8220;PwrAgnt&#8217;s pin seam, in every lens: not recommended&#8221;).</p>
+        <div class="dv-opts">
+          <div class="find">
+            <p class="quote">&#8220;In PwrAgnt we have pinned/favorite projects at the top of our leftmost sidebar, always. On PwrGit we have faves shown on faves lens only. On regular lens they don&#8217;t appear at the top of the leftmost project sidebar, which is annoying. &#8230; on the all projects tab we do not even sort the pins to the top? &#8230; Make the UX as consistent as possible with PwrAgent.&#8221;</p>
+            <p class="quote">&#8220;I&#8217;m not even positive we need the pins lens anymore after this&#8230; but we can leave it for now.&#8221;</p>
+          </div>
+          <div class="find">
+            <div class="fitem"><span class="pin ok">1</span><div><h4>A pin is the repository&#8217;s own star</h4><p>Only <code>repo.pinned</code> lifts a repository above the seam. A pinned worktree or branch still admits its repository to the Pinned lens, but below the seam (its star is not lit).</p></div></div>
+            <div class="fitem"><span class="pin ok">2</span><div><h4>One order, every lens, both columns</h4><p>The hand order of the pins is the same list in Focused, Pinned, Behind, Stale and All, in the index and in the tree. A lens only decides <b>which</b> pins are listed and how the rest is ordered.</p></div></div>
+            <div class="fitem"><span class="pin ok">3</span><div><h4>The Pinned lens stays</h4><p>Unchanged in what it lists. It no longer is the only place an order can be made.</p></div></div>
+            <div class="fitem"><span class="pin">?</span><div><h4>Open: grouped by folder</h4><p>Turn 4. Recommended: a <b>Pinned</b> group above the folder groups, so &#8220;always at the top&#8221; holds there too.</p></div></div>
+            <div class="fitem"><span class="pin">?</span><div><h4>Open: Focused no longer leads with the current repository</h4><p>An unpinned current repository now sits under the pins, first of the rest. Its row keeps the selection tint and the &#8220;Current&#8221; reason.</p></div></div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ================================================================ -->
+      <section class="dv-turn" id="t1" data-screen-label="Turn 1 Before and after">
+        <div class="dv-thd"><span class="dv-tid">1</span><span class="dv-tname">The All lens: today, PwrAgnt, proposed</span></div>
+        <p class="dv-sub">Same seven repositories, three starred (<b>PwrAgnt</b>, <b>PwrGit</b>, <b>PwrSnap</b>, arranged in that order). Today the All lens is strictly A&#8211;Z, so the stars are scattered through 48 names.</p>
+        <div class="dv-opts">
+
+          <div class="dv-opt no" id="1a">
+            <div class="dv-olabel"><span class="dv-oid">1a</span>Today &#183; All is A&#8211;Z, pins anywhere</div>
+            <div class="stage"><div class="sb">
+              <div class="col" style="width:100%">
+                <div class="lens"><span>Focused</span><span>Pinned</span><span>Behind</span><span>Stale</span><span class="on">All 7</span></div>
+                <div style="display:flex;flex:1;min-height:0">
+                  <nav class="ix">
+                    <div class="ixw"><div class="ixi cur">agent-kit</div></div>
+                    <div class="ixw"><div class="ixi inv">codex</div></div>
+                    <div class="ixw"><div class="ixi inv">disktree</div></div>
+                    <div class="ixw"><div class="ixi inv sel">PwrAgnt</div></div>
+                    <div class="ixw"><div class="ixi inv">PwrGit</div></div>
+                    <div class="ixw"><div class="ixi inv">PwrSnap</div></div>
+                    <div class="ixw"><div class="ixi inv">tart</div></div>
+                  </nav>
+                  <div class="tr">
+                    <div class="rr"><span class="n">agent-kit</span><span class="c">1 wt</span><span class="o">&#9734;</span></div>
+                    <div class="rr"><span class="n">codex</span><span class="o">&#9734;</span></div>
+                    <div class="rr"><span class="n">disktree</span><span class="o">&#9734;</span></div>
+                    <div class="rr sel"><span class="n">PwrAgnt</span><span class="c">52 wts</span><span class="s">&#9733;</span></div>
+                    <div class="rr"><span class="n">PwrGit</span><span class="c">10 wts</span><span class="s">&#9733;</span></div>
+                    <div class="rr"><span class="n">PwrSnap</span><span class="c">12 wts</span><span class="s">&#9733;</span></div>
+                    <div class="rr"><span class="n">tart</span><span class="o">&#9734;</span></div>
+                  </div>
+                </div>
+              </div>
+            </div></div>
+            <p class="note">The index is a map of the lens, and the lens does not know about pins. <code>filterReposByLens</code> returns <code>sort(byName)</code> for All; Behind and Stale float pins but ignore their hand order.</p>
+          </div>
+
+          <div class="dv-opt" id="1b">
+            <div class="dv-olabel"><span class="dv-oid">1b</span>PwrAgnt &#183; project index, every tab</div>
+            <div class="stage"><div class="sb">
+              <div class="col" style="width:100%">
+                <div class="lens"><span>Attention</span><span>Drafts</span><span>Recents</span><span class="on">Directories</span></div>
+                <div style="display:flex;flex:1;min-height:0">
+                  <nav class="ix">
+                    <div class="ixw"><div class="ixi cur sel">PwrAgnt</div></div>
+                    <div class="ixw"><div class="ixi inv">PwrGit</div></div>
+                    <div class="ixw"><div class="ixi inv">PwrSnap</div></div>
+                    <div class="seam"></div>
+                    <div class="ixw"><div class="ixi inv">agent-kit</div></div>
+                    <div class="ixw"><div class="ixi inv">codex</div></div>
+                    <div class="ixw"><div class="ixi">disktree</div></div>
+                    <div class="ixw"><div class="ixi">tart</div></div>
+                  </nav>
+                  <div class="tr">
+                    <div class="rr sel"><span class="n">PwrAgnt</span></div>
+                    <div class="rr"><span class="n">PwrGit</span></div>
+                    <div class="rr"><span class="n">PwrSnap</span></div>
+                    <div class="div">Directories</div>
+                    <div class="rr"><span class="n">agent-kit</span></div>
+                    <div class="rr"><span class="n">codex</span></div>
+                    <div class="rr"><span class="n">disktree</span></div>
+                  </div>
+                </div>
+              </div>
+            </div></div>
+            <p class="note">Reference (<code>ProjectIndex.tsx</code>, <code>DirectoriesList.tsx</code>). Pins lead in the operator&#8217;s order. A 1px hairline (<code>.project-index__seam</code>, 9px tall) ends them in the index; the list draws the same seam as a labelled divider. The rest are by name.</p>
+          </div>
+
+          <div class="dv-opt rec" id="1c">
+            <div class="dv-olabel"><span class="dv-oid">1c</span><b>Proposed</b> &#183; PwrGit, All lens</div>
+            <div class="stage"><div class="sb">
+              <div class="col" style="width:100%">
+                <div class="lens"><span>Focused</span><span>Pinned</span><span>Behind</span><span>Stale</span><span class="on">All 7</span></div>
+                <div style="display:flex;flex:1;min-height:0">
+                  <nav class="ix">
+                    <div class="ixw"><div class="ixi cur sel">PwrAgnt</div></div>
+                    <div class="ixw"><div class="ixi inv">PwrGit</div></div>
+                    <div class="ixw"><div class="ixi inv">PwrSnap</div></div>
+                    <div class="seam"></div>
+                    <div class="ixw"><div class="ixi inv">agent-kit</div></div>
+                    <div class="ixw"><div class="ixi inv">codex</div></div>
+                    <div class="ixw"><div class="ixi">disktree</div></div>
+                    <div class="ixw"><div class="ixi">tart</div></div>
+                  </nav>
+                  <div class="tr">
+                    <div class="rr sel"><span class="n">PwrAgnt</span><span class="c">52 wts</span><span class="s">&#9733;</span></div>
+                    <div class="rr"><span class="n">PwrGit</span><span class="c">10 wts</span><span class="s">&#9733;</span></div>
+                    <div class="rr"><span class="n">PwrSnap</span><span class="c">12 wts</span><span class="s">&#9733;</span></div>
+                    <div class="div">Repositories</div>
+                    <div class="rr"><span class="n">agent-kit</span><span class="c">1 wt</span><span class="o">&#9734;</span></div>
+                    <div class="rr"><span class="n">codex</span><span class="o">&#9734;</span></div>
+                    <div class="rr"><span class="n">disktree</span><span class="o">&#9734;</span></div>
+                  </div>
+                </div>
+              </div>
+            </div></div>
+            <p class="note"><b>PwrAgnt&#8217;s numbers.</b> Index seam: 9px row, 1px <code>--border-subtle</code> line inset 11px/8px. Tree divider: the eyebrow type the folder headings use, a 1px line each side, labelled &#8220;Repositories&#8221;. Both are hidden from screen readers in the index and a <code>separator</code> in the tree. Starring a repository moves it above the seam at once: after the pins already arranged, by name.</p>
+          </div>
+
+        </div>
+      </section>
+
+      <!-- ================================================================ -->
+      <section class="dv-turn" id="t2" data-screen-label="Turn 2 Every lens">
+        <div class="dv-thd"><span class="dv-tid">2</span><span class="dv-tname">Every lens: its pins, then its own answer</span></div>
+        <p class="dv-sub">A lens still filters. What changes is that the pins it lists always lead, in the one hand order, and the rest keeps the order the lens exists to give.</p>
+        <div class="dv-opts">
+          <table class="cmp">
+            <tr><th>Lens</th><th>Today</th><th>Proposed</th></tr>
+            <tr><td>Focused</td><td>Ladder: current, pinned (by activity), viewed, committed.</td><td><b>Pins</b> (hand order) &#183; seam &#183; the ladder for the rest: current, viewed, committed. Every pin is already focused, so none is added or lost. The page of eight counts the pins first.</td></tr>
+            <tr><td>Pinned</td><td>Starred first, then repositories held by a pinned worktree or branch; all of it hand-ordered, here only.</td><td><b>Pins</b> (hand order) &#183; seam &#183; repositories held only by a pinned worktree or branch, A&#8211;Z.</td></tr>
+            <tr><td>Behind, Stale</td><td>Starred first, each half A&#8211;Z; hand order ignored.</td><td><b>Pins</b> that match (hand order) &#183; seam &#183; the rest that match, A&#8211;Z.</td></tr>
+            <tr><td>All</td><td>A&#8211;Z, pins anywhere.</td><td><b>Pins</b> (hand order) &#183; seam &#183; the rest, A&#8211;Z.</td></tr>
+            <tr><td>Reordering</td><td>Drag and &#8984;&#8679;&#8593;/&#8595; in the Pinned lens only.</td><td>Drag and &#8984;&#8679;&#8593;/&#8595; on a pin <b>in every lens</b>, tree row or index name. The grip shows on pinned rows only. A lens that lists some pins moves one among the pins it shows; the hidden ones keep their places.</td></tr>
+          </table>
+        </div>
+      </section>
+
+      <!-- ================================================================ -->
+      <section class="dv-turn" id="t3" data-screen-label="Turn 3 Drag across the seam">
+        <div class="dv-thd"><span class="dv-tid">3</span><span class="dv-tname">The seam is a place to drop, as in PwrAgnt</span></div>
+        <p class="dv-sub">PwrAgnt&#8217;s drop rules (<code>directory-pin-drop.ts</code>), on PwrGit&#8217;s own drag (<code>useListReorder</code>: the tree&#8217;s dimmed source and 2px line, shared by the index). The star stays the one-click way to pin.</p>
+        <div class="dv-opts">
+
+          <div class="dv-opt" id="3a">
+            <div class="dv-olabel"><span class="dv-oid">3a</span>Move a pin among the pins</div>
+            <div class="stage"><div class="sb" style="height:200px">
+              <nav class="ix">
+                <div class="ixw"><div class="ixi cur sel">PwrAgnt</div></div>
+                <div class="ixw lb"><div class="ixi inv">PwrGit</div></div>
+                <div class="ixw drag"><div class="ixi inv">PwrSnap</div></div>
+                <div class="seam"></div>
+                <div class="ixw"><div class="ixi inv">agent-kit</div></div>
+                <div class="ixw"><div class="ixi inv">codex</div></div>
+              </nav>
+              <div class="tr">
+                <div class="rr sel"><span class="n">PwrAgnt</span><span class="s">&#9733;</span></div>
+                <div class="rr lb"><span class="n">PwrGit</span><span class="s">&#9733;</span></div>
+                <div class="rr drag"><span class="n">PwrSnap</span><span class="s">&#9733;</span></div>
+                <div class="div">Repositories</div>
+                <div class="rr"><span class="n">agent-kit</span><span class="o">&#9734;</span></div>
+                <div class="rr"><span class="n">codex</span><span class="o">&#9734;</span></div>
+              </div>
+              <div class="ghost" style="left:20px;top:22px">PwrSnap</div>
+              <svg class="cursor" style="left:60px;top:30px" viewBox="0 0 14 18"><path d="M1 1l11 9-5 .6 3 6-2 1-3-6-4 3z" fill="#fff" stroke="#000" stroke-width="1"/></svg>
+            </div></div>
+            <p class="note">As shipped in the Pinned lens (Repo Index Reorder, 2a), now in every lens. Held and aimed state shows in both columns.</p>
+          </div>
+
+          <div class="dv-opt" id="3b">
+            <div class="dv-olabel"><span class="dv-oid">3b</span>Drop an unpinned repository among the pins: it is pinned there</div>
+            <div class="stage"><div class="sb" style="height:200px">
+              <nav class="ix">
+                <div class="ixw"><div class="ixi cur sel">PwrAgnt</div></div>
+                <div class="ixw la"><div class="ixi inv">PwrGit</div></div>
+                <div class="ixw"><div class="ixi inv">PwrSnap</div></div>
+                <div class="seam"></div>
+                <div class="ixw"><div class="ixi inv">agent-kit</div></div>
+                <div class="ixw drag"><div class="ixi inv">codex</div></div>
+              </nav>
+              <div class="tr">
+                <div class="rr sel"><span class="n">PwrAgnt</span><span class="s">&#9733;</span></div>
+                <div class="rr la"><span class="n">PwrGit</span><span class="s">&#9733;</span></div>
+                <div class="rr"><span class="n">PwrSnap</span><span class="s">&#9733;</span></div>
+                <div class="div">Repositories</div>
+                <div class="rr"><span class="n">agent-kit</span><span class="o">&#9734;</span></div>
+                <div class="rr drag"><span class="n">codex</span><span class="o">&#9734;</span></div>
+              </div>
+              <div class="ghost" style="left:20px;top:44px">codex<span class="tag">Pin</span></div>
+              <svg class="cursor" style="left:60px;top:52px" viewBox="0 0 14 18"><path d="M1 1l11 9-5 .6 3 6-2 1-3-6-4 3z" fill="#fff" stroke="#000" stroke-width="1"/></svg>
+            </div></div>
+            <p class="note">Over the seam itself it joins at the end. Over another unpinned row nothing lights: the rest is in the lens&#8217;s order, so there is nowhere to land.</p>
+          </div>
+
+          <div class="dv-opt" id="3c">
+            <div class="dv-olabel"><span class="dv-oid">3c</span>Drag a pin to or below the seam: it is unpinned</div>
+            <div class="stage"><div class="sb" style="height:200px">
+              <nav class="ix">
+                <div class="ixw"><div class="ixi cur sel">PwrAgnt</div></div>
+                <div class="ixw drag"><div class="ixi inv">PwrGit</div></div>
+                <div class="ixw"><div class="ixi inv">PwrSnap</div></div>
+                <div class="seam aim"></div>
+                <div class="ixw"><div class="ixi inv">agent-kit</div></div>
+                <div class="ixw"><div class="ixi inv">codex</div></div>
+              </nav>
+              <div class="tr">
+                <div class="rr sel"><span class="n">PwrAgnt</span><span class="s">&#9733;</span></div>
+                <div class="rr drag"><span class="n">PwrGit</span><span class="s">&#9733;</span></div>
+                <div class="rr"><span class="n">PwrSnap</span><span class="s">&#9733;</span></div>
+                <div class="div aim">Unpin</div>
+                <div class="rr"><span class="n">agent-kit</span><span class="o">&#9734;</span></div>
+                <div class="rr"><span class="n">codex</span><span class="o">&#9734;</span></div>
+              </div>
+              <div class="ghost" style="left:20px;top:92px">PwrGit</div>
+              <svg class="cursor" style="left:60px;top:100px" viewBox="0 0 14 18"><path d="M1 1l11 9-5 .6 3 6-2 1-3-6-4 3z" fill="#fff" stroke="#000" stroke-width="1"/></svg>
+            </div></div>
+            <p class="note">Anywhere at or below the seam lights the seam, not a line between rows: the repository returns to its place by name, wherever it was released. The tree&#8217;s divider reads &#8220;Unpin&#8221; while lit; both lines grow to 3px <code>--accent</code>.</p>
+          </div>
+
+          <div class="dv-opt" id="3d">
+            <div class="dv-olabel"><span class="dv-oid">3d</span>Nothing pinned: a held repository opens the ghost Pin slot</div>
+            <div class="stage"><div class="sb" style="height:200px">
+              <nav class="ix">
+                <div style="padding:4px 4px 4px 6px"><div class="slot lit" style="height:26px;border-radius:6px">&#9734; Pin</div></div>
+                <div class="ixw"><div class="ixi cur sel">agent-kit</div></div>
+                <div class="ixw drag"><div class="ixi inv">codex</div></div>
+                <div class="ixw"><div class="ixi inv">disktree</div></div>
+                <div class="ixw"><div class="ixi inv">tart</div></div>
+              </nav>
+              <div class="tr">
+                <div class="slot lit" style="height:34px;margin:2px 2px 6px;border-radius:8px">&#9734; Pin</div>
+                <div class="rr sel"><span class="n">agent-kit</span><span class="o">&#9734;</span></div>
+                <div class="rr drag"><span class="n">codex</span><span class="o">&#9734;</span></div>
+                <div class="rr"><span class="n">disktree</span><span class="o">&#9734;</span></div>
+                <div class="rr"><span class="n">tart</span><span class="o">&#9734;</span></div>
+              </div>
+              <div class="ghost" style="left:150px;top:10px">codex</div>
+              <svg class="cursor" style="left:190px;top:18px" viewBox="0 0 14 18"><path d="M1 1l11 9-5 .6 3 6-2 1-3-6-4 3z" fill="#fff" stroke="#000" stroke-width="1"/></svg>
+            </div></div>
+            <p class="note">Operator, 2026-11-17: &#8220;we should have that from PwrAgent too&#8221;. PwrAgnt&#8217;s <code>.directories-pin-slot</code> (34px) and <code>.project-index__pin-slot</code> (26px): a 1.5px dashed accent outline, mounted only while a repository is held, stuck to the top of each column. Only a drop inside its box pins; lit, the outline goes solid on an accent tint. With a pin already there it is not offered: the seam is the target (3b).</p>
+          </div>
+
+          <div class="find" style="width:340px">
+            <div class="fitem"><span class="pin">&#8211;</span><div><h4>Not in this round: tilted card, drop flash</h4><p>PwrAgnt&#8217;s pointer drag draws a tilted card and flashes the dropped name. PwrGit keeps one drag style across repositories and worktrees.</p></div></div>
+          </div>
+
+        </div>
+      </section>
+
+      <!-- ================================================================ -->
+      <section class="dv-turn" id="t4" data-screen-label="Turn 4 Grouped by folder">
+        <div class="dv-thd"><span class="dv-tid">4</span><span class="dv-tname">Grouped by folder (two or more profile roots)</span></div>
+        <p class="dv-sub">PwrAgnt has no folder groups, so this is PwrGit&#8217;s call. <b>PwrGit</b> lives under <code>code</code>, <b>ui-kit</b> under <code>oss</code>; both are starred.</p>
+        <div class="dv-opts">
+
+          <div class="dv-opt rec" id="4a">
+            <div class="dv-olabel"><span class="dv-oid">4a</span><b>Recommended</b> &#183; a Pinned group above the folders</div>
+            <div class="stage"><div class="sb">
+              <nav class="ix">
+                <div class="ixl">Pinned</div>
+                <div class="ixw"><div class="ixi cur sel">PwrGit</div></div>
+                <div class="ixw"><div class="ixi inv">ui-kit</div></div>
+                <div class="seam"></div>
+                <div class="ixl" style="padding-top:3px">code</div>
+                <div class="ixw"><div class="ixi inv">atlas</div></div>
+                <div class="ixw"><div class="ixi inv">billing</div></div>
+                <div class="ixl">oss</div>
+                <div class="ixw"><div class="ixi inv">zephyr</div></div>
+              </nav>
+              <div class="tr">
+                <div class="gh">Pinned &#183; 2</div>
+                <div class="rr sel"><span class="n">PwrGit</span><span class="s">&#9733;</span></div>
+                <div class="rr"><span class="n">ui-kit</span><span class="s">&#9733;</span></div>
+                <div class="div bare"></div>
+                <div class="gh">code &#183; 2</div>
+                <div class="rr"><span class="n">atlas</span><span class="o">&#9734;</span></div>
+                <div class="rr"><span class="n">billing</span><span class="o">&#9734;</span></div>
+                <div class="gh">oss &#183; 1</div>
+                <div class="rr"><span class="n">zephyr</span><span class="o">&#9734;</span></div>
+              </div>
+            </div></div>
+            <p class="note"><b>&#8220;Always at the top&#8221; holds.</b> A pin leaves its folder group for the Pinned group; its folder is still on its hover card and in the title strip. Pins reorder across folders, in one list, which is the same list every ungrouped lens shows. The seam stays as the Unpin target, without a label: the folder heading follows it.</p>
+          </div>
+
+          <div class="dv-opt no" id="4b">
+            <div class="dv-olabel"><span class="dv-oid">4b</span>Pins lead inside each folder</div>
+            <div class="stage"><div class="sb">
+              <nav class="ix">
+                <div class="ixl">code</div>
+                <div class="ixw"><div class="ixi cur sel">PwrGit</div></div>
+                <div class="seam"></div>
+                <div class="ixw"><div class="ixi inv">atlas</div></div>
+                <div class="ixw"><div class="ixi inv">billing</div></div>
+                <div class="ixl">oss</div>
+                <div class="ixw"><div class="ixi inv">ui-kit</div></div>
+                <div class="seam"></div>
+                <div class="ixw"><div class="ixi inv">zephyr</div></div>
+              </nav>
+              <div class="tr">
+                <div class="gh">code &#183; 3</div>
+                <div class="rr sel"><span class="n">PwrGit</span><span class="s">&#9733;</span></div>
+                <div class="div bare"></div>
+                <div class="rr"><span class="n">atlas</span><span class="o">&#9734;</span></div>
+                <div class="rr"><span class="n">billing</span><span class="o">&#9734;</span></div>
+                <div class="gh">oss &#183; 2</div>
+                <div class="rr"><span class="n">ui-kit</span><span class="s">&#9733;</span></div>
+                <div class="div bare"></div>
+                <div class="rr"><span class="n">zephyr</span><span class="o">&#9734;</span></div>
+              </div>
+            </div></div>
+            <p class="note"><b>Not recommended.</b> A pin in the last folder is as far down as it is today, and there is one seam per folder. The pins&#8217; order would differ between grouped and ungrouped views of the same lens.</p>
+          </div>
+
+        </div>
+      </section>
+    </x-dc>
+  </body>
+</html>
