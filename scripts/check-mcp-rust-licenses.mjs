@@ -9,6 +9,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { evaluateSpdxExpression, isPermissive } from "./check-third-party-license-allowlist.mjs";
 import { isCliEntrypoint } from "./lib/cli-entrypoint.mjs";
+import { rustEnvironment } from "./lib/rust-environment.mjs";
 const root = fileURLToPath(new URL("../", import.meta.url));
 const manifest = join(root, "crates/pwrgit-mcp/Cargo.toml");
 const snapshotPath = join(root, "scripts/mcp-rust-licenses.json");
@@ -38,9 +39,10 @@ export function readMcpRustLicenseRecords() {
       );
   return snapshot.records;
 }
-function cargo(args) {
+function cargo(args, env) {
   const result = spawnSync("cargo", args, {
     cwd: root,
+    env,
     encoding: "utf8",
     maxBuffer: 16 * 1024 * 1024
   });
@@ -48,6 +50,7 @@ function cargo(args) {
   return result.stdout;
 }
 function generate() {
+  const env = rustEnvironment({ cwd: root });
   const selected = new Set();
   for (const target of targets) {
     for (const line of cargo([
@@ -63,13 +66,13 @@ function generate() {
       "none",
       "--format",
       "{p}"
-    ]).split("\n")) {
+    ], env).split("\n")) {
       const match = /^(\S+) v(\S+)/.exec(line);
       if (match) selected.add(`${match[1]}@${match[2]}`);
     }
   }
   const metadata = JSON.parse(
-    cargo(["metadata", "--locked", "--manifest-path", manifest, "--format-version", "1"])
+    cargo(["metadata", "--locked", "--manifest-path", manifest, "--format-version", "1"], env)
   );
   const records = metadata.packages
     .filter((p) => p.name !== "pwrgit-mcp" && selected.has(`${p.name}@${p.version}`))
