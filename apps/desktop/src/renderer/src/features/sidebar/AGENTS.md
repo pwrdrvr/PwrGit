@@ -668,8 +668,10 @@ As PwrAgnt's project index: pins first, a seam, then the rest. Rules in
   Grouped, or in a lens that lists only pins, it is a bare hairline.
 - **Only a pin draws the grip and takes ⌘⇧↑/↓** (`arrangeable` is
   `repo.pinned`). `showPinVia` is the Pinned lens's "via wt" badge.
-- **The seam is `aria-hidden` in both columns**: a `tree` owns only treeitems
-  and groups, and each row's star already says it.
+- **The seam is `aria-hidden` in both columns, and never a child of the
+  `tree`**, which may own only treeitems and groups. Ungrouped, the pins sit
+  in a `group` (`.repo-pins`, "Pinned (N repos)") that ends with the seam.
+  `e2e/repo-reorder.spec.ts` ("valid, nested roles") holds this.
 
 Design: `design/Pinned Repos Lead Every Lens - UX Review.dc.html` (1c, turn 3,
 4a). It reverses `Repo Index Reorder`, 2b.

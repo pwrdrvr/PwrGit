@@ -242,6 +242,18 @@ describe("Moving repositories from the index", () => {
         "seam",
         "atlas"
       ]);
+      // The seam is never a child of the tree: the pins' group holds it.
+      const tree = container.querySelector('[role="tree"]')!;
+      expect(
+        [...tree.children].filter(
+          (child) =>
+            child.getAttribute("role") !== "group" &&
+            !child.classList.contains("repo-block")
+        )
+      ).toEqual([]);
+      expect(
+        container.querySelector(".repo-seam")!.parentElement!.getAttribute("aria-label")
+      ).toBe("Pinned (2 repos)");
       // Only pins carry the grip.
       expect(
         [...container.querySelectorAll(".repo-row.is-arrangeable")].map((row) =>

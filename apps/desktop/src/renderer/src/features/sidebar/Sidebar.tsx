@@ -1254,8 +1254,9 @@ export function Sidebar({
    * Where the pins end. PwrAgnt's Directories divider: a hairline labelled
    * "Repositories" when rows follow it ungrouped; bare above a folder heading
    * or at the end of a lens that lists only pins, where the label would head
-   * nothing. It is the drop target that unpins, and lights for it. Hidden from the tree's accessibility tree: a
-   * `tree` owns treeitems and groups only, and the star says the same thing.
+   * nothing. It is the drop target that unpins, and lights for it. Hidden
+   * from assistive technology, and always inside a `group` (the pins'),
+   * never a child of the `tree` itself.
    */
   const pinSeam = (labelled: boolean) => (
     <div
@@ -1486,11 +1487,28 @@ export function Sidebar({
                       {g.root === PINNED_GROUP && pinSeam(false)}
                     </div>
                   ))
-                : filtered.flatMap((repo, index, list) =>
-                    index === shownPins.length - 1
-                      ? [renderRepo(repo, index, list), pinSeam(shownRest.length > 0)]
-                      : [renderRepo(repo, index, list)]
-                  )}
+                : [
+                    // A `tree` may own only treeitems and groups, so the seam
+                    // cannot be its child: the pins are a group that ends
+                    // with it, as the folder groups hold their headings.
+                    // Positions stay stated over the whole list.
+                    shownPins.length > 0 && (
+                      <div
+                        className="repo-pins"
+                        key="__pins"
+                        role="group"
+                        aria-label={`Pinned (${shownPins.length} ${
+                          shownPins.length === 1 ? "repo" : "repos"
+                        })`}
+                      >
+                        {shownPins.map((repo, index) => renderRepo(repo, index, filtered))}
+                        {pinSeam(shownRest.length > 0)}
+                      </div>
+                    ),
+                    ...shownRest.map((repo, index) =>
+                      renderRepo(repo, shownPins.length + index, filtered)
+                    )
+                  ]}
             </div>
 
             {filtered.length === 0 && (
