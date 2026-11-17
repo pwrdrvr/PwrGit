@@ -20,7 +20,8 @@ import {
   type HotCpuProfileConfig
 } from "./hot-cpu-profile-config";
 import { createHotCpuProfileSession } from "./hot-cpu-profile-session";
-import { RendererHotCpuProfiler } from "./renderer-hot-cpu-profiler";
+import { HotCpuProfiler } from "./hot-cpu-profiler";
+import { createMainProcessHotCpuTarget } from "./main-process-hot-cpu-target";
 import { resolveStartupCpuProfileConfig } from "./startup-cpu-profile-config";
 import { createStartupCpuProfileSession } from "./startup-cpu-profile-session";
 import { MainProcessCpuProfiler } from "./main-process-cpu-profiler";
@@ -42,7 +43,7 @@ type WindowEntry = {
   window: BrowserWindow;
   heapMonitor: RendererHeapMonitor | null;
   heapSessionDir: string | null;
-  hotCpuProfiler: RendererHotCpuProfiler | null;
+  hotCpuProfiler: HotCpuProfiler | null;
   hotCpuSessionDir: string | null;
 };
 
@@ -79,6 +80,8 @@ export class DiagnosticsManager {
   private readonly windows = new Map<number, WindowEntry>();
   private mainHeapMonitor: MainProcessHeapMonitor | null = null;
   private mainHeapSessionDir: string | null = null;
+  private mainHotCpuProfiler: HotCpuProfiler | null = null;
+  private mainHotCpuSessionDir: string | null = null;
   private heapConfig: HeapMonitorConfig = { enabled: false };
   private hotCpuConfig: HotCpuProfileConfig = { enabled: false };
   private heapConfigKey = "";
@@ -115,12 +118,12 @@ export class DiagnosticsManager {
       const closing = this.windows.get(id);
       this.windows.delete(id);
       if (closing !== undefined) {
-        void closing.heapMonitor
-          ?.stop("window-closed")
-          .then(() => discardSessionIfEmpty(closing.heapSessionDir));
-        void closing.hotCpuProfiler
-          ?.stop("window-closed")
-          .then(() => discardSessionIfEmpty(closing.hotCpuSessionDir));
+        this.enqueueSync(async () => {
+          await closing.heapMonitor?.stop("window-closed");
+          await discardSessionIfEmpty(closing.heapSessionDir);
+          await closing.hotCpuProfiler?.stop("window-closed");
+          await discardSessionIfEmpty(closing.hotCpuSessionDir);
+        });
       }
     });
 
@@ -156,7 +159,7 @@ export class DiagnosticsManager {
    *  running, or a queued sync may be about to start one. Quit is deferred
    *  for the flush only when this is true. */
   hasPendingWork(): boolean {
-    if (this.pendingSyncs > 0 || this.mainHeapMonitor !== null || this.stopResourceMonitoring !== null) return true;
+    if (this.pendingSyncs > 0 || this.mainHeapMonitor !== null || this.mainHotCpuProfiler !== null || this.stopResourceMonitoring !== null) return true;
     for (const entry of this.windows.values()) {
       if (entry.heapMonitor !== null || entry.hotCpuProfiler !== null) return true;
     }
@@ -198,7 +201,11 @@ export class DiagnosticsManager {
     });
 
     const heapKey = JSON.stringify(heapConfig);
-    if (heapKey !== this.heapConfigKey) {
+    const heapChanged = heapKey !== this.heapConfigKey;
+    if (heapChanged) {
+      // Heap monitoring owns the renderer debugger while enabled. Flush hot
+      // recordings before it attaches, and re-arm after it releases ownership.
+      await this.stopWindowHotCpuProfilers("heap-config-changed");
       await this.stopHeapMonitoring("config-changed");
       this.heapConfig = heapConfig;
       this.heapConfigKey = heapKey;
@@ -213,9 +220,14 @@ export class DiagnosticsManager {
       this.hotCpuConfig = hotCpuConfig;
       this.hotCpuConfigKey = hotCpuKey;
       if (hotCpuConfig.enabled) {
+        await this.startMainHotCpuProfiler(hotCpuConfig);
         for (const entry of this.windows.values()) {
           await this.startWindowHotCpuProfiler(entry, hotCpuConfig);
         }
+      }
+    } else if (heapChanged && hotCpuConfig.enabled) {
+      for (const entry of this.windows.values()) {
+        await this.startWindowHotCpuProfiler(entry, hotCpuConfig);
       }
     }
   }
@@ -298,6 +310,16 @@ export class DiagnosticsManager {
   }
 
   private async stopHotCpuProfiling(reason: string): Promise<void> {
+    if (this.mainHotCpuProfiler !== null) {
+      await this.mainHotCpuProfiler.stop(reason);
+      this.mainHotCpuProfiler = null;
+      await discardSessionIfEmpty(this.mainHotCpuSessionDir);
+      this.mainHotCpuSessionDir = null;
+    }
+    await this.stopWindowHotCpuProfilers(reason);
+  }
+
+  private async stopWindowHotCpuProfilers(reason: string): Promise<void> {
     for (const entry of this.windows.values()) {
       if (entry.hotCpuProfiler !== null) {
         await entry.hotCpuProfiler.stop(reason);
@@ -306,6 +328,24 @@ export class DiagnosticsManager {
         entry.hotCpuSessionDir = null;
       }
     }
+  }
+
+  private async startMainHotCpuProfiler(
+    config: Extract<HotCpuProfileConfig, { enabled: true }>
+  ): Promise<void> {
+    const created = await createHotCpuProfileSession({ config, target: "main", versions: versions() });
+    if (!created.ok) {
+      log.error(created.message);
+      return;
+    }
+    this.mainHotCpuSessionDir = created.session.directoryPath;
+    this.mainHotCpuProfiler = new HotCpuProfiler({
+      config, session: created.session,
+      getAppMetrics: () => app.getAppMetrics(),
+      target: createMainProcessHotCpuTarget()
+    });
+    log.info("main hot CPU session directory", { directory: created.session.directoryPath });
+    await this.mainHotCpuProfiler.start();
   }
 
   private async startWindowHotCpuProfiler(
@@ -328,7 +368,7 @@ export class DiagnosticsManager {
     });
 
     entry.hotCpuSessionDir = session.session.directoryPath;
-    entry.hotCpuProfiler = new RendererHotCpuProfiler({
+    entry.hotCpuProfiler = new HotCpuProfiler({
       config,
       getAppMetrics: () => app.getAppMetrics(),
       session: session.session,

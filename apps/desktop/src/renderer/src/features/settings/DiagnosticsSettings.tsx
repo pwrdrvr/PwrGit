@@ -52,7 +52,7 @@ const HEAP_SNAPSHOT_LIMIT_OPTIONS: Array<{
 
 /**
  * Troubleshooting pane — PwrAgnt's pane of the same name: Developer Mode and
- * process ids first, then the diagnostics port (heap monitor, hot renderer CPU
+ * process ids first, then the diagnostics port (heap monitor, hot CPU
  * profiler, startup profiler). The page id stays `diagnostics` so deep links
  * that already name it keep working. Sessions land in `diagnosticsOutputRoot`;
  * heap monitor and hot-CPU changes apply live, the startup profiler applies on
@@ -157,8 +157,8 @@ export function DiagnosticsSettings(props: {
 
       <SettingsSection
         eyebrow="CPU"
-        title="Hot Renderer CPU Profiling"
-        description={`Watch each window's CPU usage; when it stays above the trigger threshold, capture a ${hotDurationSeconds}-second CPU profile of that renderer. Arms and disarms live.`}
+        title="Hot CPU Profiling"
+        description={`Watch the main process and each window. Keep recent CPU history, then save it with ${hotDurationSeconds}s after a trigger. Arms and disarms live.`}
         chip={
           env.hotCpuProfilingForcedOn
             ? "Armed (env)"
@@ -172,9 +172,9 @@ export function DiagnosticsSettings(props: {
       >
         {bothCapturePathsOn ? (
           <p className="settings-callout settings-callout--warn" role="status">
-            Heap monitoring keeps each window's debugger attached, so hot-CPU
-            captures are skipped while both are on. Turn the heap monitor off
-            to let profiles trigger.
+            Heap monitoring keeps each window's debugger attached, so renderer
+            CPU captures are skipped while both are on. Main-process CPU
+            profiling continues.
           </p>
         ) : null}
         <div className="settings-fields">

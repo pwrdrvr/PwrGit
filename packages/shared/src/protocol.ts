@@ -829,7 +829,7 @@ export type DiagnosticsSettings = {
   resourceUsageEnabled: boolean;
   /** Sample main + renderer heaps; auto-snapshot on growth spikes. */
   heapMonitorEnabled: boolean;
-  /** Arm the hot renderer CPU profiler (captures when CPU stays hot). */
+  /** Arm main-process and renderer CPU profiling with pre-trigger history. */
   hotCpuProfilingEnabled: boolean;
   hotCpuProfilingStartDelayMs: HotCpuStartDelayMs;
   hotCpuProfilingTriggerMode: HotCpuTriggerMode;
