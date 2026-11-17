@@ -86,6 +86,9 @@ test("pinned repositories lead every lens, above one seam, in both columns", asy
       const rest = lens === "All" ? REST : lens === "Focused" ? ["lumen-api"] : [];
       expect(await column(page, tree), `${lens} tree`).toEqual([...PINS, "—", ...rest]);
       expect(await column(page, index), `${lens} index`).toEqual([...PINS, "—", ...rest]);
+      // The label heads the rows below the seam, so a lens that lists only
+      // pins draws the seam bare.
+      await expect(page.locator(".repo-seam")).toHaveText(rest.length > 0 ? "Repositories" : "");
     }
 
     await mount(page, "All", false, "light");

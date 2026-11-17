@@ -664,6 +664,8 @@ As PwrAgnt's project index: pins first, a seam, then the rest. Rules in
   below the seam is unpinned, and the seam lights instead of a row line. Two
   repositories below the seam refuse each other. Rows drag only while
   something is pinned; the first pin is the star.
+- **The tree's seam is labelled "Repositories" only when rows follow it.**
+  Grouped, or in a lens that lists only pins, it is a bare hairline.
 - **Only a pin draws the grip and takes ⌘⇧↑/↓** (`arrangeable` is
   `repo.pinned`). `showPinVia` is the Pinned lens's "via wt" badge.
 - **The seam is `aria-hidden` in both columns**: a `tree` owns only treeitems

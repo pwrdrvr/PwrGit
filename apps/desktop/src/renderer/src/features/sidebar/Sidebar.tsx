@@ -101,6 +101,7 @@ import {
   LENSES,
   lensCounts,
   movePin,
+  repoLeads,
   SORT_CYCLE,
   type SelectionModifiers
 } from "./repo-view";
@@ -998,7 +999,7 @@ export function Sidebar({
     if (index === -1) return;
     if (hasPrimaryModifier(event, platform) && event.shiftKey) {
       const direction = moveKeyDirection(event);
-      if (direction === null || !repo.pinned) return;
+      if (direction === null || !repoLeads(repo)) return;
       if (!moveRepo(repo.id, direction)) return;
       event.preventDefault();
       // Keep focus on the row that moved, not the slot it left.
@@ -1235,7 +1236,7 @@ export function Sidebar({
             ...(changeRequest === undefined ? {} : { changeRequest })
           })
         }
-        arrangeable={repo.pinned}
+        arrangeable={repoLeads(repo)}
         showPinVia={lens === "Pinned"}
         dragProps={repoDrag.rowProps(repo.id, canDragRepos)}
         dragging={repoDrag.dragId === repo.id}
@@ -1250,21 +1251,22 @@ export function Sidebar({
   };
 
   /**
-   * Where the pins end. PwrAgnt's Directories divider: a labelled hairline
-   * ungrouped, bare above a folder heading. It is the drop target that
-   * unpins, and lights for it. Hidden from the tree's accessibility tree: a
+   * Where the pins end. PwrAgnt's Directories divider: a hairline labelled
+   * "Repositories" when rows follow it ungrouped; bare above a folder heading
+   * or at the end of a lens that lists only pins, where the label would head
+   * nothing. It is the drop target that unpins, and lights for it. Hidden from the tree's accessibility tree: a
    * `tree` owns treeitems and groups only, and the star says the same thing.
    */
-  const pinSeam = (bare: boolean) => (
+  const pinSeam = (labelled: boolean) => (
     <div
       key="__pin-seam"
-      className={`repo-seam${bare ? " repo-seam--bare" : ""}${
+      className={`repo-seam${labelled ? "" : " repo-seam--bare"}${
         seamAim === null ? "" : " is-drop-target"
       }`}
       aria-hidden="true"
       {...seamDropProps}
     >
-      {(!bare || seamAim !== null) && (
+      {(labelled || seamAim !== null) && (
         <span>
           {seamAim === "unpin" ? "Unpin" : seamAim === "pin" ? "Pin" : "Repositories"}
         </span>
@@ -1481,12 +1483,12 @@ export function Sidebar({
                         <span className="repo-group__count">{g.repos.length}</span>
                       </div>
                       {g.repos.map(renderRepo)}
-                      {g.root === PINNED_GROUP && pinSeam(true)}
+                      {g.root === PINNED_GROUP && pinSeam(false)}
                     </div>
                   ))
                 : filtered.flatMap((repo, index, list) =>
                     index === shownPins.length - 1
-                      ? [renderRepo(repo, index, list), pinSeam(false)]
+                      ? [renderRepo(repo, index, list), pinSeam(shownRest.length > 0)]
                       : [renderRepo(repo, index, list)]
                   )}
             </div>

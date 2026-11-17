@@ -711,7 +711,8 @@ test("a first run lands in the one lens that has anything in it", async () => {
     );
   }
 
-  // All is the index: position follows name, and pinning must not move it.
+  // With nothing pinned, All is by name. (A pin leads every lens, above a
+  // seam: pinned-repos.spec.ts and repo-reorder.spec.ts own that rule.)
   expect(await window.locator(".repo-row__name").allTextContents()).toEqual([
     "alpha",
     "mike",

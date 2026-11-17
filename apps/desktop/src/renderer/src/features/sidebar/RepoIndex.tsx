@@ -353,7 +353,9 @@ export function RepoIndex({
       }}
       onDragStartCapture={tip.hide}
     >
-      {groups.map((group) => (
+      {groups.map((group) => {
+        const lastPin = group.entries.findLastIndex((entry) => entry.pinned);
+        return (
         <div className="repo-index__group" key={group.key}>
           {group.label !== null && (
             <div className="repo-index__label" aria-hidden="true">
@@ -406,7 +408,7 @@ export function RepoIndex({
               );
               // The hairline where the pins end: a mark for the eye and a
               // drop target for the pointer, hidden from screen readers.
-              return index === lastPinnedAt(group.entries)
+              return index === lastPin
                 ? [
                     row,
                     <li
@@ -422,7 +424,8 @@ export function RepoIndex({
             })}
           </ul>
         </div>
-      ))}
+        );
+      })}
       {tip.tooltipNode}
     </nav>
     <PaneResizer
@@ -438,10 +441,6 @@ export function RepoIndex({
     />
     </>
   );
-}
-
-function lastPinnedAt(entries: readonly RepoIndexEntry[]): number {
-  return entries.findLastIndex((entry) => entry.pinned);
 }
 
 /** Compared, never interpolated into a selector: ids carry whatever a path
