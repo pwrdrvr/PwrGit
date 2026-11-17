@@ -1,5 +1,11 @@
 # Changelog
 
+## v0.59.7 - 2026-11-17
+
+- CPU diagnostics - Improved opt-in Hot CPU Profiling to capture both the main process and each profile window, retaining recent JavaScript activity before a spike as well as 15 seconds afterward. Rolling history helps capture short bursts that finish before the CPU trigger is observed, and triggered profiles flush when settings change or the app closes.
+- Capture notices - Added standing, grouped CPU-profile notices with previous/next navigation, individual or group dismissal, and a copyable diagnostic handoff containing app identity, trigger details and artifact paths. Renderer captures stay with their producing profile; main-process captures are app-wide. Notices last until dismissed in that window, not across window closure or restart; saved files remain available.
+- Profiling limits - Recording remains opt-in with sampling overhead, a five-profile limit per recorder session and a 60-second trigger cooldown. Main-process hot-CPU captures use heap counters rather than blocking heap snapshots. Git subprocesses and native or GPU stacks still require separate measurement.
+
 ## v0.59.6 - 2026-11-17
 
 - Bulk Pull - Reduced repeated Git work by batching repository configuration and refs, and skipping branch indexing and full worktree-family refreshes when branch and tag refs have not changed. Each checkout still receives a lightweight status check under its lock; changed or uncertain state retains full safety checks, including conflicts from a stash pop.
