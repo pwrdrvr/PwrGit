@@ -1,5 +1,11 @@
 # Changelog
 
+## v0.59.6 - 2026-11-17
+
+- Bulk Pull - Reduced repeated Git work by batching repository configuration and refs, and skipping branch indexing and full worktree-family refreshes when branch and tag refs have not changed. Each checkout still receives a lightweight status check under its lock; changed or uncertain state retains full safety checks, including conflicts from a stash pop.
+- Fetch behavior - Preserved ordinary atomic pruning fetches and automatic tag following, including new tags on existing history. Only standard wildcard remotes explicitly configured with --no-tags can skip an unchanged fetch after checking remote branch tips. Custom mappings, explicit tag-pruning configuration, and bulk Fetch retain ordinary fetch behavior. Published-tag checks keep their existing setting and hourly cadence.
+- Runtime - Updated Electron to 44.10.2 and electron-updater to 6.8.11, with the packaged Electron pin aligned to the dependency update. Git subprocess reductions are verified; battery and long-running energy savings still require representative installed-app measurements.
+
 ## v0.59.5 - 2026-11-16
 
 - Resource usage - Added optional minute-level CPU and Git workload recording under Settings > Troubleshooting to help investigate long-running resource use. Recording is off by default, starts and stops live, and keeps a rolling day of local samples without repository paths, command arguments or output. Nothing is uploaded automatically.
