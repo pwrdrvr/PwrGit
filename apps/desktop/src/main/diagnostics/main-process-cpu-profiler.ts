@@ -4,6 +4,7 @@ import fs from "node:fs/promises";
 import { Session } from "node:inspector/promises";
 import type { StartupCpuProfileSession } from "./startup-cpu-profile-session";
 import { getDiagLogger, type DiagLogger } from "./diag-log";
+import { acquireMainCpuProfiler } from "./main-cpu-profiler-ownership";
 
 type InspectorProfilerSession = {
   connect: () => void;
@@ -26,6 +27,7 @@ export class MainProcessCpuProfiler {
   private readonly session: StartupCpuProfileSession;
 
   private connected = false;
+  private release: (() => void) | null = null;
   private profiling = false;
   private stopCompleted = false;
 
@@ -46,6 +48,7 @@ export class MainProcessCpuProfiler {
     if (this.profiling) return true;
 
     try {
+      this.release = acquireMainCpuProfiler();
       this.profilerSession.connect();
       this.connected = true;
       await this.profilerSession.post("Profiler.enable");
@@ -114,8 +117,12 @@ export class MainProcessCpuProfiler {
   }
 
   private disconnect(): void {
-    if (!this.connected) return;
-    this.profilerSession.disconnect();
-    this.connected = false;
+    try {
+      if (this.connected) this.profilerSession.disconnect();
+    } finally {
+      this.connected = false;
+      this.release?.();
+      this.release = null;
+    }
   }
 }

@@ -8,11 +8,11 @@ import type {
   HotCpuProfileSample,
   HotCpuProfileSession
 } from "./hot-cpu-profile-session";
+import type { HotCpuProfileCapturedEvent } from "@pwrgit/shared";
 import { MainProcessHeapMonitor } from "./main-process-heap-monitor";
 import {
-  RendererHotCpuProfiler,
-  type HotCpuProfileCapturedEvent
-} from "./renderer-hot-cpu-profiler";
+  HotCpuProfiler
+} from "./hot-cpu-profiler";
 
 // Trigger-logic tests for the machinery ported from PwrAgnt, driven through
 // the injected seams (readHeap / writeSnapshot / getAppMetrics / structural
@@ -172,7 +172,7 @@ describe("MainProcessHeapMonitor", () => {
   });
 });
 
-describe("RendererHotCpuProfiler", () => {
+describe("HotCpuProfiler", () => {
   function fakeHotCpuSession(directoryPath: string) {
     const samples: HotCpuProfileSample[] = [];
     const events: HotCpuProfileEvent[] = [];
@@ -260,7 +260,7 @@ describe("RendererHotCpuProfiler", () => {
     let sampleIndex = 0;
     const captured: HotCpuProfileCapturedEvent[] = [];
 
-    const profiler = new RendererHotCpuProfiler({
+    const profiler = new HotCpuProfiler({
       config,
       getAppMetrics: () => metricsFor(cpuSequence[sampleIndex++] ?? 20),
       session,
@@ -301,15 +301,15 @@ describe("RendererHotCpuProfiler", () => {
     await profiler.stop();
   });
 
-  it("stays idle below the threshold and on single spikes in sustained mode", async () => {
+  it("keeps history without publishing profiles below the sustained trigger", async () => {
     const dir = mkdtempSync(join(tmpdir(), "pwrgit-hotcpu-"));
-    const { session } = fakeHotCpuSession(dir);
+    const { session, events, artifacts } = fakeHotCpuSession(dir);
     const { target, commands } = fakeDebugger();
     // Alternating hot/cold never reaches 2 consecutive hot samples.
     const cpuSequence = [60, 20, 60, 20, 60, 20];
     let sampleIndex = 0;
 
-    const profiler = new RendererHotCpuProfiler({
+    const profiler = new HotCpuProfiler({
       config,
       getAppMetrics: () => metricsFor(cpuSequence[sampleIndex++] ?? 20),
       session,
@@ -322,7 +322,9 @@ describe("RendererHotCpuProfiler", () => {
       await vi.advanceTimersByTimeAsync(100);
       await flushAsync();
     }
-    expect(commands).not.toContain("Profiler.start");
+    expect(commands).toContain("Profiler.start"); // Armed before a trigger.
+    expect(events.filter((event) => event.type === "profile-started")).toHaveLength(0);
     await profiler.stop();
+    expect(artifacts).toHaveLength(0);
   });
 });

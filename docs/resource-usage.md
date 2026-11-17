@@ -117,3 +117,53 @@ when Git state is unchanged, sharing repeated history queries across sibling
 worktrees, and reducing offscreen/background work. Those require validating
 freshness, external Git operations, configuration changes and pull safety;
 this instrumentation establishes a comparable baseline first.
+
+## Automatic CPU profiles
+
+Settings → Troubleshooting → Hot CPU Profiling arms one recorder for the main
+process and one for each profile window. The shared recorder follows PwrAgent's
+hot-CPU capture behavior: sample process CPU every two seconds, evaluate the
+selected trigger, and save recent history plus 15 seconds after the trigger.
+Spike needs one sample at 50%, Sustained needs two, and Slow burn needs two at
+15%. Percentages describe one CPU core, using cumulative CPU deltas when
+Electron supplies them.
+
+While armed, V8 sampling runs continuously. History stays in memory: a live
+30-second window and the previous complete window, rotated after evaluating
+the CPU sample. A burst spanning a rotation is retained. A triggered profile
+can therefore include up to about 60 seconds of history before the 15-second
+follow-up. Untriggered history is discarded, and each recorder saves at most
+five profiles per session with a 60-second trigger cooldown. This is opt-in
+instrumentation with sampling overhead, not a passive power meter.
+
+Each recorder writes a `hot-cpu-*` directory beneath the diagnostics output
+folder. `session.json` identifies `main` or `renderer`, the app/runtime versions,
+and saved artifacts. `samples.ndjson` records CPU readings, and `events.ndjson`
+records triggers, failures, pre-trigger duration, and shutdown. Open
+`main-hot-*.cpuprofile` or `renderer-hot-*.cpuprofile` in Chrome DevTools to
+inspect JavaScript stacks. Settings changes and app shutdown flush triggered
+profiles; untriggered recordings do not produce a `.cpuprofile`.
+
+Completed captures produce a standing CPU notice using PwrAgnt's compact
+header, copy/close icons, and arrow navigation. Copy includes the source host,
+app identity, capture time and trigger, session/profile names and full paths,
+and heap artifacts. Where supported, the clipboard also carries a formatted
+code block. Notices remain until explicitly dismissed in that
+window; they are not persisted across window closure or app restart. Previous
+and Next arrows page through the captures, and Dismiss all clears
+only that group. Later captures produce new notices. Renderer captures notify
+their producing profile; main captures are app-wide. Saved profile files remain
+available in the diagnostics folder after a notice is dismissed.
+
+Main-process recording is shared across windows. Startup profiling owns the
+main V8 profiler until it finishes; automatic recording waits for that owner
+to release it. Heap monitoring or an attached debugger can prevent renderer
+recording. Main-process hot-CPU recording continues with cheap heap counters
+and never takes automatic blocking heap snapshots through this capture path.
+The optional heap snapshots attached to hot profiles apply only to renderers.
+
+These profiles do not sample spawned Git processes or explain GPU/native
+stacks. Correlate them with the resource recorder's Git activity counters;
+use an OS profiler when the expensive work is outside JavaScript. A recording
+from the installed app reflects that build, even when a worktree contains newer
+profiler code.
