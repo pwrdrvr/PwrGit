@@ -35,6 +35,16 @@ jobs:
     outputs:
       code_impacting: ${{ steps.classify.outputs.code_impacting }}
     steps:
+      # Docs-only PRs skip the expensive jobs, so the agent-instruction check
+      # (AGENTS.md sizes and links) runs here, where every PR and push passes
+      # through. It is dependency-free and needs no install. Links can point
+      # anywhere in the tree, so this is a full (shallow) checkout.
+      - name: Checkout repository
+        uses: actions/checkout@v5
+
+      - name: Check agent instructions
+        run: node ./scripts/check-agent-instructions.mjs
+
       - name: Classify changed files
         id: classify
         uses: actions/github-script@v9
@@ -189,13 +199,35 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     needs: [changes, install-deps]
-    if: needs.changes.outputs.code_impacting == 'true'
+    # Branch protection counts a skipped required check as satisfied. When the
+    # classifier fails (for example, its agent-instruction check), every job
+    # that needs it would skip and the PR could merge. Typecheck runs instead,
+    # repeats the check, and then refuses to pass.
+    if: >-
+      !cancelled() &&
+      (needs.changes.result != 'success'
+        || (needs.changes.outputs.code_impacting == 'true'
+          && needs.install-deps.result == 'success'))
     env:
       # Completed-tree consumers must never trigger pnpm implicit installs.
       PNPM_CONFIG_VERIFY_DEPS_BEFORE_RUN: "false"
     steps:
       - name: Checkout repository
         uses: actions/checkout@v5
+
+      # Normally pnpm lint runs this check; repeat it here only to show why
+      # the classifier failed.
+      - name: Check agent instructions
+        if: needs.changes.result != 'success'
+        timeout-minutes: 1
+        run: node ./scripts/check-agent-instructions.mjs
+
+      - name: Require change classification
+        env:
+          CHANGES_RESULT: ${{ needs.changes.result }}
+        run: |
+          echo "Classify Changes: $CHANGES_RESULT"
+          [[ "$CHANGES_RESULT" == "success" ]]
 
       - name: Install Node.js and dependencies
         uses: pwrdrvr/configure-nodejs@d416c1c78119b25fe03ee3ef78b75af0d69b10a7 # v1.7.1
