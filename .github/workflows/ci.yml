@@ -35,6 +35,21 @@ jobs:
     outputs:
       code_impacting: ${{ steps.classify.outputs.code_impacting }}
     steps:
+      # Docs-only PRs skip the expensive jobs, so the root AGENTS.md size
+      # guard runs here, where every PR and push passes through. The script
+      # is dependency-free; check out only it, its import and AGENTS.md.
+      - name: Checkout agent instructions
+        uses: actions/checkout@v5
+        with:
+          sparse-checkout: |
+            AGENTS.md
+            scripts/check-agent-instructions-size.mjs
+            scripts/lib/cli-entrypoint.mjs
+          sparse-checkout-cone-mode: false
+
+      - name: Check root AGENTS.md size
+        run: node ./scripts/check-agent-instructions-size.mjs
+
       - name: Classify changed files
         id: classify
         uses: actions/github-script@v9
@@ -189,13 +204,31 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     needs: [changes, install-deps]
-    if: needs.changes.outputs.code_impacting == 'true'
+    # Branch protection counts a skipped required check as satisfied. When the
+    # classifier fails (for example, its root AGENTS.md size check), every job
+    # that needs it would skip and the PR could merge. Typecheck runs instead,
+    # repeats the size check, and then refuses to pass.
+    if: >-
+      !cancelled() &&
+      (needs.changes.result != 'success'
+        || needs.changes.outputs.code_impacting == 'true')
     env:
       # Completed-tree consumers must never trigger pnpm implicit installs.
       PNPM_CONFIG_VERIFY_DEPS_BEFORE_RUN: "false"
     steps:
       - name: Checkout repository
         uses: actions/checkout@v5
+
+      - name: Check root AGENTS.md size
+        timeout-minutes: 1
+        run: node ./scripts/check-agent-instructions-size.mjs
+
+      - name: Require change classification
+        env:
+          CHANGES_RESULT: ${{ needs.changes.result }}
+        run: |
+          echo "Classify Changes: $CHANGES_RESULT"
+          [[ "$CHANGES_RESULT" == "success" ]]
 
       - name: Install Node.js and dependencies
         uses: pwrdrvr/configure-nodejs@d416c1c78119b25fe03ee3ef78b75af0d69b10a7 # v1.7.1

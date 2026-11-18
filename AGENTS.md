@@ -94,9 +94,9 @@ do not compile Rust automatically. Native transport tests need this build first;
 without a helper the app can run with native MCP unavailable. CI requests the
 host build before those tests; release staging alone requests `--universal`.
 
-`pnpm lint` chains `lint:syntax` → `lint:forge-kinds` → `lint:colors` →
-`deps:maturity` → `licenses:check` → `lint:boundaries` → `typecheck` →
-`check:renderer-bytecode`.
+`pnpm lint` chains `lint:agent-instructions` → `lint:syntax` →
+`lint:forge-kinds` → `lint:colors` → `deps:maturity` → `licenses:check` →
+`lint:boundaries` → `typecheck` → `check:renderer-bytecode`.
 
 - `deps:maturity` enforces the seven-day dependency cooldown;
   `licenses:check` gates every shipped license.
@@ -159,4 +159,7 @@ Beta Prerelease. CI, preview builds and signing:
 - Put it in the smallest scope that needs it: a nested `AGENTS.md` beside the
   code it governs. Long operator procedures go in `docs/`, with a one-line
   pointer that says when to read them. Keep every `AGENTS.md` brief.
+- Keep this file under 24 KiB (`pnpm lint:agent-instructions`; CI checks
+  it on every PR). Codex silently drops AGENTS.md text past 32 KiB. Move
+  detail into a linked doc and leave a line here saying when to read it.
 - Symlink `CLAUDE.md → AGENTS.md` beside every `AGENTS.md`.
