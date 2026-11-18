@@ -2,6 +2,8 @@
 
 This guide covers how a deferred quit must resume, how OS shutdown hurries the drain, and how the quit path is tested.
 
+Code paths in backticks are relative to [apps/desktop/src/main](../../../apps/desktop/src/main/).
+
 ## A deferred quit resumes from a macrotask
 
 A `before-quit` or `will-quit` listener that calls `preventDefault()` and then

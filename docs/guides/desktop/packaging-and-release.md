@@ -2,6 +2,8 @@
 
 This guide covers app icons, macOS release architectures, signing-input archives and Windows installer names for packaged desktop builds.
 
+Code paths in backticks are relative to [apps/desktop](../../../apps/desktop/).
+
 ## macOS app icon — ship the Icon Composer `.icon`; actool derives the `.icns`
 
 `mac.icon` in [electron-builder.yml](../../../apps/desktop/electron-builder.yml) is

@@ -3,6 +3,8 @@
 This guide covers clone and fork against forge instances and how fork remotes are written. It was moved from
 [apps/desktop/src/main/git/AGENTS.md](../../../apps/desktop/src/main/git/AGENTS.md).
 
+Code paths in backticks are relative to [apps/desktop/src/main/git](../../../apps/desktop/src/main/git/).
+
 ## Clone and fork reach a forge INSTANCE, not a forge
 
 **Every provider lookup passes the hostname from the request.**

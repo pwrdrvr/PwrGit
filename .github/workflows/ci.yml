@@ -206,7 +206,8 @@ jobs:
     if: >-
       !cancelled() &&
       (needs.changes.result != 'success'
-        || needs.changes.outputs.code_impacting == 'true')
+        || (needs.changes.outputs.code_impacting == 'true'
+          && needs.install-deps.result == 'success'))
     env:
       # Completed-tree consumers must never trigger pnpm implicit installs.
       PNPM_CONFIG_VERIFY_DEPS_BEFORE_RUN: "false"
@@ -214,7 +215,10 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v5
 
+      # Normally pnpm lint runs this check; repeat it here only to show why
+      # the classifier failed.
       - name: Check agent instructions
+        if: needs.changes.result != 'success'
         timeout-minutes: 1
         run: node ./scripts/check-agent-instructions.mjs
 

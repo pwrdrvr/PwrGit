@@ -2,6 +2,8 @@
 
 This guide covers the repository index column, pinned-repository order, shared context menus, and Hide and Remove.
 
+Code paths in backticks are relative to [apps/desktop/src/renderer/src/features/sidebar](../../../apps/desktop/src/renderer/src/features/sidebar/).
+
 ## The repository index is a map beside the tree, not part of it
 
 `RepoIndex.tsx` lists the lens's repositories by name, left of

@@ -2,6 +2,8 @@
 
 This guide covers how the remote activity card opens on a click, settles into a receipt, and keeps its layout stable while an operation runs.
 
+Code paths in backticks are relative to [apps/desktop/src/renderer/src/features/remote](../../../apps/desktop/src/renderer/src/features/remote/).
+
 ## The click opens it; the outcome closes it
 
 - **Every path out of an operation ends in exactly one of: `settle`,

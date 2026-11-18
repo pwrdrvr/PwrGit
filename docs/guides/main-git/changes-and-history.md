@@ -3,6 +3,8 @@
 This guide covers path handling, staging, branch switching, the lane graph, sequencer operations and commit identity. It was moved from
 [apps/desktop/src/main/git/AGENTS.md](../../../apps/desktop/src/main/git/AGENTS.md).
 
+Code paths in backticks are relative to [apps/desktop/src/main/git](../../../apps/desktop/src/main/git/).
+
 ## Paths from git are always forward-slash
 
 `git status`, `ls-files` and `ls-tree` report `a/b/c` on every platform. Split

@@ -2,6 +2,8 @@
 
 This guide covers the change-request hover card, forge-wide commit-author identity, and the published SSH server key registry.
 
+Code paths in backticks are relative to [apps/desktop/src/main/forge](../../../apps/desktop/src/main/forge/).
+
 ## The hover card
 
 - `PrChip` opens `PrStatusCard` (renderer). It renders only from the

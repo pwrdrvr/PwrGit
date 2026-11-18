@@ -2,6 +2,8 @@
 
 This guide covers the sidebar footer, pins, the worktree list cap, refs-browser rows, selection, anchoring, and section-heading fit.
 
+Code paths in backticks are relative to [apps/desktop/src/renderer/src/features/sidebar](../../../apps/desktop/src/renderer/src/features/sidebar/).
+
 ## The sidebar footer holds the profile's AI switch
 
 `.sidebar__footer` sits under `.sidebar__list` and carries `AiFeaturesSwitch`.

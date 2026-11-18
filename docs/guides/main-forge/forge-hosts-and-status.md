@@ -2,6 +2,8 @@
 
 This guide covers how forge hosts are enumerated and resolved, and how forge status, capabilities and the per-host switch decide who may call a forge.
 
+Code paths in backticks are relative to [apps/desktop/src/main/forge](../../../apps/desktop/src/main/forge/).
+
 ## Forge hosts
 
 - **Forge hosts are enumerated, not guessed** (`cli-hosts.ts`, `hosts.ts`).

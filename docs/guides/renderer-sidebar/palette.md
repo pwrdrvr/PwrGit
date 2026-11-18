@@ -2,6 +2,8 @@
 
 This guide covers the ⌘K palette's rows, ranking and profile scope, and the sidebar's pull and merge request section.
 
+Code paths in backticks are relative to [apps/desktop/src/renderer/src/features/sidebar](../../../apps/desktop/src/renderer/src/features/sidebar/).
+
 ## The kind glyph is labelled twice
 
 Each `.overlay-result` in the ⌘K palette (`RepoSwitcherOverlay.tsx`) starts

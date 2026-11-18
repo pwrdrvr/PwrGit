@@ -2,6 +2,8 @@
 
 This guide covers how a refresh control shows busy state and how in-flight or unavailable controls are disabled and dimmed.
 
+Code paths in backticks are relative to [apps/desktop/src/renderer/src/styles](../../../apps/desktop/src/renderer/src/styles/).
+
 ## Busy state is `[aria-busy]`, and the arrow spins
 
 A control that re-reads state (network `git fetch` or a local re-read) shows

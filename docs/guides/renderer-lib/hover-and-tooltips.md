@@ -2,6 +2,8 @@
 
 This guide covers hover-intent gating, `hoverTooltip` cards in place of native `title`, and how hover cards stay dismissible and reachable.
 
+Code paths in backticks are relative to [apps/desktop/src/renderer/src/lib](../../../apps/desktop/src/renderer/src/lib/).
+
 ## Hover-opened popups go through `useHoverIntent`
 
 `hoverIntentHandlers({ intent, show, hide })` is the tested routing. Read

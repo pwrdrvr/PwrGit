@@ -2,6 +2,8 @@
 
 This guide covers the hover and focus path that opens the remote activity card for operations a click did not start, and how to test it.
 
+Code paths in backticks are relative to [apps/desktop/src/renderer/src/features/remote](../../../apps/desktop/src/renderer/src/features/remote/).
+
 ## The hover path survives, for the operations a click cannot cover
 
 The rest of this file covers operations on this checkout that something else

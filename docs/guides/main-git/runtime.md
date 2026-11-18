@@ -3,6 +3,8 @@
 This guide covers which Git binary PwrGit runs, the managed runtime downloads, and copy-on-write clones. It was moved from
 [apps/desktop/src/main/git/AGENTS.md](../../../apps/desktop/src/main/git/AGENTS.md).
 
+Code paths in backticks are relative to [apps/desktop/src/main/git](../../../apps/desktop/src/main/git/).
+
 ## Which Git runs: the bundle, set up the way an installed Git would be
 
 Every Git process goes through `gitLaunch` in `dugite.ts`. It returns the

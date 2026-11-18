@@ -2,6 +2,8 @@
 
 This guide covers the seven registry sites a new forge kind fills in, and why every per-product value lives in a `Record<ForgeKind, …>`.
 
+Code paths in backticks are relative to [apps/desktop/src/main/forge](../../../apps/desktop/src/main/forge/).
+
 ## Adding a forge
 
 **A provider class per seam, plus one registry entry.** Add the member to

@@ -2,6 +2,8 @@
 
 This guide covers the Maintenance dialog: reattaching a run, its fixed frame and footers, and the Clones step.
 
+Code paths in backticks are relative to [apps/desktop/src/renderer/src/features/sidebar](../../../apps/desktop/src/renderer/src/features/sidebar/).
+
 ## A Maintenance run outlives its dialog
 
 A reload keeps the webContents id, so main's `maintenance:run` goes on

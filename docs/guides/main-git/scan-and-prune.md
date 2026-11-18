@@ -3,6 +3,8 @@
 This guide covers profile scans, repository discovery, hidden repositories and the worktree pruner. It was moved from
 [apps/desktop/src/main/git/AGENTS.md](../../../apps/desktop/src/main/git/AGENTS.md).
 
+Code paths in backticks are relative to [apps/desktop/src/main/git](../../../apps/desktop/src/main/git/).
+
 ## A scan that found nothing is not proof anything was deleted
 
 **A prune caused by a bad scan cannot be undone.** `rescanProfile` prunes the

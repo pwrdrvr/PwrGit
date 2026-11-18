@@ -2,6 +2,8 @@
 
 This guide covers auto-paging, paged remote branches and tags, forge host classification, vendor logos, toast subjects, and render-error logging.
 
+Code paths in backticks are relative to [apps/desktop/src/renderer/src/lib](../../../apps/desktop/src/renderer/src/lib/).
+
 ## `useAutoPaging` re-observes on `loading`, never on `error`
 
 - **Pass the real error state.** `null` brings back the request loop below.

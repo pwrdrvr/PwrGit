@@ -41,8 +41,7 @@ export function checkAgentInstructionsSize(bytes, maxBytes = ROOT_AGENTS_MD_MAX_
     message:
       `AGENTS.md is ${bytes} bytes; the limit is ${maxBytes} bytes `
       + `(${bytes - maxBytes} over). Codex truncates AGENTS.md content past `
-      + "32 KiB and Claude Code loads all of it on every first turn. "
-      + FIX.replace("AGENTS.md.", "AGENTS.md, with a when-to-read line for each."),
+      + `32 KiB and Claude Code loads all of it on every first turn. ${FIX}`,
   };
 }
 
@@ -68,7 +67,11 @@ export function agentInstructionChains(sizes) {
 }
 
 export function checkAgentInstructionChains(sizes, maxBytes = AGENTS_MD_CHAIN_MAX_BYTES) {
-  return agentInstructionChains(sizes)
+  return chainFailures(agentInstructionChains(sizes), maxBytes);
+}
+
+function chainFailures(chains, maxBytes) {
+  return chains
     .filter(({ total }) => total > maxBytes)
     .map(({ dir, files, total }) => ({
       dir,
@@ -81,8 +84,9 @@ export function checkAgentInstructionChains(sizes, maxBytes = AGENTS_MD_CHAIN_MA
     }));
 }
 
+// Fenced blocks, including ones indented inside list items.
 function stripCode(markdown) {
-  return markdown.replace(/^(```|~~~)[^\n]*\n[\s\S]*?^\1[^\n]*$/gm, "");
+  return markdown.replace(/^[ \t]*(`{3,}|~{3,})[^\n]*\n[\s\S]*?^[ \t]*\1[^\n]*$/gm, "");
 }
 
 /**
@@ -97,10 +101,15 @@ export function headingAnchors(markdown) {
   const seen = new Map();
   const prose = stripCode(markdown);
   for (const [, heading] of prose.matchAll(/^#{1,6}[ \t]+(.+?)[ \t#]*$/gm)) {
+    // Code spans keep their text verbatim; HTML tags and emphasis outside
+    // them render as nothing.
     const text = heading
-      .replace(/!?\[([^\]]*)\]\([^)]*\)/g, "$1")
-      .replace(/<[^>]+>/g, "")
-      .replace(/[`*]/g, "");
+      .split("`")
+      .map((part, index) => (index % 2 ? part : part
+        .replace(/!?\[([^\]]*)\]\([^)]*\)/g, "$1")
+        .replace(/<[^>]+>/g, "")
+        .replace(/\*/g, "")))
+      .join("");
     const base = text.toLowerCase().replace(/[^\p{L}\p{M}\p{N}\p{Pc} -]/gu, "").replace(/ /g, "-");
     const count = seen.get(base) ?? 0;
     seen.set(base, count + 1);
@@ -123,7 +132,12 @@ export function headingAnchors(markdown) {
 export function brokenRelativeLinks(markdown, fromPath, exists, read) {
   const prose = stripCode(markdown).replace(/`[^`\n]*`/g, "");
   const broken = [];
-  for (const [, rawTarget] of prose.matchAll(/\]\(\s*<?([^)\s>]+)>?(?:\s+"[^"]*")?\s*\)/g)) {
+  const targets = [
+    ...[...prose.matchAll(/\]\(\s*<?([^)\s>]+)>?(?:\s+"[^"]*")?\s*\)/g)].map((match) => match[1]),
+    // Reference-style definitions: `[label]: target "title"`.
+    ...[...prose.matchAll(/^[ \t]{0,3}\[[^\]\n]+\]:[ \t]*<?([^\s>]+)>?/gm)].map((match) => match[1]),
+  ];
+  for (const rawTarget of targets) {
     if (/^[a-z][a-z0-9+.-]*:/i.test(rawTarget)) continue;
     const [pathPart, anchor] = rawTarget.split("#");
     let target = pathPart;
@@ -137,7 +151,7 @@ export function brokenRelativeLinks(markdown, fromPath, exists, read) {
       : target.startsWith("/")
         ? posix.normalize(target.slice(1))
         : posix.normalize(posix.join(directoryOf(fromPath), target));
-    if (resolved.startsWith("../") || !exists(resolved.replace(/\/$/, "") || ".")) {
+    if (resolved === ".." || resolved.startsWith("../") || !exists(resolved.replace(/\/$/, "") || ".")) {
       broken.push(rawTarget);
       continue;
     }
@@ -171,9 +185,11 @@ export function runChecks(repoRoot) {
     files.filter((path) => posix.basename(path) === "AGENTS.md")
       .map((path) => [path, readFileSync(join(repoRoot, path)).byteLength]),
   );
+  if (!sizes.has("AGENTS.md")) errors.push(`No AGENTS.md at the repository root (${repoRoot}).`);
   const root = checkAgentInstructionsSize(sizes.get("AGENTS.md") ?? 0);
   if (!root.ok) errors.push(root.message);
-  for (const failure of checkAgentInstructionChains(sizes)) errors.push(failure.message);
+  const chains = agentInstructionChains(sizes);
+  for (const failure of chainFailures(chains, AGENTS_MD_CHAIN_MAX_BYTES)) errors.push(failure.message);
   const exists = (path) => existsSync(join(repoRoot, path));
   const read = (path) => readFileSync(join(repoRoot, path), "utf8");
   for (const path of files.filter((p) => posix.basename(p) === "AGENTS.md" || /^docs\/guides\/.+\.md$/.test(p))) {
@@ -181,7 +197,6 @@ export function runChecks(repoRoot) {
       errors.push(`${path}: link target ${target} does not exist (file or heading anchor).`);
     }
   }
-  const chains = agentInstructionChains(sizes);
   const largest = chains.reduce((max, chain) => (chain.total > max.total ? chain : max), { total: 0, dir: "" });
   return { errors, rootBytes: root.bytes, files: sizes.size, largest };
 }

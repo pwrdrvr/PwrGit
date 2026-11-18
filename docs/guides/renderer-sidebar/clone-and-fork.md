@@ -2,6 +2,8 @@
 
 This guide covers the Clone and Fork dialogs, fork tracking repair, and the route graphic.
 
+Code paths in backticks are relative to [apps/desktop/src/renderer/src/features/sidebar](../../../apps/desktop/src/renderer/src/features/sidebar/).
+
 ## Clone and Fork… ask the forge the same question
 
 Clone's "Clone from" pair (the original, or your fork) runs

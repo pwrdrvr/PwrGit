@@ -2,6 +2,8 @@
 
 This guide covers `ForgeRepoProvider`, the second forge seam that clone, fork and repository identity marks use.
 
+Code paths in backticks are relative to [apps/desktop/src/main/forge](../../../apps/desktop/src/main/forge/).
+
 ## Repository metadata: a second seam, deliberately separate
 
 Clone, fork and repo identity marks need other verbs (visibility, fork

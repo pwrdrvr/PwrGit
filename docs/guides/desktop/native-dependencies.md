@@ -2,6 +2,8 @@
 
 This guide covers how the desktop app loads CommonJS dependencies, stages better-sqlite3 and the Electron binary, and pins its packaging dependencies.
 
+Code paths in backticks are relative to [apps/desktop](../../../apps/desktop/).
+
 ## The main bundle is strict ESM — default-import CommonJS deps
 
 `src/main/**` runs as ESM. A **named** import from a CommonJS package

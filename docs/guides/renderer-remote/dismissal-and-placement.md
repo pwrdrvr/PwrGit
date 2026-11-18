@@ -2,6 +2,8 @@
 
 This guide covers how a pinned remote activity card is dismissed, how its countdown rail behaves, and where the shared card renders.
 
+Code paths in backticks are relative to [apps/desktop/src/renderer/src/features/remote](../../../apps/desktop/src/renderer/src/features/remote/).
+
 ## Dismissal belongs to the user, not to the pointer
 
 **Rule: a pinned card ends only on a user action or when the rail runs out.**

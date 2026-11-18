@@ -2,6 +2,8 @@
 
 This guide covers why main cannot tell which profile is asking, how ⌘K search is scoped and ranked, and how to test profile scoping with two profiles.
 
+Code paths in backticks are relative to [apps/desktop/src/main](../../../apps/desktop/src/main/).
+
 ## Main cannot tell which profile is asking
 
 PwrGit runs one window per profile (`profile-windows.ts`), but that binding

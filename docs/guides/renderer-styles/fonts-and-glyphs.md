@@ -2,6 +2,8 @@
 
 This guide covers which bundled font faces draw which characters, how to check glyph coverage, and how to design icon glyphs that stay legible at 15px.
 
+Code paths in backticks are relative to [apps/desktop/src/renderer/src/styles](../../../apps/desktop/src/renderer/src/styles/).
+
 ## A bundled font is requested by its `@font-face` name
 
 - **Name the exact `@font-face` family.** Otherwise the face never loads and

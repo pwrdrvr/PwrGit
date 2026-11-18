@@ -2,6 +2,8 @@
 
 This guide covers the sidebar toolbar, the Focused lens, and the Fetch/Pull split button with its bulk-sync run.
 
+Code paths in backticks are relative to [apps/desktop/src/renderer/src/features/sidebar](../../../apps/desktop/src/renderer/src/features/sidebar/).
+
 ## The sidebar's actions are one toolbar row; search is in the title strip
 
 `SidebarToolbar` holds Add ▾ (Add folders, Rescan folders, Clone, Fork

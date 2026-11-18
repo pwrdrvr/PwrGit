@@ -2,6 +2,8 @@
 
 This guide covers the `ForgeProvider` seam, the shared CLI and retry helpers, how forge clients fail without caching a failure, GitLab change-request specifics, and the GitLab test fixture.
 
+Code paths in backticks are relative to [apps/desktop/src/main/forge](../../../apps/desktop/src/main/forge/).
+
 ## The provider seam
 
 - **The seam is `ForgeProvider`** (`types.ts`), in two shapes:

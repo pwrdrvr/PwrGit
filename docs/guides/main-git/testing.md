@@ -3,6 +3,8 @@
 This guide covers the hazards of tests that run a real Git, on Windows CI and across Git versions. It was moved from
 [apps/desktop/src/main/git/AGENTS.md](../../../apps/desktop/src/main/git/AGENTS.md).
 
+Code paths in backticks are relative to [apps/desktop/src/main/git](../../../apps/desktop/src/main/git/).
+
 ## Real-git tests run on Windows CI too
 
 Many suites here run a real Git against temp repos. Some hazards fail only on

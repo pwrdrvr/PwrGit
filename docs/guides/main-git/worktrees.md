@@ -3,6 +3,8 @@
 This guide covers the operation queue, process limits, nested and vanished worktrees, and removing worktrees and repositories. It was moved from
 [apps/desktop/src/main/git/AGENTS.md](../../../apps/desktop/src/main/git/AGENTS.md).
 
+Code paths in backticks are relative to [apps/desktop/src/main/git](../../../apps/desktop/src/main/git/).
+
 ## Git queue locks have one order
 
 Acquire repository -> worktree when both scopes are needed. Prefer

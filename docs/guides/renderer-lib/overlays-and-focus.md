@@ -2,6 +2,8 @@
 
 This guide covers click-opened overlays, which surface owns Escape and Tab, and how `useFocusTrap` handles scrollers and the opener.
 
+Code paths in backticks are relative to [apps/desktop/src/renderer/src/lib](../../../apps/desktop/src/renderer/src/lib/).
+
 ## Click-opened overlays go through `useDismissable` / `useModal`
 
 Hand-rolled keydown effects (four menus, fourteen dialogs) left `.branch-pop`

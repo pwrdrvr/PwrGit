@@ -3,6 +3,8 @@
 This guide covers remote commands: tag fetching, activity tracking, change events, publishing, credentials and SSH host trust. It was moved from
 [apps/desktop/src/main/git/AGENTS.md](../../../apps/desktop/src/main/git/AGENTS.md).
 
+Code paths in backticks are relative to [apps/desktop/src/main/git](../../../apps/desktop/src/main/git/).
+
 ## Fetch never rewrites a tag; the published remote is compared, not trusted
 
 Git keeps one `refs/tags/*` for every remote, and an ordinary fetch only adds

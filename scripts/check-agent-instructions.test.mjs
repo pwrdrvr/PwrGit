@@ -1,5 +1,7 @@
-import { spawnSync } from "node:child_process";
-import { readFileSync } from "node:fs";
+import { execFileSync, spawnSync } from "node:child_process";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 
@@ -10,6 +12,8 @@ import {
   brokenRelativeLinks,
   checkAgentInstructionChains,
   checkAgentInstructionsSize,
+  headingAnchors,
+  runChecks,
 } from "./check-agent-instructions.mjs";
 
 const CODEX_PROJECT_DOC_DEFAULT_MAX_BYTES = 32 * 1024;
@@ -118,9 +122,51 @@ describe("brokenRelativeLinks", () => {
       .toEqual(["../../docs/gone.md", "../../../outside.md", "docs/a.md"]);
   });
 
-  it("ignores link syntax inside code spans and fenced blocks", () => {
-    const markdown = "`[x](missing.md)`\n\n```md\n[y](missing.md)\n```\n\n[z](missing.md)";
+  it("ignores link syntax inside code spans and fenced blocks, indented ones too", () => {
+    const markdown = [
+      "`[x](missing.md)`", "", "```md", "[y](missing.md)", "```", "",
+      "- item", "", "  ````md", "  [w](missing.md)", "  ````", "", "[z](missing.md)",
+    ].join("\n");
     expect(brokenRelativeLinks(markdown, "AGENTS.md", exists)).toEqual(["missing.md"]);
+  });
+
+  it("rejects a target that normalizes to the repository's parent", () => {
+    expect(brokenRelativeLinks("[up](../..)", "a/AGENTS.md", () => true)).toEqual(["../.."]);
+  });
+
+  it("checks reference-style link definitions", () => {
+    const markdown = "See [a][] and [gone][].\n\n[a]: ../../docs/a.md\n[gone]: <../../docs/gone.md> \"Title\"\n";
+    expect(brokenRelativeLinks(markdown, "apps/desktop/AGENTS.md", exists)).toEqual(["../../docs/gone.md"]);
+  });
+
+  it("checks #anchors against the target's GitHub heading slugs", () => {
+    const guide = "# Guide\n\n## Use `Map<string, X>` here\n\n## Repeat\n\n## Repeat\n";
+    const read = (path) => (path === "docs/a.md" ? guide : undefined);
+    const markdown = "[a](../../docs/a.md#use-mapstring-x-here) [b](../../docs/a.md#repeat-1) [c](../../docs/a.md#nope)";
+    expect(brokenRelativeLinks(markdown, "apps/desktop/AGENTS.md", exists, read)).toEqual(["../../docs/a.md#nope"]);
+  });
+});
+
+describe("headingAnchors", () => {
+  it("keeps code-span text verbatim and drops tags and emphasis outside it", () => {
+    expect([...headingAnchors("## Use `Map<string, X>` *now* <br>here\n")]).toEqual(["use-mapstring-x-now-here"]);
+  });
+
+  it("ignores heading-like lines inside fenced blocks", () => {
+    expect([...headingAnchors("```sh\n# comment\n```\n## Real\n")]).toEqual(["real"]);
+  });
+});
+
+describe("runChecks", () => {
+  it("fails a tree with no root AGENTS.md", () => {
+    const directory = mkdtempSync(join(tmpdir(), "pwrgit-agent-instructions-"));
+    try {
+      execFileSync("git", ["init", "--quiet"], { cwd: directory });
+      writeFileSync(join(directory, "README.md"), "# x\n");
+      expect(runChecks(directory).errors).toEqual([expect.stringContaining("No AGENTS.md at the repository root")]);
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
   });
 });
 
@@ -150,6 +196,8 @@ describe("CI wiring", () => {
     expect(typecheck).toContain("!cancelled() &&");
     expect(typecheck).toContain("needs.changes.result != 'success'");
     expect(typecheck).toContain("run: node ./scripts/check-agent-instructions.mjs");
+    // A failed dependency install still skips Typecheck, as before.
+    expect(typecheck).toContain("&& needs.install-deps.result == 'success'");
     const gate = typecheck.split(/^      - /m).find((step) => step.startsWith("name: Require change classification\n"));
     expect(gate).toBeDefined();
     const run = gate.split("        run: |\n")[1];

@@ -2,6 +2,8 @@
 
 This guide covers E2E builds, React DevTools profiling, and the main-process runtime facts: IPC, migrations, git execution and logging.
 
+Code paths in backticks are relative to [apps/desktop](../../../apps/desktop/).
+
 ## e2e needs a build first
 
 Full-app E2E opens real desktop windows, including without `--headed`. Run it
