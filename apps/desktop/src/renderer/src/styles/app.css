@@ -11150,14 +11150,24 @@ button.commit-byline:focus-visible {
   background: color-mix(in srgb, var(--text-primary) 10%, transparent);
 }
 .graph-row.is-flash {
+  position: relative;
+  isolation: isolate;
+}
+/* Fade an accent layer behind the contents so the compositor can run the
+   flash and the row can keep showing its HEAD, focus or hover background. */
+.graph-row.is-flash::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  background: var(--accent);
+  opacity: 0;
   animation: head-flash 1.6s ease-out;
 }
 @keyframes head-flash {
-  0% {
-    background: color-mix(in srgb, var(--accent) 32%, transparent);
-  }
-  100% {
-    background: color-mix(in srgb, var(--accent) 6%, transparent);
+  from {
+    opacity: 0.28;
   }
 }
 .graph-locate,
@@ -11317,10 +11327,8 @@ button.commit-byline:focus-visible {
   background: var(--bg-panel);
   border-radius: 999px;
 }
-/* HEAD's ring breathes three times when it appears, so "where am I" is
-   findable at a glance, then rests at the pulse's own end value. Endless, it
-   repainted the window every frame while HEAD was on screen (styles/AGENTS.md,
-   "An idle window draws nothing"). */
+/* HEAD's ring breathes three times when it appears, then holds its end
+   value so the compositor can go idle. */
 .graph-lanes .head-ring {
   opacity: 0.9;
   animation: head-pulse 2.6s ease-in-out 3;
@@ -11346,7 +11354,7 @@ button.commit-byline:focus-visible {
 @media (prefers-reduced-motion: reduce) {
   .graph-card,
   .graph-lanes .head-ring,
-  .graph-row.is-flash {
+  .graph-row.is-flash::before {
     animation: none;
   }
 }

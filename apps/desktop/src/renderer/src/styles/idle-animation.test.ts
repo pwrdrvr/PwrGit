@@ -6,12 +6,11 @@ import { describe, expect, it } from "vitest";
 /**
  * An idle window draws nothing.
  *
- * Chromium repaints every frame while a CSS animation runs on screen (60 or
- * 120 a second; an opacity animation on an SVG child is not even composited).
- * The HEAD ring's endless `head-pulse` kept a one-repository window at a
- * steady ~7% renderer + GPU CPU for as long as HEAD was in view. Measured in
- * an offscreen Electron window against this stylesheet: 60 paints/s with the
- * pulse, 0 without.
+ * Even a composited CSS animation can keep Chromium submitting frames. The
+ * HEAD ring's endless `head-pulse` kept a one-repository window at a steady
+ * ~7% renderer + GPU CPU for as long as HEAD was in view. The offscreen
+ * Electron window reported about 60 output frames/s with the pulse, 0 after
+ * it finished. The hidden graph harness checks compositor layer assignment.
  *
  * So an `infinite` animation may only run on something that exists or
  * matches while work is in flight: a spinner, a busy state, an indeterminate

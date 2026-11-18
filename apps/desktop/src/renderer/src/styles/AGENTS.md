@@ -90,9 +90,10 @@ A glyph that is not a circular arrow (Pull's ↓, Push's ↑) swaps to
 - **`infinite` animations only on in-flight state**: a spinner, a busy
   attribute, an indeterminate bar. Anything on screen at rest pulses a
   finite number of times, then holds its last keyframe's value.
-- Why: a running animation repaints every frame (an SVG child's opacity is
-  not composited). HEAD's endless ring held an idle one-repo window at ~7%
-  renderer + GPU CPU.
+- Why: even a compositor animation can keep submitting frames. HEAD's
+  endless ring held an idle one-repo window at ~7% renderer + GPU CPU.
+  Animate `opacity` or `transform` for motion that can avoid main-thread
+  paints. Chromium's layer tree can verify that an animation is composited.
 - `idle-animation.test.ts` lists each `infinite` selector with its gate. Add
   yours there with what mounts it, or make it finite.
 
