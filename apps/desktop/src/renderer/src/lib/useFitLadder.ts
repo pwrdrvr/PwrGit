@@ -55,6 +55,7 @@ type Fit = {
   row: HTMLElement;
   steps: readonly string[];
   fits: () => boolean;
+  affectsHeight: boolean;
 };
 
 type Ladder = {
@@ -72,15 +73,7 @@ function clearSteps(row: HTMLElement, steps: readonly string[]): void {
   }
 }
 
-/** Complete the pending fits for a caller reading geometry in a layout effect. */
-export function flushFitLadders(): void {
-  if (pending.size === 0) return;
-  let active: Fit[] = [];
-  for (const { fit } of pending) {
-    if (fit !== null) active.push(fit);
-  }
-  pending.clear();
-
+function fitRows(active: Fit[]): void {
   // Reset every row before the first layout read. At each depth, finish
   // all reads before writing the next step, so nearby rows share a layout.
   for (const { row, steps } of active) clearSteps(row, steps);
@@ -92,6 +85,22 @@ export function flushFitLadders(): void {
       if (depth + 1 < fit.steps.length) active.push(fit);
     }
   }
+}
+
+/** Complete the pending fits for a caller reading geometry in a layout effect. */
+export function flushFitLadders(): void {
+  if (pending.size === 0) return;
+  const heightChanging: Fit[] = [];
+  const other: Fit[] = [];
+  for (const { fit } of pending) {
+    if (fit !== null) (fit.affectsHeight ? heightChanging : other).push(fit);
+  }
+  pending.clear();
+
+  // Worktree badges can wrap when their steps reset. Fit them first so the
+  // other rows measure with the final scrollbar width.
+  fitRows(heightChanging);
+  fitRows(other);
 }
 
 function requestFit(ladder: Ladder): void {
@@ -175,8 +184,12 @@ export function useStepLadder(
   rowRef: RefObject<HTMLElement | null>,
   fits: () => boolean,
   steps: readonly string[],
-  /** What to watch for width changes, when the stepped element is rigid. */
-  observe: () => Element | null = () => rowRef.current
+  { observe = () => rowRef.current, affectsHeight = false }: {
+    /** What to watch for width changes, when the stepped element is rigid. */
+    observe?: () => Element | null;
+    /** Fit first when wrapping can change the space taken by a scrollbar. */
+    affectsHeight?: boolean;
+  } = {}
 ): () => void {
   const key = steps.join(" ");
   const classes = useMemo(() => (key === "" ? [] : key.split(" ")), [key]);
@@ -191,7 +204,8 @@ export function useStepLadder(
     if (previous !== null && (previous.row !== row || previous.steps !== classes)) {
       clearSteps(previous.row, previous.steps);
     }
-    ladder.fit = row === null || classes.length === 0 ? null : { row, steps: classes, fits };
+    ladder.fit =
+      row === null || classes.length === 0 ? null : { row, steps: classes, fits, affectsHeight };
     watch(ladder, ladder.fit === null ? null : observe());
     requestFit(ladder);
   });

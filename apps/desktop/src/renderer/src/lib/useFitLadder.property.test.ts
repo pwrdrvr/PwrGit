@@ -80,7 +80,7 @@ function Row({
   const refit = useStepLadder(ref, () => {
     onRead?.();
     return fits(STEPS.filter((step) => ref.current!.classList.contains(step)).length);
-  }, steps, () => watch ?? ref.current);
+  }, steps, { observe: () => watch ?? ref.current });
   useLayoutEffect(() => captureRefit?.(refit), [captureRefit, refit]);
   return createElement("div", { ref, className: "row" });
 }

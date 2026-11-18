@@ -11,7 +11,7 @@ import {
 } from "@playwright/test";
 import { cleanEnv } from "./fixtures/electron-app";
 import { buildHarness } from "./harness/build";
-import type { SceneReport } from "./harness/section-headings/main";
+import type { SceneReport, ScrollbarReport } from "./harness/section-headings/main";
 
 /**
  * The sidebar's section headings at the widths a sidebar gives them.
@@ -217,4 +217,20 @@ test("a block re-expanded after mount still re-steps on resize", async () => {
   await expect
     .poll(async () => depth((await readScenes()).find((s) => s.repo === "atlas" && s.row === 194)!))
     .toBe(0);
+});
+
+test("full headings survive worktree badges briefly creating a scrollbar", async () => {
+  const result = await page.evaluate(() =>
+    (window as unknown as { __harness: { showTransientScrollbarCase: () => Promise<ScrollbarReport> } })
+      .__harness.showTransientScrollbarCase()
+  );
+  const shots = process.env["PWRGIT_HARNESS_SHOTS"];
+  if (shots !== undefined && shots !== "") {
+    await page.locator(".harness-scrollbar-case .pane--sidebar").screenshot({
+      path: join(shots, "fit-scrollbar.png")
+    });
+  }
+  expect(result.widthWithLongBadges).toBeLessThan(result.fullWidth);
+  expect(result.finalWidth).toBe(result.fullWidth);
+  expect(result.headingSteps).toEqual([]);
 });

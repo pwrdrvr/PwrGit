@@ -71,11 +71,10 @@ export function PullBadge({
       if (badge.offsetParent === null) return true;
       return Math.abs(badge.offsetTop - name.offsetTop) < name.offsetHeight;
     },
-    // Only the source badge steps (and holds `ref`). Keying the steps on it
-    // re-runs the ladder's observer effect when a tracked badge becomes a
-    // source one in place; otherwise it would never watch the row.
+    // Only the worktree's source badge steps. Settle wrapping before other
+    // ladders measure the width left by the sidebar scrollbar.
     placement === "row" && pull.kind === "source" ? ROW_FIT_STEPS : [],
-    row
+    { observe: row, affectsHeight: true }
   );
   const sentence = pullSentence(pull, branch);
 

@@ -1,10 +1,13 @@
-import { StrictMode, useEffect, useState, type Dispatch, type SetStateAction } from "react";
+import { StrictMode, useEffect, useState, type Dispatch, type ReactNode, type SetStateAction } from "react";
 import { flushSync } from "react-dom";
 import { createRoot } from "react-dom/client";
 import { ok } from "@pwrgit/shared";
 import "../../../src/renderer/src/styles/app.css";
 import { ChangeRequestSelectionContext } from "../../../src/renderer/src/features/change-request/change-request-selection";
 import { RepoRow } from "../../../src/renderer/src/features/sidebar/RepoRow";
+import { PullBadge } from "../../../src/renderer/src/features/sidebar/PullBadge";
+import { headingsFit, SECTION_FIT_STEPS } from "../../../src/renderer/src/features/sidebar/section-fit";
+import { useViewportTooltip } from "../../../src/renderer/src/lib/useViewportTooltip";
 import { HARNESS_NOW, HARNESS_REPOS, type HarnessRepo } from "./fixtures";
 import { headingRowProblems, repoRowProblems } from "./measure";
 
@@ -66,13 +69,15 @@ function Tree({
   row,
   tree,
   expanded,
-  focusable
+  focusable,
+  children
 }: {
   entry: HarnessRepo;
   row: number;
   tree: number;
   expanded: boolean;
   focusable: boolean;
+  children?: ReactNode;
 }) {
   return (
     <div className="harness-scene" data-repo={entry.repo.id} data-row={row}>
@@ -127,6 +132,7 @@ function Tree({
                   setsize={1}
                   platform="darwin"
                 />
+                {children}
               </div>
             </div>
           </div>
@@ -239,6 +245,95 @@ function App() {
   return <Harness inset={inset} />;
 }
 
+function BadgeRows() {
+  const tip = useViewportTooltip();
+  const branches = ["feature/metrics", "feature/ring-buffer", "feature/alerts"];
+  return branches.map((branch) => (
+    <div key={branch} className="wt-row">
+      <span className="wt-row__branch">{branch}</span>
+      <PullBadge
+        pull={{
+          kind: "source",
+          label: "upstream-observability-and-maintenance-team/main",
+          behind: 24,
+          ahead: 0,
+          trackedBehind: 0,
+          trackedAhead: 0
+        }}
+        branch={branch}
+        tip={tip}
+        placement="row"
+      />
+    </div>
+  ));
+}
+
+/** The next frame after ResizeObserver had a chance to report final sizes. */
+function afterResize(): Promise<void> {
+  return new Promise((resolve) =>
+    requestAnimationFrame(() => requestAnimationFrame(() => resolve()))
+  );
+}
+
+export type ScrollbarReport = {
+  fullWidth: number;
+  widthWithLongBadges: number;
+  finalWidth: number;
+  headingSteps: string[];
+};
+
+async function showTransientScrollbarCase(): Promise<ScrollbarReport> {
+  const fixture = document.createElement("div");
+  fixture.className = "harness-scrollbar-case";
+  document.body.prepend(fixture);
+  const root = createRoot(fixture);
+  const render = (focusable: boolean) => flushSync(() => root.render(
+    <ChangeRequestSelectionContext.Provider value={{ selectedKey: null, select: noop, clear: noop }}>
+      <Tree entry={HARNESS_REPOS.atlas} row={270} tree={320} expanded focusable={focusable}>
+        <BadgeRows />
+      </Tree>
+    </ChangeRequestSelectionContext.Provider>
+  ));
+  render(false);
+  await settled();
+  const tree = fixture.querySelector<HTMLElement>(".pane--sidebar")!;
+  const list = fixture.querySelector<HTMLElement>(".sidebar__list")!;
+  const sections = fixture.querySelector<HTMLElement>(".repo-sections")!;
+  // Find the narrowest width that fits all labels with no scrollbar. The
+  // threshold follows the browser's actual font metrics.
+  let low = 200;
+  let high = 400;
+  sections.classList.remove(...SECTION_FIT_STEPS);
+  while (high - low > 1) {
+    const width = Math.floor((low + high) / 2);
+    tree.style.width = `${width}px`;
+    if (headingsFit(sections)) high = width;
+    else low = width;
+  }
+  tree.style.width = `${high + 4}px`;
+  await afterResize();
+  list.style.maxHeight = `${list.scrollHeight + 1}px`;
+  await afterResize();
+  const fullWidth = list.clientWidth;
+
+  // Check the fixture actually crosses the scrollbar threshold when the
+  // badge words are restored, then restore the settled DOM before React fits.
+  const badges = [...fixture.querySelectorAll(".badge--source-row")];
+  const classes = badges.map((badge) => badge.className);
+  for (const badge of badges) badge.classList.remove("fit-glyph", "fit-gone");
+  const widthWithLongBadges = list.clientWidth;
+  for (const [index, badge] of badges.entries()) badge.className = classes[index]!;
+
+  render(true);
+  await afterResize();
+  return {
+    fullWidth,
+    widthWithLongBadges,
+    finalWidth: list.clientWidth,
+    headingSteps: SECTION_FIT_STEPS.filter((step) => sections.classList.contains(step))
+  };
+}
+
 const harness = {
   ready: (async () => {
     // Load every face the headings draw before the first fit, so no step is
@@ -263,6 +358,7 @@ const harness = {
     await settled();
   })(),
   report,
+  showTransientScrollbarCase,
   async benchmark(kind: "commit" | "resize", rounds: number): Promise<void> {
     const trees = [...document.querySelectorAll<HTMLElement>(".harness-scene .pane--sidebar")];
     const widths = trees.map((tree) => parseFloat(tree.style.width));

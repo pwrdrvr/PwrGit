@@ -327,7 +327,7 @@ export function RepoRow({
     sectionsRef,
     () => headingsFit(sectionsRef.current),
     SECTION_FIT_STEPS,
-    () => blockRef.current
+    { observe: () => blockRef.current }
   );
   /** "Manage remotes…", Finished and View all ask `RepoRefsSections` to open
    *  its browser, which needs refs only that component loads — so the ask is
