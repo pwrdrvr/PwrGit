@@ -1,5 +1,12 @@
 # Changelog
 
+## v0.60.0 - 2026-11-17
+
+- Pinned repositories - Improved every sidebar lens to put its pinned repositories first, in the same hand-arranged order in both the index and tree. The remaining repositories keep the lens's usual order; an unpinned current repository in Focused now follows the pins. Folder grouping places pins together in a separate Pinned group.
+- Repository arrangement - Added pinning and unpinning by dragging across the divider, plus a Pin drop slot when nothing is pinned yet. Pins can be reordered from the index or tree in every lens, by dragging or with Command+Shift+Up/Down on macOS and Ctrl+Shift+Up/Down elsewhere. Moves preserve the profile's full pin order even when a lens shows only some pins.
+- Repository menus - Added right-click, Menu-key and Shift+F10 access to a repository's own menu from its index name. Index and tree menus share Pin/Unpin and Move up/down actions, alongside Reveal, Copy path and existing repository actions; Escape returns focus to the index name.
+- Source builds - Made native Rust MCP helper compilation explicit with pnpm build:native. Install, Dev and ordinary JavaScript builds and tests no longer compile Rust automatically. Build the helper before native MCP tests or after Rust changes; the app can run without it, with native MCP unavailable. Release staging still builds the required platform helper, including universal macOS slices.
+
 ## v0.59.7 - 2026-11-17
 
 - CPU diagnostics - Improved opt-in Hot CPU Profiling to capture both the main process and each profile window, retaining recent JavaScript activity before a spike as well as 15 seconds afterward. Rolling history helps capture short bursts that finish before the CPU trigger is observed, and triggered profiles flush when settings change or the app closes.
