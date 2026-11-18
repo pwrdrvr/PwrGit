@@ -47,7 +47,14 @@ jobs:
           cache-key-suffix: pwrgit-store-d416c1c78119b25fe03ee3ef78b75af0d69b10a7-v1
 
       - name: Build native MCP helper
-        run: pnpm build:native
+        shell: bash
+        run: |
+          # The requested release ref may predate the explicit native command.
+          if node -e 'process.exit(require("./package.json").scripts?.["build:native"] ? 0 : 1)'; then
+            pnpm build:native
+          else
+            pnpm --filter @pwrgit/desktop build:mcp --host
+          fi
 
       # The capture drives the BUILT app (out/main/index.js); the script's
       # pretest:docs-shots hook builds it, exactly as pretest:e2e does for the

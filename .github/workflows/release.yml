@@ -91,7 +91,14 @@ jobs:
         uses: ./.github/actions/select-xcode-for-actool
 
       - name: Build native MCP helper for tests
-        run: pnpm build:native
+        shell: bash
+        run: |
+          # The requested release ref may predate the explicit native command.
+          if node -e 'process.exit(require("./package.json").scripts?.["build:native"] ? 0 : 1)'; then
+            pnpm build:native
+          else
+            pnpm --filter @pwrgit/desktop build:mcp --host
+          fi
 
       - name: Test (unit)
         env:

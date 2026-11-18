@@ -55,5 +55,5 @@ it("CI compiles the helper explicitly before suites that use it", () => {
     expect(native, name).toBeGreaterThan(-1);
     expect(native, name).toBeLessThan(job.indexOf("id: " + (name.endsWith("test") ? "unit-tests" : "e2e-tests")));
   }
-  for (const file of ["release.yml", "docs-screenshots.yml"]) expect(read(`.github/workflows/${file}`)).toContain("run: pnpm build:native");
+  for (const file of ["release.yml", "docs-screenshots.yml"]) expect(read(`.github/workflows/${file}`)).toContain("pnpm build:native");
 });
