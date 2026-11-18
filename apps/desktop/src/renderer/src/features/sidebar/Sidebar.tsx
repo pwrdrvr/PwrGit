@@ -753,6 +753,20 @@ export function Sidebar({
   const indexProbeRef = useRef<HTMLSpanElement>(null);
   const fitInputs = useRef({ enabled: repoIndexEnabled, repoCount: filtered.length });
   fitInputs.current = { enabled: repoIndexEnabled, repoCount: filtered.length };
+  /** A repository's menu, asked for from its name in the index. The tree row
+   *  draws it (its own menu), so the index never lists verbs of its own. */
+  const [indexMenu, setIndexMenu] = useState<{
+    repoId: string;
+    x: number;
+    y: number;
+    trigger: HTMLElement | null;
+  } | null>(null);
+  const closeIndexMenu = useCallback(() => setIndexMenu(null), []);
+  // A row that leaves the list takes its menu with it, without onClose: drop
+  // the request too, or the menu would reopen when the repository returns.
+  if (indexMenu !== null && !filtered.some((repo) => repo.id === indexMenu.repoId)) {
+    setIndexMenu(null);
+  }
   const [indexFit, setIndexFit] = useState<RepoIndexFit>({
     shown: false,
     reason: "narrow"
@@ -1010,6 +1024,16 @@ export function Sidebar({
       movedMessage(name, index + (direction === "up" ? 0 : 2), shownPins.length)
     );
     return true;
+  };
+
+  /** Whether a pin has a neighbour above and below it among the pins shown:
+   *  the menu's Move up / Move down, which are `moveRepo`. */
+  const pinPlace = new Map(shownPins.map((repo, index) => [repo.id, index]));
+  const moveRoomOf = (repoId: string): { up: boolean; down: boolean } => {
+    const index = pinPlace.get(repoId) ?? -1;
+    return index === -1
+      ? { up: false, down: false }
+      : { up: index > 0, down: index < shownPins.length - 1 };
   };
 
   // The index moves names with the tree's own drag and key move, so held and
@@ -1320,6 +1344,10 @@ export function Sidebar({
           })
         }
         arrangeable={repoLeads(repo)}
+        moveRoom={moveRoomOf(repo.id)}
+        onMoveRepo={(direction) => moveRepo(repo.id, direction)}
+        indexMenu={indexMenu?.repoId === repo.id ? indexMenu : null}
+        onIndexMenuClose={closeIndexMenu}
         showPinVia={lens === "Pinned"}
         after={repo.id === lastShownPinId ? pinSeam : undefined}
         dragProps={repoDrag.rowProps(repo.id, true)}
@@ -1495,6 +1523,9 @@ export function Sidebar({
             listRef={listRef}
             treeId={REPO_TREE_ID}
             onJump={jumpToRepo}
+            onOpenMenu={(repoId, point, trigger) =>
+              setIndexMenu({ repoId, ...point, trigger })
+            }
             reorder={indexReorder}
           />
         )}

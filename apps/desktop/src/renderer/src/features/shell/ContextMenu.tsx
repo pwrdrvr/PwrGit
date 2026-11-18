@@ -36,6 +36,11 @@ export type MenuItem =
       /** Without `checked`: still lead with an empty check slot, so a command
        *  under a group of checkable entries lines up with them. */
       inset?: boolean;
+      /** The key that does the same thing outside the menu, drawn muted at
+       *  the entry's end ("⇧⌘↑") as PwrAgnt's menus do. */
+      shortcut?: string;
+      /** `shortcut` in `aria-keyshortcuts` form ("Meta+Shift+ArrowUp"). */
+      keyshortcuts?: string;
       onSelect: () => void;
     }
   | { type: "sep" }
@@ -190,6 +195,7 @@ export function ContextMenu({
             }
             aria-checked={it.checked}
             aria-describedby={groupHint[i]}
+            aria-keyshortcuts={it.keyshortcuts}
             disabled={it.disabled === true}
             onClick={(e) => {
               e.stopPropagation();
@@ -209,6 +215,11 @@ export function ContextMenu({
               <span className="pop-menu__stack">
                 <span>{it.label}</span>
                 <span className="pop-menu__hint">{it.hint}</span>
+              </span>
+            )}
+            {it.shortcut !== undefined && (
+              <span className="pop-menu__shortcut" aria-hidden="true">
+                {it.shortcut}
               </span>
             )}
           </button>
