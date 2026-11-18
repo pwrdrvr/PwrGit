@@ -39,16 +39,7 @@ function checkoutsIn(workflow) {
         patterns.push(step[next].trim());
       }
     }
-    // A sparse checkout in a job that never installs dependencies (the CI
-    // classifier's AGENTS.md size check) has no Electron install to retain;
-    // check-agent-instructions-size.test.mjs pins that sparse closure instead.
-    let jobStart = index;
-    while (jobStart > 0 && !/^  [\w-]+:\s*$/.test(lines[jobStart])) jobStart--;
-    let jobEnd = index + 1;
-    while (jobEnd < lines.length && !/^  [\w-]+:\s*$/.test(lines[jobEnd]) && !/^\S/.test(lines[jobEnd])) jobEnd++;
-    const installs = /configure-nodejs|install-electron|\bpnpm\b/.test(lines.slice(jobStart, jobEnd).join("\n"));
-    checkouts.push({ workflow, line: index + 1, patterns, installs,
-      job: lines[jobStart].trim().replace(/:$/, ""),
+    checkouts.push({ workflow, line: index + 1, patterns,
       cone: !step.some((line) => /^\s*sparse-checkout-cone-mode:\s*false\s*$/.test(line)),
     });
   }
@@ -105,14 +96,7 @@ it("discovers CI and release checkouts and every sparse input", () => {
   expect(checkouts.filter(({ patterns }) => patterns !== undefined)).toHaveLength(sparseInputs);
 });
 
-const exempt = ({ patterns, installs }) => patterns !== undefined && !installs;
-
-it("exempts only the classifier's install-free sparse checkout", () => {
-  expect(checkouts.filter(exempt)
-    .map(({ workflow, job }) => `${workflow}:${job}`)).toEqual([".github/workflows/ci.yml:changes"]);
-});
-
-it.each(checkouts.filter((checkout) => !exempt(checkout)))("Git oracle: $workflow:$line retains the Electron install import closure", assertRetained);
+it.each(checkouts)("Git oracle: $workflow:$line retains the Electron install import closure", assertRetained);
 
 it("rejects the parent regression: installer and adapter selected without their helper", () => {
   expect(() => assertRetained({

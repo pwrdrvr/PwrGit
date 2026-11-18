@@ -34,9 +34,11 @@ going, leaving the rest of the download invisible.
 
 So: while a user-initiated check is working, this component renders its own
 card (progress track, byte meter, Cancel) outside the toast store, with no
-countdown. Only when the check settles does the outcome go to the store. Ordinary outcomes
+countdown. Only when the check settles does the outcome go to the store.
+Ordinary outcomes
 get the countdown; manual update instructions stay visible until dismissed,
-and Copy copies only their runnable command. Don't move the in-flight card back into
+and Copy copies only their runnable command. Don't move the in-flight card
+back into
 `showInfoToast`.
 
 ## Cancel is offered from `available`, so main must be ready by then
@@ -115,7 +117,7 @@ outcome toasts all named a version with no way out to what is in it.
 So: **any surface that renders a version renders a
 [`ReleaseNotesLink`](./ReleaseNotesLink.tsx) beside it**, and the URL comes from
 `releaseNotesUrl` in
-[packages/shared/src/release-notes.ts](../../../../../../packages/shared/src/release-notes.ts)
+[packages/shared/src/release-notes.ts](../../../../../../../packages/shared/src/release-notes.ts)
 — never composed at the call site.
 
 Four things about that are load-bearing:

@@ -14,7 +14,7 @@
     "dev": "node scripts/resource-run.mjs pnpm --filter @pwrgit/desktop dev",
     "lint": "node scripts/resource-run.mjs pnpm lint:agent-instructions && node scripts/resource-run.mjs pnpm lint:syntax && node scripts/resource-run.mjs pnpm lint:forge-kinds && node scripts/resource-run.mjs pnpm lint:colors && node scripts/resource-run.mjs pnpm deps:maturity && node scripts/resource-run.mjs pnpm licenses:check && node scripts/resource-run.mjs pnpm lint:boundaries && node scripts/resource-run.mjs pnpm typecheck && node scripts/resource-run.mjs pnpm check:renderer-bytecode",
     "check:renderer-bytecode": "node scripts/resource-run.mjs node scripts/check-renderer-bytecode.mjs",
-    "lint:agent-instructions": "node ./scripts/check-agent-instructions-size.mjs",
+    "lint:agent-instructions": "node ./scripts/check-agent-instructions.mjs",
     "lint:boundaries": "node scripts/resource-run.mjs depcruise --config .dependency-cruiser.cjs packages/ apps/desktop/src/",
     "lint:colors": "node scripts/resource-run.mjs node ./scripts/lint-renderer-colors.mjs",
     "lint:forge-kinds": "node scripts/resource-run.mjs node ./scripts/check-forge-kind-branching.mjs",

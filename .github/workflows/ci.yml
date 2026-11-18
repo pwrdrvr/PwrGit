@@ -35,20 +35,15 @@ jobs:
     outputs:
       code_impacting: ${{ steps.classify.outputs.code_impacting }}
     steps:
-      # Docs-only PRs skip the expensive jobs, so the root AGENTS.md size
-      # guard runs here, where every PR and push passes through. The script
-      # is dependency-free; check out only it, its import and AGENTS.md.
-      - name: Checkout agent instructions
+      # Docs-only PRs skip the expensive jobs, so the agent-instruction check
+      # (AGENTS.md sizes and links) runs here, where every PR and push passes
+      # through. It is dependency-free and needs no install. Links can point
+      # anywhere in the tree, so this is a full (shallow) checkout.
+      - name: Checkout repository
         uses: actions/checkout@v5
-        with:
-          sparse-checkout: |
-            AGENTS.md
-            scripts/check-agent-instructions-size.mjs
-            scripts/lib/cli-entrypoint.mjs
-          sparse-checkout-cone-mode: false
 
-      - name: Check root AGENTS.md size
-        run: node ./scripts/check-agent-instructions-size.mjs
+      - name: Check agent instructions
+        run: node ./scripts/check-agent-instructions.mjs
 
       - name: Classify changed files
         id: classify
@@ -205,9 +200,9 @@ jobs:
     timeout-minutes: 15
     needs: [changes, install-deps]
     # Branch protection counts a skipped required check as satisfied. When the
-    # classifier fails (for example, its root AGENTS.md size check), every job
+    # classifier fails (for example, its agent-instruction check), every job
     # that needs it would skip and the PR could merge. Typecheck runs instead,
-    # repeats the size check, and then refuses to pass.
+    # repeats the check, and then refuses to pass.
     if: >-
       !cancelled() &&
       (needs.changes.result != 'success'
@@ -219,9 +214,9 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v5
 
-      - name: Check root AGENTS.md size
+      - name: Check agent instructions
         timeout-minutes: 1
-        run: node ./scripts/check-agent-instructions-size.mjs
+        run: node ./scripts/check-agent-instructions.mjs
 
       - name: Require change classification
         env:
