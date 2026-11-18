@@ -8,6 +8,8 @@ The source comparison is the starting point; the evidence here adds execution.
 
 A later [OpenClaw follow-up](2026-11-16-git-twig-cow-openclaw.md) applies the
 same protocol to a 65,500-path real repository, preserving its attributes.
+The [Nov18 update](2026-11-18-git-twig-attributes-lfs.md) reviews Twig v0.5/current
+main, its newer attribute support, LFS exclusions and bundled-helper feasibility.
 
 **Both native paths saved working-tree allocation. Their speed depended on
 file shape. The shipped PwrGit binary also reproduced its documented donor
