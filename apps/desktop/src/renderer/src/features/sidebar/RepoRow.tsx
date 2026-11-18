@@ -1,6 +1,7 @@
 import {
   useCallback,
   useEffect,
+  useMemo,
   useRef,
   useState,
   type DragEvent,
@@ -17,11 +18,10 @@ import {
   type WorktreeSort
 } from "@pwrgit/shared";
 import { announce, movedMessage } from "../../lib/announce";
-import { copyText } from "../../lib/copyText";
 import { dispatch } from "../../lib/pwrgit";
 import { ContextMenu, type MenuItem } from "../shell/ContextMenu";
-import { revealLabel, revealPath } from "../shell/reveal";
 import { forkMenuLabel } from "../shell/worktree-menu-items";
+import { repoMenuItems } from "./repo-menu-items";
 import {
   currentPlatform,
   hasPrimaryModifier,
@@ -81,6 +81,7 @@ import { selectionBarCount, worktreeRowLook } from "./worktree-batch";
 
 /** Distinguishes worktree drags from repo drags (see useListReorder). */
 const WORKTREE_MIME = "application/x-pwrgit-worktree";
+const NO_MOVE_ROOM = { up: false, down: false } as const;
 
 const REFRESH_WORKTREES_TOOLTIP =
   "Refresh this list — re-read Git for worktrees added, removed, or switched outside PwrGit (does not fetch)";
@@ -160,6 +161,10 @@ export function RepoRow({
   onHideRepo,
   onRemoveRepo,
   arrangeable,
+  moveRoom = NO_MOVE_ROOM,
+  onMoveRepo,
+  indexMenu = null,
+  onIndexMenuClose,
   showPinVia = false,
   after,
   dragProps,
@@ -235,6 +240,16 @@ export function RepoRow({
   /** The repository is pinned, so it has a place in the hand order: it
    *  draws the grip and moves by ⌘⇧↑/↓, in every lens. */
   arrangeable: boolean;
+  /** Whether this pin has a neighbour above and below it in the lens: the
+   *  menu's Move up / Move down are disabled at the ends. */
+  moveRoom?: { up: boolean; down: boolean };
+  /** One step among the pins shown (⌘⇧↑/↓'s move). */
+  onMoveRepo?: ((direction: "up" | "down") => boolean) | undefined;
+  /** This repository's menu, asked for from its name in the repository
+   *  index: the same menu, at that point. `trigger` is the name, for focus to
+   *  return to when the Menu key opened it; null for a right-click. */
+  indexMenu?: { x: number; y: number; trigger: HTMLElement | null } | null;
+  onIndexMenuClose?: () => void;
   /** The Pinned lens: say why a repository whose star is unlit is listed. */
   showPinVia?: boolean;
   /** Drawn at the end of this repository's block, after its sections: the
@@ -287,6 +302,9 @@ export function RepoRow({
     from: "kebab" | "row" | "pointer";
   } | null>(null);
   const kebabRef = useRef<HTMLButtonElement>(null);
+  // Stable per request: ContextMenu registers its trigger once per opening.
+  const indexTrigger = indexMenu?.trigger ?? null;
+  const indexTriggerRef = useMemo(() => ({ current: indexTrigger }), [indexTrigger]);
   const rowRef = useRef<HTMLDivElement>(null);
   const nameRef = useRef<HTMLSpanElement>(null);
   const sectionsRef = useRef<HTMLDivElement>(null);
@@ -352,56 +370,34 @@ export function RepoRow({
   }, [expanded]);
   /** Built only while the menu is open: every row renders on every sidebar
    *  update, and a closed menu has no use for its items. */
-  const menuItems = (): MenuItem[] => [
-    {
-      type: "item",
-      label: forkMenuLabel(repo),
-      onSelect: onForkRepo
-    },
-    {
-      type: "item",
-      label: "Manage remotes…",
-      onSelect: () => {
-        if (!expanded) onToggleExpand();
-        setRefsBrowserRequest({ tab: "remotes" });
+  const menuItems = (): MenuItem[] =>
+    repoMenuItems({
+      repo,
+      platform,
+      arrangeable,
+      moveRoom,
+      removeHint: removeRepoHint(repo),
+      actions: {
+        onTogglePin: onToggleRepoPin,
+        onMove: (direction) => void onMoveRepo?.(direction),
+        onFork: onForkRepo,
+        onManageRemotes: () => {
+          if (!expanded) onToggleExpand();
+          setRefsBrowserRequest({ tab: "remotes" });
+        },
+        onOpenSetup: () => onOpenSetup?.(),
+        // Forced: this is the manual trigger for a row whose identity never
+        // landed, which is exactly the row the TTL and backoff would skip.
+        onRefreshForgeInfo: () =>
+          void dispatch("repo:refreshIdentities", {
+            profileId: repo.profileId,
+            repoId: repo.id,
+            force: true
+          }),
+        onHide: () => onHideRepo?.(),
+        onRemove: () => onRemoveRepo?.()
       }
-    },
-    { type: "item", label: "Repository setup…", onSelect: () => onOpenSetup?.() },
-    { type: "sep" },
-    { type: "item", label: "Copy path", onSelect: () => void copyText(repo.path) },
-    {
-      type: "item",
-      label: revealLabel(platform),
-      onSelect: () => revealPath(repo.path)
-    },
-    { type: "sep" },
-    {
-      type: "item",
-      label: "Refresh forge info",
-      // Forced: this is the manual trigger for a row whose identity never
-      // landed, which is exactly the row the TTL and backoff would skip.
-      onSelect: () =>
-        void dispatch("repo:refreshIdentities", {
-          profileId: repo.profileId,
-          repoId: repo.id,
-          force: true
-        })
-    },
-    { type: "sep" },
-    {
-      type: "item",
-      label: "Hide repository",
-      hint: "Stays on disk. Unhide from the sidebar's Hidden list.",
-      onSelect: () => onHideRepo?.()
-    },
-    {
-      type: "item",
-      label: "Remove repository…",
-      danger: true,
-      hint: removeRepoHint(repo),
-      onSelect: () => onRemoveRepo?.()
-    }
-  ];
+    });
   const navigation = groupWorktreesForNavigation(
     repo.worktrees,
     sort,
@@ -1024,7 +1020,7 @@ export function RepoRow({
           </button>
         </span>
       </div>
-      {menu !== null && (
+      {menu !== null ? (
         <ContextMenu
           x={menu.x}
           y={menu.y}
@@ -1036,6 +1032,21 @@ export function RepoRow({
             : { triggerRef: menu.from === "kebab" ? kebabRef : rowRef })}
           onClose={() => setMenu(null)}
         />
+      ) : (
+        indexMenu !== null && (
+          // The index's name opens this same menu (PwrAgnt's project index
+          // opens the header's), so the two can never list different verbs.
+          <ContextMenu
+            x={indexMenu.x}
+            y={indexMenu.y}
+            label={`${repo.name} actions`}
+            items={menuItems()}
+            {...(indexMenu.trigger === null
+              ? {}
+              : { triggerRef: indexTriggerRef })}
+            onClose={() => onIndexMenuClose?.()}
+          />
+        )
       )}
 
       {expanded && (

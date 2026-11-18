@@ -13347,6 +13347,16 @@ body.is-col-resizing {
   font: 500 10.5px/1.3 var(--font-sans);
   white-space: normal;
 }
+/* A command's own key, at the entry's end (PwrAgnt's
+   .thread-context-menu__shortcut, in PwrGit's muted tone). */
+.pop-menu__shortcut {
+  margin-left: auto;
+  padding-left: 20px;
+  color: var(--text-subtle);
+  font: 500 11px/1 var(--font-sans);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.02em;
+}
 .pop-menu__item--danger {
   color: var(--danger-text);
 }

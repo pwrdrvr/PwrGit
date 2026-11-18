@@ -5,6 +5,7 @@ import {
   useRef,
   useState,
   type KeyboardEvent as ReactKeyboardEvent,
+  type MouseEvent as ReactMouseEvent,
   type PointerEvent as ReactPointerEvent,
   type RefObject
 } from "react";
@@ -110,6 +111,7 @@ export function RepoIndex({
   listRef,
   treeId,
   onJump,
+  onOpenMenu,
   reorder
 }: {
   groups: RepoIndexGroup[];
@@ -117,6 +119,16 @@ export function RepoIndex({
   listRef: RefObject<HTMLDivElement | null>;
   treeId: string;
   onJump: (repoId: string) => void;
+  /**
+   * Open this repository's menu at a point — the tree row's own menu, as
+   * PwrAgnt's project index opens the project header's. `trigger` is the name
+   * when the Menu key asked (focus returns to it), null for a right-click.
+   */
+  onOpenMenu?: (
+    repoId: string,
+    point: { x: number; y: number },
+    trigger: HTMLElement | null
+  ) => void;
   reorder?: RepoIndexReorder;
 }) {
   const tip = useViewportTooltip();
@@ -280,6 +292,17 @@ export function RepoIndex({
     const target = event.target as HTMLElement;
     const at = ids.indexOf(target.dataset["indexId"] ?? "");
     if (at === -1) return;
+    // The platform's own "open the context menu" keys, as on a tree row.
+    if (
+      onOpenMenu !== undefined &&
+      (event.key === "ContextMenu" || (event.shiftKey && event.key === "F10"))
+    ) {
+      event.preventDefault();
+      const rect = target.getBoundingClientRect();
+      tip.hide();
+      onOpenMenu(ids[at] as string, { x: rect.left + 12, y: rect.bottom + 2 }, target);
+      return;
+    }
     const direction = entries[at]?.pinned ? reorder?.moveKey(event) ?? null : null;
     if (direction !== null) {
       event.preventDefault();
@@ -410,6 +433,19 @@ export function RepoIndex({
                       if (reorder?.isPostDragClick()) return;
                       onJump(entry.id);
                     }}
+                    {...(onOpenMenu === undefined
+                      ? {}
+                      : {
+                          onContextMenu: (event: ReactMouseEvent) => {
+                            event.preventDefault();
+                            tip.hide();
+                            onOpenMenu(
+                              entry.id,
+                              { x: event.clientX, y: event.clientY },
+                              null
+                            );
+                          }
+                        })}
                     onMouseEnter={cut.onMouseEnter}
                     onMouseLeave={cut.onMouseLeave}
                     onFocus={(event) => {

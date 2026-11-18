@@ -690,6 +690,16 @@ Design: `design/Pinned Repos Lead Every Lens - UX Review.dc.html` (1c, turn 3,
   surface: the row's kebab, its right-click, the graph header's kebab and the
   refs browser's Worktrees tab. Don't hand-build a list beside it. They were
   four lists, and right-click lost Reset while only the header could Fork.
+- **A repository's entries come from `repo-menu-items.ts`**: the tree row's
+  kebab, its right-click and Menu key, and a right-click (or Menu key) on its
+  name in the repository index. The index draws no menu of its own: Sidebar
+  hands the request to that repository's `RepoRow` (`indexMenu`), as PwrAgnt's
+  project index opens the project header's. The order is PwrAgnt's: Pin/Unpin
+  (and, for a pin, Move up/down, which are `moveRepo`), the path, the
+  repository's verbs, then Hide and Remove. Held by
+  `repo-menu-items.property.test.ts` and, against the row's menu as oracle,
+  `Sidebar.repo-index.test.tsx`. Design:
+  `design/Repo Index Context Menu - UX Review.dc.html`, 2a and 2b.
 - **An entry that can't run on this row stays, disabled with a `hint`.** The
   primary checkout's Remove points at Remove repository… on the repo row.
 - **A change request's Open/Copy link entries come from

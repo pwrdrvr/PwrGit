@@ -541,3 +541,93 @@ describe("Moving repositories from the index", () => {
   });
 });
 
+
+// Repo Index Context Menu, 2a and 2b. PwrAgnt's project index opens the project
+// header's own menu; the index here opens the tree row's own menu. The row's
+// menu is the oracle: whatever it lists, the name must list, in its order.
+describe("A right-click on an index name", () => {
+  const menuOf = (): HTMLElement | null =>
+    document.querySelector<HTMLElement>('[role="menu"]');
+  const entries = (menu: HTMLElement | null): string[] =>
+    [...(menu?.querySelectorAll<HTMLElement>('[role^="menuitem"]') ?? [])].map(
+      (item) =>
+        `${item.textContent ?? ""}${item.hasAttribute("disabled") ? " [disabled]" : ""}`
+    );
+  const rightClick = (target: Element): void => {
+    act(() => {
+      target.dispatchEvent(
+        new MouseEvent("contextmenu", { bubbles: true, cancelable: true, clientX: 30, clientY: 40 })
+      );
+    });
+  };
+  const escape = (): void => {
+    act(() => {
+      document.activeElement?.dispatchEvent(
+        new KeyboardEvent("keydown", { key: "Escape", bubbles: true })
+      );
+    });
+  };
+  const PINS: Repo[] = REPOS.map((repo) =>
+    repo.id === "cinder" ? repo : { ...repo, pinned: true }
+  );
+
+  for (const name of ["atlas", "beacon", "cinder"]) {
+    it(`opens ${name}'s tree-row menu, entry for entry`, () => {
+      render("atlas:wt0", () => undefined, { repos: PINS });
+      rightClick(container.querySelector(`.repo-row[data-repo-id="${name}"]`)!);
+      const fromRow = menuOf();
+      expect(fromRow?.getAttribute("aria-label")).toBe(`${name} actions`);
+      const rowEntries = entries(fromRow);
+      escape();
+      expect(menuOf()).toBeNull();
+
+      rightClick(indexItem(name));
+      const fromIndex = menuOf();
+      expect(fromIndex?.getAttribute("aria-label")).toBe(`${name} actions`);
+      expect(entries(fromIndex)).toEqual(rowEntries);
+    });
+  }
+
+  it("pins an unpinned repository, as its star does", () => {
+    const onSetRepoPin = vi.fn();
+    render("atlas:wt0", () => undefined, { onSetRepoPin });
+    rightClick(indexItem("beacon"));
+    const pin = [...menuOf()!.querySelectorAll<HTMLElement>('[role="menuitem"]')].find(
+      (item) => item.textContent === "Pin repository"
+    )!;
+    act(() => pin.click());
+    expect(onSetRepoPin).toHaveBeenCalledExactlyOnceWith("beacon", true);
+    expect(menuOf()).toBeNull();
+  });
+
+  it("moves a pin through ⌘⇧↓'s own move, disabled at the ends", () => {
+    const persist = vi.fn();
+    render("atlas:wt0", () => undefined, { repos: PINS, onPersistRepoOrder: persist });
+    rightClick(indexItem("atlas"));
+    expect(entries(menuOf()).slice(0, 3)).toEqual([
+      "Unpin repository",
+      "Move up⇧⌘↑ [disabled]",
+      "Move down⇧⌘↓"
+    ]);
+    const down = [...menuOf()!.querySelectorAll<HTMLElement>('[role="menuitem"]')].find(
+      (item) => item.textContent?.startsWith("Move down")
+    )!;
+    expect(down.getAttribute("aria-keyshortcuts")).toBe("Meta+Shift+ArrowDown");
+    act(() => down.click());
+    expect(persist).toHaveBeenCalledExactlyOnceWith(["beacon", "atlas"]);
+  });
+
+  it("opens from the Menu key under the name, and gives focus back on Escape", () => {
+    render("atlas:wt0", () => undefined);
+    act(() => indexItem("beacon").focus());
+    act(() => {
+      indexItem("beacon").dispatchEvent(
+        new KeyboardEvent("keydown", { key: "ContextMenu", bubbles: true, cancelable: true })
+      );
+    });
+    expect(menuOf()?.getAttribute("aria-label")).toBe("beacon actions");
+    escape();
+    expect(menuOf()).toBeNull();
+    expect(document.activeElement).toBe(indexItem("beacon"));
+  });
+});
