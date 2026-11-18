@@ -1,7 +1,7 @@
 import {
   useCallback,
-  useEffect,
   useLayoutEffect,
+  useMemo,
   useRef,
   type RefObject
 } from "react";
@@ -24,8 +24,7 @@ import {
  * Everything the steps act on must be rigid (`flex: 0 0 auto`). A shrinkable
  * item never overflows, so the row would read as fitting while that item
  * ellipsized; and even a 1000:1 shrink weight leaks a sub-pixel share that
- * draws an ellipsis. The stepping touches only `classList` and reads layout,
- * so it costs a few synchronous layouts and no React render.
+ * draws an ellipsis.
  */
 export function useFitLadder(
   rowRef: RefObject<HTMLElement | null>,
@@ -52,6 +51,112 @@ export function useFitLadder(
   );
 }
 
+type Fit = {
+  row: HTMLElement;
+  steps: readonly string[];
+  fits: () => boolean;
+};
+
+type Ladder = {
+  fit: Fit | null;
+  watched: Element | null;
+};
+
+const pending = new Set<Ladder>();
+let flushQueued = false;
+
+function clearSteps(row: HTMLElement, steps: readonly string[]): void {
+  // Even removing absent tokens can write the class attribute.
+  if (steps.some((step) => row.classList.contains(step))) {
+    row.classList.remove(...steps);
+  }
+}
+
+/** Complete the pending fits for a caller reading geometry in a layout effect. */
+export function flushFitLadders(): void {
+  if (pending.size === 0) return;
+  let active: Fit[] = [];
+  for (const { fit } of pending) {
+    if (fit !== null) active.push(fit);
+  }
+  pending.clear();
+
+  // Reset every row before the first layout read. At each depth, finish
+  // all reads before writing the next step, so nearby rows share a layout.
+  for (const { row, steps } of active) clearSteps(row, steps);
+  for (let depth = 0; active.length > 0; depth++) {
+    const advance = active.filter(({ fits }) => !fits());
+    active = [];
+    for (const fit of advance) {
+      fit.row.classList.add(fit.steps[depth]!);
+      if (depth + 1 < fit.steps.length) active.push(fit);
+    }
+  }
+}
+
+function requestFit(ladder: Ladder): void {
+  if (ladder.fit === null) return;
+  pending.add(ladder);
+  if (flushQueued) return;
+  flushQueued = true;
+  queueMicrotask(() => {
+    flushQueued = false;
+    flushFitLadders();
+  });
+}
+
+const watched = new Map<Element, Set<Ladder>>();
+let resizeObserver: ResizeObserver | null = null;
+
+function onFontsLoaded(): void {
+  for (const ladders of watched.values()) {
+    for (const ladder of ladders) pending.add(ladder);
+  }
+  flushFitLadders();
+}
+
+function watch(ladder: Ladder, target: Element | null): void {
+  const previous = ladder.watched;
+  if (previous === target) return;
+
+  if (watched.size === 0) {
+    if (typeof ResizeObserver !== "undefined") {
+      resizeObserver = new ResizeObserver((entries) => {
+        for (const { target } of entries) {
+          for (const ladder of watched.get(target) ?? []) pending.add(ladder);
+        }
+        // Resize deliveries already run as a batch before paint.
+        flushFitLadders();
+      });
+    }
+    // A late face changes content widths even when the observed box stays put.
+    document.fonts?.addEventListener?.("loadingdone", onFontsLoaded);
+  }
+  if (previous !== null) {
+    const ladders = watched.get(previous)!;
+    ladders.delete(ladder);
+    if (ladders.size === 0) {
+      watched.delete(previous);
+      resizeObserver?.unobserve(previous);
+    }
+  }
+  ladder.watched = target;
+  if (target !== null) {
+    let ladders = watched.get(target);
+    if (ladders === undefined) {
+      ladders = new Set();
+      watched.set(target, ladders);
+      resizeObserver?.observe(target);
+    }
+    ladders.add(ladder);
+  }
+  if (watched.size === 0) {
+    resizeObserver?.disconnect();
+    resizeObserver = null;
+    document.fonts?.removeEventListener?.("loadingdone", onFontsLoaded);
+  }
+}
+
 /**
  * The ladder with its own test of "fits". `useFitLadder` asks whether the
  * last control ends inside the box; a row whose one shrinkable item absorbs
@@ -61,9 +166,10 @@ export function useFitLadder(
  * Returns a stable re-fit, for content the hook cannot see change: a child
  * component that re-renders on its own state (the sidebar's section
  * headings, whose counts land after the repository row has rendered) calls it
- * from its own layout effect. Calls coalesce into one fit in a microtask,
- * still before paint, and none at all when the hook's own layout effect fits
- * after them in the same commit (children's effects run first).
+ * from its own layout effect. That request joins any fit requested by the
+ * parent commit. The fit batch runs in a microtask before paint, or earlier
+ * if a layout effect needs the final geometry. Each predicate reads its own
+ * row or block.
  */
 export function useStepLadder(
   rowRef: RefObject<HTMLElement | null>,
@@ -73,55 +179,30 @@ export function useStepLadder(
   observe: () => Element | null = () => rowRef.current
 ): () => void {
   const key = steps.join(" ");
-  const pending = useRef(false);
+  const classes = useMemo(() => (key === "" ? [] : key.split(" ")), [key]);
+  const state = useRef<Ladder>({ fit: null, watched: null });
 
-  const fit = (): void => {
-    pending.current = false;
+  // A chip's text or a control appearing changes what fits without changing
+  // the row's width. Publish the latest predicate only once React commits it.
+  useLayoutEffect(() => {
+    const ladder = state.current;
     const row = rowRef.current;
-    if (row === null) return;
-    const classes = key === "" ? [] : key.split(" ");
-    row.classList.remove(...classes);
-    for (const step of classes) {
-      if (fits()) return;
-      row.classList.add(step);
+    const previous = ladder.fit;
+    if (previous !== null && (previous.row !== row || previous.steps !== classes)) {
+      clearSteps(previous.row, previous.steps);
     }
-  };
-
-  // After every render: a chip's text, a flash, or a control appearing all
-  // change what fits without changing the row's width.
-  useLayoutEffect(fit);
-
-  // The latest `fit` closes over this render's `fits` and steps; the stable
-  // wrapper is what callers hold.
-  const latest = useRef(fit);
-  latest.current = fit;
-  const refit = useCallback(() => {
-    if (pending.current) return;
-    pending.current = true;
-    queueMicrotask(() => {
-      if (pending.current) latest.current();
-    });
+    ladder.fit = row === null || classes.length === 0 ? null : { row, steps: classes, fits };
+    watch(ladder, ladder.fit === null ? null : observe());
+    requestFit(ladder);
+  });
+  useLayoutEffect(() => {
+    const ladder = state.current;
+    return () => {
+      pending.delete(ladder);
+      watch(ladder, null);
+      ladder.fit = null;
+    };
   }, []);
 
-  useEffect(() => {
-    const watched = observe();
-    if (watched === null || typeof ResizeObserver === "undefined") return;
-    const observer = new ResizeObserver(() => fit());
-    observer.observe(watched);
-    // A face that loads after the first fit changes every width without
-    // changing the row's: the ladder would keep a step measured in the
-    // fallback font.
-    const fonts = typeof document === "undefined" ? undefined : document.fonts;
-    const refit = (): void => fit();
-    fonts?.addEventListener?.("loadingdone", refit);
-    return () => {
-      observer.disconnect();
-      fonts?.removeEventListener?.("loadingdone", refit);
-    };
-    // `fit` and `observe` read refs; re-observing on every render would
-    // churn the observer for nothing.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [rowRef, key]);
-
-  return refit;
+  return useCallback(() => requestFit(state.current), []);
 }

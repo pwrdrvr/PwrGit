@@ -1,4 +1,5 @@
 import { StrictMode, useEffect, useState, type Dispatch, type SetStateAction } from "react";
+import { flushSync } from "react-dom";
 import { createRoot } from "react-dom/client";
 import { ok } from "@pwrgit/shared";
 import "../../../src/renderer/src/styles/app.css";
@@ -57,18 +58,21 @@ const noop = (): void => undefined;
 
 /** Scenes drawn collapsed, set from outside through `__harness.setExpanded`. */
 let setCollapsed: Dispatch<SetStateAction<ReadonlySet<string>>> | null = null;
+let setKeyboardRow: Dispatch<SetStateAction<number>> | null = null;
 const sceneKey = (repo: string, row: number): string => `${repo}@${row}`;
 
 function Tree({
   entry,
   row,
   tree,
-  expanded
+  expanded,
+  focusable
 }: {
   entry: HarnessRepo;
   row: number;
   tree: number;
   expanded: boolean;
+  focusable: boolean;
 }) {
   return (
     <div className="harness-scene" data-repo={entry.repo.id} data-row={row}>
@@ -115,7 +119,7 @@ function Tree({
                   dragProps={{ draggable: false }}
                   dragging={false}
                   dropPosition={null}
-                  focusable
+                  focusable={focusable}
                   onRowKeyDown={noop}
                   onRowFocus={noop}
                   isPostDragClick={() => false}
@@ -134,8 +138,10 @@ function Tree({
 
 function Harness({ inset }: { inset: number }) {
   const [collapsed, setCollapsedState] = useState<ReadonlySet<string>>(new Set());
+  const [keyboardRow, setKeyboardRowState] = useState(0);
   useEffect(() => {
     setCollapsed = setCollapsedState;
+    setKeyboardRow = setKeyboardRowState;
   }, []);
   const repos = (new URLSearchParams(location.search).get("repos") ?? "atlas,beacon,cinder")
     .split(",")
@@ -145,14 +151,15 @@ function Harness({ inset }: { inset: number }) {
       value={{ selectedKey: null, select: noop, clear: noop }}
     >
       <div className="harness-grid" style={{ gridTemplateColumns: `repeat(${ROWS.length}, max-content)` }}>
-        {repos.flatMap((key) =>
-          ROWS.map((row) => (
+        {repos.flatMap((key, repoIndex) =>
+          ROWS.map((row, widthIndex) => (
             <Tree
               key={`${key}-${row}`}
               entry={HARNESS_REPOS[key]}
               row={row}
               tree={row + inset}
               expanded={!collapsed.has(sceneKey(HARNESS_REPOS[key].repo.id, row))}
+              focusable={keyboardRow === 0 || keyboardRow === repoIndex * ROWS.length + widthIndex + 1}
             />
           ))
         )}
@@ -256,6 +263,31 @@ const harness = {
     await settled();
   })(),
   report,
+  async benchmark(kind: "commit" | "resize", rounds: number): Promise<void> {
+    const trees = [...document.querySelectorAll<HTMLElement>(".harness-scene .pane--sidebar")];
+    const widths = trees.map((tree) => parseFloat(tree.style.width));
+    for (let i = 0; i < rounds; i++) {
+      if (kind === "commit") {
+        // Move the roving tab stop. The tree renders again, with the same fit content.
+        flushSync(() => setKeyboardRow?.((i % trees.length) + 1));
+        await Promise.resolve();
+        document.body.getBoundingClientRect();
+      } else {
+        for (const [index, tree] of trees.entries()) {
+          tree.style.width = `${widths[index]! + (i % 2 === 0 ? 48 : 0)}px`;
+        }
+        // ResizeObserver runs after the first frame callback.
+        await new Promise<void>((resolve) =>
+          requestAnimationFrame(() => requestAnimationFrame(() => resolve()))
+        );
+      }
+    }
+    if (kind === "commit") {
+      flushSync(() => setKeyboardRow?.(0));
+      await Promise.resolve();
+      document.body.getBoundingClientRect();
+    }
+  },
   /** Collapse or expand one scene's repository. */
   setExpanded(repo: string, row: number, expanded: boolean): void {
     setCollapsed?.((current) => {

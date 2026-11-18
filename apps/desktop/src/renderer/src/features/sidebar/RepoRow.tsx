@@ -321,8 +321,8 @@ export function RepoRow({
   // One ladder for every heading in this block, measured on the width the
   // tree gives it: a quiet repository keeps its words where a busy one steps
   // down (3a). The sections re-render on their own state and call `refit`.
-  // It watches the block, which is always mounted: the sections come and go
-  // with the disclosure, and the observer is attached only once.
+  // The block gives the headings their width. Only watch it while the
+  // disclosure is open and there are sections to fit.
   const refitSections = useStepLadder(
     sectionsRef,
     () => headingsFit(sectionsRef.current),

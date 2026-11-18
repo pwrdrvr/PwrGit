@@ -53,9 +53,13 @@ export function headingRowFits(row: HTMLElement): boolean {
     (parseFloat(style.borderRightWidth) || 0);
   for (const child of row.children) {
     // `display: none` (a folded chip, a hidden glyph) has no box at all.
-    if (child.getClientRects().length === 0) continue;
+    const boxes = child.getClientRects();
+    if (boxes.length === 0) continue;
     const margin = parseFloat(getComputedStyle(child).marginRight) || 0;
-    if (child.getBoundingClientRect().right + margin > right + 0.5) return false;
+    // Flex children normally have one box. Reuse it, while keeping the
+    // bounding box semantics for a fragmented child.
+    const edge = boxes.length === 1 ? boxes[0]!.right : child.getBoundingClientRect().right;
+    if (edge + margin > right + 0.5) return false;
   }
   return true;
 }
