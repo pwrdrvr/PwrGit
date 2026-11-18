@@ -1,5 +1,11 @@
 # Changelog
 
+## v0.60.1 - 2026-11-18
+
+- Sidebar performance - Improved fitting of labels and badges by batching measurements across rows during updates, resizing and font changes, rather than forcing layout independently for each row. Worktree badges now settle before section headings are measured, fixing headings remaining unnecessarily shortened after a temporary scrollbar disappears. Scroll anchors and repository-index jumps use the settled layout.
+- Graph performance - Improved the locate-commit flash by fading a separate accent layer instead of repeatedly repainting the row background. The flash settles into the row's current HEAD, focus or hover styling and respects reduced motion. The HEAD ring still pulses only three times before resting.
+- Performance validation - Verified reduced layout and paint work in controlled renderer harnesses. Whole-app CPU-spike frequency, GPU use and battery savings remain unmeasured.
+
 ## v0.60.0 - 2026-11-17
 
 - Pinned repositories - Improved every sidebar lens to put its pinned repositories first, in the same hand-arranged order in both the index and tree. The remaining repositories keep the lens's usual order; an unpinned current repository in Focused now follows the pins. Folder grouping places pins together in a separate Pinned group.
