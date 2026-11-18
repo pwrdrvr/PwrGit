@@ -128,6 +128,8 @@ framing, backpressure and scheduled admission/revocation histories. Native tests
 exercise real socket security, ownership, stale cleanup, incompatible greetings
 and cancellation. Integration tests use the packaged relay protocol with the
 real desktop factory, native consent seam, policy file and HTTP parser. Run
-`pnpm test`, `pnpm lint`, `pnpm build`, and the three-platform native CI workflow.
+`pnpm build:native` explicitly before `pnpm test`, then `pnpm lint`, `pnpm build`,
+and the three-platform native CI workflow. Install, Dev and JavaScript builds
+do not invoke Rust; rebuild the host helper explicitly after Rust source edits.
 Rust builds are pinned by Cargo.lock; their normal/build dependency graph is
 verified against the license snapshot and disclosed in THIRD_PARTY_LICENSES.

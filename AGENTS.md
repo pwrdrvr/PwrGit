@@ -82,10 +82,17 @@ Re-run the fix after Electron is replaced.
 ```bash
 pnpm dev        # run the app (electron-vite dev)
 pnpm build      # production build
+pnpm build:native # explicit host Rust MCP helper build
 pnpm test       # vitest across the workspace
 pnpm typecheck  # TypeScript 7 native compiler across packages
 pnpm lint       # every check CI runs, cheapest-first
 ```
+
+Rust compilation is explicit: run `pnpm build:native` when you need native MCP
+or after changing `crates/pwrgit-mcp`. Install, Dev, JavaScript builds and tests
+do not compile Rust automatically. Native transport tests need this build first;
+without a helper the app can run with native MCP unavailable. CI requests the
+host build before those tests; release staging alone requests `--universal`.
 
 `pnpm lint` chains `lint:syntax` → `lint:forge-kinds` → `lint:colors` →
 `deps:maturity` → `licenses:check` → `lint:boundaries` → `typecheck` →

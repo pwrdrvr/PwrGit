@@ -67,7 +67,7 @@ served skill's guest-only setup guidance.
   "thread_name": "Verify desktop startup",
   "job": {
     "repository": "/absolute/path/to/clean/PwrGit/worktree",
-    "setup": [["bash", "-c", "set -e; source ~/.nvm/nvm.sh; nvm install; nvm use; corepack enable; pnpm install --frozen-lockfile"]],
+    "setup": [["bash", "-c", "set -e; source ~/.nvm/nvm.sh; nvm install; nvm use; corepack enable; pnpm install --frozen-lockfile; pnpm build:native"]],
     "command": ["bash", "-c", "set -e; source ~/.nvm/nvm.sh; nvm use; pnpm test:desktop-e2e --grep 'startup'"],
     "artifacts": ["apps/desktop/test-results"],
     "timeout_seconds": 3600
@@ -76,7 +76,8 @@ served skill's guest-only setup guidance.
 ```
 
 `test:desktop-e2e` builds the Electron app through `pretest:e2e`. The install
-stages both native artifacts. Use the narrowest useful test selection and
+stages SQLite's Node/Electron artifacts; the explicit native build supplies the
+Rust MCP helper. Use the narrowest useful test selection and
 request only relevant output directories, never the entire checkout or secrets.
 The default reporter is `list`; request an HTML report only if you enable it.
 

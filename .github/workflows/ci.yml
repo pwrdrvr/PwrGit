@@ -289,6 +289,9 @@ jobs:
       - name: Build MCP server workspace output
         run: pnpm --filter @pwrgit/mcp-server build
 
+      - name: Build native MCP helper
+        run: pnpm build:native
+
       # A fresh `pnpm i` already leaves better-sqlite3 ready for both runtimes
       # (see the root AGENTS.md), so this exits immediately. It earns its
       # place on jobs that restore a cached node_modules: the rebuild script
@@ -412,6 +415,9 @@ jobs:
       # prepare builds outside node_modules, so the archive cannot carry it.
       - name: Build MCP server workspace output
         run: pnpm --filter @pwrgit/mcp-server build
+
+      - name: Build native MCP helper
+        run: pnpm build:native
 
       - name: Run desktop Electron E2E specs
         id: e2e-tests
@@ -553,6 +559,9 @@ jobs:
       # prepare builds outside node_modules, so the archive cannot carry it.
       - name: Build MCP server workspace output
         run: pnpm --filter @pwrgit/mcp-server build
+
+      - name: Build native MCP helper
+        run: pnpm build:native
 
       - name: Run desktop Electron E2E specs (macOS)
         id: e2e-tests
@@ -786,6 +795,9 @@ jobs:
       - name: Build MCP server workspace output
         run: pnpm --filter @pwrgit/mcp-server build
 
+      - name: Build native MCP helper
+        run: pnpm build:native
+
       # A fresh `pnpm i` already leaves better-sqlite3 ready for both runtimes
       # (see the root AGENTS.md), so this exits immediately. It earns its
       # place on jobs that restore a cached node_modules: the rebuild script
@@ -898,6 +910,9 @@ jobs:
       # prepare builds outside node_modules, so the archive cannot carry it.
       - name: Build MCP server workspace output
         run: pnpm --filter @pwrgit/mcp-server build
+
+      - name: Build native MCP helper
+        run: pnpm build:native
 
       - name: Run desktop Electron E2E specs (Windows)
         id: e2e-tests

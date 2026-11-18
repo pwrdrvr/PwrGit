@@ -18,6 +18,7 @@ never run on the physical Mac as a fallback or evade a refusal with SSH/scripts.
 Inside the MCP guest job or the existing GitHub Actions runner workflow:
 
 ```bash
+pnpm build:native                    # explicit host MCP helper build
 pnpm --filter @pwrgit/desktop test:e2e   # pretest builds out/, then playwright
 ```
 

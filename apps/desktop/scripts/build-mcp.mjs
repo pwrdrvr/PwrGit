@@ -1,21 +1,23 @@
 #!/usr/bin/env node
 // Native stdio transport. Packaged macOS helpers are universal; developer/test
-// builds may request --host. Fail rather than ship a missing/stale executable.
+// builds use the host. Only explicit release staging requests --universal.
 import { spawnSync } from "node:child_process";
 import { copyFileSync, mkdirSync } from "node:fs";
 import { resolve, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { rustEnvironment } from "../../../scripts/lib/rust-environment.mjs";
 const root = fileURLToPath(new URL("../../../", import.meta.url));
+const env = rustEnvironment({ cwd: root });
 const manifest = join(root, "crates/pwrgit-mcp/Cargo.toml");
 const output = join(root, "apps/desktop/build/mcp");
 function run(command, args) {
-  const result = spawnSync(command, args, { cwd: root, stdio: "inherit", env: process.env });
+  const result = spawnSync(command, args, { cwd: root, stdio: "inherit", env });
   if (result.error) throw result.error;
   if (result.status !== 0) throw new Error(`${command} failed (${result.status})`);
 }
 mkdirSync(output, { recursive: true });
 const targets =
-  process.platform === "darwin" && !process.argv.includes("--host")
+  process.platform === "darwin" && process.argv.includes("--universal")
     ? ["aarch64-apple-darwin", "x86_64-apple-darwin"]
     : [];
 if (targets.length) {
