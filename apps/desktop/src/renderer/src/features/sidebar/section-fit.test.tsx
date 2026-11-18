@@ -53,6 +53,17 @@ describe("headingRowFits", () => {
   it("does not fit once a rigid item runs past it", () => {
     expect(headingRowFits(row([[0, 120], [124, 201]]))).toBe(false);
   });
+
+  it("counts fractional margin edges and keeps the bounding edge for multiple boxes", () => {
+    const el = row([[0, 120], [124, 202.25]]);
+    const item = el.children[1] as HTMLElement;
+    item.style.marginRight = "-2px";
+    expect(headingRowFits(el)).toBe(true);
+
+    item.getClientRects = () => [rect(124, 195), rect(124, 202.25)] as unknown as DOMRectList;
+    item.style.marginRight = "-1.5px";
+    expect(headingRowFits(el)).toBe(false);
+  });
 });
 
 describe("steppedTooltip", () => {

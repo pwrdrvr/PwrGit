@@ -11,7 +11,7 @@ import {
 } from "@playwright/test";
 import { cleanEnv } from "./fixtures/electron-app";
 import { buildHarness } from "./harness/build";
-import type { SceneReport } from "./harness/section-headings/main";
+import type { SceneReport, ScrollbarReport } from "./harness/section-headings/main";
 
 /**
  * The sidebar's section headings at the widths a sidebar gives them.
@@ -140,6 +140,47 @@ test("the repository row drops marks, then its count's word, before its name", (
   }
 });
 
+// Run on the base and candidate with the same harness, Electron and host.
+// Record Chromium's renderer counters without imposing a wall-time gate in CI.
+test("benchmark sidebar fitting across commits and resizes", async () => {
+  test.skip(process.env["PWRGIT_FIT_BENCH"] !== "1", "opt-in renderer benchmark");
+  type BenchApi = { benchmark: (kind: "commit" | "resize", rounds: number) => Promise<void> };
+  const run = (kind: "commit" | "resize", rounds: number) =>
+    page.evaluate(
+      ({ kind, rounds }) =>
+        (window as unknown as { __harness: BenchApi }).__harness.benchmark(kind, rounds),
+      { kind, rounds }
+    );
+  const cdp = await page.context().newCDPSession(page);
+  try {
+    await cdp.send("Performance.enable");
+    for (const kind of ["commit", "resize"] as const) {
+      const rounds = kind === "commit" ? 40 : 24;
+      await run(kind, 8);
+      const runs = [];
+      for (let trial = 0; trial < 5; trial++) {
+        const before = await cdp.send("Performance.getMetrics");
+        await run(kind, rounds);
+        const after = await cdp.send("Performance.getMetrics");
+        const deltas = Object.fromEntries(after.metrics.map(({ name, value }) => [
+          name, value - (before.metrics.find((metric) => metric.name === name)?.value ?? 0)
+        ]));
+        runs.push({
+          layouts: deltas["LayoutCount"],
+          styleRecalcs: deltas["RecalcStyleCount"],
+          layoutMs: Math.round(deltas["LayoutDuration"]! * 1000),
+          styleMs: Math.round(deltas["RecalcStyleDuration"]! * 1000),
+          taskMs: Math.round(deltas["TaskDuration"]! * 1000)
+        });
+      }
+      console.log(JSON.stringify({ kind, rounds, runs }));
+      expect(await readScenes()).toEqual(scenes);
+    }
+  } finally {
+    await cdp.detach();
+  }
+});
+
 test("a block re-steps when its tree is resized in place", async () => {
   const before = depth(scene("atlas", 270));
   await page.evaluate(() =>
@@ -176,4 +217,20 @@ test("a block re-expanded after mount still re-steps on resize", async () => {
   await expect
     .poll(async () => depth((await readScenes()).find((s) => s.repo === "atlas" && s.row === 194)!))
     .toBe(0);
+});
+
+test("full headings survive worktree badges briefly creating a scrollbar", async () => {
+  const result = await page.evaluate(() =>
+    (window as unknown as { __harness: { showTransientScrollbarCase: () => Promise<ScrollbarReport> } })
+      .__harness.showTransientScrollbarCase()
+  );
+  const shots = process.env["PWRGIT_HARNESS_SHOTS"];
+  if (shots !== undefined && shots !== "") {
+    await page.locator(".harness-scrollbar-case .pane--sidebar").screenshot({
+      path: join(shots, "fit-scrollbar.png")
+    });
+  }
+  expect(result.widthWithLongBadges).toBeLessThan(result.fullWidth);
+  expect(result.finalWidth).toBe(result.fullWidth);
+  expect(result.headingSteps).toEqual([]);
 });

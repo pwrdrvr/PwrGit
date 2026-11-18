@@ -35,6 +35,7 @@ import {
   useViewportTooltip
 } from "../../lib/useViewportTooltip";
 import { useRelativeClock } from "../../lib/useRelativeClock";
+import { flushFitLadders } from "../../lib/useFitLadder";
 import { ContextMenu, type MenuItem } from "../shell/ContextMenu";
 import { forkMenuLabel, worktreeMenuItems } from "../shell/worktree-menu-items";
 import { openResetToRemote } from "../graph/reset-to-remote";
@@ -510,6 +511,9 @@ export function Sidebar({
     if (selectedWorktreeId !== null) keepSidebarAnchorForSelection();
   }, [selectedWorktreeId]);
   useLayoutEffect(() => {
+    // All repo rows have requested their fits. Their final heights are
+    // needed by the scroll anchor and any pending repository-index jump.
+    flushFitLadders();
     applySidebarAnchor(listRef.current);
   });
 
