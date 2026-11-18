@@ -18,6 +18,7 @@ import {
   type WorktreeSort
 } from "@pwrgit/shared";
 import { announce, movedMessage } from "../../lib/announce";
+import { holdFocus } from "../../lib/holdFocus";
 import { dispatch } from "../../lib/pwrgit";
 import { ContextMenu, type MenuItem } from "../shell/ContextMenu";
 import { forkMenuLabel } from "../shell/worktree-menu-items";
@@ -370,16 +371,22 @@ export function RepoRow({
   }, [expanded]);
   /** Built only while the menu is open: every row renders on every sidebar
    *  update, and a closed menu has no use for its items. */
-  const menuItems = (): MenuItem[] =>
-    repoMenuItems({
+  const menuItems = (focusHolder: HTMLElement | null): MenuItem[] => {
+    // Pin and Move move the name or row they were opened from; a keyboard
+    // reader's focus must survive that (lib/holdFocus).
+    const keepingFocus = (run: () => void) => (): void => {
+      run();
+      if (focusHolder !== null) holdFocus(focusHolder);
+    };
+    return repoMenuItems({
       repo,
       platform,
       arrangeable,
       moveRoom,
       removeHint: removeRepoHint(repo),
       actions: {
-        onTogglePin: onToggleRepoPin,
-        onMove: (direction) => void onMoveRepo?.(direction),
+        onTogglePin: keepingFocus(onToggleRepoPin),
+        onMove: (direction) => keepingFocus(() => void onMoveRepo?.(direction))(),
         onFork: onForkRepo,
         onManageRemotes: () => {
           if (!expanded) onToggleExpand();
@@ -398,6 +405,7 @@ export function RepoRow({
         onRemove: () => onRemoveRepo?.()
       }
     });
+  };
   const navigation = groupWorktreesForNavigation(
     repo.worktrees,
     sort,
@@ -1026,7 +1034,13 @@ export function RepoRow({
           y={menu.y}
           label={`${repo.name} actions`}
           align={menu.align}
-          items={menuItems()}
+          items={menuItems(
+            menu.from === "kebab"
+              ? kebabRef.current
+              : menu.from === "row"
+                ? rowRef.current
+                : null
+          )}
           {...(menu.from === "pointer"
             ? {}
             : { triggerRef: menu.from === "kebab" ? kebabRef : rowRef })}
@@ -1040,7 +1054,7 @@ export function RepoRow({
             x={indexMenu.x}
             y={indexMenu.y}
             label={`${repo.name} actions`}
-            items={menuItems()}
+            items={menuItems(indexMenu.trigger)}
             {...(indexMenu.trigger === null
               ? {}
               : { triggerRef: indexTriggerRef })}

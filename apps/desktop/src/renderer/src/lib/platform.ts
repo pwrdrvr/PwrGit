@@ -45,6 +45,20 @@ export function shortcutLabel(
   ].join("+");
 }
 
+/** The same shortcut in `aria-keyshortcuts` form ("Meta+Shift+ArrowUp"), so
+ *  what is announced is always the chord `shortcutLabel` draws. */
+export function ariaKeyShortcuts(
+  shortcut: Shortcut,
+  platform: string = currentPlatform()
+): string {
+  return [
+    isMacPlatform(platform) ? "Meta" : "Control",
+    ...(shortcut.alt === true ? ["Alt"] : []),
+    ...(shortcut.shift === true ? ["Shift"] : []),
+    shortcut.key
+  ].join("+");
+}
+
 /** Whether an event carries the primary modifier advertised for this OS. */
 export function hasPrimaryModifier(
   event: { metaKey: boolean; ctrlKey: boolean },

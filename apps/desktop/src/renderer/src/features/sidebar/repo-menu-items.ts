@@ -1,6 +1,6 @@
 import type { Repo } from "@pwrgit/shared";
 import { copyText } from "../../lib/copyText";
-import { isMacPlatform, shortcutLabel } from "../../lib/platform";
+import { ariaKeyShortcuts, shortcutLabel } from "../../lib/platform";
 import type { MenuItem } from "../shell/ContextMenu";
 import { revealLabel, revealPath } from "../shell/reveal";
 import { forkMenuLabel } from "../shell/worktree-menu-items";
@@ -16,13 +16,6 @@ export type RepoMenuActions = {
   onHide: () => void;
   onRemove: () => void;
 };
-
-/** The ⌘⇧↑/↓ move, in `aria-keyshortcuts` form. */
-function moveKeyshortcuts(direction: "up" | "down", platform: string): string {
-  return `${isMacPlatform(platform) ? "Meta" : "Control"}+Shift+${
-    direction === "up" ? "ArrowUp" : "ArrowDown"
-  }`;
-}
 
 /**
  * One repository's actions, in one order, for every surface that offers them:
@@ -52,17 +45,17 @@ export function repoMenuItems({
   removeHint: string;
   actions: RepoMenuActions;
 }): MenuItem[] {
-  const move = (direction: "up" | "down"): MenuItem => ({
-    type: "item",
-    label: direction === "up" ? "Move up" : "Move down",
-    disabled: !moveRoom[direction],
-    shortcut: shortcutLabel(
-      { key: direction === "up" ? "ArrowUp" : "ArrowDown", shift: true },
-      platform
-    ),
-    keyshortcuts: moveKeyshortcuts(direction, platform),
-    onSelect: () => actions.onMove(direction)
-  });
+  const move = (direction: "up" | "down"): MenuItem => {
+    const chord = { key: direction === "up" ? "ArrowUp" : "ArrowDown", shift: true };
+    return {
+      type: "item",
+      label: direction === "up" ? "Move up" : "Move down",
+      disabled: !moveRoom[direction],
+      shortcut: shortcutLabel(chord, platform),
+      keyshortcuts: ariaKeyShortcuts(chord, platform),
+      onSelect: () => actions.onMove(direction)
+    };
+  };
   return [
     {
       type: "item",

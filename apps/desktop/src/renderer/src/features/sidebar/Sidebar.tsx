@@ -762,6 +762,11 @@ export function Sidebar({
     trigger: HTMLElement | null;
   } | null>(null);
   const closeIndexMenu = useCallback(() => setIndexMenu(null), []);
+  // A row that leaves the list takes its menu with it, without onClose: drop
+  // the request too, or the menu would reopen when the repository returns.
+  if (indexMenu !== null && !filtered.some((repo) => repo.id === indexMenu.repoId)) {
+    setIndexMenu(null);
+  }
   const [indexFit, setIndexFit] = useState<RepoIndexFit>({
     shown: false,
     reason: "narrow"
@@ -1023,8 +1028,9 @@ export function Sidebar({
 
   /** Whether a pin has a neighbour above and below it among the pins shown:
    *  the menu's Move up / Move down, which are `moveRepo`. */
+  const pinPlace = new Map(shownPins.map((repo, index) => [repo.id, index]));
   const moveRoomOf = (repoId: string): { up: boolean; down: boolean } => {
-    const index = shownPins.findIndex((repo) => repo.id === repoId);
+    const index = pinPlace.get(repoId) ?? -1;
     return index === -1
       ? { up: false, down: false }
       : { up: index > 0, down: index < shownPins.length - 1 };

@@ -617,6 +617,16 @@ describe("A right-click on an index name", () => {
     expect(persist).toHaveBeenCalledExactlyOnceWith(["beacon", "atlas"]);
   });
 
+  it("forgets a request whose repository left the list, so it never reopens by itself", () => {
+    render("atlas:wt0", () => undefined);
+    rightClick(indexItem("cinder"));
+    expect(menuOf()?.getAttribute("aria-label")).toBe("cinder actions");
+    render("atlas:wt0", () => undefined, { repos: REPOS.filter((r) => r.id !== "cinder") });
+    expect(menuOf()).toBeNull();
+    render("atlas:wt0", () => undefined);
+    expect(menuOf()).toBeNull();
+  });
+
   it("opens from the Menu key under the name, and gives focus back on Escape", () => {
     render("atlas:wt0", () => undefined);
     act(() => indexItem("beacon").focus());
