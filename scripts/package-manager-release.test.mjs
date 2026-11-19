@@ -1,7 +1,8 @@
+import { execFileSync, spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { expect, test, vi } from "vitest";
 import { audit, caskMacosRequirement, compareVersions, distribution, downloadPlatform, prepare, publicationFailures, readCask, readWingetInstaller, renderManifests, selectAssets, stableVersion, validationPlan } from "./package-manager-release.mjs";
 
@@ -198,15 +199,51 @@ test("maps native arm64 and universal Intel DMGs separately and offers only Wind
   expect(output["Casks/pwrgit.rb"]).toContain('arch arm: "arm64", intel: "universal"');
   expect(output["Casks/pwrgit.rb"]).toContain(`sha256 arm:   "${"1".repeat(64)}"`);
   expect(output["Casks/pwrgit.rb"]).toContain(`intel: "${"2".repeat(64)}"`);
-  expect(output["Casks/pwrgit.rb"]).toContain(
-    '\n  command_wrapper "pwrgit", executable: "#{appdir}/PwrGit.app/Contents/Resources/git/bin/git"\n',
-  );
+  expect(output["Casks/pwrgit.rb"]).toContain('\n  command_wrapper "pwrgit",');
   const installer = output[`${distribution.wingetPath}/0.27.0/PwrDrvr.PwrGit.installer.yaml`];
   expect(installer).toContain("Architecture: x64");
   expect(installer).toContain("Custom: /currentuser");
   expect(installer).toContain(`InstallerSha256: ${"3".repeat(64)}`);
   expect(installer).not.toContain("Architecture: arm64");
   expect(installer).not.toContain("/latest/");
+});
+
+const canRunCaskWrapper = process.platform !== "win32" && spawnSync("ruby", ["--version"]).status === 0;
+
+test.runIf(canRunCaskWrapper).each([
+  "Apps $PWRGIT_TEST_PATH",
+  "Apps with 'single' and \"double\" quotes",
+  "Apps with \\ and \n",
+])("runs the installed Git and preserves arguments from app directory %j", (name) => {
+  const directory = mkdtempSync(join(tmpdir(), "pwrgit-cask-wrapper-"));
+  try {
+    const appdir = join(directory, name);
+    const git = join(appdir, "PwrGit.app", "Contents", "Resources", "git", "bin", "git");
+    mkdirSync(dirname(git), { recursive: true });
+    writeFileSync(git, "#!/bin/sh\nprintf '<%s>\\n' \"$@\"\n", { mode: 0o755 });
+    const value = release();
+    const cask = renderManifests(value, selectAssets(value))["Casks/pwrgit.rb"];
+    const stanza = cask.slice(cask.indexOf("  command_wrapper "), cask.lastIndexOf("\nend"));
+    const script = execFileSync("ruby", ["-rshellwords", "-e", String.raw`
+      def command_wrapper(_name, content: nil, executable: nil)
+        # Match Homebrew's executable: wrapper when testing the old stanza.
+        print content || "#!/bin/bash\nexec \"#{executable}\" \"$@\"\n"
+      end
+
+      appdir = ARGV.fetch(0)
+      eval(STDIN.read, binding)
+    `, appdir], { input: stanza });
+    const wrapper = join(directory, "pwrgit");
+    writeFileSync(wrapper, script, { mode: 0o755 });
+    const result = spawnSync(wrapper, ["--version", "with spaces", "$PWRGIT_TEST_PATH", ""], {
+      encoding: "utf8", env: { ...process.env, PWRGIT_TEST_PATH: "expanded" },
+    });
+    expect(result.stderr).toBe("");
+    expect(result.status).toBe(0);
+    expect(result.stdout).toBe("<--version>\n<with spaces>\n<$PWRGIT_TEST_PATH>\n<>\n");
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
 });
 
 
