@@ -22013,6 +22013,8 @@ button.agent-auth-node:focus-visible,
   cursor: pointer;
 }
 .maintenance__problem-log:hover { background: var(--accent-soft); }
+/* Copy all and View log sit together in a Clones card's head (turn 4). */
+.maintenance__problem-log + .maintenance__problem-log { margin-left: -8px; }
 .maintenance__problem > ul { margin: 0; padding: 0; list-style: none; }
 .maintenance__problem-row {
   display: flex;

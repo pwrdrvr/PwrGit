@@ -10,7 +10,9 @@ import { createSystemGit } from "./test-support/system-git";
 import {
   parseReflinkPorcelain,
   refreshRepositoryClones,
+  reshareFailureLogLines,
   reshareResultFromPorcelain,
+  reshareWorktree,
   softPullMainCheckout,
   type ReshareWorktreeRow
 } from "./worktree-reshare";
@@ -70,7 +72,35 @@ describe("git worktree reflink porcelain", () => {
 
   it("fails without a summary, with Git's words", () => {
     const result = reshareResultFromPorcelain(worktree, parseReflinkPorcelain(""), 128, "fatal: not a git repository");
-    expect(result).toMatchObject({ outcome: "failed", message: "fatal: not a git repository" });
+    expect(result).toMatchObject({ outcome: "failed", message: "fatal: not a git repository", gitError: "fatal: not a git repository", exitCode: 128 });
+  });
+
+  it("keeps Git's words and exit code apart from the count sentence when files fail", () => {
+    const parsed = parseReflinkPorcelain(
+      record("reflink 1", "backend clone-replace") + record("summary", "reshared 3", "failed 2", "observed-private-reduction 4096")
+    );
+    const stderr = "error: could not clone 'a.bin'\nerror: could not clone 'https://u:ghp_abcdefghijklmnop@example.test'\n";
+    const result = reshareResultFromPorcelain(worktree, parsed, 1, stderr);
+    expect(result).toMatchObject({ outcome: "failed", exitCode: 1 });
+    // Sanitized like every Git diagnostic: one line, no credential.
+    expect(result.gitError).toBe("error: could not clone 'a.bin' | error: could not clone 'https://[redacted]@example.test'");
+    expect(result.message).toBe(`3 files re-shared · 2 files failed. ${result.gitError}`);
+    expect(reshareFailureLogLines({
+      repo: { id: "r", name: "r", path: "/r", profileId: "p", profileName: "P" },
+      outcome: "partial",
+      message: "1 worktree · 3 files re-shared · 1 failed.",
+      reshare: { main: { outcome: "failed", message: "Main checkout not updated: the fetch failed." }, worktrees: [result] }
+    })).toEqual([
+      "main checkout failed: Main checkout not updated: the fetch failed.",
+      `worktree failed: /w (feature) exit 1: ${result.message}`
+    ]);
+  });
+
+  it("names a Git that never started, with no exit code", async () => {
+    const spawnFailed: GitExec = async () => ({ ok: false, error: { kind: "git", code: "spawn_failed", message: "spawn git ENOENT" } });
+    const result = await reshareWorktree(spawnFailed, worktree);
+    expect(result).toMatchObject({ outcome: "failed", message: "spawn git ENOENT", gitError: "spawn git ENOENT" });
+    expect(result.exitCode).toBeUndefined();
   });
 
   it("leaves symlinks and submodules out of the count, not only the reasons", () => {

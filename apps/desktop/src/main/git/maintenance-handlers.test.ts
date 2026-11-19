@@ -14,6 +14,7 @@ import {
 } from "@pwrgit/shared";
 import { CommandBus } from "../command-bus";
 import { emitEvent } from "../ipc";
+import { logMain } from "../logs";
 import { openDatabase, type DB } from "../persistence/db";
 import { activeGitPath, noteGitReflinkSupport, type GitExec } from "./dugite";
 import type { RepoIndexer } from "./repo-indexer";
@@ -816,6 +817,40 @@ describe("maintenance › clones", () => {
     expect(summary.noWorktrees?.map((repo) => repo.id)).toEqual(["b"]);
     const reflinkCwds = git.mock.calls.filter(([args]) => args[1] === "reflink").map(([, cwd]) => cwd);
     expect(reflinkCwds).toEqual([join(root, "a-wt")]);
+  });
+
+  it("names each failed worktree in the log, with Git's sanitized words and exit code", async () => {
+    // A worktree whose .git file points into the repository's old folder:
+    // Git prints no porcelain at all and exits 128.
+    noteGitReflinkSupport(activeGitPath(), "git version 2.56.0-dev-pwrgit.2", { checkout: true, reshare: true });
+    const fatal = `fatal: gitfile does not point to a valid repository: ${join(root, "a-wt", ".git")}`;
+    git.mockImplementation(async (args, cwd) => {
+      if (args[0] === "rev-parse") return output(join(cwd, ".git"));
+      if (args[0] === "worktree" && args[1] === "reflink") {
+        return cwd === join(root, "a-wt")
+          ? ok({ stdout: "", stderr: `${fatal}\nhint: https://tok:ghp_abcdefghijklmnop@example.test/x\n`, exitCode: 128 })
+          : output(porcelain);
+      }
+      return output();
+    });
+    vi.mocked(logMain).mockClear();
+    const summary = value(
+      await bus.dispatch("maintenance:run", { profileId: "one", operationId: "log", action: reshare })
+    );
+    const failed = summary.results.flatMap((row) => row.reshare?.worktrees ?? []).filter((wt) => wt.outcome === "failed");
+    expect(failed.map((wt) => wt.path)).toEqual([join(root, "a-wt")]);
+    expect(failed[0]).toMatchObject({ exitCode: 128 });
+    expect(failed[0]?.gitError).toContain(fatal);
+    const warned = vi.mocked(logMain).mock.calls
+      .filter(([level, scope]) => level === "warn" && scope === "maintenance")
+      .map(([, , text]) => String(text));
+    const line = warned.find((text) => text.includes(join(root, "a-wt")));
+    expect(line).toBeDefined();
+    expect(line).toContain("exit 128");
+    expect(line).toContain(fatal);
+    expect(line).toContain("(a-wt)");
+    // The sanitizer still runs: no credential reaches the log.
+    expect(warned.join("\n")).not.toContain("ghp_abcdefghijklmnop");
   });
 
   it("starts one run when two Starts both wait for the copy-on-write probe", async () => {

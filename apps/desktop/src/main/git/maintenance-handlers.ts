@@ -38,7 +38,7 @@ import { visibleRepoSql } from "./hidden-repos";
 import { activeGitReflinkProbe } from "./dugite";
 import { refreshActiveGitReflink } from "./runtime-status";
 import { registerClonesOfferHandlers } from "./clones-offer";
-import { refreshRepositoryClones, softPullMainCheckout, type ReshareWorktreeRow } from "./worktree-reshare";
+import { refreshRepositoryClones, reshareFailureLogLines, softPullMainCheckout, type ReshareWorktreeRow } from "./worktree-reshare";
 
 /** Linked (non-primary) worktrees per repository, for Clones' scope. */
 /** Heaviest first, ties in the order given: the longest job starts first,
@@ -731,6 +731,11 @@ export function registerMaintenanceHandlers(
           "maintenance",
           `${action.kind}: ${repo.path}: ${result.message}`
         );
+        // The summary only counts Clones failures; name each one, so Logs
+        // can explain a run that has finished.
+        for (const line of reshareFailureLogLines(result)) {
+          logMain("warn", "maintenance", `${action.kind}: ${repo.path}: ${line}`);
+        }
       });
       const summary: MaintenanceSummary = {
         operationId: req.operationId,

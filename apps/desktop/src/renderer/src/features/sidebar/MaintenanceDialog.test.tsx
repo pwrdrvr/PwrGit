@@ -1413,6 +1413,50 @@ describe("Clones as a Combined step", () => {
     }), { numRuns: 4 });
   });
 
+  it("lists each worktree Clones failed in, with its path, and Copy all takes every row", async () => {
+    await open({ reshare: true });
+    const normal = dispatch.getMockImplementation()!;
+    const fatal = "fatal: gitfile does not point to a valid repository: /fixtures/docs-wt/.git";
+    const failedWorktree = (id: string, branch: string, message: string, extra: object) => ({
+      worktreeId: id, path: `/fixtures/${id}`, branch, outcome: "failed" as const, message,
+      reshared: 0, alreadyShared: 0, skipped: 0, failed: 0, sharedBytes: null, ...extra
+    });
+    const ok = shared(4096);
+    const result: MaintenanceRepoResult = {
+      ...ok, outcome: "partial", message: "main up to date · 3 worktrees · 12 files re-shared · 2 failed.",
+      reshare: { ...ok.reshare!, worktrees: [
+        ...ok.reshare!.worktrees,
+        failedWorktree("docs-wt", "docs/refresh", fatal, { gitError: fatal, exitCode: 128 }),
+        failedWorktree("api-wt", "agent/quiet-heron", "3 files re-shared · 2 files failed.", { exitCode: 1 })
+      ] }
+    };
+    dispatch.mockImplementation(async (name: string, req: { action?: { kind: string } }) =>
+      name === "maintenance:run" && req.action?.kind === "reshare" ? { ok: true, value: summary([result]) } : normal(name, req));
+    const writeText = vi.fn(async () => undefined);
+    Object.defineProperty(navigator, "clipboard", { value: { writeText }, configurable: true });
+    for (const label of ["Remove finished worktrees", "Delete finished local branches", "Collect garbage"]) await untick(label);
+    await click("Start");
+    const card = container.querySelector(".maintenance__problem")!;
+    expect(card.querySelector("strong")!.textContent).toBe("2 worktrees couldn’t be re-shared in 1 repository");
+    const rows = [...card.querySelectorAll(".maintenance__problem-row")];
+    expect(rows.map((row) => row.querySelector("small")?.textContent)).toEqual(["/fixtures/docs-wt", "/fixtures/api-wt"]);
+    expect(rows[0]!.textContent).toContain("Git couldn’t open this worktree.");
+    // Git's words never lead; they sit behind Details with the exit code.
+    expect(rows[0]!.querySelector("p")!.textContent).not.toContain("fatal:");
+    await act(async () => [...rows[0]!.querySelectorAll("button")].find((b) => b.textContent === "Details")!.click());
+    expect(rows[0]!.querySelector("pre")!.textContent).toBe(`${fatal}\nExit code 128 · git worktree reflink --porcelain -z`);
+    await act(async () => [...card.querySelectorAll("button")].find((b) => b.textContent === "Copy all")!.click());
+    Reflect.deleteProperty(navigator, "clipboard");
+    const copied = String((writeText.mock.calls as unknown[][])[0]?.[0]);
+    expect(copied).toContain("Worktree: /fixtures/docs-wt");
+    expect(copied).toContain(`Git: ${fatal}`);
+    expect(copied).toContain("Worktree: /fixtures/api-wt");
+    expect(copied).toContain("Exit code: 1");
+    // The step line keeps its counts, now matching the rows.
+    const step = [...container.querySelectorAll(".maintenance__receipt-step")].find((node) => node.querySelector("strong")?.textContent === "Clones")!;
+    expect(step.textContent).toContain("3 worktrees · 2 failed");
+  });
+
   it("a Clones run with nothing new still counts as a step that ran, and the done line names only planned steps", async () => {
     await open({ reshare: true });
     const normal = dispatch.getMockImplementation()!;

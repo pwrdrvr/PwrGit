@@ -6,6 +6,7 @@ import type {
   ReshareMainCheckout,
   ReshareWorktreeResult
 } from "@pwrgit/shared";
+import { RESHARE_ARGS } from "@pwrgit/shared";
 import { mapLimit } from "../util/map-limit";
 import { bulkSyncRepositories } from "./bulk-sync";
 import { sanitizeGitLogDetail, type GitExec } from "./dugite";
@@ -114,11 +115,14 @@ export function reshareResultFromPorcelain(
     failed,
     sharedBytes: Number.isFinite(reduction) ? reduction : null
   };
+  const gitError = stderr.trim() === "" ? {} : { gitError: sanitizeGitLogDetail(stderr.trim()) };
   if (summary === null) {
     return {
       ...base,
       outcome: "failed",
-      message: sanitizeGitLogDetail(stderr.trim() || `Git exited ${exitCode} without a summary.`)
+      message: gitError.gitError ?? `Git exited ${exitCode} without a summary.`,
+      ...gitError,
+      exitCode
     };
   }
   if (porcelain.header.get("backend") === "unsupported") {
@@ -137,11 +141,12 @@ export function reshareResultFromPorcelain(
   ].filter((part): part is string => part !== null);
   const message = parts.length > 0 ? `${parts.join(" · ")}.` : "No tracked files to share.";
   if (failed > 0 || exitCode !== 0) {
-    const detail = stderr.trim();
     return {
       ...base,
       outcome: "failed",
-      message: detail === "" ? message : `${message} ${sanitizeGitLogDetail(detail)}`
+      message: gitError.gitError === undefined ? message : `${message} ${gitError.gitError}`,
+      ...gitError,
+      exitCode
     };
   }
   return {
@@ -161,14 +166,16 @@ export async function reshareWorktree(
   git: GitExec,
   worktree: { id: string; path: string; branch: string }
 ): Promise<ReshareWorktreeResult> {
-  const run = await git(["worktree", "reflink", "--porcelain", "-z"], worktree.path);
+  const run = await git([...RESHARE_ARGS], worktree.path);
   if (!run.ok) {
+    const gitError = sanitizeGitLogDetail(run.error.message);
     return {
       worktreeId: worktree.id,
       path: worktree.path,
       branch: worktree.branch,
       outcome: "failed",
-      message: sanitizeGitLogDetail(run.error.message),
+      message: gitError,
+      gitError,
       reshared: 0,
       alreadyShared: 0,
       skipped: 0,
@@ -397,6 +404,29 @@ export async function refreshRepositoryClones(deps: RefreshClonesDeps): Promise<
     cancelled > 0 ? `${cancelled} not started` : null
   ].filter((part): part is string => part !== null);
   return { repo, outcome, message: `${summary.join(" · ")}.`, reshare: { main, worktrees } };
+}
+
+/**
+ * One log line per thing a repository's Clones run could not do: each failed
+ * worktree with its path, branch, exit code and Git's words, and a main
+ * checkout that failed to update. The repository's own summary line only
+ * counts them, so without these a finished run cannot be diagnosed from Logs.
+ * Every part is already sanitized (`gitError`, `message`) or a local path.
+ */
+export function reshareFailureLogLines(result: MaintenanceRepoResult): string[] {
+  const report = result.reshare;
+  if (report === undefined) return [];
+  const lines: string[] = [];
+  if (report.main.outcome === "failed") lines.push(`main checkout failed: ${report.main.message}`);
+  for (const worktree of report.worktrees) {
+    if (worktree.outcome !== "failed") continue;
+    const exit = worktree.exitCode === undefined ? "" : ` exit ${worktree.exitCode}`;
+    const words = worktree.gitError !== undefined && !worktree.message.endsWith(worktree.gitError)
+      ? `${worktree.message} ${worktree.gitError}`
+      : worktree.message;
+    lines.push(`worktree failed: ${worktree.path} (${worktree.branch || "detached"})${exit}: ${words}`);
+  }
+  return lines;
 }
 
 /**

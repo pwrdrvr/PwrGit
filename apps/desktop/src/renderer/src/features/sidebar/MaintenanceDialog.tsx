@@ -37,6 +37,8 @@ import {
   branchStepLine,
   clonesCardCopy,
   clonesStepLine,
+  issueReport,
+  issuesReport,
   deletedLead,
   gcCardCopy,
   gcStepLine,
@@ -46,7 +48,7 @@ import {
   type IssueSource,
   type StepIssue
 } from "./maintenance-issues";
-import { IssueRow, ProblemCard, StepLine } from "./MaintenanceProblem";
+import { CopyButton, IssueRow, ProblemCard, StepLine, ViewLogButton } from "./MaintenanceProblem";
 
 const branchKey = (branch: StaleBranch): string =>
   `${branch.repoId}:${branch.branch}`;
@@ -780,7 +782,7 @@ export function MaintenanceDialog({
       : stepResults.gc !== undefined && stepResults.gc.state !== "failed" ? "ran" : "none";
     const branchCard = branchCardCopy(branchIssues, deletedCount, gcAfter, gcIssues.length > 0);
     const gcCard = gcCardCopy(gcIssues, gcReceipt?.results.filter((row) => row.outcome === "success").length ?? 0);
-    const clonesCard = clonesCardCopy(clonesIssues);
+    const clonesCard = clonesCardCopy(clonesIssues, clonesTotals(clonesReceipt?.results ?? []).worktrees);
     /** Each repository the Clones step shared something in, largest first. */
     const clonesRows = (clonesReceipt?.results ?? [])
       .map((row) => ({ row, totals: repoTotals(row) }))
@@ -804,8 +806,9 @@ export function MaintenanceDialog({
       {branchIssues.length > 0 && <ProblemCard headline={branchCard.headline} sub={branchCard.sub} listLabel={branchCard.listLabel}>
         {branchIssues.map((issue, index) => <IssueRow key={`${issue.path ?? issue.repo}:${issue.branch ?? ""}:${index}`} issue={issue} />)}
       </ProblemCard>}
-      {clonesIssues.length > 0 && <ProblemCard headline={clonesCard.headline} sub={clonesCard.sub} listLabel={clonesCard.listLabel}>
-        {clonesIssues.map((issue, index) => <IssueRow key={`${issue.path ?? issue.repo}:${index}`} issue={issue} />)}
+      {clonesIssues.length > 0 && <ProblemCard headline={clonesCard.headline} sub={clonesCard.sub} listLabel={clonesCard.listLabel}
+        action={<><CopyButton className="maintenance__problem-log" label="Copy all" text={issuesReport(clonesCard.headline, clonesIssues, "Clones")} /><ViewLogButton /></>}>
+        {clonesIssues.map((issue, index) => <IssueRow key={`${issue.path ?? issue.repo}:${index}`} issue={issue} report={issueReport(issue, "Clones")} />)}
       </ProblemCard>}
       {gcIssues.length > 0 && <ProblemCard headline={gcCard.headline} sub={gcCard.sub} listLabel={gcCard.listLabel}>
         {gcIssues.map((issue, index) => <IssueRow key={`${issue.path ?? issue.repo}:${index}`} issue={issue} />)}

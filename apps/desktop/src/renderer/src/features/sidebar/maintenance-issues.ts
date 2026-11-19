@@ -1,19 +1,25 @@
-import type { MaintenanceSummary } from "@pwrgit/shared";
+import { RESHARE_ARGS, type MaintenanceRepoResult, type MaintenanceSummary, type ReshareWorktreeResult } from "@pwrgit/shared";
 
 /**
  * One thing a Combined maintenance step left behind, as a row of its outcome
  * card ("Maintenance Continues Past Errors" board, turn 3). A retained branch
  * is one row; a repository failure with no branch rows is one row. The
  * repository's own count sentence ("26 local branches deleted; 1 retained.")
- * is never a row: the card's head and the step line already say it.
+ * is never a row: the card's head and the step line already say it. Clones
+ * reports per worktree, so each worktree it failed in is a row of its own
+ * (turn 4), with its path and Git's words.
  */
 export type StepIssue = {
   /** `branch`: a retained branch. `review`: a repository whose branch review
    *  failed. `repo`: any other repository failure (deletion, refresh, GC).
-   *  `run`: the command itself returned no results. */
-  kind: "branch" | "review" | "repo" | "run";
+   *  `run`: the command itself returned no results. `worktree`: a linked
+   *  worktree Clones could not re-share. */
+  kind: "branch" | "review" | "repo" | "run" | "worktree";
   repo: string;
+  /** The repository's path; a `worktree` row's own path is the worktree's. */
   path?: string;
+  /** A `worktree` row's repository path. */
+  repoPath?: string;
   branch?: string;
   head?: string;
   /** Plain words. `lead` is its first sentence, drawn in danger ink. */
@@ -21,6 +27,9 @@ export type StepIssue = {
   lead?: string;
   /** Git's own text, behind Details. */
   raw?: string;
+  /** The Git command a `worktree` row ran, and how it exited. */
+  command?: string;
+  exitCode?: number;
   /** The repository was cancelled rather than failing. */
   cancelled?: boolean;
 };
@@ -44,11 +53,65 @@ function explain(message: string, rawReason: string): Pick<StepIssue, "reason" |
   return lead === undefined ? { reason: message } : { reason: message, lead };
 }
 
+const RESHARE_LEAD = "Git couldn’t re-share it.";
+const BROKEN_LINK_LEAD = "Git couldn’t open this worktree.";
+/** Git's words for a worktree whose `.git` file points at no repository,
+ *  as a moved repository leaves it. */
+const BROKEN_LINK = /gitfile does not point to a valid repository|not a git repository/i;
+const RESHARE_COMMAND = `git ${RESHARE_ARGS.join(" ")}`;
+
+/** A worktree Clones failed in, as its row: PwrGit's sentence leads, and
+ *  Git's own words (already sanitized by main) sit behind Details. */
+function worktreeIssue(repo: MaintenanceRepoResult["repo"], worktree: ReshareWorktreeResult): StepIssue {
+  const git = worktree.gitError;
+  // Main appends Git's words to its count sentence; the row shows them once.
+  const own = git !== undefined && worktree.message.endsWith(git)
+    ? worktree.message.slice(0, worktree.message.length - git.length).trim()
+    : worktree.message;
+  const raw = git ?? (looksLikeRawGit(own) ? own.trim() : undefined);
+  const words: Pick<StepIssue, "reason" | "lead"> =
+    own !== "" && !looksLikeRawGit(own)
+      ? { reason: own, lead: firstSentence(own) ?? own }
+      : raw !== undefined && BROKEN_LINK.test(raw)
+        ? { reason: `${BROKEN_LINK_LEAD} Its .git link points to a folder that isn’t a repository. Repair links can re-point it; then run Clones again.`, lead: BROKEN_LINK_LEAD }
+        : { reason: RESHARE_LEAD, lead: RESHARE_LEAD };
+  return {
+    kind: "worktree",
+    repo: repo.name,
+    repoPath: repo.path,
+    path: worktree.path,
+    branch: worktree.branch,
+    ...words,
+    ...(raw === undefined ? {} : { raw }),
+    command: RESHARE_COMMAND,
+    ...(worktree.exitCode === undefined ? {} : { exitCode: worktree.exitCode })
+  };
+}
+
+/** A Clones repository's rows: each failed worktree, and a main checkout that
+ *  failed to update. Null when neither happened, so the repository's own
+ *  failure (or cancellation) is its row. */
+function clonesIssues(row: MaintenanceRepoResult): StepIssue[] | null {
+  const report = row.reshare;
+  if (report === undefined) return null;
+  const main: StepIssue[] = report.main.outcome === "failed"
+    ? [{ kind: "repo", repo: row.repo.name, path: row.repo.path, ...explain(report.main.message, "Git couldn’t update the main checkout.") }]
+    : [];
+  const worktrees = report.worktrees
+    .filter((worktree) => worktree.outcome === "failed")
+    .map((worktree) => worktreeIssue(row.repo, worktree));
+  return main.length + worktrees.length === 0 ? null : [...main, ...worktrees];
+}
+
 /** The rows a command's result leaves for its step's card. */
 export function stepIssues(result: MaintenanceSummary, source: IssueSource): StepIssue[] {
   return result.results.flatMap((row): StepIssue[] => {
     const where = { repo: row.repo.name, path: row.repo.path };
     const cancelled = row.outcome === "cancelled" ? { cancelled: true } : {};
+    if (source === "clones") {
+      const rows = clonesIssues(row);
+      if (rows !== null) return rows;
+    }
     const retained = (row.branches ?? []).filter((branch) => !branch.deleted).map((branch): StepIssue => ({
       kind: "branch", ...where, branch: branch.branch, head: branch.head, ...cancelled,
       ...explain(branch.message, "Git refused to delete it.")
@@ -103,17 +166,46 @@ export function clonesStepLine(shared: string | null, files: number, worktrees: 
   return `${lead} · ${worktrees.toLocaleString("en-US")} ${worktrees === 1 ? "worktree" : "worktrees"}${issues.length > 0 ? ` · ${issues.length} failed` : ""}`;
 }
 
-/** Head of the Clones card. Sharing only ever leaves files as they were. */
-export function clonesCardCopy(issues: StepIssue[]): CardCopy {
+/** Head of the Clones card. Sharing only ever leaves files as they were.
+ *  `worktrees` is how many linked worktrees the step covered. */
+export function clonesCardCopy(issues: StepIssue[], worktrees = 0): CardCopy {
   if (issues.every((issue) => issue.kind === "run"))
     return { headline: "Clones couldn’t run", sub: "Maintenance stopped here.", listLabel: "Repositories not shared" };
-  const repos = new Set(issues.map((issue) => issue.path ?? issue.repo)).size;
+  const repos = new Set(issues.map((issue) => issue.repoPath ?? issue.path ?? issue.repo)).size;
+  const sub = "Files Git did not share are left exactly as they were.";
+  if (issues.every((issue) => issue.kind === "worktree")) {
+    const others = worktrees - issues.length;
+    return {
+      headline: `${issues.length} ${issues.length === 1 ? "worktree" : "worktrees"} couldn’t be re-shared in ${repositories(repos)}`,
+      sub: others > 0 ? `${sub} The other ${others.toLocaleString("en-US")} ${others === 1 ? "worktree" : "worktrees"} ran.` : sub,
+      listLabel: "Worktrees not re-shared"
+    };
+  }
   return {
     headline: `Clones: ${issues.length} ${issues.length === 1 ? "problem" : "problems"} in ${repositories(repos)}`,
-    sub: "Files Git did not share are left exactly as they were.",
+    sub,
     listLabel: "Clones problems"
   };
 }
+
+/** One row as plain text for the clipboard: what failed, where, and what Git
+ *  said. It holds nothing the maintenance log does not. */
+export function issueReport(issue: StepIssue, step: string): string {
+  const name = [issue.repo, issue.branch === undefined ? null : issue.branch || "detached"].filter((part) => part !== null && part !== "").join(" · ");
+  return [
+    `${step} failed${name === "" ? "" : `: ${name}`}`,
+    issue.kind === "worktree" && issue.path !== undefined ? `Worktree: ${issue.path}` : null,
+    (issue.repoPath ?? issue.path) !== undefined ? `Repository: ${issue.repoPath ?? issue.path}` : null,
+    `Reason: ${issue.reason}`,
+    issue.command === undefined ? null : `Command: ${issue.command}`,
+    issue.exitCode === undefined ? null : `Exit code: ${issue.exitCode}`,
+    issue.raw === undefined ? null : `Git: ${issue.raw}`
+  ].filter((line): line is string => line !== null).join("\n");
+}
+
+/** Every row of a card, under its headline, for Copy all. */
+export const issuesReport = (headline: string, issues: StepIssue[], step: string): string =>
+  [headline, ...issues.map((issue) => issueReport(issue, step))].join("\n\n");
 
 /** Splits a step line into its result and its issue counts ("1 not
  *  deleted", "2 failed"), so only the counts draw in danger ink. */

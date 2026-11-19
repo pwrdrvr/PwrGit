@@ -59,5 +59,12 @@ its main-checkout fetch brought in.
   after the window opens; main decides, see `main/git/AGENTS.md`). Share files
   opens the dialog with `CLONES_ONLY_PLAN` and `autoStart`; a dialog already
   open is left alone, because remounting it cancels its run.
+- **A Clones failure is a row per worktree, never per repository.** Main
+  reports `reshare.worktrees`; `stepIssues` turns each failed one into a
+  `worktree` row with its path, Git's sanitized `gitError` and `exitCode`.
+  Copy and Copy all (`issueReport`) hold nothing the log does not: main
+  writes one `warn` line per failed worktree (`reshareFailureLogLines`).
+  `maintenance-issues.clones.property.test.ts` holds the rule.
 
-Design: `design/Clones in Maintenance - UX Review.dc.html`.
+Design: `design/Clones in Maintenance - UX Review.dc.html`; failure rows in
+`design/Maintenance Continues Past Errors - UX Review.dc.html`, turn 4.
