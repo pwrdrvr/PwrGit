@@ -171,7 +171,10 @@ export default defineConfig(({ command }) => {
         sourcemap: false,
         rollupOptions: {
           input: { index: resolve(__dirname, "src/main/index.ts") },
-          output: { entryFileNames: "[name].js" }
+          output: {
+            entryFileNames: (chunk) =>
+              chunk.name === "prune-size-worker" ? "[name].mjs" : "[name].js"
+          }
         }
       }
     },
