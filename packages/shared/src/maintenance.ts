@@ -145,6 +145,10 @@ export type ReshareMainCheckout = {
 };
 
 /** One linked worktree's `git worktree reflink --porcelain` answer. */
+/** What Clones runs in each linked worktree. A failed worktree's copied
+ *  report names it. */
+export const RESHARE_ARGS = ["worktree", "reflink", "--porcelain", "-z"] as const;
+
 export type ReshareWorktreeResult = {
   worktreeId: string;
   path: string;
@@ -160,6 +164,11 @@ export type ReshareWorktreeResult = {
   /** Git's `observed-private-reduction`: file data that stopped being
    *  private. Null when Git could not measure allocation. Not free space. */
   sharedBytes: number | null;
+  /** On a failure, Git's own words: its stderr, or why it could not start,
+   *  passed through the log sanitizer. Absent when Git said nothing. */
+  gitError?: string;
+  /** Git's exit code, when the process ran. */
+  exitCode?: number;
 };
 
 export type ReshareRepoReport = {
