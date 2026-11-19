@@ -1,5 +1,12 @@
 # Changelog
 
+## v0.60.2 - 2026-11-19
+
+- Security dependencies - Updated the bundled Hono HTTP framework and Node server adapter to include upstream security fixes.
+- Prune scans - Improved checkout sizing and filesystem-activity checks by reusing temporary workers across each concurrent sizing loop, moving the walk off the main thread and reducing per-file asynchronous overhead. Scans retain hard-link accounting, symlink metadata, entry limits and cancellation checks, with the asynchronous scanner available if a worker cannot start or load. The worker ships inside the protected app archive.
+- Graph performance - Avoided ref-chip fitting when a refresh has unchanged geometry-relevant content. Changed labels or badges still refit the affected row, and resizing and completed font loads still trigger fitting. Restoring a row's last ref after resizing now discards the stale fit so the chip uses the current width rather than an obsolete overflow pill.
+- Performance validation - Verified scan and layout improvements in controlled fixtures. Worker startup can cost more for very small checkouts, and lower total scan CPU does not guarantee a lower peak. Whole-app CPU-spike frequency, GPU usage and battery savings remain unmeasured.
+
 ## v0.60.1 - 2026-11-18
 
 - Sidebar performance - Improved fitting of labels and badges by batching measurements across rows during updates, resizing and font changes, rather than forcing layout independently for each row. Worktree badges now settle before section headings are measured, fixing headings remaining unnecessarily shortened after a temporary scrollbar disappears. Scroll anchors and repository-index jumps use the settled layout.
