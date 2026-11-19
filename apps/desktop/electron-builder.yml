@@ -25,9 +25,6 @@ npmRebuild: false
 asar: true
 asarUnpack:
   - "**/*.node"
-  # The Node worker resolves its entry as a regular file. The standalone
-  # electron-vite module is ESM even outside the app's package.json.
-  - "out/main/prune-size-worker.mjs"
 compression: normal
 # beforePack changes the staged native dependencies for each architecture.
 # Never package architectures concurrently against this shared deploy stage.

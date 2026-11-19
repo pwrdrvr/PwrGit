@@ -72,8 +72,9 @@ if (missing.length > 0) {
   process.exit(1);
 }
 
-if (!existsSync(resolve(`${asarPath}.unpacked`, pruneWorkerEntry))) {
-  console.error(`verify-asar-contents: missing unpacked prune worker: ${pruneWorkerEntry}`);
+const pruneWorkerFile = asar.statFile(asarPath, asarExtractPath(`/${pruneWorkerEntry}`), false);
+if (!("offset" in pruneWorkerFile) || pruneWorkerFile.unpacked) {
+  console.error(`verify-asar-contents: prune worker must be packed: ${pruneWorkerEntry}`);
   process.exit(1);
 }
 

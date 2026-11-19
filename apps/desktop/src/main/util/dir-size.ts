@@ -1,4 +1,4 @@
-import { lstatSync, readdirSync, type Dirent, type Stats } from "node:fs";
+import { lstatSync, opendirSync, type Dirent, type Stats } from "node:fs";
 import { lstat, readdir } from "node:fs/promises";
 import { join } from "node:path";
 
@@ -93,6 +93,29 @@ export function directorySizeInWorker(
 
 type ReadStats = (path: string) => Stats | Promise<Stats>;
 
+function readWorkerDirectory(
+  path: string,
+  remaining: number,
+  aborted: () => boolean
+): Dirent[] {
+  if (aborted()) return [];
+  // Node may stat entries whose types the filesystem omitted. Bound that work
+  // to one buffer per read, with a cancellation check before each read.
+  const directory = opendirSync(path, { bufferSize: STAT_BATCH });
+  const entries: Dirent[] = [];
+  try {
+    // Read one extra entry to distinguish a capped directory from exact EOF.
+    while (entries.length <= remaining && !aborted()) {
+      const entry = directory.readSync();
+      if (entry === null) break;
+      entries.push(entry);
+    }
+  } finally {
+    directory.closeSync();
+  }
+  return entries;
+}
+
 async function walkDirectory(
   root: string,
   { entryCap = DIR_SIZE_ENTRY_CAP, trackActivity = false }: DirSizeOptions,
@@ -137,8 +160,6 @@ async function walkDirectory(
     result.bytes += stats.size;
   };
   const readStats: ReadStats = inWorker ? lstatSync : lstat;
-  const readDirectory = (dir: string): Dirent[] | Promise<Dirent[]> =>
-    inWorker ? readdirSync(dir, { withFileTypes: true }) : readdir(dir, { withFileTypes: true });
   const stack: string[] = [root];
   let dirsRead = 0;
 
@@ -155,13 +176,20 @@ async function walkDirectory(
     let dirents;
     try {
       if (trackActivity) observe(await readStats(dir));
-      dirents = await readDirectory(dir);
+      dirents = inWorker
+        ? readWorkerDirectory(dir, Math.ceil(entryCap - result.entries), aborted)
+        : await readdir(dir, { withFileTypes: true });
     } catch {
       result.inaccessible += 1;
       continue;
     }
     dirsRead += 1;
     if (!inWorker && dirsRead % YIELD_EVERY_DIRS === 0) await yieldToEventLoop();
+
+    if (inWorker && aborted()) {
+      result.partial = true;
+      return finish();
+    }
 
     const files: string[] = [];
     for (const dirent of dirents) {

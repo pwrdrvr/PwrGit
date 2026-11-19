@@ -1,4 +1,4 @@
-import { linkSync, lstatSync, mkdirSync, mkdtempSync, rmSync, symlinkSync, utimesSync, writeFileSync } from "node:fs";
+import { Dir, linkSync, lstatSync, mkdirSync, mkdtempSync, rmSync, symlinkSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import fc from "fast-check";
@@ -17,7 +17,7 @@ beforeEach(() => {
 });
 afterEach(() => rmSync(root, { recursive: true, force: true }));
 
-it("matches filesystem metadata for generated trees and agrees with the regular walk at entry caps", async () => {
+it("matches filesystem metadata for generated trees and returns lower bounds at entry caps", async () => {
   let next = 0;
   const flag = new Int32Array(new SharedArrayBuffer(Int32Array.BYTES_PER_ELEMENT));
   await runPruneSizeWorker(entry, new AbortController().signal, async (measure) => {
@@ -41,21 +41,76 @@ it("matches filesystem metadata for generated trees and agrees with the regular 
         const hardLink = join(checkout, "hard-link");
         const symlink = join(checkout, "loop");
         linkSync(paths[0]!, hardLink);
-        symlinkSync(checkout, symlink, "dir");
+        symlinkSync(checkout, symlink, process.platform === "win32" ? "junction" : "dir");
         const stats = [checkout, ignored, hardLink, symlink, ...paths].map((path) => lstatSync(path));
         const latest = Math.max(...stats.flatMap((s) => [s.mtimeMs, s.ctimeMs, s.birthtimeMs]));
-        expect(await measure(checkout)).toEqual({
+        const expected = {
           bytes: files.reduce((sum, { size }) => sum + size, 0),
           entries: files.length + 3,
           hardLinks: 1,
           inaccessible: 0,
           partial: false,
           lastTouchedAt: new Date(latest).toISOString()
-        });
-        expect(await directorySizeInWorker(checkout, flag, entryCap))
-          .toEqual(await directorySize(checkout, { trackActivity: true, entryCap }));
+        };
+        expect(await measure(checkout)).toEqual(expected);
+        const capped = await directorySizeInWorker(checkout, flag, entryCap);
+        if (entryCap > expected.entries) {
+          expect(capped).toEqual(expected);
+        } else {
+          // Directory handles enumerate in filesystem order, so a truncated
+          // traversal may include a different subset of entries.
+          expect(capped.entries).toBe(entryCap);
+          expect(capped.bytes).toBeLessThanOrEqual(expected.bytes);
+          expect(capped.partial).toBe(entryCap < expected.entries);
+        }
       }
     ), { numRuns: 25 });
+  });
+  expect(logMain).not.toHaveBeenCalled();
+});
+
+it("bounds directory reads at the entry cap and closes the handle when cancelled during enumeration", async () => {
+  for (let index = 0; index < 50; index += 1) {
+    writeFileSync(join(root, String(index)), "file");
+  }
+  const read = Dir.prototype.readSync;
+  await fc.assert(fc.asyncProperty(
+    fc.integer({ min: 1, max: 16 }),
+    fc.boolean(),
+    async (limit, cancel) => {
+      const flag = new Int32Array(new SharedArrayBuffer(Int32Array.BYTES_PER_ELEMENT));
+      let reads = 0;
+      const readSpy = vi.spyOn(Dir.prototype, "readSync").mockImplementation(function (this: Dir) {
+        const entry = read.call(this);
+        reads += 1;
+        if (cancel && reads === limit) Atomics.store(flag, 0, 1);
+        return entry;
+      });
+      const closeSpy = vi.spyOn(Dir.prototype, "closeSync");
+      try {
+        const result = await directorySizeInWorker(root, flag, cancel ? 50 : limit);
+        expect(result.partial).toBe(true);
+        expect(result.entries).toBeLessThanOrEqual(limit);
+        expect(reads).toBe(cancel ? limit : limit + 1);
+        expect(closeSpy).toHaveBeenCalledTimes(1);
+      } finally {
+        readSpy.mockRestore();
+        closeSpy.mockRestore();
+      }
+    }
+  ));
+});
+
+it("starts the file-backed worker from its loaded module bytes", async () => {
+  const modulePath = join(root, "worker.mjs");
+  writeFileSync(modulePath, `
+    import { parentPort } from "node:worker_threads";
+    parentPort.once("message", () => {
+      parentPort.postMessage({ bytes: import.meta.url.startsWith("data:") ? 1 : 0 });
+    });
+  `);
+  await runPruneSizeWorker(modulePath, new AbortController().signal, async (measure) => {
+    expect(await measure(root)).toMatchObject({ bytes: 1 });
   });
   expect(logMain).not.toHaveBeenCalled();
 });

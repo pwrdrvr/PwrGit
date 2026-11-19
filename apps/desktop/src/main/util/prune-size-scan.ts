@@ -1,3 +1,4 @@
+import { readFile } from "node:fs/promises";
 import { Worker } from "node:worker_threads";
 import { logMain } from "../logs";
 import { directorySize, type DirSizeResult } from "./dir-size";
@@ -17,7 +18,13 @@ export async function runPruneSizeWorker(
   const cancelled = new Int32Array(new SharedArrayBuffer(Int32Array.BYTES_PER_ELEMENT));
   let worker: Worker;
   try {
-    worker = new Worker(workerModule, { workerData: cancelled });
+    // The production asset lives in app.asar. Read it through Electron's
+    // filesystem and run those bytes in the worker's standalone ESM loader.
+    const entry = typeof workerModule === "string"
+      ? new URL(`data:text/javascript;base64,${await readFile(workerModule, "base64")}`)
+      : workerModule;
+    if (signal.aborted) return;
+    worker = new Worker(entry, { workerData: cancelled });
   } catch (error) {
     logMain("warn", "prune", `Could not start the sizing worker: ${String(error)}`);
     await run(fallback);

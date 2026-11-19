@@ -1,6 +1,6 @@
 import { hostname } from "node:os";
 import { mkdirSync } from "node:fs";
-import { basename, join } from "node:path";
+import { join } from "node:path";
 import {
   app,
   BrowserWindow,
@@ -1384,9 +1384,7 @@ if (!gotSingleInstanceLock) {
       indexer,
       refresher,
       worktreeOperations,
-      app.isPackaged
-        ? join(process.resourcesPath, "app.asar.unpacked", "out", "main", basename(pruneSizeWorker))
-        : pruneSizeWorker
+      pruneSizeWorker
     );
     const maintenanceHandlers = registerMaintenanceHandlers(
       bus, db, execGit, worktreeOperations, indexer, prService, Date.now,
