@@ -113,7 +113,8 @@ beforeAll(async () => {
     recordingGit,
     indexer,
     createWorktreeRefresher(state, db),
-    operations
+    operations,
+    new URL("../util/prune-size-worker.ts", import.meta.url)
   );
 });
 

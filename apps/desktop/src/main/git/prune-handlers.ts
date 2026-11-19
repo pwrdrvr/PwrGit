@@ -13,7 +13,8 @@ import type { CommandBus } from "../command-bus";
 import { emitEvent } from "../ipc";
 import { logMain } from "../logs";
 import type { DB } from "../persistence/db";
-import { directorySize, pathSize } from "../util/dir-size";
+import { pathSize } from "../util/dir-size";
+import { runPruneSizeWorker } from "../util/prune-size-scan";
 import { sanitizeGitLogDetail, type GitExec } from "./dugite";
 import type { RepoIndexer } from "./repo-indexer";
 import { previewReclaim, reclaimIgnored } from "./worktree-reclaim";
@@ -146,7 +147,8 @@ export function registerPruneHandlers(
   git: GitExec,
   indexer: Pick<RepoIndexer, "getRepo">,
   refresher: WorktreeRefresher,
-  operations: WorktreeOperationQueue
+  operations: WorktreeOperationQueue,
+  sizeWorkerModule: string | URL
 ): PruneHandlers {
   const active = new Map<
     string,
@@ -257,18 +259,8 @@ export function registerPruneHandlers(
           await refresher.refreshRepoWorktrees(repoId);
         },
         readRepo: (repoId) => indexer.getRepo(repoId),
-        sizeOf: async (path, signal) => {
-          const measured = await directorySize(
-            path,
-            { trackActivity: true, ...(signal === undefined ? {} : { signal }) }
-          );
-          return {
-            bytes: measured.bytes,
-            partial: measured.partial,
-            ...(measured.lastTouchedAt === undefined ? {} : { lastTouchedAt: measured.lastTouchedAt }),
-            activityComplete: !measured.partial && measured.inaccessible === 0
-          };
-        },
+        runSizeWorker: (run) =>
+          runPruneSizeWorker(sizeWorkerModule, controller.signal, run),
         onProgress: (progress) => emitEvent("prune:scanProgress", progress),
         runRepository: (repoId, operation) =>
           operations.runRepository(repoId, operation)

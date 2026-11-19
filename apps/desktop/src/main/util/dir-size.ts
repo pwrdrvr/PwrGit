@@ -1,3 +1,4 @@
+import { lstatSync, readdirSync, type Dirent, type Stats } from "node:fs";
 import { lstat, readdir } from "node:fs/promises";
 import { join } from "node:path";
 
@@ -11,7 +12,8 @@ import { join } from "node:path";
  *   millions of inodes, and "at least 4 GB" is the same decision as "4.2 GB");
  * - an **abort signal**, because the user must be able to cancel a sweep and
  *   have git and the filesystem both stop;
- * - a **yield** every few directories, so the main process keeps painting.
+ * - a **yield** every few directories when running on main, so IPC and
+ *   other main-process work can proceed.
  *
  * Symlinks are never followed: their target may be outside the tree (a pnpm
  * store elsewhere on the disk) and counting it would attribute another
@@ -32,7 +34,7 @@ export const DIR_SIZE_ENTRY_CAP = 250_000;
 /** Directories read between event-loop yields. */
 const YIELD_EVERY_DIRS = 24;
 
-/** `lstat` calls issued at once within one directory. */
+/** Entries between cancellation checks, also the async stat batch size. */
 const STAT_BATCH = 32;
 
 export type DirSizeResult = {
@@ -71,7 +73,32 @@ export async function directorySize(
   root: string,
   options: DirSizeOptions = {}
 ): Promise<DirSizeResult> {
-  const entryCap = options.entryCap ?? DIR_SIZE_ENTRY_CAP;
+  return walkDirectory(root, options, () => options.signal?.aborted === true);
+}
+
+/** Used in the prune worker, where blocking metadata calls avoid a libuv
+ * round trip for each entry without blocking main. */
+export function directorySizeInWorker(
+  root: string,
+  cancelled: Int32Array,
+  entryCap = DIR_SIZE_ENTRY_CAP
+): Promise<DirSizeResult> {
+  return walkDirectory(
+    root,
+    { trackActivity: true, entryCap },
+    () => Atomics.load(cancelled, 0) !== 0,
+    true
+  );
+}
+
+type ReadStats = (path: string) => Stats | Promise<Stats>;
+
+async function walkDirectory(
+  root: string,
+  { entryCap = DIR_SIZE_ENTRY_CAP, trackActivity = false }: DirSizeOptions,
+  aborted: () => boolean,
+  inWorker = false
+): Promise<DirSizeResult> {
   const result: DirSizeResult = {
     bytes: 0,
     entries: 0,
@@ -82,44 +109,59 @@ export async function directorySize(
   // Only files with nlink > 1 are recorded, so the ordinary case costs nothing:
   // a tree with no hard links never puts a key in here.
   const seenLinks = new Set<string>();
-  // Read through a call, not a property: `signal.aborted` is a readonly
-  // boolean, so TypeScript narrows it permanently after the first check and
-  // a later `=== true` reads as dead code — while the value really does flip
-  // underneath us, which is the whole point of the check.
-  const aborted = (): boolean => options.signal?.aborted === true;
-  const observe = (stats: { mtimeMs: number; ctimeMs: number; birthtimeMs: number }): void => {
-    if (!options.trackActivity) return;
+  let lastTouchedMs = Number.NEGATIVE_INFINITY;
+  const observe = (stats: Stats): void => {
+    if (!trackActivity) return;
     // Reads/atime do not count. Metadata changes and creation do, including
     // checkouts of old commits and edits restored to their committed contents.
     const at = Math.max(stats.mtimeMs, stats.ctimeMs, stats.birthtimeMs);
-    if (Number.isFinite(at) &&
-        (result.lastTouchedAt === undefined || at > Date.parse(result.lastTouchedAt))) {
-      result.lastTouchedAt = new Date(at).toISOString();
-    }
+    if (Number.isFinite(at) && at > lastTouchedMs) lastTouchedMs = at;
   };
+  const finish = (): DirSizeResult => {
+    if (Number.isFinite(lastTouchedMs)) {
+      result.lastTouchedAt = new Date(lastTouchedMs).toISOString();
+    }
+    return result;
+  };
+  const countFile = (stats: Stats): void => {
+    observe(stats);
+    if (!stats.isFile()) return;
+    if (stats.nlink > 1) {
+      const key = `${stats.dev}:${stats.ino}`;
+      if (seenLinks.has(key)) {
+        result.hardLinks += 1;
+        return;
+      }
+      seenLinks.add(key);
+    }
+    result.bytes += stats.size;
+  };
+  const readStats: ReadStats = inWorker ? lstatSync : lstat;
+  const readDirectory = (dir: string): Dirent[] | Promise<Dirent[]> =>
+    inWorker ? readdirSync(dir, { withFileTypes: true }) : readdir(dir, { withFileTypes: true });
   const stack: string[] = [root];
   let dirsRead = 0;
 
   while (stack.length > 0) {
     if (aborted()) {
       result.partial = true;
-      return result;
+      return finish();
     }
     if (result.entries >= entryCap) {
       result.partial = true;
-      return result;
+      return finish();
     }
     const dir = stack.pop() as string;
     let dirents;
     try {
-      if (options.trackActivity) observe(await lstat(dir));
-      dirents = await readdir(dir, { withFileTypes: true });
+      if (trackActivity) observe(await readStats(dir));
+      dirents = await readDirectory(dir);
     } catch {
       result.inaccessible += 1;
       continue;
     }
     dirsRead += 1;
-    if (dirsRead % YIELD_EVERY_DIRS === 0) await yieldToEventLoop();
+    if (!inWorker && dirsRead % YIELD_EVERY_DIRS === 0) await yieldToEventLoop();
 
     const files: string[] = [];
     for (const dirent of dirents) {
@@ -131,9 +173,9 @@ export async function directorySize(
         break;
       }
       result.entries += 1;
-      // A symlink is counted as an entry and nothing more — see the note above.
+      // Observe a symlink's own activity without following its target.
       if (dirent.isSymbolicLink()) {
-        if (options.trackActivity) files.push(join(dir, dirent.name));
+        if (trackActivity) files.push(join(dir, dirent.name));
         continue;
       }
       if (dirent.isDirectory()) stack.push(join(dir, dirent.name));
@@ -143,40 +185,31 @@ export async function directorySize(
     for (let at = 0; at < files.length; at += STAT_BATCH) {
       if (aborted()) {
         result.partial = true;
-        return result;
+        return finish();
       }
-      const sizes = await Promise.all(
-        files.slice(at, at + STAT_BATCH).map(async (file) => {
+      if (inWorker) {
+        const end = Math.min(at + STAT_BATCH, files.length);
+        for (let index = at; index < end; index += 1) {
           try {
-            const stats = await lstat(file);
-            observe(stats);
-            if (!stats.isFile()) return { size: 0, key: null };
-            if (stats.nlink <= 1) return { size: stats.size, key: null };
-            return { size: stats.size, key: `${stats.dev}:${stats.ino}` };
+            countFile(lstatSync(files[index]!));
           } catch {
-            return null;
+            result.inaccessible += 1;
           }
-        })
+        }
+        continue;
+      }
+      const batch = await Promise.all(
+        files.slice(at, at + STAT_BATCH).map((file) => lstat(file).catch(() => null))
       );
-      for (const measured of sizes) {
-        if (measured === null) {
-          result.inaccessible += 1;
-          continue;
-        }
-        if (measured.key !== null) {
-          if (seenLinks.has(measured.key)) {
-            result.hardLinks += 1;
-            continue;
-          }
-          seenLinks.add(measured.key);
-        }
-        result.bytes += measured.size;
+      for (const stats of batch) {
+        if (stats === null) result.inaccessible += 1;
+        else countFile(stats);
       }
     }
     // Sized what this directory had, then stop: `partial` is already set.
-    if (result.partial) return result;
+    if (result.partial) return finish();
   }
-  return result;
+  return finish();
 }
 
 /**

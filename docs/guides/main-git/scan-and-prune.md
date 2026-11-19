@@ -120,10 +120,10 @@ Files: `worktree-prune.ts` (the sweep), `worktree-reclaim.ts` (the
   go into `worktree_state`, so a cancelled sweep is not wasted and a re-run
   reports `cached` without git. `prune-handlers.test.ts` pins this.
 - **Sizing is a separate phase** after candidates are known, because walking
-  `node_modules` is slow. `util/dir-size.ts` has an entry ceiling (the answer
-  becomes a floor, with the same decision), an abort signal, a yield every few
-  directories, and never follows symlinks (a pnpm store outside the tree is
-  not this worktree's bytes).
+  `node_modules` is slow. The sweep reuses up to four Node workers for its
+  filesystem metadata reads. Each walk has an entry ceiling (the size becomes
+  a lower bound), checks for cancellation, and skips symlink targets. The
+  asynchronous walk yields every few directories when used on main.
 - **Sizes de-duplicate hard links.** pnpm hard-links one store blob into every
   package, so summing `stat.size` turned a 400 MB checkout into "freeing
   4.2 GB". `directorySize` counts each `dev:ino` once (`hardLinks` reports the

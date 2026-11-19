@@ -280,10 +280,11 @@ describe("sweepPrunableWorktrees", () => {
       options(
         { a: repo("a", [stale("w1")]), b: repo("b", [stale("w2")]) },
         {
-          sizeOf: async (path) => ({
+          runSizeWorker: (run) => run(async (path) => ({
             bytes: path === "/w/w1" ? 4096 : 128,
-            partial: path === "/w/w2"
-          }),
+            partial: path === "/w/w2",
+            inaccessible: 0
+          })),
           onProgress: (progress) => phases.push(progress.phase)
         }
       )
@@ -302,9 +303,9 @@ describe("sweepPrunableWorktrees", () => {
       options(
         { a: repo("a", [stale("w1")]) },
         {
-          sizeOf: async () => {
+          runSizeWorker: (run) => run(async () => {
             throw new Error("EACCES");
-          }
+          })
         }
       )
     );
@@ -390,8 +391,10 @@ it("carries measured activity onto candidates, and leaves cancelled checks unkno
     operationId: "activity", now: () => new Date(NOW),
     computeRepoState: async () => undefined,
     readRepo: () => repo("r", [stale("old"), stale("partial")]),
-    sizeOf: async (path) => ({ bytes: 10, partial: path.endsWith("partial"),
-      lastTouchedAt: ago(2), activityComplete: !path.endsWith("partial") })
+    runSizeWorker: (run) => run(async (path) => ({
+      bytes: 10, partial: false, lastTouchedAt: ago(2),
+      inaccessible: path.endsWith("partial") ? 1 : 0
+    }))
   });
   expect(result.results[0]!.candidates.map((c) => [c.lastTouchedAt, c.activityComplete])).toEqual([
     [ago(2), true], [ago(2), false]
@@ -401,7 +404,9 @@ it("carries measured activity onto candidates, and leaves cancelled checks unkno
     operationId: "cancelled-activity", signal: controller.signal,
     computeRepoState: async () => { controller.abort(); },
     readRepo: () => repo("r", [stale("old")]),
-    sizeOf: async () => { throw new Error("must not measure after cancellation"); }
+    runSizeWorker: (run) => run(async () => {
+      throw new Error("must not measure after cancellation");
+    })
   });
   expect(stopped.results[0]!.candidates[0]!.activityComplete).toBeUndefined();
 });

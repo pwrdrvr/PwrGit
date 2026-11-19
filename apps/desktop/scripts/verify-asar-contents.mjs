@@ -58,8 +58,10 @@ const asar = require("@electron/asar");
 const listing = asar
   .listPackage(asarPath, { isPack: false })
   .map((entry) => entry.replace(/\\/g, "/"));
+const pruneWorkerEntry = "out/main/prune-size-worker.mjs";
 const required = [
   "/out/main/index.js",
+  `/${pruneWorkerEntry}`
 ];
 
 const missing = required.filter((entry) => !listing.includes(entry));
@@ -67,6 +69,11 @@ if (missing.length > 0) {
   console.error(
     `verify-asar-contents: missing required packaged file(s): ${missing.join(", ")}`,
   );
+  process.exit(1);
+}
+
+if (!existsSync(resolve(`${asarPath}.unpacked`, pruneWorkerEntry))) {
+  console.error(`verify-asar-contents: missing unpacked prune worker: ${pruneWorkerEntry}`);
   process.exit(1);
 }
 

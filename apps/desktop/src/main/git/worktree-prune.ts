@@ -7,6 +7,7 @@ import {
   type PruneScanSummary,
   type Repo
 } from "@pwrgit/shared";
+import type { DirSizeResult } from "../util/dir-size";
 
 /**
  * The pruner's own pass over a whole profile.
@@ -62,6 +63,10 @@ export type PruneScanRepoInput = {
 
 type LockRunner = <T>(id: string, operation: () => Promise<T>) => Promise<T>;
 
+type SizeOf = (path: string) => Promise<
+  Pick<DirSizeResult, "bytes" | "partial" | "inaccessible" | "lastTouchedAt">
+>;
+
 export type PruneScanOptions = {
   operationId: string;
   signal?: AbortSignal;
@@ -77,16 +82,9 @@ export type PruneScanOptions = {
   computeRepoState: (repoId: string) => Promise<void>;
   /** Re-read the repo's projection after computing. Null means it is gone. */
   readRepo: (repoId: string) => Repo | null;
-  /** Measure one candidate's checkout. Omitted ⇒ sizes stay null. */
-  sizeOf?: (
-    path: string,
-    signal?: AbortSignal
-  ) => Promise<{
-    bytes: number;
-    partial: boolean;
-    lastTouchedAt?: string;
-    activityComplete?: boolean;
-  }>;
+  /** Provide one measurer for a sizing loop and close it when the loop ends.
+   * Omitted ⇒ sizes stay null. */
+  runSizeWorker?: (run: (sizeOf: SizeOf) => Promise<void>) => Promise<void>;
   onProgress?: (progress: PruneScanProgress) => void;
   /** Serialize per-repository git through the app's repository lock. */
   runRepository?: LockRunner;
@@ -303,8 +301,8 @@ export async function sweepPrunableWorktrees(
   // candidate set is known means the progress line can say how many are left,
   // and a cancel here still returns every candidate — just without its size.
   const candidates = ordered.flatMap((repo) => repo.candidates);
-  if (options.sizeOf !== undefined && candidates.length > 0) {
-    const sizeOf = options.sizeOf;
+  const runSizeWorker = options.runSizeWorker;
+  if (runSizeWorker !== undefined && candidates.length > 0) {
     let sized = 0;
     let at = 0;
     const emit = (): void =>
@@ -328,7 +326,7 @@ export async function sweepPrunableWorktrees(
       )
     );
     emit();
-    const sizeWorker = async (): Promise<void> => {
+    const sizeWorker = async (sizeOf: SizeOf): Promise<void> => {
       for (;;) {
         if (isAborted(options.signal)) return;
         const index = at;
@@ -336,14 +334,12 @@ export async function sweepPrunableWorktrees(
         if (index >= candidates.length) return;
         const candidate = candidates[index]!;
         try {
-          const measured = await sizeOf(candidate.path, options.signal);
+          const measured = await sizeOf(candidate.path);
           candidate.sizeBytes = measured.bytes;
           if (measured.lastTouchedAt !== undefined) {
             candidate.lastTouchedAt = measured.lastTouchedAt;
           }
-          if (measured.activityComplete !== undefined) {
-            candidate.activityComplete = measured.activityComplete;
-          }
+          candidate.activityComplete = !measured.partial && measured.inaccessible === 0;
           if (measured.partial) candidate.sizePartial = true;
         } catch {
           candidate.sizeBytes = null;
@@ -355,7 +351,7 @@ export async function sweepPrunableWorktrees(
     await Promise.all(
       Array.from(
         { length: Math.min(PRUNE_SIZE_CONCURRENCY, candidates.length) },
-        () => sizeWorker()
+        () => runSizeWorker(sizeWorker)
       )
     );
   }

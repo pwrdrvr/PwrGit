@@ -1,6 +1,6 @@
 import { hostname } from "node:os";
 import { mkdirSync } from "node:fs";
-import { join } from "node:path";
+import { basename, join } from "node:path";
 import {
   app,
   BrowserWindow,
@@ -63,6 +63,7 @@ import { registerBulkSyncHandlers } from "./git/bulk-sync-handlers";
 import { checkPullWatchdogDeadlines } from "./git/pull-watchdog";
 import { registerMaintenanceHandlers } from "./git/maintenance-handlers";
 import { registerPruneHandlers } from "./git/prune-handlers";
+import pruneSizeWorker from "./util/prune-size-worker.ts?modulePath";
 import { SshHostTrustService } from "./git/ssh-host-trust";
 import { registerSshHostTrustHandlers } from "./git/ssh-host-trust-handlers";
 import { registerCloneHandlers } from "./git/clone-handlers";
@@ -1382,7 +1383,10 @@ if (!gotSingleInstanceLock) {
       execGit,
       indexer,
       refresher,
-      worktreeOperations
+      worktreeOperations,
+      app.isPackaged
+        ? join(process.resourcesPath, "app.asar.unpacked", "out", "main", basename(pruneSizeWorker))
+        : pruneSizeWorker
     );
     const maintenanceHandlers = registerMaintenanceHandlers(
       bus, db, execGit, worktreeOperations, indexer, prService, Date.now,
