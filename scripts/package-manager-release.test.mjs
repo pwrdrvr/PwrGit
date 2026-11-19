@@ -199,7 +199,6 @@ test("maps native arm64 and universal Intel DMGs separately and offers only Wind
   expect(output["Casks/pwrgit.rb"]).toContain('arch arm: "arm64", intel: "universal"');
   expect(output["Casks/pwrgit.rb"]).toContain(`sha256 arm:   "${"1".repeat(64)}"`);
   expect(output["Casks/pwrgit.rb"]).toContain(`intel: "${"2".repeat(64)}"`);
-  expect(output["Casks/pwrgit.rb"]).toContain('\n  command_wrapper "pwrgit",');
   const installer = output[`${distribution.wingetPath}/0.27.0/PwrDrvr.PwrGit.installer.yaml`];
   expect(installer).toContain("Architecture: x64");
   expect(installer).toContain("Custom: /currentuser");
@@ -209,6 +208,32 @@ test("maps native arm64 and universal Intel DMGs separately and offers only Wind
 });
 
 const canRunCaskWrapper = process.platform !== "win32" && spawnSync("ruby", ["--version"]).status === 0;
+
+function caskInstallArtifacts(appdir, supportsWrapper) {
+  const value = release();
+  const cask = renderManifests(value, selectAssets(value))["Casks/pwrgit.rb"];
+  const stanzas = cask.slice(cask.indexOf('  app "PwrGit.app"'), cask.lastIndexOf("\nend"));
+  const artifacts = execFileSync("ruby", ["-rjson", "-rshellwords", "-e", `
+    def app(name)
+      @app = name
+    end
+
+    if ARGV.fetch(1) == "true"
+      def self.command_wrapper(name, content:)
+        @wrapper = [name, content]
+      end
+    end
+
+    appdir = ARGV.fetch(0)
+    eval(STDIN.read, binding)
+    puts JSON.generate(app: @app, wrapper: @wrapper)
+  `, appdir, String(supportsWrapper)], { input: stanzas, encoding: "utf8" });
+  return JSON.parse(artifacts);
+}
+
+test.runIf(canRunCaskWrapper)("loads the desktop app artifact on Homebrew without command_wrapper", () => {
+  expect(caskInstallArtifacts("/Applications", false)).toEqual({ app: "PwrGit.app", wrapper: null });
+});
 
 test.runIf(canRunCaskWrapper).each([
   "Apps $PWRGIT_TEST_PATH",
@@ -221,19 +246,10 @@ test.runIf(canRunCaskWrapper).each([
     const git = join(appdir, "PwrGit.app", "Contents", "Resources", "git", "bin", "git");
     mkdirSync(dirname(git), { recursive: true });
     writeFileSync(git, "#!/bin/sh\nprintf '<%s>\\n' \"$@\"\n", { mode: 0o755 });
-    const value = release();
-    const cask = renderManifests(value, selectAssets(value))["Casks/pwrgit.rb"];
-    const stanza = cask.slice(cask.indexOf("  command_wrapper "), cask.lastIndexOf("\nend"));
-    const script = execFileSync("ruby", ["-rshellwords", "-e", String.raw`
-      def command_wrapper(_name, content: nil, executable: nil)
-        # Match Homebrew's executable: wrapper when testing the old stanza.
-        print content || "#!/bin/bash\nexec \"#{executable}\" \"$@\"\n"
-      end
-
-      appdir = ARGV.fetch(0)
-      eval(STDIN.read, binding)
-    `, appdir], { input: stanza });
-    const wrapper = join(directory, "pwrgit");
+    const { app, wrapper: [command, script] } = caskInstallArtifacts(appdir, true);
+    expect(app).toBe("PwrGit.app");
+    expect(command).toBe("pwrgit");
+    const wrapper = join(directory, command);
     writeFileSync(wrapper, script, { mode: 0o755 });
     const result = spawnSync(wrapper, ["--version", "with spaces", "$PWRGIT_TEST_PATH", ""], {
       encoding: "utf8", env: { ...process.env, PWRGIT_TEST_PATH: "expanded" },
