@@ -1,10 +1,5 @@
 import { useEffect, useRef } from "react";
-import {
-  ASSUMED_FORGE_KIND,
-  changeRequestLabel,
-  changeRequestSigil,
-  type PrSummary
-} from "@pwrgit/shared";
+import { ASSUMED_FORGE_KIND, changeRequestLabel, type PrSummary } from "@pwrgit/shared";
 import { copyText } from "../../lib/copyText";
 import {
   hoverIntentHandlers,
@@ -13,7 +8,7 @@ import {
 } from "../../lib/hoverIntent";
 import { dispatch } from "../../lib/pwrgit";
 import { useViewportTooltip } from "../../lib/useViewportTooltip";
-import { prPresentation } from "./pr-status";
+import { prChipLabel, prPresentation } from "./pr-status";
 import { PrStatusCard } from "./PrStatusCard";
 
 /** A compact PR-status chip: colored dot + #number. Click opens the PR in
@@ -59,15 +54,7 @@ export function PrChip({
   // PwrAgnt: the bar is an affordance for open drafts only.
   const status = prPresentation(pr);
   const isDraft = status.draft;
-  // The forge's own sigil: a GitLab merge request is !41, and in a list that
-  // mixes forges it is one of the two things saying which is which.
-  const sigil = changeRequestSigil(pr.forge ?? ASSUMED_FORGE_KIND);
-  const label =
-    pr.state === "merged"
-      ? `merged ${sigil}${pr.number}`
-      : pr.state === "closed"
-      ? `closed ${sigil}${pr.number}`
-        : `${sigil}${pr.number}`;
+  const label = prChipLabel(pr);
   const card = <PrStatusCard pr={pr} repoId={repoId} />;
   const open = (): void => void dispatch("shell:openExternal", { url: pr.url });
   const activate = (altKey: boolean): void => {

@@ -1,9 +1,17 @@
 import {
+  ASSUMED_FORGE_KIND,
+  changeRequestSigil,
   mergeQueueLabel,
   mergeQueueStatus,
   type MergeQueueStatus,
   type PrSummary
 } from "@pwrgit/shared";
+
+/** Visible chip text, including the forge's own sigil. */
+export function prChipLabel(pr: PrSummary): string {
+  const number = `${changeRequestSigil(pr.forge ?? ASSUMED_FORGE_KIND)}${pr.number}`;
+  return pr.state === "open" ? number : `${pr.state} ${number}`;
+}
 
 /**
  * The dot a queue state draws. A PR in the queue is neither merged (purple)

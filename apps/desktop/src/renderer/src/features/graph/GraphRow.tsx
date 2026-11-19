@@ -5,6 +5,7 @@ import { CheckoutGlyph } from "../../lib/CheckoutGlyph";
 import { AuthorAvatar } from "./AuthorAvatar";
 import { hoverIntentHandlers, type HoverIntent } from "../../lib/hoverIntent";
 import { PrChip } from "../sidebar/PrChip";
+import { prChipLabel } from "../sidebar/pr-status";
 import { TagGlyph } from "../../lib/TagGlyph";
 import type { LaneRow } from "./lane-layout";
 import type { PrLandingSeg } from "./pr-landings";
@@ -176,13 +177,47 @@ export function GraphRow({
   const chipCount = refs.length + remoteRefs.length;
   const isTip = chipCount > 0;
   const chipNames = [...refs, ...remoteRefs];
+  const canTakeTag = onTakeTag !== undefined;
+  const hasPersonButton = onShowPerson !== undefined;
+  const movedTag = canTakeTag ? vm.tagMoved : undefined;
+  const publishedTags = canTakeTag ? vm.publishedTags : undefined;
   // The strip shows only chips that fit whole; the rest fold into "+N". The
-  // tag chip keeps its name until they have all folded. The view model and
-  // branch adornments are everything on the meta line besides its width, so a
-  // new identity for either re-measures.
+  // tag chip keeps its name until they have all folded.
   const lineRef = useRef<HTMLDivElement>(null);
   const stripRef = useRef<HTMLSpanElement>(null);
-  const chipContent = useMemo(() => [vm, branchInfo], [vm, branchInfo]);
+  const { localChips, remoteChips, chipContent } = useMemo(() => {
+    const localChips = refs.slice(0, MAX_REF_CHIPS).map((name) => {
+      const info = branchInfo?.[name];
+      return {
+        name,
+        pr: info?.pr?.number === pullRequest?.number ? undefined : info?.pr,
+        worktreeId: info?.worktreeId
+      };
+    });
+    const remoteChips = remoteRefs.slice(0, MAX_REF_CHIPS - localChips.length);
+    // A graph or PR refresh can replace every row model. Refit only when a
+    // row's meta line can change size. Folded names and PR status colors,
+    // for example, update in React without changing the strip's geometry.
+    const chipContent = !isTip && vm.tag === undefined ? "" : JSON.stringify([
+      chipCount,
+      localChips.map(({ name, pr, worktreeId }) => [
+        name, pr && prChipLabel(pr), worktreeId !== undefined
+      ]),
+      remoteChips,
+      pullRequest && prChipLabel(pullRequest),
+      vm.tag?.name,
+      movedTag !== undefined,
+      publishedTags?.map(({ name, published }) => [name, published.remote]) ?? [],
+      isHead,
+      commit.isMerge,
+      isMine ? "you" : commit.authorName,
+      hasPersonButton
+    ]);
+    return { localChips, remoteChips, chipContent };
+  }, [
+    refs, remoteRefs, branchInfo, pullRequest, isTip, chipCount, vm.tag, movedTag,
+    publishedTags, isHead, commit.isMerge, isMine, commit.authorName, hasPersonButton
+  ]);
   const chipFit = useRefChipFit(
     lineRef,
     stripRef,
@@ -453,23 +488,23 @@ export function GraphRow({
           {/* Fitted with the branch chips, and last to give way: its name
               ellipsizes to a floor, then leaves the mark alone. The tooltip
               and the hidden name still say which tag it is. */}
-          {vm.tag !== undefined && vm.tagMoved !== undefined && onTakeTag !== undefined ? (
+          {vm.tag !== undefined && movedTag !== undefined && onTakeTag !== undefined ? (
             // Moved on the publisher: the chip says so and is the way to fix it.
             <button
               type="button"
               className={`commit-tag commit-tag--tag is-moved${
                 tagFit === "whole" ? "" : ` is-${tagFit}`
               }`}
-              aria-label={`${vm.tag.kind === "annotated" ? "Annotated tag" : "Tag"} ${vm.tag.name}, moved on ${vm.tagMoved.published.remote} to ${vm.tagMoved.published.targetId.slice(0, 7)}. Take ${vm.tagMoved.published.remote}'s…`}
+              aria-label={`${vm.tag.kind === "annotated" ? "Annotated tag" : "Tag"} ${vm.tag.name}, moved on ${movedTag.published.remote} to ${movedTag.published.targetId.slice(0, 7)}. Take ${movedTag.published.remote}'s…`}
               {...hoverTooltip(
                 tip,
-                `${vm.tagMoved.published.remote}'s ${vm.tag.name} is at ${vm.tagMoved.published.targetId.slice(0, 12)}\n` +
-                  `Click to take ${vm.tagMoved.published.remote}'s.`
+                `${movedTag.published.remote}'s ${vm.tag.name} is at ${movedTag.published.targetId.slice(0, 12)}\n` +
+                  `Click to take ${movedTag.published.remote}'s.`
               )}
               onClick={(event) => {
                 event.stopPropagation();
                 tip.hide();
-                onTakeTag(vm.tagMoved!);
+                onTakeTag(movedTag);
               }}
             >
               <TagGlyph />
@@ -508,7 +543,7 @@ export function GraphRow({
             </span>
           )}
           {onTakeTag !== undefined &&
-            vm.publishedTags?.map((moved) => (
+            publishedTags?.map((moved) => (
               // Where the publisher's value of a local tag now points.
               <button
                 type="button"
@@ -543,47 +578,40 @@ export function GraphRow({
               className={`ref-chips${chipFit?.shown === 0 ? " is-folded" : ""}`}
               {...hoverTooltip(tip, chipNames.join("\n"))}
             >
-              {refs.slice(0, shownChips).map((name) => {
-                const info = branchInfo?.[name];
-                const wtId = info?.worktreeId;
-                return (
-                  <span key={name} className={`ref-group${squeezeClass}`}>
+              {localChips.slice(0, shownChips).map(({ name, pr, worktreeId }) => (
+                <span key={name} className={`ref-group${squeezeClass}`}>
+                  <button
+                    type="button"
+                    className={`ref-chip${squeezeClass}`}
+                    aria-label={`Actions for branch ${name}`}
+                    style={{
+                      color,
+                      borderColor: `color-mix(in srgb, ${color} 45%, transparent)`,
+                      background: `color-mix(in srgb, ${color} 13%, transparent)`
+                    }}
+                    {...branchMenu(name, false)}
+                  >
+                    <BranchGlyph size={8} strokeWidth={2.6} />
+                    <span className="ref-chip__name">{name}</span>
+                  </button>
+                  {pr !== undefined && <PrChip pr={pr} />}
+                  {worktreeId !== undefined && (
                     <button
-                      type="button"
-                      className={`ref-chip${squeezeClass}`}
-                      aria-label={`Actions for branch ${name}`}
-                      style={{
-                        color,
-                        borderColor: `color-mix(in srgb, ${color} 45%, transparent)`,
-                        background: `color-mix(in srgb, ${color} 13%, transparent)`
+                      className="ref-wt"
+                      {...hoverTooltip(tip, "Checked out in a worktree — click to open it")}
+                      aria-label={`Open the ${name} worktree`}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        onRevealWorktree?.(worktreeId);
                       }}
-                      {...branchMenu(name, false)}
                     >
-                      <BranchGlyph size={8} strokeWidth={2.6} />
-                      <span className="ref-chip__name">{name}</span>
+                      <CheckoutGlyph size={10} />
                     </button>
-                    {info?.pr !== undefined &&
-                      info.pr.number !== pullRequest?.number && (
-                        <PrChip pr={info.pr} />
-                      )}
-                    {wtId !== undefined && (
-                      <button
-                        className="ref-wt"
-                        {...hoverTooltip(tip, "Checked out in a worktree — click to open it")}
-                        aria-label={`Open the ${name} worktree`}
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          onRevealWorktree?.(wtId);
-                        }}
-                      >
-                        <CheckoutGlyph size={10} />
-                      </button>
-                    )}
-                  </span>
-                );
-              })}
-              {remoteRefs
-                .slice(0, Math.max(0, shownChips - refs.length))
+                  )}
+                </span>
+              ))}
+              {remoteChips
+                .slice(0, Math.max(0, shownChips - localChips.length))
                 .map((name) =>
                   // A collapsed chip names the remote alone ("origin", drawn
                   // when it sits on the local branch): its branch actions are

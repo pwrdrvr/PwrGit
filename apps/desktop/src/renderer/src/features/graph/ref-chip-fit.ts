@@ -167,20 +167,20 @@ function watchWidth(line: Element, refit: () => void): () => void {
  * every capped branch chip plus the "+N" pill, and this settles on a fit in
  * the same commit, before anything paints.
  *
- * `content` is any value whose identity changes when the meta line's contents
- * might have (the row's view model); a new one re-measures. Width changes and
- * font loads re-measure on their own.
+ * `content` identifies the parts of the meta line that can affect its fit.
+ * A new value re-measures. Width changes and font loads re-measure on their
+ * own.
  */
 export function useRefChipFit(
   lineRef: RefObject<HTMLElement | null>,
   stripRef: RefObject<HTMLElement | null>,
   total: number,
   hasTag: boolean,
-  content: unknown
+  content: string
 ): RefChipFit | null {
   const [settled, setSettled] = useState<{
     fit: RefChipFit;
-    content: unknown;
+    content: string;
     epoch: number;
   } | null>(null);
   const [epoch, setEpoch] = useState(0);
