@@ -184,11 +184,16 @@ export function useRefChipFit(
     epoch: number;
   } | null>(null);
   const [epoch, setEpoch] = useState(0);
+  const fits = total > 0 || hasTag;
+  if (!fits && settled !== null) {
+    // A chipless row stops watching widths and fonts. Measure again if
+    // the same chips return.
+    setSettled(null);
+  }
   const fit =
     settled !== null && settled.content === content && settled.epoch === epoch
       ? settled.fit
       : null;
-  const fits = total > 0 || hasTag;
 
   useLayoutEffect(() => {
     const line = lineRef.current;

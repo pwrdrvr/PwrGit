@@ -16,6 +16,7 @@ declare global {
 let out: string;
 let app: ElectronApplication;
 let page: Page;
+const shots = process.env["PWRGIT_HARNESS_SHOTS"];
 
 test.beforeAll(async () => {
   out = mkdtempSync(join(tmpdir(), "pwrgit-ref-chips-"));
@@ -147,6 +148,33 @@ test("width and content changes agree with a fresh fit across the chip ladder", 
   expect(changed).toEqual(await readRows());
 });
 
+test("restoring the last ref after a resize agrees with a fresh fit", async () => {
+  const refs = ["feature/repair-widget-previews"];
+  await page.evaluate((refs) => {
+    window.graphRefHarness.mount(1, 120);
+    window.graphRefHarness.changeRow({ refs, tag: undefined });
+  }, refs);
+  await settle();
+  expect((await readRows())[0]).toMatchObject({ chips: [], folded: 1 });
+
+  await page.evaluate(() => window.graphRefHarness.changeRow({ refs: [] }));
+  await expect(page.locator(".ref-chips")).toHaveCount(0);
+  await page.evaluate(() => window.graphRefHarness.resize(700));
+  await settle();
+  await page.evaluate((refs) => window.graphRefHarness.changeRow({ refs }), refs);
+  const restored = await readRows();
+  if (shots) {
+    mkdirSync(shots, { recursive: true });
+    await page.locator(".graph-harness").screenshot({ path: join(shots, "restored-ref-700.png") });
+  }
+
+  await page.evaluate(() => window.graphRefHarness.remount());
+  await settle();
+  const fresh = await readRows();
+  expect(fresh[0]).toMatchObject({ chips: [{ text: refs[0] }], folded: 0 });
+  expect(restored).toEqual(fresh);
+});
+
 test("a late font refits the row at an unchanged width", async () => {
   await page.evaluate(() => window.graphRefHarness.mount(10, 390, true));
   await settle();
@@ -160,7 +188,6 @@ test("a late font refits the row at an unchanged width", async () => {
   expect(loaded).toEqual(await readRows());
 });
 
-const shots = process.env["PWRGIT_HARNESS_SHOTS"];
 if (shots) {
   test("captures wide, squeezed and folded chip layouts", async () => {
     mkdirSync(shots, { recursive: true });
