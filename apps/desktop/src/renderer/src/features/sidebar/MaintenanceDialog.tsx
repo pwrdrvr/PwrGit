@@ -782,13 +782,14 @@ export function MaintenanceDialog({
       : stepResults.gc !== undefined && stepResults.gc.state !== "failed" ? "ran" : "none";
     const branchCard = branchCardCopy(branchIssues, deletedCount, gcAfter, gcIssues.length > 0);
     const gcCard = gcCardCopy(gcIssues, gcReceipt?.results.filter((row) => row.outcome === "success").length ?? 0);
-    const clonesCard = clonesCardCopy(clonesIssues, clonesTotals(clonesReceipt?.results ?? []).worktrees);
+    const clonesSum = clonesTotals(clonesReceipt?.results ?? []);
+    const clonesCard = clonesCardCopy(clonesIssues, clonesSum.worktrees);
     /** Each repository the Clones step shared something in, largest first. */
     const clonesRows = (clonesReceipt?.results ?? [])
       .map((row) => ({ row, totals: repoTotals(row) }))
       .filter(({ totals }) => totals.worktrees > 0)
       .sort((a, b) => (b.totals.bytes ?? 0) - (a.totals.bytes ?? 0));
-    const clonesShared = clonesTotals(clonesReceipt?.results ?? []).bytes ?? 0;
+    const clonesShared = clonesSum.bytes ?? 0;
     /** The finished line counts only what the plan ran. */
     const doneCounts = [
       runPlan.worktrees ? `${stepResults.worktrees?.items?.length ?? 0} ${stepResults.worktrees?.items?.length === 1 ? "worktree" : "worktrees"}` : null,
@@ -807,8 +808,8 @@ export function MaintenanceDialog({
         {branchIssues.map((issue, index) => <IssueRow key={`${issue.path ?? issue.repo}:${issue.branch ?? ""}:${index}`} issue={issue} />)}
       </ProblemCard>}
       {clonesIssues.length > 0 && <ProblemCard headline={clonesCard.headline} sub={clonesCard.sub} listLabel={clonesCard.listLabel}
-        action={<><CopyButton className="maintenance__problem-log" label="Copy all" text={issuesReport(clonesCard.headline, clonesIssues, "Clones")} /><ViewLogButton /></>}>
-        {clonesIssues.map((issue, index) => <IssueRow key={`${issue.path ?? issue.repo}:${index}`} issue={issue} report={issueReport(issue, "Clones")} />)}
+        action={<><CopyButton className="maintenance__problem-log" label="Copy all" text={() => issuesReport(clonesCard.headline, clonesIssues, "Clones")} /><ViewLogButton /></>}>
+        {clonesIssues.map((issue, index) => <IssueRow key={`${issue.path ?? issue.repo}:${index}`} issue={issue} report={() => issueReport(issue, "Clones")} />)}
       </ProblemCard>}
       {gcIssues.length > 0 && <ProblemCard headline={gcCard.headline} sub={gcCard.sub} listLabel={gcCard.listLabel}>
         {gcIssues.map((issue, index) => <IssueRow key={`${issue.path ?? issue.repo}:${index}`} issue={issue} />)}

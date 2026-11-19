@@ -1,6 +1,7 @@
 import { useEffect, useId, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { dispatch } from "../../lib/pwrgit";
 import { copyText } from "../../lib/copyText";
+import { hoverTooltip, useViewportTooltip } from "../../lib/useViewportTooltip";
 import { splitStepLine, type StepIssue } from "./maintenance-issues";
 
 /**
@@ -57,8 +58,9 @@ export function DetailsToggle({ open, onToggle }: { open: boolean; onToggle: () 
 }
 
 /** Puts `text` on the clipboard and says so for a moment. `className`
- *  picks the card head's link style or a row's outlined button. */
-export function CopyButton({ text, label, className }: { text: string; label: string; className?: string }) {
+ *  picks the card head's link style or a row's outlined button. `text` is
+ *  built on click, not on every render of the dialog. */
+export function CopyButton({ text, label, className }: { text: () => string; label: string; className?: string }) {
   const [copied, setCopied] = useState(false);
   useEffect(() => {
     if (!copied) return;
@@ -69,7 +71,7 @@ export function CopyButton({ text, label, className }: { text: string; label: st
     <button
       type="button"
       className={className}
-      onClick={() => void copyText(text).then(() => setCopied(true), () => undefined)}
+      onClick={() => void copyText(text()).then(() => setCopied(true), () => undefined)}
     >
       <Icon name="copy" />
       <span aria-live="polite">{copied ? "Copied" : label}</span>
@@ -144,8 +146,9 @@ export function ProblemCard({
 
 /** One branch, repository or worktree a Combined step left behind.
  *  `report` is the row as plain text; with it the row offers Copy. */
-export function IssueRow({ issue, report }: { issue: StepIssue; report?: string }) {
+export function IssueRow({ issue, report }: { issue: StepIssue; report?: () => string }) {
   const [open, setOpen] = useState(false);
+  const tip = useViewportTooltip();
   const exit = issue.exitCode === undefined ? null : `Exit code ${issue.exitCode}${issue.command === undefined ? "" : ` · ${issue.command}`}`;
   const details = [issue.raw, exit].filter((line): line is string => line !== undefined && line !== null).join("\n");
   return (
@@ -153,13 +156,13 @@ export function IssueRow({ issue, report }: { issue: StepIssue; report?: string 
       {issue.kind !== "run" && <div className="maintenance__problem-title">
         <strong className="selectable">
           <span>{issue.repo}</span>
-          {issue.branch !== undefined && <> · {issue.branch}</>}
+          {issue.branch !== undefined && <> · {issue.branch || "detached"}</>}
         </strong>
         {issue.head !== undefined && <code>{issue.head.slice(0, 8)}</code>}
       </div>}
       <Reason message={issue.reason} lead={issue.lead} />
       {(issue.branch === undefined || issue.kind === "worktree") && issue.path !== undefined && (
-        <small className="selectable" title={issue.path}>{issue.path}</small>
+        <small className="selectable" {...hoverTooltip(tip, issue.path)}>{issue.path}</small>
       )}
       {(report !== undefined || details !== "") && (
         <div className="maintenance__problem-actions">
@@ -170,6 +173,7 @@ export function IssueRow({ issue, report }: { issue: StepIssue; report?: string 
       {open && details !== "" && (
         <pre className="maintenance__problem-raw selectable">{details}</pre>
       )}
+      {tip.tooltipNode}
     </li>
   );
 }

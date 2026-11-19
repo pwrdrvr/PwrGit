@@ -1434,27 +1434,30 @@ describe("Clones as a Combined step", () => {
       name === "maintenance:run" && req.action?.kind === "reshare" ? { ok: true, value: summary([result]) } : normal(name, req));
     const writeText = vi.fn(async () => undefined);
     Object.defineProperty(navigator, "clipboard", { value: { writeText }, configurable: true });
-    for (const label of ["Remove finished worktrees", "Delete finished local branches", "Collect garbage"]) await untick(label);
-    await click("Start");
-    const card = container.querySelector(".maintenance__problem")!;
-    expect(card.querySelector("strong")!.textContent).toBe("2 worktrees couldn’t be re-shared in 1 repository");
-    const rows = [...card.querySelectorAll(".maintenance__problem-row")];
-    expect(rows.map((row) => row.querySelector("small")?.textContent)).toEqual(["/fixtures/docs-wt", "/fixtures/api-wt"]);
-    expect(rows[0]!.textContent).toContain("Git couldn’t open this worktree.");
-    // Git's words never lead; they sit behind Details with the exit code.
-    expect(rows[0]!.querySelector("p")!.textContent).not.toContain("fatal:");
-    await act(async () => [...rows[0]!.querySelectorAll("button")].find((b) => b.textContent === "Details")!.click());
-    expect(rows[0]!.querySelector("pre")!.textContent).toBe(`${fatal}\nExit code 128 · git worktree reflink --porcelain -z`);
-    await act(async () => [...card.querySelectorAll("button")].find((b) => b.textContent === "Copy all")!.click());
-    Reflect.deleteProperty(navigator, "clipboard");
-    const copied = String((writeText.mock.calls as unknown[][])[0]?.[0]);
-    expect(copied).toContain("Worktree: /fixtures/docs-wt");
-    expect(copied).toContain(`Git: ${fatal}`);
-    expect(copied).toContain("Worktree: /fixtures/api-wt");
-    expect(copied).toContain("Exit code: 1");
-    // The step line keeps its counts, now matching the rows.
-    const step = [...container.querySelectorAll(".maintenance__receipt-step")].find((node) => node.querySelector("strong")?.textContent === "Clones")!;
-    expect(step.textContent).toContain("3 worktrees · 2 failed");
+    try {
+      for (const label of ["Remove finished worktrees", "Delete finished local branches", "Collect garbage"]) await untick(label);
+      await click("Start");
+      const card = container.querySelector(".maintenance__problem")!;
+      expect(card.querySelector("strong")!.textContent).toBe("2 worktrees couldn’t be re-shared in 1 repository");
+      const rows = [...card.querySelectorAll(".maintenance__problem-row")];
+      expect(rows.map((row) => row.querySelector("small")?.textContent)).toEqual(["/fixtures/docs-wt", "/fixtures/api-wt"]);
+      expect(rows[0]!.textContent).toContain("Git couldn’t open this worktree.");
+      // Git's words never lead; they sit behind Details with the exit code.
+      expect(rows[0]!.querySelector("p")!.textContent).not.toContain("fatal:");
+      await act(async () => [...rows[0]!.querySelectorAll("button")].find((b) => b.textContent === "Details")!.click());
+      expect(rows[0]!.querySelector("pre")!.textContent).toBe(`${fatal}\nExit code 128 · git worktree reflink --porcelain -z`);
+      await act(async () => [...card.querySelectorAll("button")].find((b) => b.textContent === "Copy all")!.click());
+      const copied = String((writeText.mock.calls as unknown[][])[0]?.[0]);
+      expect(copied).toContain("Worktree: /fixtures/docs-wt");
+      expect(copied).toContain(`Git: ${fatal}`);
+      expect(copied).toContain("Worktree: /fixtures/api-wt");
+      expect(copied).toContain("Exit code: 1");
+      // The step line keeps its counts, now matching the rows.
+      const step = [...container.querySelectorAll(".maintenance__receipt-step")].find((node) => node.querySelector("strong")?.textContent === "Clones")!;
+      expect(step.textContent).toContain("3 worktrees · 2 failed");
+    } finally {
+      Reflect.deleteProperty(navigator, "clipboard");
+    }
   });
 
   it("a Clones run with nothing new still counts as a step that ran, and the done line names only planned steps", async () => {

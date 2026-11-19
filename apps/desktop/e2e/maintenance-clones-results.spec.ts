@@ -50,7 +50,7 @@ test("Clones failures name each worktree, show Git's words, and copy", async () 
     await shoot(page, "maintenance-clones.png");
 
     const card = page.getByRole("alert", { name: "2 worktrees couldn’t be re-shared in 2 repositories" });
-    await expect(card).toContainText("The other 2 worktrees ran.");
+    await expect(card).toContainText("The other 2 worktrees had no errors.");
     const rows = card.locator(".maintenance__problem-row");
     await expect(rows).toHaveCount(2);
     await expect(rows.nth(0)).toContainText("docs-site · docs/refresh-guides");

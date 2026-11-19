@@ -177,7 +177,9 @@ export function clonesCardCopy(issues: StepIssue[], worktrees = 0): CardCopy {
     const others = worktrees - issues.length;
     return {
       headline: `${issues.length} ${issues.length === 1 ? "worktree" : "worktrees"} couldn’t be re-shared in ${repositories(repos)}`,
-      sub: others > 0 ? `${sub} The other ${others.toLocaleString("en-US")} ${others === 1 ? "worktree" : "worktrees"} ran.` : sub,
+      // The rest include missing, locked and unstarted worktrees, so they
+      // had no errors; not all of them ran.
+      sub: others > 0 ? `${sub} The other ${others.toLocaleString("en-US")} ${others === 1 ? "worktree" : "worktrees"} had no errors.` : sub,
       listLabel: "Worktrees not re-shared"
     };
   }
@@ -189,7 +191,8 @@ export function clonesCardCopy(issues: StepIssue[], worktrees = 0): CardCopy {
 }
 
 /** One row as plain text for the clipboard: what failed, where, and what Git
- *  said. It holds nothing the maintenance log does not. */
+ *  said. Git's words are main's sanitized `gitError`, as in the log; the
+ *  Reason line is PwrGit's own sentence. */
 export function issueReport(issue: StepIssue, step: string): string {
   const name = [issue.repo, issue.branch === undefined ? null : issue.branch || "detached"].filter((part) => part !== null && part !== "").join(" · ");
   return [

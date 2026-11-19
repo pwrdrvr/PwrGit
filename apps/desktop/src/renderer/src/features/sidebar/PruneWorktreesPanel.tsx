@@ -26,7 +26,7 @@ import {
 import { ReclaimDiskPanel } from "./ReclaimDiskPanel";
 import { daysLabel, FinishedAfterSelect, MaintenanceRulesApplied } from "./MaintenancePlan";
 import { StatusMark } from "./BulkSyncStatus";
-import { DetailsToggle, Icon, ProblemCard, Reason } from "./MaintenanceProblem";
+import { DetailsToggle, Icon, ProblemCard, Reason, ViewLogButton } from "./MaintenanceProblem";
 import {
   describeBytes,
   emptyReviewCopy,
@@ -814,16 +814,7 @@ function RemovalFailures({
     <ProblemCard
       headline={one ? "1 worktree wasn’t removed" : `${count} worktrees weren’t removed`}
       sub={sub}
-      action={
-        <button
-          type="button"
-          className="maintenance__problem-log"
-          onClick={() => void dispatch("logs:openWindow", undefined)}
-        >
-          <Icon name="log" />
-          View log
-        </button>
-      }
+      action={<ViewLogButton />}
     >
       {failures.map((failure) => (
         <ProblemRow
