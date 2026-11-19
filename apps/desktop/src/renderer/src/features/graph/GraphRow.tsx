@@ -1,4 +1,4 @@
-import { useMemo, useRef, type MouseEvent } from "react";
+import { memo, useMemo, useRef, type MouseEvent } from "react";
 import type { Commit, LaneBranchInfo, MovedTag, PrSummary } from "@pwrgit/shared";
 import { BranchGlyph } from "../../lib/BranchGlyph";
 import { CheckoutGlyph } from "../../lib/CheckoutGlyph";
@@ -7,7 +7,7 @@ import { hoverIntentHandlers, type HoverIntent } from "../../lib/hoverIntent";
 import { PrChip } from "../sidebar/PrChip";
 import { prChipLabel } from "../sidebar/pr-status";
 import { TagGlyph } from "../../lib/TagGlyph";
-import type { LaneRow } from "./lane-layout";
+import type { LaneRow, LaneSeg } from "./lane-layout";
 import type { PrLandingSeg } from "./pr-landings";
 import type { BranchChipTarget } from "./BranchChipMenu";
 import { shortWhen } from "./graph-view";
@@ -66,6 +66,8 @@ const curveTop = (from: number, to: number): string =>
 const curveBottom = (from: number, to: number): string =>
   `M ${cx(from)} ${MID} C ${cx(from)} ${MID + MID * 0.5}, ${cx(to)} ${MID + MID * 0.5}, ${cx(to)} ${ROW_H}`;
 
+type PrLanding = { top: PrLandingSeg[]; bottom: PrLandingSeg[] };
+
 export type GraphRowVM = {
   commit: Commit;
   row: LaneRow;
@@ -116,7 +118,7 @@ export function GraphRow({
   vm: GraphRowVM;
   laneCount: number;
   /** Dotted semantic PR landing segments; never part of Git ancestry. */
-  prLanding?: { top: PrLandingSeg[]; bottom: PrLandingSeg[] };
+  prLanding?: PrLanding;
   /** One shared renderer clock, supplied by LineageGraph. */
   now: number;
   selected: boolean;
@@ -287,19 +289,6 @@ export function GraphRow({
     </>
   );
 
-  // A lane that runs straight through both halves of the row is drawn as ONE
-  // full-height line (no half-line seam at the vertical midpoint). Halves with
-  // different dash tiers (a local or remote tip row on the spine) stay
-  // separate so the pattern boundary lands exactly at the dot.
-  const passThrough = new Map<number, number>();
-  for (const t of row.top) {
-    if (t.from !== t.to) continue;
-    const b = row.bottom.find((s) => s.from === s.to && s.from === t.from);
-    if (b !== undefined && (t.dashed ?? 0) === (b.dashed ?? 0)) {
-      passThrough.set(t.from, t.dashed ?? 0);
-    }
-  }
-
   return (
     <div
       className={`graph-row${selected ? " is-selected" : ""}${
@@ -323,98 +312,7 @@ export function GraphRow({
           height={ROW_H}
           viewBox={`0 0 ${width} ${ROW_H}`}
         >
-        {prLanding?.top.map((s, i) => (
-          <path
-            key={`plt${i}`}
-            d={curveTop(s.from, s.to)}
-            fill="none"
-            stroke="var(--brand-purple)"
-            strokeWidth={1.5}
-            strokeLinecap="round"
-            strokeDasharray="2 2"
-            opacity={0.9}
-          >
-            <title>{`PR #${s.number} landed without a Git parent edge`}</title>
-          </path>
-        ))}
-        {prLanding?.bottom.map((s, i) => (
-          <path
-            key={`plb${i}`}
-            d={curveBottom(s.from, s.to)}
-            fill="none"
-            stroke="var(--brand-purple)"
-            strokeWidth={1.5}
-            strokeLinecap="round"
-            strokeDasharray="2 2"
-            opacity={0.9}
-          >
-            <title>{`PR #${s.number} landed without a Git parent edge`}</title>
-          </path>
-        ))}
-        {[...passThrough].map(([k, dashed]) => (
-          <line
-            key={`p${k}`}
-            x1={cx(k)}
-            y1={0}
-            x2={cx(k)}
-            y2={ROW_H}
-            stroke={laneColor(k)}
-            strokeWidth={2}
-            strokeDasharray={dashed > 0 ? dashFor(dashed) : undefined}
-          />
-        ))}
-        {row.top
-          .filter((s) => !(s.from === s.to && passThrough.has(s.from)))
-          .map((s, i) =>
-            s.from === s.to ? (
-              <line
-                key={`t${i}`}
-                x1={cx(s.from)}
-                y1={0}
-                x2={cx(s.to)}
-                y2={MID}
-                stroke={laneColor(s.from)}
-                strokeWidth={2}
-                strokeDasharray={s.dashed !== undefined ? dashFor(s.dashed) : undefined}
-              />
-            ) : (
-              <path
-                key={`t${i}`}
-                d={curveTop(s.from, s.to)}
-                fill="none"
-                stroke={laneColor(s.from)}
-                strokeWidth={2}
-                strokeLinecap="round"
-                strokeDasharray={s.dashed !== undefined ? dashFor(s.dashed) : undefined}
-              />
-            )
-          )}
-        {row.bottom
-          .filter((s) => !(s.from === s.to && passThrough.has(s.from)))
-          .map((s, i) =>
-            s.from === s.to ? (
-              <line
-                key={`b${i}`}
-                x1={cx(s.from)}
-                y1={MID}
-                x2={cx(s.to)}
-                y2={ROW_H}
-                stroke={laneColor(s.to)}
-                strokeWidth={2}
-                strokeDasharray={s.dashed !== undefined ? dashFor(s.dashed) : undefined}
-              />
-            ) : (
-              <path
-                key={`b${i}`}
-                d={curveBottom(s.from, s.to)}
-                fill="none"
-                stroke={laneColor(s.to)}
-                strokeWidth={2}
-                strokeLinecap="round"
-                strokeDasharray={s.dashed !== undefined ? dashFor(s.dashed) : undefined}
-              />
-            )
-          )}
+        <GraphLaneSegments row={row} prLanding={prLanding} />
 
         {/* Soft halo behind branch tips + HEAD so the eye lands on them. */}
         {(isTip || isHead) && (
@@ -700,3 +598,158 @@ export function GraphRow({
     </div>
   );
 }
+
+type GraphLaneSegmentsProps = {
+  row: LaneRow;
+  prLanding: PrLanding | undefined;
+};
+type DrawableSegment = LaneSeg & { number?: number };
+
+function sameSegments(
+  previous: readonly DrawableSegment[] | undefined,
+  next: readonly DrawableSegment[] | undefined
+): boolean {
+  if (previous === next) return true;
+  if (previous === undefined || next === undefined || previous.length !== next.length) {
+    return false;
+  }
+  for (let i = 0; i < previous.length; i += 1) {
+    const before = previous[i]!;
+    const after = next[i]!;
+    if (
+      before.from !== after.from ||
+      before.to !== after.to ||
+      before.dashed !== after.dashed ||
+      before.number !== after.number
+    ) {
+      return false;
+    }
+  }
+  return true;
+}
+
+// Interaction often reuses the layout. A graph refresh can rebuild every
+// segment, so compare their drawing inputs in order to reuse the SVG paths.
+const GraphLaneSegments = memo(function GraphLaneSegments({
+  row,
+  prLanding
+}: GraphLaneSegmentsProps) {
+  // A lane that runs straight through both halves of the row is drawn as ONE
+  // full-height line (no half-line seam at the vertical midpoint). Halves with
+  // different dash tiers (a local or remote tip row on the spine) stay
+  // separate so the pattern boundary lands exactly at the dot.
+  const passThrough = new Map<number, number>();
+  for (const t of row.top) {
+    if (t.from !== t.to) continue;
+    const b = row.bottom.find((s) => s.from === s.to && s.from === t.from);
+    if (b !== undefined && (t.dashed ?? 0) === (b.dashed ?? 0)) {
+      passThrough.set(t.from, t.dashed ?? 0);
+    }
+  }
+
+  return (
+    <>
+      {prLanding?.top.map((s, i) => (
+        <path
+          key={`plt${i}`}
+          d={curveTop(s.from, s.to)}
+          fill="none"
+          stroke="var(--brand-purple)"
+          strokeWidth={1.5}
+          strokeLinecap="round"
+          strokeDasharray="2 2"
+          opacity={0.9}
+        >
+          <title>{`PR #${s.number} landed without a Git parent edge`}</title>
+        </path>
+      ))}
+      {prLanding?.bottom.map((s, i) => (
+        <path
+          key={`plb${i}`}
+          d={curveBottom(s.from, s.to)}
+          fill="none"
+          stroke="var(--brand-purple)"
+          strokeWidth={1.5}
+          strokeLinecap="round"
+          strokeDasharray="2 2"
+          opacity={0.9}
+        >
+          <title>{`PR #${s.number} landed without a Git parent edge`}</title>
+        </path>
+      ))}
+      {[...passThrough].map(([k, dashed]) => (
+        <line
+          key={`p${k}`}
+          x1={cx(k)}
+          y1={0}
+          x2={cx(k)}
+          y2={ROW_H}
+          stroke={laneColor(k)}
+          strokeWidth={2}
+          strokeDasharray={dashed > 0 ? dashFor(dashed) : undefined}
+        />
+      ))}
+      {row.top
+        .filter((s) => !(s.from === s.to && passThrough.has(s.from)))
+        .map((s, i) =>
+          s.from === s.to ? (
+            <line
+              key={`t${i}`}
+              x1={cx(s.from)}
+              y1={0}
+              x2={cx(s.to)}
+              y2={MID}
+              stroke={laneColor(s.from)}
+              strokeWidth={2}
+              strokeDasharray={s.dashed !== undefined ? dashFor(s.dashed) : undefined}
+            />
+          ) : (
+            <path
+              key={`t${i}`}
+              d={curveTop(s.from, s.to)}
+              fill="none"
+              stroke={laneColor(s.from)}
+              strokeWidth={2}
+              strokeLinecap="round"
+              strokeDasharray={s.dashed !== undefined ? dashFor(s.dashed) : undefined}
+            />
+          )
+        )}
+      {row.bottom
+        .filter((s) => !(s.from === s.to && passThrough.has(s.from)))
+        .map((s, i) =>
+          s.from === s.to ? (
+            <line
+              key={`b${i}`}
+              x1={cx(s.from)}
+              y1={MID}
+              x2={cx(s.to)}
+              y2={ROW_H}
+              stroke={laneColor(s.to)}
+              strokeWidth={2}
+              strokeDasharray={s.dashed !== undefined ? dashFor(s.dashed) : undefined}
+            />
+          ) : (
+            <path
+              key={`b${i}`}
+              d={curveBottom(s.from, s.to)}
+              fill="none"
+              stroke={laneColor(s.to)}
+              strokeWidth={2}
+              strokeLinecap="round"
+              strokeDasharray={s.dashed !== undefined ? dashFor(s.dashed) : undefined}
+            />
+          )
+        )}
+    </>
+  );
+}, (previous, next) =>
+  (previous.row === next.row || (
+    sameSegments(previous.row.top, next.row.top) &&
+    sameSegments(previous.row.bottom, next.row.bottom)
+  )) &&
+  (previous.prLanding === next.prLanding || (
+    sameSegments(previous.prLanding?.top, next.prLanding?.top) &&
+    sameSegments(previous.prLanding?.bottom, next.prLanding?.bottom)
+  ))
+);
