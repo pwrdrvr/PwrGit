@@ -1,5 +1,10 @@
 # Changelog
 
+## v0.60.3 - 2026-11-19
+
+- Clones maintenance - Fixed Combined maintenance reporting only a repository-level count when re-sharing fails in linked worktrees. Each failed worktree now has its own row with its repository, branch and path, a plain-language explanation, and Git's sanitized error and exit code under Details. Added Copy, Copy all and View log actions, and retained per-worktree failure details in the app log so completed runs can be diagnosed. Failed main-checkout updates are reported separately.
+- Graph performance - Improved refresh and commit-focus updates by reusing unchanged Git lane and PR landing SVG segments, including equivalent graph responses with newly allocated lane arrays. Changed coordinates, dash patterns, ordering and PR numbers still update the drawing. Controlled renderer fixtures showed less CPU work and JavaScript allocation; whole-app CPU-spike frequency, GPU use and battery savings remain unmeasured.
+
 ## v0.60.2 - 2026-11-19
 
 - Security dependencies - Updated the bundled Hono HTTP framework and Node server adapter to include upstream security fixes.
