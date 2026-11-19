@@ -216,6 +216,7 @@ export function renderManifests(release, assets, minimumMacos = caskMacosRequire
   depends_on macos: ${minimumMacos}
 
   app "PwrGit.app"
+  command_wrapper "pwrgit", executable: "#{appdir}/PwrGit.app/Contents/Resources/git/bin/git"
 end
 `,
     [`${distribution.wingetPath}/${version}/${distribution.wingetId}.yaml`]: `${header("version")}DefaultLocale: en-US\nManifestType: version\nManifestVersion: 1.12.0\n`,

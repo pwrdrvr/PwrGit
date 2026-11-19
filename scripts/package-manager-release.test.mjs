@@ -198,6 +198,9 @@ test("maps native arm64 and universal Intel DMGs separately and offers only Wind
   expect(output["Casks/pwrgit.rb"]).toContain('arch arm: "arm64", intel: "universal"');
   expect(output["Casks/pwrgit.rb"]).toContain(`sha256 arm:   "${"1".repeat(64)}"`);
   expect(output["Casks/pwrgit.rb"]).toContain(`intel: "${"2".repeat(64)}"`);
+  expect(output["Casks/pwrgit.rb"]).toContain(
+    '\n  command_wrapper "pwrgit", executable: "#{appdir}/PwrGit.app/Contents/Resources/git/bin/git"\n',
+  );
   const installer = output[`${distribution.wingetPath}/0.27.0/PwrDrvr.PwrGit.installer.yaml`];
   expect(installer).toContain("Architecture: x64");
   expect(installer).toContain("Custom: /currentuser");
