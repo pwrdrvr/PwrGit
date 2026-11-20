@@ -189,8 +189,10 @@ describe.skipIf(process.platform === "win32")("stageRuntime", () => {
     try {
       return await run();
     } finally {
-      expect(fetch).not.toHaveBeenCalled();
+      // Restore before asserting, so a failure here cannot leak the mock.
+      const downloads = fetch.mock.calls.length;
       fetch.mockRestore();
+      expect(downloads).toBe(0);
     }
   };
 
@@ -231,6 +233,7 @@ describe.skipIf(process.platform === "win32")("stageRuntime", () => {
     await offlineStage(() => stageRuntime({ manifestPath, platform: "linux", arch: "x64", output, cache }));
     const inode = statSync(output).ino;
     chmodSync(output, 0o700); // stale: not the runtime's own mode
+    const leftovers = () => readdirSync(temp).filter((name) => name.startsWith(".pwrgit-stage-"));
 
     const shim = join(temp, "no-exchange");
     mkdirSync(shim);
@@ -244,10 +247,13 @@ describe.skipIf(process.platform === "win32")("stageRuntime", () => {
       process.env.PATH = path;
     }
     expect(statSync(output).ino).toBe(inode);
+    expect(leftovers()).toEqual([]);
 
     const pin = await offlineStage(() => stageRuntime({ manifestPath, platform: "linux", arch: "x64", output, cache }));
     expect(statSync(output).ino).not.toBe(inode);
     expect(statSync(output).mode & 0o777).toBe(0o755);
     expect(verifyRuntime(output, pin).version).toBe(VERSION);
+    // The displaced runtime went out with the stager's temp directory.
+    expect(leftovers()).toEqual([]);
   });
 });

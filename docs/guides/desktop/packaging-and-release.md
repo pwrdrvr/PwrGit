@@ -73,6 +73,14 @@ Ghostty (MIT) ships the same pair.
 - DMG and ZIP targets build universal and arm64. Keep `concurrency.jobs: 1`:
   `beforePack` mutates the shared stage's Git and SQLite files per
   architecture.
+- On macOS and Linux, `beforePack` stages the pinned custom Git over
+  Dugite's non-empty `node_modules/dugite/git` with `stage-runtime.mjs`. Node
+  cannot rename over a non-empty directory, so that first pass swaps the two
+  through `python3` (`renamex_np` on macOS, `renameat2` on Linux): packaging
+  needs `python3` on `PATH`. Archives are cached in `~/.cache/pwrgit-runtime`
+  (`PWRGIT_RUNTIME_CACHE` overrides it), which nothing prunes; delete old
+  archives there by hand. The stager is huntharo/git's file byte for byte
+  (the pin's `consumer_sha256`), so change it upstream, never here.
 - `release.mjs` verifies both app trees. `mac-release-artifacts.mjs` then
   writes one `latest-mac.yml` and the stable DMG aliases. Universal stays the
   legacy `path`/`sha512` fallback and the `PwrGit.dmg` alias.
