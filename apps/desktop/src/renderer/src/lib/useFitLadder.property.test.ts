@@ -4,7 +4,7 @@ import fc from "fast-check";
 import { act, createElement, useLayoutEffect, useRef } from "react";
 import { createRoot } from "react-dom/client";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
-import { flushFitLadders, useStepLadder } from "./useFitLadder";
+import { flushFitLadders, useFitLadder, useStepLadder } from "./useFitLadder";
 
 class TestResizeObserver {
   static active = new Set<TestResizeObserver>();
@@ -203,4 +203,63 @@ it("retires old step classes and observers when a mounted ladder becomes empty",
   await act(() => root.render(createElement(Row, { fits: () => false, steps: [] })));
   expect(depths()).toEqual([0]);
   expect(TestResizeObserver.active.size).toBe(0);
+});
+
+it("fits the current refs when any one of the stepped row, box or end is replaced", async () => {
+  const makeElement = (right: () => number) => {
+    const element = document.createElement("div");
+    element.getBoundingClientRect = () => new DOMRect(0, 0, right(), 0);
+    return element;
+  };
+  const depth = (row: Element) => STEPS.filter((step) => row.classList.contains(step)).length;
+
+  function SimpleRow({ row, box, end }: { row: HTMLElement; box: HTMLElement; end: HTMLElement }) {
+    const rowRef = useRef<HTMLElement>(null);
+    const boxRef = useRef<HTMLElement>(null);
+    const endRef = useRef<HTMLElement>(null);
+    // Simulate React publishing new ref targets before the fit's layout effect,
+    // with no mutations to the previously observed subtree.
+    useLayoutEffect(() => {
+      rowRef.current = row;
+      boxRef.current = box;
+      endRef.current = end;
+    });
+    useFitLadder(rowRef, boxRef, endRef, STEPS);
+    return null;
+  }
+
+  await fc.assert(fc.asyncProperty(
+    fc.array(fc.tuple(fc.constantFrom("row", "box", "end"), fc.integer({ min: 0, max: 3 })), { minLength: 3 }),
+    async (replacements) => {
+      let rowInset = 0;
+      let boxRight = 100;
+      let endRight = 110;
+      const currentEnd = (): number => endRight + rowInset - depth(sequence.row) * 10;
+      const sequence = {
+        row: makeElement(() => 0),
+        box: makeElement(() => boxRight),
+        end: makeElement(currentEnd)
+      };
+      await act(() => root.render(createElement(SimpleRow, { ...sequence })));
+      expect(depth(sequence.row)).toBe(1);
+      for (const [ref, size] of replacements) {
+        const previous = sequence.row;
+        if (ref === "row") {
+          rowInset = size * 10;
+          sequence.row = makeElement(() => 0);
+        } else if (ref === "box") {
+          boxRight = 90 + size * 10;
+          sequence.box = makeElement(() => boxRight);
+        } else {
+          endRight = 90 + size * 10;
+          sequence.end = makeElement(currentEnd);
+        }
+        await act(() => root.render(createElement(SimpleRow, { ...sequence })));
+        // Each step gains 10px, capped at the last presentation.
+        const needed = (endRight + rowInset - boxRight) / 10;
+        expect(depth(sequence.row)).toBe(Math.min(STEPS.length, Math.max(0, needed)));
+        if (ref === "row") expect(depth(previous)).toBe(0);
+      }
+    }
+  ), { numRuns: 20 });
 });

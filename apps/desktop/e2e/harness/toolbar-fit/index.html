@@ -1,0 +1,23 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <title>Toolbar fit harness</title>
+    <style>
+      body { margin: 0; padding: 16px; }
+      .toolbar-case { height: 88px; overflow: auto; }
+      .toolbar-case::-webkit-scrollbar { width: 18px; }
+      .toolbar-case > .pane { min-width: 0; width: auto; }
+      .toolbar-case--lineage { height: 400px; }
+      .toolbar-case--lineage .graph-scroll { flex: 0 0 280px; }
+      :root[style*="--toolbar-test-text-scale"] :is(.graph-toolbar__label, .graph-toolbar button,
+        .wt-header__state .wt-btn, .wt-header__state .sync-chip, .sidebar-toolbar__btn) {
+        font-size: calc(11px * var(--toolbar-test-text-scale, 1));
+      }
+    </style>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="./main.tsx"></script>
+  </body>
+</html>
