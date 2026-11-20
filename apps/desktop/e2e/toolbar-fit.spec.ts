@@ -64,10 +64,18 @@ test.afterAll(async () => {
   if (out !== undefined) rmSync(out, { recursive: true, force: true });
 });
 
-async function settle() {
-  await page.evaluate(() => new Promise<void>((resolve) =>
-    requestAnimationFrame(() => requestAnimationFrame(() => resolve()))
-  ));
+async function waitForLayout(toolbar: Toolbar) {
+  // Hidden windows can deliver frames at 1 Hz on CI. Wait for one actual
+  // layout delivery, including the fit box's initial ResizeObserver pass.
+  await page.locator(CASES[toolbar].box).evaluate((box) =>
+    new Promise<void>((resolve) => {
+      const observer = new ResizeObserver(() => {
+        observer.disconnect();
+        resolve();
+      });
+      observer.observe(box);
+    })
+  );
 }
 
 async function mount(toolbar: Toolbar) {
@@ -75,7 +83,7 @@ async function mount(toolbar: Toolbar) {
     window.toolbarFit.mount({ toolbar, width, expanded: true, overflow: false });
   }, { toolbar, width: CASES[toolbar].width });
   if (toolbar === "lineage") await expect(page.locator(".graph-locate")).toBeAttached();
-  await settle();
+  await waitForLayout(toolbar);
 }
 
 /** Try every presentation on a separate copy at the live width. The oracle
@@ -110,11 +118,11 @@ async function checkFit(toolbar: Toolbar) {
   return { depth: actual.expected.length, width: actual.width };
 }
 
-async function resize(width: number) {
+async function resize(toolbar: Toolbar, width: number) {
   await page.locator(".toolbar-case").evaluate((parent, value) => {
     parent.style.width = `${value}px`;
   }, width);
-  await settle();
+  await waitForLayout(toolbar);
 }
 
 const photos = process.env["PWRGIT_HARNESS_SHOTS"];
@@ -138,9 +146,8 @@ for (const toolbar of ["lineage", "worktree", "sidebar"] as const) {
           window.toolbarFit.update({ tick });
           await Promise.resolve();
         }
-        await new Promise<void>((resolve) =>
-          requestAnimationFrame(() => requestAnimationFrame(() => resolve()))
-        );
+        // Run after the mutation observers and any queued fit from the commits.
+        await new Promise<void>((resolve) => setTimeout(resolve, 0));
         return { reads, writes };
       } finally {
         observer.disconnect();
@@ -159,30 +166,22 @@ for (const toolbar of ["lineage", "worktree", "sidebar"] as const) {
     let respondsToScale = false;
     for (const width of [base + 135, base + 100, base + 65, base + 40, base + 24, base, base - 12]) {
       // External parent resize alone, with no React commit.
-      await resize(width);
+      await resize(toolbar, width);
       const initial = await checkFit(toolbar);
       depths.add(initial.depth);
-      await page.evaluate(async () => {
-        window.toolbarFit.update({ expanded: false });
-        if (document.querySelector(".graph-toolbar") !== null) {
-          // Fake IPC and the effects publishing the new graph are async.
-          await new Promise<void>((resolve) => setTimeout(resolve, 0));
-        }
-        await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
-      });
+      await page.evaluate(() => window.toolbarFit.update({ expanded: false }));
       if (toolbar === "lineage") await expect(page.locator(".graph-locate")).toHaveCount(0);
       const compact = await checkFit(toolbar);
       expect(compact.width).toBe(initial.width);
       respondsToContent ||= compact.depth !== initial.depth;
 
       await page.evaluate(() => window.toolbarFit.update({ overflow: true }));
-      await settle();
+      await waitForLayout(toolbar);
       const scrolled = await checkFit(toolbar);
       expect(scrolled.width).toBeLessThan(compact.width);
       respondsToScrollbar ||= compact.depth !== scrolled.depth;
 
       await page.evaluate(() => window.toolbarFit.scale(true));
-      await settle();
       const scaled = await checkFit(toolbar);
       expect(scaled.width).toBe(scrolled.width);
       respondsToScale ||= scaled.depth !== scrolled.depth;
@@ -193,7 +192,7 @@ for (const toolbar of ["lineage", "worktree", "sidebar"] as const) {
           expanded: true, overflow: false });
       });
       if (toolbar === "lineage") await expect(page.locator(".graph-locate")).toBeAttached();
-      await settle();
+      await waitForLayout(toolbar);
       expect(await checkFit(toolbar)).toEqual(initial);
     }
     expect(depths.size).toBeGreaterThan(1);
@@ -208,11 +207,10 @@ test("refits when the child-owned Git LFS chip changes at a fixed width", async 
   for (const width of [305, 325, 345, 365, 385, 405, 425, 445]) {
     await page.evaluate((width) =>
       window.toolbarFit.mount({ toolbar: "worktree", width, expanded: true, overflow: false }), width);
-    await settle();
+    await waitForLayout("worktree");
     const before = await checkFit("worktree");
     await page.evaluate(() => window.toolbarFit.finishLfsRead());
     await expect(page.locator(".lfs-chip")).toBeAttached();
-    await settle();
     if (photos !== undefined && width === 365) {
       mkdirSync(photos, { recursive: true });
       await page.locator(".toolbar-case").screenshot({ path: join(photos, "worktree-lfs.png") });
@@ -228,14 +226,28 @@ test("refits at the same width when a pending font becomes available", async () 
   await mount("sidebar");
   await page.evaluate(() => window.toolbarFit.useLateFont());
   // The initial no-step threshold is measured in the fallback face.
-  for (let width = 208; width <= 330; width += 2) {
-    await resize(width);
-    if ((await checkFit("sidebar")).depth === 0) break;
+  let tooNarrow = CASES.sidebar.width - 1;
+  let wideEnough = 330;
+  while (wideEnough - tooNarrow > 1) {
+    const width = Math.floor((tooNarrow + wideEnough) / 2);
+    await resize("sidebar", width);
+    if ((await checkFit("sidebar")).depth === 0) wideEnough = width;
+    else tooNarrow = width;
   }
+  await resize("sidebar", wideEnough);
   const fallback = await checkFit("sidebar");
   expect(fallback.depth).toBe(0);
-  await page.evaluate(() => window.toolbarFit.loadWideFont());
-  await settle();
+  await page.evaluate(async () => {
+    const finished = new Promise<void>((resolve) => {
+      const onFontsLoaded = (event: FontFaceSetLoadEvent) => {
+        if (!event.fontfaces.some((face) => face.family.includes("Toolbar Fit Wide"))) return;
+        document.fonts.removeEventListener("loadingdone", onFontsLoaded);
+        resolve();
+      };
+      document.fonts.addEventListener("loadingdone", onFontsLoaded);
+    });
+    await Promise.all([window.toolbarFit.loadWideFont(), finished]);
+  });
   const loaded = await checkFit("sidebar");
   expect(loaded.width).toBe(fallback.width);
   expect(loaded.depth).toBeGreaterThan(fallback.depth);
@@ -253,9 +265,9 @@ test("benchmark each toolbar in isolation", async () => {
     await mount(toolbar);
     if (photos !== undefined) {
       mkdirSync(photos, { recursive: true });
-      await resize(CASES[toolbar].width + 24);
+      await resize(toolbar, CASES[toolbar].width + 24);
       await page.locator(CASES[toolbar].row).screenshot({ path: join(photos, `${toolbar}.png`) });
-      await resize(CASES[toolbar].width);
+      await resize(toolbar, CASES[toolbar].width);
     }
     for (const workload of ["unchanged", "content", "width"] as const) {
       const run = (count: number) => page.evaluate(async ({ count, workload, config, toolbar }) => {
