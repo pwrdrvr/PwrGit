@@ -1,4 +1,4 @@
-import type { LaneGraph, Worktree, WorktreeState } from "@pwrgit/shared";
+import type { ForkStatus, LaneGraph, Worktree, WorktreeState } from "@pwrgit/shared";
 import wideFont from "@fontsource/geist-sans/files/geist-sans-latin-600-normal.woff2?url";
 import { flushSync } from "react-dom";
 import { createRoot } from "react-dom/client";
@@ -15,6 +15,7 @@ type Scene = {
   expanded: boolean;
   overflow: boolean;
   tick: number;
+  forkSource?: boolean;
 };
 
 const noop = () => undefined;
@@ -35,6 +36,22 @@ const branchState = {
 const worktree: Worktree = {
   ...branchState, id: "widget-checkout", repoId: repo.id, path: repo.path,
   pinned: false, isPrimary: true
+};
+const forkStatus: ForkStatus = {
+  branch: branchState.branch,
+  head: branchState.head,
+  source: {
+    ref: "refs/remotes/upstream-widget-automation/main",
+    label: "upstream-widget-automation/main",
+    remote: "upstream-widget-automation",
+    head: "a".repeat(40),
+    ahead: 0, behind: 812, pushBack: null
+  },
+  tracked: {
+    ref: "refs/remotes/origin/main", label: "origin/main", remote: "origin",
+    head: branchState.head, ahead: 0, behind: 0
+  },
+  drift: null
 };
 const compactGraph: LaneGraph = {
   commits: Array.from({ length: 40 }, (_, i) => {
@@ -88,6 +105,7 @@ Object.assign(window, {
             } });
           });
         case "remote:forkStatus":
+          return { ok: true, value: scene.forkSource && scene.expanded ? forkStatus : null };
         case "repo:setup": return { ok: true, value: null };
         default: return { ok: false, error: { message: `Fixture has no response for ${command}` } };
       }
@@ -97,13 +115,10 @@ Object.assign(window, {
 
 let scene: Scene = { toolbar: "lineage", width: 360, expanded: false, overflow: false, tick: 0 };
 const selected = new Set<string>();
-function ToolbarScene({ toolbar, width, expanded, overflow, tick }: Scene) {
+function ToolbarScene({ toolbar, width, expanded, overflow, tick, forkSource }: Scene) {
   const state: WorktreeState = {
     ...branchState, worktreeId: worktree.id, hasUpstream: true, updatedAt: sampledAt,
-    ...(expanded ? {
-      dirty: 812, behind: 812,
-      source: { remote: "upstream-widget-automation", label: "upstream-widget-automation/main", ahead: 0, behind: 812 }
-    } : {})
+    ...(expanded ? { dirty: 812, behind: forkSource ? 0 : 812 } : {})
   };
   return (
     <div className={`toolbar-case toolbar-case--${toolbar}`} style={{ width }}>
@@ -157,10 +172,14 @@ export const toolbarFit = {
   },
   update(change: Partial<Omit<Scene, "toolbar">> = {}) {
     const previousGraph = graph;
+    const wasExpanded = scene.expanded;
     scene = { ...scene, ...change };
     graph = scene.expanded ? expandedGraph : compactGraph;
     render();
-    if (scene.toolbar === "lineage" && previousGraph !== graph) {
+    if (
+      (scene.toolbar === "lineage" && previousGraph !== graph) ||
+      (scene.toolbar === "worktree" && scene.forkSource && scene.expanded !== wasExpanded)
+    ) {
       emit("graph:changed", { repoId: repo.id });
     }
   },

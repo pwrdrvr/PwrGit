@@ -78,10 +78,10 @@ async function waitForLayout(toolbar: Toolbar) {
   );
 }
 
-async function mount(toolbar: Toolbar) {
-  await page.evaluate(({ toolbar, width }) => {
-    window.toolbarFit.mount({ toolbar, width, expanded: true, overflow: false });
-  }, { toolbar, width: CASES[toolbar].width });
+async function mount(toolbar: Toolbar, forkSource = false) {
+  await page.evaluate(({ toolbar, width, forkSource }) => {
+    window.toolbarFit.mount({ toolbar, width, forkSource, expanded: true, overflow: false });
+  }, { toolbar, width: CASES[toolbar].width, forkSource });
   if (toolbar === "lineage") await expect(page.locator(".graph-locate")).toBeAttached();
   await waitForLayout(toolbar);
 }
@@ -158,19 +158,30 @@ for (const toolbar of ["lineage", "worktree", "sidebar"] as const) {
   });
 
   test(`${toolbar} matches the widest fitting presentation through layout and content changes`, async () => {
-    await mount(toolbar);
+    await mount(toolbar, toolbar === "worktree");
+    const forkChip = page.locator(".sync-chip--source");
+    if (toolbar === "worktree") {
+      await expect(forkChip.locator(".sync-chip__text")).toHaveText("↓812 behind upstream-widget-automation");
+      await expect(forkChip).toHaveAttribute("data-mid", "↓812 upstream-widget-automation");
+      await expect(forkChip).toHaveAttribute("data-short", "↓812");
+    }
     const base = CASES[toolbar].width;
+    // The fork's long remote name needs wider cases for the full and mid labels.
+    const widths = toolbar === "worktree"
+      ? [740, 615, 595, 465, 395, 354, 330, 318]
+      : [base + 135, base + 100, base + 65, base + 40, base + 24, base, base - 12];
     const depths = new Set<number>();
     let respondsToContent = false;
     let respondsToScrollbar = false;
     let respondsToScale = false;
-    for (const width of [base + 135, base + 100, base + 65, base + 40, base + 24, base, base - 12]) {
+    for (const width of widths) {
       // External parent resize alone, with no React commit.
       await resize(toolbar, width);
       const initial = await checkFit(toolbar);
       depths.add(initial.depth);
       await page.evaluate(() => window.toolbarFit.update({ expanded: false }));
       if (toolbar === "lineage") await expect(page.locator(".graph-locate")).toHaveCount(0);
+      if (toolbar === "worktree") await expect(forkChip).toHaveCount(0);
       const compact = await checkFit(toolbar);
       expect(compact.width).toBe(initial.width);
       respondsToContent ||= compact.depth !== initial.depth;
@@ -192,10 +203,16 @@ for (const toolbar of ["lineage", "worktree", "sidebar"] as const) {
           expanded: true, overflow: false });
       });
       if (toolbar === "lineage") await expect(page.locator(".graph-locate")).toBeAttached();
+      if (toolbar === "worktree") await expect(forkChip).toBeAttached();
       await waitForLayout(toolbar);
       expect(await checkFit(toolbar)).toEqual(initial);
     }
     expect(depths.size).toBeGreaterThan(1);
+    if (toolbar === "worktree") {
+      expect(depths.has(0) || depths.has(1), "full fork-source label").toBe(true);
+      expect(depths.has(2), "mid fork-source label").toBe(true);
+      expect(depths.has(3), "short fork-source label").toBe(true);
+    }
     expect(respondsToContent).toBe(true);
     expect(respondsToScrollbar).toBe(true);
     expect(respondsToScale).toBe(true);
@@ -253,15 +270,18 @@ test("refits at the same width when a pending font becomes available", async () 
   expect(loaded.depth).toBeGreaterThan(fallback.depth);
 });
 
-test("benchmark each toolbar in isolation", async () => {
-  test.skip(process.env["PWRGIT_FIT_BENCH"] !== "1", "Opt-in browser profiling");
-  const cdp = await page.context().newCDPSession(page);
-  await cdp.send("Performance.enable", { timeDomain: "threadTicks" });
-  const traceDirectory = process.env["PWRGIT_FIT_TRACE"];
-  const readMetrics = async () => Object.fromEntries(
-    (await cdp.send("Performance.getMetrics")).metrics.map(({ name, value }) => [name, value])
-  );
-  for (const toolbar of ["lineage", "worktree", "sidebar"] as const) {
+for (const toolbar of ["lineage", "worktree", "sidebar"] as const) {
+  test(`benchmark each toolbar in isolation (${toolbar})`, async () => {
+    test.skip(process.env["PWRGIT_FIT_BENCH"] !== "1", "Opt-in browser profiling");
+    // The 172 resizes with tracing can each take two frames. Budget for 1 Hz
+    // hidden windows, including the timers used by the Lineage content workload.
+    test.setTimeout(20 * 60_000);
+    const cdp = await page.context().newCDPSession(page);
+    await cdp.send("Performance.enable", { timeDomain: "threadTicks" });
+    const traceDirectory = process.env["PWRGIT_FIT_TRACE"];
+    const readMetrics = async () => Object.fromEntries(
+      (await cdp.send("Performance.getMetrics")).metrics.map(({ name, value }) => [name, value])
+    );
     await mount(toolbar);
     if (photos !== undefined) {
       mkdirSync(photos, { recursive: true });
@@ -348,5 +368,6 @@ test("benchmark each toolbar in isolation", async () => {
         writeFileSync(join(traceDirectory, `${toolbar}-${workload}.json`), JSON.stringify(events));
       }
     }
-  }
-});
+    await cdp.detach();
+  });
+}
