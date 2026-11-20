@@ -68,7 +68,8 @@ function prepareSkippedInstall({ electronPresent }) {
   }
   return {
     root, electron,
-    runSync: (env = {}) => execFileSync(process.execPath, [join(scripts, "install.mjs")], {
+    // pnpm's Vitest shim can expose the real Electron through NODE_PATH.
+    runSync: (env = {}) => execFileSync(process.execPath, ["--no-global-search-paths", join(scripts, "install.mjs")], {
       env: { ...process.env, PWRAGENT_HOME: join(root, "home"), ELECTRON_SKIP_BINARY_DOWNLOAD: "", ...env },
       encoding: "utf8", stdio: "pipe",
     }),
@@ -210,14 +211,12 @@ it.skipIf(process.platform !== "win32")("oracle: inherited PowerShell modules do
   const modulePathKey = Object.keys(process.env).find((key) => key.toUpperCase() === "PSMODULEPATH") ?? "PSModulePath";
   const systemModules = join(process.env.SystemRoot, "System32/WindowsPowerShell/v1.0/Modules");
   const host = { platform: process.platform, arch: process.arch };
-  const upstream = prepareInstall(setup, "upstream", host);
   const install = prepareInstall(setup, "shadowed-module", {
     ...host, blockedZipTools: ["tar.exe"],
     env: { [modulePathKey]: `${moduleRoot};${systemModules}`, PWRGIT_FIXTURE_BLOCK_EXTRACTOR: "1" },
   });
-  upstream.runUpstream();
   install.runSync();
-  expect(await inventory(join(install.electron, "dist"))).toEqual(await inventory(join(upstream.electron, "dist")));
+  expect(await inventory(join(install.electron, "dist"))).toEqual(await inventory(join(setup.root, "payload")));
 });
 
 it("runs the production entry point for the native host and reuses the same cache across project layouts", async () => {
@@ -268,7 +267,12 @@ it.each(["EACCES", "EPERM", "EROFS"])("native entry point forwards owned downloa
 
 it("preserves the missing-Electron skip without downloading", () => {
   const install = prepareSkippedInstall({ electronPresent: false });
-  install.runSync();
+  const globalModules = mkdtempSync(join(tmpdir(), "pwrgit-electron-node-path-"));
+  roots.push(globalModules);
+  const globalElectron = join(globalModules, "electron");
+  mkdirSync(globalElectron);
+  writeFileSync(join(globalElectron, "package.json"), JSON.stringify({ name: "electron", version: "44.9.3" }));
+  expect(install.runSync({ NODE_PATH: globalModules })).toContain("electron is not installed here");
   expect(readdirSync(install.root)).toEqual(["scripts"]);
 });
 
