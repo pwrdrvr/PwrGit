@@ -75,7 +75,7 @@ function prepareSkippedInstall({ electronPresent }) {
   };
 }
 
-function prepareInstall({ root, zip, version }, name, { platform = "darwin", arch = "arm64", env = {}, denyCacheCode, noZipTools = false } = {}) {
+function prepareInstall({ root, zip, version }, name, { platform = "darwin", arch = "arm64", env = {}, denyCacheCode, blockedZipTools = [] } = {}) {
   const target = join(root, name);
   const electron = join(target, "node_modules/electron");
   mkdirSync(join(electron, "node_modules/@electron/get"), { recursive: true });
@@ -109,7 +109,7 @@ function prepareInstall({ root, zip, version }, name, { platform = "darwin", arc
     import { syncBuiltinESMExports } from "node:module";
     const execute = childProcess.execFileSync;
     childProcess.execFileSync = (command, ...args) => {
-      if (["unzip", "bsdtar", "powershell.exe", "tar.exe"].includes(command)) {
+      if (${JSON.stringify(blockedZipTools)}.includes(command)) {
         throw Object.assign(new Error("Host ZIP tool is unavailable"), { code: "ENOENT" });
       }
       return execute(command, ...args);
@@ -121,11 +121,12 @@ function prepareInstall({ root, zip, version }, name, { platform = "darwin", arc
     env: { ...process.env, PWRAGENT_HOME: join(root, "home"), npm_config_platform: platform, npm_config_arch: arch, ELECTRON_SKIP_BINARY_DOWNLOAD: "", ELECTRON_INSTALL_PLATFORM: "", ELECTRON_INSTALL_ARCH: "", ...env },
     stdio: "pipe",
   };
+  const entryPoint = blockedZipTools.length ? bootstrap : join(scripts, "install.mjs");
   return {
     electron,
     binary: join(electron, "dist", platformPath(platform)),
-    run: () => execAsync(process.execPath, [noZipTools ? bootstrap : join(scripts, "install.mjs")], options),
-    runSync: () => execFileSync(process.execPath, [noZipTools ? bootstrap : join(scripts, "install.mjs")], options),
+    run: () => execAsync(process.execPath, [entryPoint], options),
+    runSync: () => execFileSync(process.execPath, [entryPoint], options),
     runUpstream: () => execFileSync(process.execPath, [join(electron, "install.js")], options),
   };
 }
@@ -178,7 +179,7 @@ it("property: explicit and npm target precedence agrees with Electron's installe
 
 it("regression: real bundled extractor installs without host ZIP tools and stays lazy on cache hits", async () => {
   const setup = fixture("44.9.3", randomBytes(8192));
-  const host = { platform: process.platform, arch: process.arch, noZipTools: true };
+  const host = { platform: process.platform, arch: process.arch, blockedZipTools: ["unzip", "bsdtar", "powershell.exe", "tar.exe"] };
   const first = prepareInstall(setup, "minimal-host", host);
   first.runSync();
   expect(readFileSync(first.binary)).toEqual(setup.bytes);
@@ -190,6 +191,33 @@ it("regression: real bundled extractor installs without host ZIP tools and stays
   const extractions = readFileSync(join(setup.root, "extractions.jsonl"), "utf8").trim().split("\n").map(JSON.parse);
   expect(extractions).toHaveLength(1);
   expect(extractions[0].zip).toBe(setup.zip);
+});
+
+it.skipIf(process.platform !== "win32")("oracle: inherited PowerShell modules do not change the installed runtime", async () => {
+  const setup = fixture("44.9.3", randomBytes(8192));
+  const moduleRoot = join(setup.root, "modules");
+  const archiveModule = "Microsoft.PowerShell.Archive";
+  mkdirSync(join(moduleRoot, archiveModule), { recursive: true });
+  // Simulate the PowerShell 7 module's non-terminating error under Windows PowerShell.
+  writeFileSync(join(moduleRoot, archiveModule, `${archiveModule}.psm1`), `
+    function Expand-Archive {
+      [CmdletBinding()]
+      param([string]$LiteralPath, [string]$DestinationPath, [switch]$Force)
+      Write-Error 'Fixture archive module cannot extract under Windows PowerShell'
+    }
+    Export-ModuleMember -Function Expand-Archive
+  `);
+  const modulePathKey = Object.keys(process.env).find((key) => key.toUpperCase() === "PSMODULEPATH") ?? "PSModulePath";
+  const systemModules = join(process.env.SystemRoot, "System32/WindowsPowerShell/v1.0/Modules");
+  const host = { platform: process.platform, arch: process.arch };
+  const upstream = prepareInstall(setup, "upstream", host);
+  const install = prepareInstall(setup, "shadowed-module", {
+    ...host, blockedZipTools: ["tar.exe"],
+    env: { [modulePathKey]: `${moduleRoot};${systemModules}`, PWRGIT_FIXTURE_BLOCK_EXTRACTOR: "1" },
+  });
+  upstream.runUpstream();
+  install.runSync();
+  expect(await inventory(join(install.electron, "dist"))).toEqual(await inventory(join(upstream.electron, "dist")));
 });
 
 it("runs the production entry point for the native host and reuses the same cache across project layouts", async () => {

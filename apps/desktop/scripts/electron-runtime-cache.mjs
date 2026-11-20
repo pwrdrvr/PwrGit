@@ -170,7 +170,13 @@ export async function extractZip(zipPath, targetDir, fallback) {
   const quotePowerShell = (value) => `'${value.replace(/'/g, "''")}'`;
   const attempts = process.platform === "win32"
     ? [
-        ["powershell.exe", ["-NoProfile", "-Command", `Expand-Archive -LiteralPath ${quotePowerShell(zipPath)} -DestinationPath ${quotePowerShell(targetDir)} -Force`]],
+        // Node can pass PowerShell 7's PSModulePath to Windows PowerShell 5.1.
+        // Load the host's module and make errors fail the command so tar can retry.
+        ["powershell.exe", ["-NoProfile", "-Command", [
+          "$ErrorActionPreference = 'Stop'",
+          'Import-Module "$PSHOME/Modules/Microsoft.PowerShell.Archive"',
+          `Expand-Archive -LiteralPath ${quotePowerShell(zipPath)} -DestinationPath ${quotePowerShell(targetDir)} -Force`,
+        ].join("; ")]],
         ["tar.exe", ["-xf", zipPath, "-C", targetDir]],
       ]
     : [["unzip", ["-q", "-o", zipPath, "-d", targetDir]], ["bsdtar", ["-xf", zipPath, "-C", targetDir]]];
