@@ -9,53 +9,45 @@ permissions:
 
 jobs:
   probe:
-    runs-on: ${{ matrix.image }}
-    strategy:
-      fail-fast: false
-      matrix:
-        image: [windows-latest, windows-2025-vs2026]
-        sample: [1, 2]
-    timeout-minutes: 5
+    runs-on: windows-2025-vs2026
+    timeout-minutes: 12
     steps:
-      - name: Compare Windows ZIP tools
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v6
+        with:
+          node-version-file: .nvmrc
+      - name: Install dependencies for focused tests
+        run: |
+          corepack enable pnpm
+          pnpm install --frozen-lockfile --ignore-scripts
+      - name: Check the regression with the pre-fix installer
         shell: pwsh
         env:
           TEMP: ${{ runner.temp }}
           TMP: ${{ runner.temp }}
         run: |
-          $PSVersionTable
-          Get-Command powershell.exe, tar.exe | Select-Object Name, Source, Version | Format-List
-          @'
-          const { spawnSync } = require('node:child_process');
-          const fs = require('node:fs');
-          const path = require('node:path');
-          const root = fs.mkdtempSync(path.join(require('node:os').tmpdir(), 'pwrgit-electron-cache-'));
-          const payload = path.join(root, 'payload');
-          fs.mkdirSync(path.join(payload, 'Electron.app/Contents/MacOS'), { recursive: true });
-          for (const name of ['electron.exe', 'electron', 'Electron.app/Contents/MacOS/Electron', 'version']) {
-            fs.writeFileSync(path.join(payload, name), '44.10.1');
+          $module = 'apps/desktop/scripts/electron-runtime-cache.mjs'
+          $spec = 'apps/desktop/scripts/ensure-electron-runtime.test.mjs'
+          git restore --source=fd01374f85f5b16c1b9924f06e48ec52b63b2aaf -- $module
+          try {
+            $output = pnpm test $spec -t 'inherited PowerShell modules' --no-color 2>&1
+            $testExit = $LASTEXITCODE
+            $output | Write-Host
+            if ($testExit -eq 0 -or ($output -join "`n") -notmatch 'Electron artifact has an unexpected runtime version or executable') {
+              throw "Expected the pre-fix regression to fail with the runtime validation error (exit $testExit)"
+            }
+          } finally {
+            git restore -- $module
           }
-          const zip = path.join(root, 'electron.zip');
-          const ps = (script, name = 'powershell.exe') => run(name, ['-NoProfile', '-Command', script]);
-          const q = value => `'${value.replace(/'/g, "''")}'`;
-          function run(command, args) {
-            const {status, stdout, stderr, error} = spawnSync(command, args, {encoding: 'utf8'});
-            console.log(JSON.stringify({command, args, status, stdout, stderr, error}));
+      - name: Run the fixed installer tests twice
+        shell: pwsh
+        env:
+          TEMP: ${{ runner.temp }}
+          TMP: ${{ runner.temp }}
+        run: |
+          for ($sample = 1; $sample -le 2; $sample++) {
+            pnpm test apps/desktop/scripts/ensure-electron-runtime.test.mjs --no-color
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           }
-          console.log('Inherited PSModulePath:', process.env.PSModulePath);
-          ps('$PSVersionTable; Get-Command Expand-Archive, Compress-Archive | ForEach-Object { $_.Module | Format-List Name,Version,Path }');
-          ps(`Compress-Archive -Path ${q(path.join(payload, '*'))} -DestinationPath ${q(zip)}`);
-          run('tar.exe', ['--version']);
-          run('tar.exe', ['-tf', zip]);
-          for (const mode of ['default', 'stop', 'builtin', 'pwsh', 'tar']) {
-            const dir = path.join(root, mode);
-            fs.mkdirSync(dir);
-            const expand = `Expand-Archive -LiteralPath ${q(zip)} -DestinationPath ${q(dir)} -Force`;
-            if (mode === 'tar') run('tar.exe', ['-xf', zip, '-C', dir]);
-            else if (mode === 'builtin') ps(`Import-Module "$PSHOME/Modules/Microsoft.PowerShell.Archive" -ErrorAction Stop; ${expand} -ErrorAction Stop`);
-            else ps(expand + (mode === 'stop' ? ' -ErrorAction Stop' : ''), mode === 'pwsh' ? 'pwsh.exe' : 'powershell.exe');
-            console.log(mode, fs.readdirSync(dir, {recursive: true}), fs.existsSync(path.join(dir, 'version')) && fs.readFileSync(path.join(dir, 'version'), 'utf8'));
-          }
-          fs.rmSync(root, {recursive: true, force: true});
-          '@ | Set-Content -Path probe.cjs
-          node probe.cjs
