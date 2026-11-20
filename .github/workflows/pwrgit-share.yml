@@ -1,0 +1,43 @@
+name: pwrgit-share
+on:
+  pull_request:
+    paths:
+      - 'tools/pwrgit-share/**'
+      - '.github/workflows/pwrgit-share.yml'
+      # The gate creates worktrees with PwrGit's pinned Git runtime.
+      - 'apps/desktop/custom-git-runtime.json'
+      - 'apps/desktop/scripts/stage-runtime.mjs'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, ubuntu-latest]
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        working-directory: tools/pwrgit-share
+    steps:
+      - uses: actions/checkout@v4
+      - name: Isolate Cargo home
+        run: echo "CARGO_HOME=${RUNNER_TEMP}/pwrgit-share-cargo" >> "$GITHUB_ENV"
+      - name: Install pinned stable toolchain
+        run: rustup toolchain install 1.94.1 --profile minimal --component rustfmt --component clippy
+      - name: Install the Cargo the seeding gate proves
+        run: rustup toolchain install 1.97.1 --profile minimal
+      - name: Stage PwrGit's Git runtime for copy-on-write worktrees
+        if: runner.os == 'macOS'
+        run: |
+          node ../../apps/desktop/scripts/stage-runtime.mjs ../../apps/desktop/custom-git-runtime.json darwin universal "${RUNNER_TEMP}/pwrgit-git"
+          echo "PWRGIT_SHARE_GIT=${RUNNER_TEMP}/pwrgit-git/bin/git" >> "$GITHUB_ENV"
+      - run: cargo fmt --check
+      - run: cargo test --locked -- --nocapture
+      - run: cargo clippy --locked --all-targets -- -D warnings
+      - run: cargo build --locked --release
+      - uses: actions/upload-artifact@v4
+        with:
+          name: pwrgit-share-${{ matrix.os }}
+          path: tools/pwrgit-share/target/release/pwrgit-share
