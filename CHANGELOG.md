@@ -1,5 +1,11 @@
 # Changelog
 
+## v0.60.4 - 2026-11-20
+
+- Toolbar fitting - Avoided redundant fitting on equivalent toolbar updates while retaining refits when controls, text, available width, fonts or inherited appearance change. Fixed a delayed Git LFS chip leaving the Worktree Header's last control clipped at narrow widths. Repository rows, section headings, badges and title-bar fitting retain their existing scheduling.
+- Windows build setup - Fixed Electron ZIP extraction during dependency installation when PowerShell 7's module search path is inherited by Windows PowerShell. The extractor now loads the host's own archive module and treats PowerShell errors as failures so the existing extraction fallback can run.
+- macOS packaging - Added an ad-hoc signature after merging the native MCP helper's architectures so unsigned preview builds pass strict relay verification. Release packaging still replaces it with Developer ID signing.
+
 ## v0.60.3 - 2026-11-19
 
 - Clones maintenance - Fixed Combined maintenance reporting only a repository-level count when re-sharing fails in linked worktrees. Each failed worktree now has its own row with its repository, branch and path, a plain-language explanation, and Git's sanitized error and exit code under Details. Added Copy, Copy all and View log actions, and retained per-worktree failure details in the app log so completed runs can be diagnosed. Failed main-checkout updates are reported separately.
