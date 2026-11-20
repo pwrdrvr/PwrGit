@@ -1,10 +1,11 @@
+import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { chmodSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, renameSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { afterEach, describe, expect, test } from "vitest";
-import { readRuntimeManifest, verifyRuntime } from "./stage-runtime.mjs";
+import { afterEach, describe, expect, test, vi } from "vitest";
+import { readRuntimeManifest, stageRuntime, verifyRuntime } from "./stage-runtime.mjs";
 
 const sha = (data) => createHash("sha256").update(data).digest("hex");
 const consumer = sha(readFileSync(join(dirname(fileURLToPath(import.meta.url)), "stage-runtime.mjs")));
@@ -141,5 +142,53 @@ describe.skipIf(process.platform === "win32")("verifyRuntime", () => {
     const { root, pin } = runtime();
     expect(() => verifyRuntime(root, { ...pin, manifest: { ...pin.manifest, source_revision: "b".repeat(40) } }, offline))
       .toThrow("Custom Git source/version mismatch");
+  });
+});
+
+describe.skipIf(process.platform === "win32")("stageRuntime", () => {
+  // A strict umask must not change the sealed modes: plain `tar -xzf` applies
+  // it and the inventory check then refuses the runtime (huntharo/git#33).
+  test("stages a cached archive under umask 077 with its sealed modes intact", async () => {
+    const temp = scratch();
+    const root = join(temp, "runtime");
+    mkdirSync(join(root, "bin"), { recursive: true });
+    const metadata = join(root, "pwrgit-build.json");
+    writeFileSync(metadata, JSON.stringify({ version: VERSION, source_revision: REVISION, primary_sha1: "SHA1_DC", lfs_version: "3.7.1" }));
+    chmodSync(metadata, 0o644);
+    const git = join(root, "bin", "git");
+    writeFileSync(git, `#!/bin/sh
+case "$*" in
+  '--version') echo 'git version ${VERSION}' ;;
+  'version --build-options') printf '%s\\n' 'SHA-1: SHA1_DC' 'built from commit: ${REVISION}' ;;
+  '--exec-path') printf '%s/libexec/git-core\\n' "\${0%/bin/git}" ;;
+  'lfs version') echo 'git-lfs/3.7.1 test' ;;
+  *) exit 1 ;;
+esac
+`);
+    chmodSync(git, 0o755);
+    const inventory = JSON.stringify({
+      "bin/git": { sha256: sha(readFileSync(git)), mode: 0o755 },
+      "pwrgit-build.json": { sha256: sha(readFileSync(metadata)), mode: 0o644 },
+    });
+    writeFileSync(join(root, "runtime-files.json"), inventory);
+    const cache = join(temp, "cache");
+    mkdirSync(cache);
+    const archive = join(temp, "fixture.tar.gz");
+    execFileSync("tar", ["-czf", archive, "-C", root, "."]);
+    const digest = sha(readFileSync(archive));
+    renameSync(archive, join(cache, `${digest}.tar.gz`));
+    const manifestPath = writeManifest(manifest({}, { sha256: digest, inventory_sha256: sha(inventory) }));
+    const fetch = vi.spyOn(globalThis, "fetch").mockRejectedValue(new Error("expected the cached archive"));
+    const output = join(temp, "staged");
+    const previous = process.umask(0o077);
+    try {
+      await stageRuntime({ manifestPath, platform: "linux", arch: "x64", output, cache });
+    } finally {
+      process.umask(previous);
+      fetch.mockRestore();
+    }
+    expect(fetch).not.toHaveBeenCalled();
+    expect(statSync(join(output, "pwrgit-build.json")).mode & 0o777).toBe(0o644);
+    expect(statSync(join(output, "bin", "git")).mode & 0o777).toBe(0o755);
   });
 });

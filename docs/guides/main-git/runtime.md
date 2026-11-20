@@ -112,12 +112,16 @@ string: a local build of the same source has none.
   `bundledSystemConfig` writes `checkout.reflink = true|false` *after* the
   bundle's include, while Settings' switch is on *and* the last probe of the
   Git in use (`refreshActiveGitReflink`, at launch and after every runtime
-  switch) said it can. Off is written as `false`, so the runtime's own config
-  never decides: `.2`'s `etc/gitconfig` forced `true`; `.3` and `.4`
-  (which PwrGit ships) set nothing. System scope keeps the user's global and
-  repository config in charge, as for LFS and the keychain.
+  switch) said it can. Off is written as `false`, so neither the runtime's
+  own config nor its built-in default decides: `.2`'s `etc/gitconfig` forced
+  `true`; `.3` and `.4` set nothing; `2.56.1-dev-pwrgit.1` (which PwrGit
+  ships) sets nothing but turns verified reflinks on when nothing else sets
+  `checkout.reflink`. System scope keeps the user's global and repository
+  config in charge, as for LFS and the keychain.
   An installed Git reads its own system config, which PwrGit never writes, so
-  it gets `-c checkout.reflink=true` while on and nothing while off.
+  it gets `-c checkout.reflink=true` while on and nothing while off. Known
+  gap: an installed `2.56.1-dev-pwrgit.1` or newer then follows its own
+  default, which is on.
   - Add no `[include]` or `path =` after the include: `userSystemConfig` and
     PwrAgent's `operatorSystemConfig` read the first `path =` after the last
     `[include]`. Keep the `# Written by PwrGit:` first line.
