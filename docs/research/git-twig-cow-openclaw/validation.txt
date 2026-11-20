@@ -1,0 +1,12 @@
+2026-11-16 OpenClaw evidence checks
+61 creates exited 0
+50 full commit-oracle checks: no byte/mode/link mismatches, empty status and diff
+Re-share: 65493 inode replacements; zero byte/mode or mtime changes
+Reset: complete tracked-tree digest unchanged, commit oracle passed
+All 3 binary SHA-256s match prior experiment
+Compressed results parsed; 5371 raw command records parsed
+Python syntax compilation: exit 0
+pnpm lint with Node 24.22.1: exit 0; see lint-output.txt
+hdiutil detach /private/tmp/pwrgit-openclaw-20261116/volume: exit 0, disk4 ejected
+Host free space observed after cohorts: 71 GiB
+Final lint after staging all OpenClaw files: exit 0

@@ -1,0 +1,4275 @@
+{
+  "/private/tmp/pwrgit-twig-20261116/results1/results.json": {
+    "timing": [
+      {
+        "fixture": "byte-heavy",
+        "rev": "head",
+        "arm": "stock",
+        "samples": {
+          "wall": [
+            0.16,
+            0.28,
+            0.17,
+            0.18,
+            0.17
+          ],
+          "user": [
+            0.06,
+            0.06,
+            0.06,
+            0.06,
+            0.06
+          ],
+          "system": [
+            0.1,
+            0.1,
+            0.11,
+            0.11,
+            0.1
+          ],
+          "rss_bytes": [
+            16613376,
+            16596992,
+            16662528,
+            16678912,
+            16678912
+          ]
+        },
+        "median": {
+          "wall": 0.17,
+          "user": 0.06,
+          "system": 0.1,
+          "rss_bytes": 16662528
+        },
+        "backends": {
+          "stock": 5
+        },
+        "sharing": {
+          "files": 33,
+          "same_first_extent": 0,
+          "zero_private": 0,
+          "private_bytes": 268439552,
+          "sample": {
+            "files/000/00000.bin": {
+              "source": {
+                "first_block": 69513216,
+                "private_bytes": 8388608
+              },
+              "target": {
+                "first_block": 779345920,
+                "private_bytes": 8388608
+              }
+            },
+            "files/000/00001.bin": {
+              "source": {
+                "first_block": 77901824,
+                "private_bytes": 8388608
+              },
+              "target": {
+                "first_block": 787734528,
+                "private_bytes": 8388608
+              }
+            },
+            "files/000/00002.bin": {
+              "source": {
+                "first_block": 87019520,
+                "private_bytes": 8388608
+              },
+              "target": {
+                "first_block": 892063744,
+                "private_bytes": 8388608
+              }
+            }
+          }
+        }
+      },
+      {
+        "fixture": "byte-heavy",
+        "rev": "head",
+        "arm": "twig",
+        "samples": {
+          "wall": [
+            0.86,
+            0.9,
+            0.86,
+            0.86,
+            0.9
+          ],
+          "user": [
+            0.62,
+            0.65,
+            0.62,
+            0.62,
+            0.65
+          ],
+          "system": [
+            0.05,
+            0.06,
+            0.05,
+            0.05,
+            0.05
+          ],
+          "rss_bytes": [
+            16220160,
+            16220160,
+            16203776,
+            16220160,
+            16203776
+          ]
+        },
+        "median": {
+          "wall": 0.86,
+          "user": 0.62,
+          "system": 0.05,
+          "rss_bytes": 16220160
+        },
+        "backends": {
+          "native": 5
+        },
+        "sharing": {
+          "files": 33,
+          "same_first_extent": 33,
+          "zero_private": 33,
+          "private_bytes": 0,
+          "sample": {
+            "files/000/00000.bin": {
+              "source": {
+                "first_block": 69513216,
+                "private_bytes": 0
+              },
+              "target": {
+                "first_block": 69513216,
+                "private_bytes": 0
+              }
+            },
+            "files/000/00001.bin": {
+              "source": {
+                "first_block": 77901824,
+                "private_bytes": 0
+              },
+              "target": {
+                "first_block": 77901824,
+                "private_bytes": 0
+              }
+            },
+            "files/000/00002.bin": {
+              "source": {
+                "first_block": 87019520,
+                "private_bytes": 0
+              },
+              "target": {
+                "first_block": 87019520,
+                "private_bytes": 0
+              }
+            }
+          }
+        }
+      },
+      {
+        "fixture": "byte-heavy",
+        "rev": "head",
+        "arm": "on",
+        "samples": {
+          "wall": [
+            0.02,
+            0.03,
+            0.02,
+            0.03,
+            0.02
+          ],
+          "user": [
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "system": [
+            0.01,
+            0.01,
+            0.01,
+            0.01,
+            0.01
+          ],
+          "rss_bytes": [
+            8552448,
+            8552448,
+            8601600,
+            8601600,
+            8601600
+          ]
+        },
+        "median": {
+          "wall": 0.02,
+          "user": 0.0,
+          "system": 0.01,
+          "rss_bytes": 8601600
+        },
+        "backends": {
+          "on": 5
+        },
+        "sharing": {
+          "files": 33,
+          "same_first_extent": 33,
+          "zero_private": 33,
+          "private_bytes": 0,
+          "sample": {
+            "files/000/00000.bin": {
+              "source": {
+                "first_block": 69513216,
+                "private_bytes": 0
+              },
+              "target": {
+                "first_block": 69513216,
+                "private_bytes": 0
+              }
+            },
+            "files/000/00001.bin": {
+              "source": {
+                "first_block": 77901824,
+                "private_bytes": 0
+              },
+              "target": {
+                "first_block": 77901824,
+                "private_bytes": 0
+              }
+            },
+            "files/000/00002.bin": {
+              "source": {
+                "first_block": 87019520,
+                "private_bytes": 0
+              },
+              "target": {
+                "first_block": 87019520,
+                "private_bytes": 0
+              }
+            }
+          }
+        }
+      },
+      {
+        "fixture": "byte-heavy",
+        "rev": "head",
+        "arm": "off",
+        "samples": {
+          "wall": [
+            0.17,
+            0.16,
+            0.19,
+            0.2,
+            0.16
+          ],
+          "user": [
+            0.06,
+            0.06,
+            0.06,
+            0.06,
+            0.06
+          ],
+          "system": [
+            0.1,
+            0.1,
+            0.1,
+            0.1,
+            0.1
+          ],
+          "rss_bytes": [
+            16629760,
+            16580608,
+            16613376,
+            16580608,
+            16613376
+          ]
+        },
+        "median": {
+          "wall": 0.17,
+          "user": 0.06,
+          "system": 0.1,
+          "rss_bytes": 16613376
+        },
+        "backends": {
+          "off": 5
+        },
+        "sharing": {
+          "files": 33,
+          "same_first_extent": 0,
+          "zero_private": 0,
+          "private_bytes": 268439552,
+          "sample": {
+            "files/000/00000.bin": {
+              "source": {
+                "first_block": 69513216,
+                "private_bytes": 8388608
+              },
+              "target": {
+                "first_block": 828428288,
+                "private_bytes": 8388608
+              }
+            },
+            "files/000/00001.bin": {
+              "source": {
+                "first_block": 77901824,
+                "private_bytes": 8388608
+              },
+              "target": {
+                "first_block": 908001280,
+                "private_bytes": 8388608
+              }
+            },
+            "files/000/00002.bin": {
+              "source": {
+                "first_block": 87019520,
+                "private_bytes": 8388608
+              },
+              "target": {
+                "first_block": 926875648,
+                "private_bytes": 8388608
+              }
+            }
+          }
+        }
+      },
+      {
+        "fixture": "byte-heavy",
+        "rev": "older",
+        "arm": "stock",
+        "samples": {
+          "wall": [
+            0.18,
+            0.26,
+            0.18,
+            0.18,
+            0.18
+          ],
+          "user": [
+            0.06,
+            0.06,
+            0.06,
+            0.06,
+            0.06
+          ],
+          "system": [
+            0.1,
+            0.11,
+            0.11,
+            0.11,
+            0.11
+          ],
+          "rss_bytes": [
+            16580608,
+            16629760,
+            16613376,
+            16662528,
+            16613376
+          ]
+        },
+        "median": {
+          "wall": 0.18,
+          "user": 0.06,
+          "system": 0.11,
+          "rss_bytes": 16613376
+        },
+        "backends": {
+          "stock": 5
+        },
+        "sharing": {
+          "files": 33,
+          "same_first_extent": 0,
+          "zero_private": 0,
+          "private_bytes": 268439552,
+          "sample": {
+            "files/000/00000.bin": {
+              "source": {
+                "first_block": 69513216,
+                "private_bytes": 8388608
+              },
+              "target": {
+                "first_block": 779345920,
+                "private_bytes": 8388608
+              }
+            },
+            "files/000/00001.bin": {
+              "source": {
+                "first_block": 77901824,
+                "private_bytes": 8388608
+              },
+              "target": {
+                "first_block": 787734528,
+                "private_bytes": 8388608
+              }
+            },
+            "files/000/00002.bin": {
+              "source": {
+                "first_block": 87019520,
+                "private_bytes": 8388608
+              },
+              "target": {
+                "first_block": 828428288,
+                "private_bytes": 8388608
+              }
+            }
+          }
+        }
+      },
+      {
+        "fixture": "byte-heavy",
+        "rev": "older",
+        "arm": "twig",
+        "samples": {
+          "wall": [
+            0.19,
+            0.2,
+            0.19,
+            0.18,
+            0.2
+          ],
+          "user": [
+            0.07,
+            0.07,
+            0.07,
+            0.07,
+            0.07
+          ],
+          "system": [
+            0.11,
+            0.11,
+            0.11,
+            0.11,
+            0.11
+          ],
+          "rss_bytes": [
+            16596992,
+            16678912,
+            16547840,
+            16580608,
+            16613376
+          ]
+        },
+        "median": {
+          "wall": 0.19,
+          "user": 0.07,
+          "system": 0.11,
+          "rss_bytes": 16596992
+        },
+        "backends": {
+          "fallback": 5
+        },
+        "sharing": {
+          "files": 33,
+          "same_first_extent": 0,
+          "zero_private": 0,
+          "private_bytes": 268439552,
+          "sample": {
+            "files/000/00000.bin": {
+              "source": {
+                "first_block": 69513216,
+                "private_bytes": 8388608
+              },
+              "target": {
+                "first_block": 943652864,
+                "private_bytes": 8388608
+              }
+            },
+            "files/000/00001.bin": {
+              "source": {
+                "first_block": 77901824,
+                "private_bytes": 8388608
+              },
+              "target": {
+                "first_block": 952041472,
+                "private_bytes": 8388608
+              }
+            },
+            "files/000/00002.bin": {
+              "source": {
+                "first_block": 87019520,
+                "private_bytes": 8388608
+              },
+              "target": {
+                "first_block": 960430080,
+                "private_bytes": 8388608
+              }
+            }
+          }
+        }
+      },
+      {
+        "fixture": "byte-heavy",
+        "rev": "older",
+        "arm": "on",
+        "samples": {
+          "wall": [
+            0.04,
+            0.04,
+            0.04,
+            0.04,
+            0.05
+          ],
+          "user": [
+            0.01,
+            0.01,
+            0.01,
+            0.01,
+            0.01
+          ],
+          "system": [
+            0.02,
+            0.02,
+            0.02,
+            0.02,
+            0.03
+          ],
+          "rss_bytes": [
+            16744448,
+            16744448,
+            16809984,
+            16744448,
+            16875520
+          ]
+        },
+        "median": {
+          "wall": 0.04,
+          "user": 0.01,
+          "system": 0.02,
+          "rss_bytes": 16744448
+        },
+        "backends": {
+          "on": 5
+        },
+        "sharing": {
+          "files": 33,
+          "same_first_extent": 28,
+          "zero_private": 28,
+          "private_bytes": 33558528,
+          "sample": {
+            "files/000/00000.bin": {
+              "source": {
+                "first_block": 69513216,
+                "private_bytes": 8388608
+              },
+              "target": {
+                "first_block": 892063744,
+                "private_bytes": 8388608
+              }
+            },
+            "files/000/00001.bin": {
+              "source": {
+                "first_block": 77901824,
+                "private_bytes": 0
+              },
+              "target": {
+                "first_block": 77901824,
+                "private_bytes": 0
+              }
+            },
+            "files/000/00002.bin": {
+              "source": {
+                "first_block": 87019520,
+                "private_bytes": 0
+              },
+              "target": {
+                "first_block": 87019520,
+                "private_bytes": 0
+              }
+            }
+          }
+        }
+      },
+      {
+        "fixture": "byte-heavy",
+        "rev": "older",
+        "arm": "off",
+        "samples": {
+          "wall": [
+            0.19,
+            0.18,
+            0.17,
+            0.32,
+            0.17
+          ],
+          "user": [
+            0.06,
+            0.06,
+            0.06,
+            0.06,
+            0.06
+          ],
+          "system": [
+            0.1,
+            0.1,
+            0.1,
+            0.1,
+            0.1
+          ],
+          "rss_bytes": [
+            16596992,
+            16613376,
+            16596992,
+            16613376,
+            16564224
+          ]
+        },
+        "median": {
+          "wall": 0.18,
+          "user": 0.06,
+          "system": 0.1,
+          "rss_bytes": 16596992
+        },
+        "backends": {
+          "off": 5
+        },
+        "sharing": {
+          "files": 33,
+          "same_first_extent": 0,
+          "zero_private": 0,
+          "private_bytes": 268439552,
+          "sample": {
+            "files/000/00000.bin": {
+              "source": {
+                "first_block": 69513216,
+                "private_bytes": 8388608
+              },
+              "target": {
+                "first_block": 779345920,
+                "private_bytes": 8388608
+              }
+            },
+            "files/000/00001.bin": {
+              "source": {
+                "first_block": 77901824,
+                "private_bytes": 8388608
+              },
+              "target": {
+                "first_block": 787734528,
+                "private_bytes": 8388608
+              }
+            },
+            "files/000/00002.bin": {
+              "source": {
+                "first_block": 87019520,
+                "private_bytes": 8388608
+              },
+              "target": {
+                "first_block": 828428288,
+                "private_bytes": 8388608
+              }
+            }
+          }
+        }
+      },
+      {
+        "fixture": "file-heavy",
+        "rev": "head",
+        "arm": "stock",
+        "samples": {
+          "wall": [
+            0.46,
+            0.8,
+            0.57,
+            0.6,
+            0.5
+          ],
+          "user": [
+            0.02,
+            0.03,
+            0.02,
+            0.02,
+            0.02
+          ],
+          "system": [
+            0.3,
+            0.41,
+            0.28,
+            0.27,
+            0.25
+          ],
+          "rss_bytes": [
+            14663680,
+            14680064,
+            14630912,
+            14565376,
+            14598144
+          ]
+        },
+        "median": {
+          "wall": 0.57,
+          "user": 0.02,
+          "system": 0.28,
+          "rss_bytes": 14630912
+        },
+        "backends": {
+          "stock": 5
+        },
+        "sharing": {
+          "files": 4097,
+          "same_first_extent": 0,
+          "zero_private": 0,
+          "private_bytes": 16781312,
+          "sample": {
+            "files/000/00000.bin": {
+              "source": {
+                "first_block": 22081536,
+                "private_bytes": 4096
+              },
+              "target": {
+                "first_block": 735309824,
+                "private_bytes": 4096
+              }
+            },
+            "files/000/00001.bin": {
+              "source": {
+                "first_block": 22085632,
+                "private_bytes": 4096
+              },
+              "target": {
+                "first_block": 735313920,
+                "private_bytes": 4096
+              }
+            },
+            "files/000/00002.bin": {
+              "source": {
+                "first_block": 22089728,
+                "private_bytes": 4096
+              },
+              "target": {
+                "first_block": 735318016,
+                "private_bytes": 4096
+              }
+            }
+          }
+        }
+      },
+      {
+        "fixture": "file-heavy",
+        "rev": "head",
+        "arm": "twig",
+        "samples": {
+          "wall": [
+            1.28,
+            1.29,
+            0.56,
+            0.56,
+            0.51
+          ],
+          "user": [
+            0.13,
+            0.12,
+            0.09,
+            0.1,
+            0.09
+          ],
+          "system": [
+            0.51,
+            0.48,
+            0.3,
+            0.33,
+            0.31
+          ],
+          "rss_bytes": [
+            9601024,
+            9601024,
+            9584640,
+            9568256,
+            9519104
+          ]
+        },
+        "median": {
+          "wall": 0.56,
+          "user": 0.1,
+          "system": 0.33,
+          "rss_bytes": 9584640
+        },
+        "backends": {
+          "native": 5
+        },
+        "sharing": {
+          "files": 4097,
+          "same_first_extent": 4097,
+          "zero_private": 4097,
+          "private_bytes": 0,
+          "sample": {
+            "files/000/00000.bin": {
+              "source": {
+                "first_block": 22081536,
+                "private_bytes": 0
+              },
+              "target": {
+                "first_block": 22081536,
+                "private_bytes": 0
+              }
+            },
+            "files/000/00001.bin": {
+              "source": {
+                "first_block": 22085632,
+                "private_bytes": 0
+              },
+              "target": {
+                "first_block": 22085632,
+                "private_bytes": 0
+              }
+            },
+            "files/000/00002.bin": {
+              "source": {
+                "first_block": 22089728,
+                "private_bytes": 0
+              },
+              "target": {
+                "first_block": 22089728,
+                "private_bytes": 0
+              }
+            }
+          }
+        }
+      },
+      {
+        "fixture": "file-heavy",
+        "rev": "head",
+        "arm": "on",
+        "samples": {
+          "wall": [
+            1.09,
+            0.68,
+            0.6,
+            0.64,
+            0.6
+          ],
+          "user": [
+            0.03,
+            0.03,
+            0.02,
+            0.03,
+            0.02
+          ],
+          "system": [
+            0.88,
+            0.64,
+            0.57,
+            0.61,
+            0.57
+          ],
+          "rss_bytes": [
+            15941632,
+            15810560,
+            15646720,
+            15745024,
+            15646720
+          ]
+        },
+        "median": {
+          "wall": 0.64,
+          "user": 0.03,
+          "system": 0.61,
+          "rss_bytes": 15745024
+        },
+        "backends": {
+          "on": 5
+        },
+        "sharing": {
+          "files": 4097,
+          "same_first_extent": 4097,
+          "zero_private": 4097,
+          "private_bytes": 0,
+          "sample": {
+            "files/000/00000.bin": {
+              "source": {
+                "first_block": 22081536,
+                "private_bytes": 0
+              },
+              "target": {
+                "first_block": 22081536,
+                "private_bytes": 0
+              }
+            },
+            "files/000/00001.bin": {
+              "source": {
+                "first_block": 22085632,
+                "private_bytes": 0
+              },
+              "target": {
+                "first_block": 22085632,
+                "private_bytes": 0
+              }
+            },
+            "files/000/00002.bin": {
+              "source": {
+                "first_block": 22089728,
+                "private_bytes": 0
+              },
+              "target": {
+                "first_block": 22089728,
+                "private_bytes": 0
+              }
+            }
+          }
+        }
+      },
+      {
+        "fixture": "file-heavy",
+        "rev": "head",
+        "arm": "off",
+        "samples": {
+          "wall": [
+            0.33,
+            0.32,
+            0.33,
+            0.58,
+            0.32
+          ],
+          "user": [
+            0.02,
+            0.01,
+            0.01,
+            0.02,
+            0.01
+          ],
+          "system": [
+            0.3,
+            0.26,
+            0.25,
+            0.27,
+            0.25
+          ],
+          "rss_bytes": [
+            14712832,
+            14581760,
+            14516224,
+            14450688,
+            14516224
+          ]
+        },
+        "median": {
+          "wall": 0.33,
+          "user": 0.01,
+          "system": 0.26,
+          "rss_bytes": 14516224
+        },
+        "backends": {
+          "off": 5
+        },
+        "sharing": {
+          "files": 4097,
+          "same_first_extent": 0,
+          "zero_private": 0,
+          "private_bytes": 16781312,
+          "sample": {
+            "files/000/00000.bin": {
+              "source": {
+                "first_block": 22081536,
+                "private_bytes": 4096
+              },
+              "target": {
+                "first_block": 707698688,
+                "private_bytes": 4096
+              }
+            },
+            "files/000/00001.bin": {
+              "source": {
+                "first_block": 22085632,
+                "private_bytes": 4096
+              },
+              "target": {
+                "first_block": 707702784,
+                "private_bytes": 4096
+              }
+            },
+            "files/000/00002.bin": {
+              "source": {
+                "first_block": 22089728,
+                "private_bytes": 4096
+              },
+              "target": {
+                "first_block": 707706880,
+                "private_bytes": 4096
+              }
+            }
+          }
+        }
+      },
+      {
+        "fixture": "file-heavy",
+        "rev": "older",
+        "arm": "stock",
+        "samples": {
+          "wall": [
+            0.59,
+            0.56,
+            0.6,
+            0.4,
+            0.55
+          ],
+          "user": [
+            0.02,
+            0.02,
+            0.02,
+            0.02,
+            0.02
+          ],
+          "system": [
+            0.29,
+            0.27,
+            0.27,
+            0.25,
+            0.28
+          ],
+          "rss_bytes": [
+            14139392,
+            14204928,
+            14024704,
+            14106624,
+            14139392
+          ]
+        },
+        "median": {
+          "wall": 0.56,
+          "user": 0.02,
+          "system": 0.27,
+          "rss_bytes": 14139392
+        },
+        "backends": {
+          "stock": 5
+        },
+        "sharing": {
+          "files": 4097,
+          "same_first_extent": 0,
+          "zero_private": 0,
+          "private_bytes": 16781312,
+          "sample": {
+            "files/000/00000.bin": {
+              "source": {
+                "first_block": 22081536,
+                "private_bytes": 4096
+              },
+              "target": {
+                "first_block": 798474240,
+                "private_bytes": 4096
+              }
+            },
+            "files/000/00001.bin": {
+              "source": {
+                "first_block": 22085632,
+                "private_bytes": 4096
+              },
+              "target": {
+                "first_block": 798478336,
+                "private_bytes": 4096
+              }
+            },
+            "files/000/00002.bin": {
+              "source": {
+                "first_block": 22089728,
+                "private_bytes": 4096
+              },
+              "target": {
+                "first_block": 798482432,
+                "private_bytes": 4096
+              }
+            }
+          }
+        }
+      },
+      {
+        "fixture": "file-heavy",
+        "rev": "older",
+        "arm": "twig",
+        "samples": {
+          "wall": [
+            0.6,
+            0.59,
+            0.65,
+            0.61,
+            0.67
+          ],
+          "user": [
+            0.03,
+            0.03,
+            0.03,
+            0.03,
+            0.03
+          ],
+          "system": [
+            0.29,
+            0.28,
+            0.3,
+            0.28,
+            0.29
+          ],
+          "rss_bytes": [
+            14172160,
+            14057472,
+            14106624,
+            14172160,
+            14073856
+          ]
+        },
+        "median": {
+          "wall": 0.61,
+          "user": 0.03,
+          "system": 0.29,
+          "rss_bytes": 14106624
+        },
+        "backends": {
+          "fallback": 5
+        },
+        "sharing": {
+          "files": 4097,
+          "same_first_extent": 0,
+          "zero_private": 0,
+          "private_bytes": 16781312,
+          "sample": {
+            "files/000/00000.bin": {
+              "source": {
+                "first_block": 22081536,
+                "private_bytes": 4096
+              },
+              "target": {
+                "first_block": 779390976,
+                "private_bytes": 4096
+              }
+            },
+            "files/000/00001.bin": {
+              "source": {
+                "first_block": 22085632,
+                "private_bytes": 4096
+              },
+              "target": {
+                "first_block": 779395072,
+                "private_bytes": 4096
+              }
+            },
+            "files/000/00002.bin": {
+              "source": {
+                "first_block": 22089728,
+                "private_bytes": 4096
+              },
+              "target": {
+                "first_block": 779399168,
+                "private_bytes": 4096
+              }
+            }
+          }
+        }
+      },
+      {
+        "fixture": "file-heavy",
+        "rev": "older",
+        "arm": "on",
+        "samples": {
+          "wall": [
+            0.57,
+            0.57,
+            0.6,
+            0.57,
+            0.6
+          ],
+          "user": [
+            0.02,
+            0.02,
+            0.03,
+            0.02,
+            0.03
+          ],
+          "system": [
+            0.54,
+            0.54,
+            0.57,
+            0.54,
+            0.57
+          ],
+          "rss_bytes": [
+            15187968,
+            15220736,
+            15237120,
+            15400960,
+            15368192
+          ]
+        },
+        "median": {
+          "wall": 0.57,
+          "user": 0.02,
+          "system": 0.54,
+          "rss_bytes": 15237120
+        },
+        "backends": {
+          "on": 5
+        },
+        "sharing": {
+          "files": 4097,
+          "same_first_extent": 3584,
+          "zero_private": 3584,
+          "private_bytes": 2101248,
+          "sample": {
+            "files/000/00000.bin": {
+              "source": {
+                "first_block": 22081536,
+                "private_bytes": 4096
+              },
+              "target": {
+                "first_block": 772968448,
+                "private_bytes": 4096
+              }
+            },
+            "files/000/00001.bin": {
+              "source": {
+                "first_block": 22085632,
+                "private_bytes": 0
+              },
+              "target": {
+                "first_block": 22085632,
+                "private_bytes": 0
+              }
+            },
+            "files/000/00002.bin": {
+              "source": {
+                "first_block": 22089728,
+                "private_bytes": 0
+              },
+              "target": {
+                "first_block": 22089728,
+                "private_bytes": 0
+              }
+            }
+          }
+        }
+      },
+      {
+        "fixture": "file-heavy",
+        "rev": "older",
+        "arm": "off",
+        "samples": {
+          "wall": [
+            0.61,
+            0.57,
+            0.58,
+            0.58,
+            0.55
+          ],
+          "user": [
+            0.01,
+            0.02,
+            0.01,
+            0.01,
+            0.02
+          ],
+          "system": [
+            0.27,
+            0.28,
+            0.28,
+            0.27,
+            0.28
+          ],
+          "rss_bytes": [
+            13991936,
+            14008320,
+            14024704,
+            13959168,
+            14123008
+          ]
+        },
+        "median": {
+          "wall": 0.58,
+          "user": 0.01,
+          "system": 0.28,
+          "rss_bytes": 14008320
+        },
+        "backends": {
+          "off": 5
+        },
+        "sharing": {
+          "files": 4097,
+          "same_first_extent": 0,
+          "zero_private": 0,
+          "private_bytes": 16781312,
+          "sample": {
+            "files/000/00000.bin": {
+              "source": {
+                "first_block": 22081536,
+                "private_bytes": 4096
+              },
+              "target": {
+                "first_block": 753713152,
+                "private_bytes": 4096
+              }
+            },
+            "files/000/00001.bin": {
+              "source": {
+                "first_block": 22085632,
+                "private_bytes": 4096
+              },
+              "target": {
+                "first_block": 753717248,
+                "private_bytes": 4096
+              }
+            },
+            "files/000/00002.bin": {
+              "source": {
+                "first_block": 22089728,
+                "private_bytes": 4096
+              },
+              "target": {
+                "first_block": 753721344,
+                "private_bytes": 4096
+              }
+            }
+          }
+        }
+      },
+      {
+        "fixture": "public-twig",
+        "rev": "head",
+        "arm": "stock",
+        "samples": {
+          "wall": [
+            0.04,
+            0.03,
+            0.03,
+            0.03,
+            0.03
+          ],
+          "user": [
+            0.01,
+            0.01,
+            0.01,
+            0.01,
+            0.01
+          ],
+          "system": [
+            0.01,
+            0.01,
+            0.01,
+            0.01,
+            0.02
+          ],
+          "rss_bytes": [
+            11665408,
+            11567104,
+            11485184,
+            11567104,
+            11681792
+          ]
+        },
+        "median": {
+          "wall": 0.03,
+          "user": 0.01,
+          "system": 0.01,
+          "rss_bytes": 11567104
+        },
+        "backends": {
+          "stock": 5
+        },
+        "sharing": {
+          "files": 162,
+          "same_first_extent": 0,
+          "zero_private": 0,
+          "private_bytes": 4173824,
+          "sample": {
+            ".github/workflows/ci.yml": {
+              "source": {
+                "first_block": 658640896,
+                "private_bytes": 4096
+              },
+              "target": {
+                "first_block": 714862592,
+                "private_bytes": 4096
+              }
+            },
+            ".github/workflows/release.yml": {
+              "source": {
+                "first_block": 658644992,
+                "private_bytes": 4096
+              },
+              "target": {
+                "first_block": 714866688,
+                "private_bytes": 4096
+              }
+            },
+            ".gitignore": {
+              "source": {
+                "first_block": 658649088,
+                "private_bytes": 4096
+              },
+              "target": {
+                "first_block": 714870784,
+                "private_bytes": 4096
+              }
+            }
+          }
+        }
+      },
+      {
+        "fixture": "public-twig",
+        "rev": "head",
+        "arm": "twig",
+        "samples": {
+          "wall": [
+            0.13,
+            0.14,
+            0.13,
+            0.15,
+            0.15
+          ],
+          "user": [
+            0.06,
+            0.06,
+            0.06,
+            0.06,
+            0.07
+          ],
+          "system": [
+            0.04,
+            0.04,
+            0.04,
+            0.05,
+            0.05
+          ],
+          "rss_bytes": [
+            8552448,
+            8552448,
+            8519680,
+            8536064,
+            8519680
+          ]
+        },
+        "median": {
+          "wall": 0.14,
+          "user": 0.06,
+          "system": 0.04,
+          "rss_bytes": 8536064
+        },
+        "backends": {
+          "native": 5
+        },
+        "sharing": {
+          "files": 162,
+          "same_first_extent": 162,
+          "zero_private": 162,
+          "private_bytes": 0,
+          "sample": {
+            ".github/workflows/ci.yml": {
+              "source": {
+                "first_block": 658640896,
+                "private_bytes": 0
+              },
+              "target": {
+                "first_block": 658640896,
+                "private_bytes": 0
+              }
+            },
+            ".github/workflows/release.yml": {
+              "source": {
+                "first_block": 658644992,
+                "private_bytes": 0
+              },
+              "target": {
+                "first_block": 658644992,
+                "private_bytes": 0
+              }
+            },
+            ".gitignore": {
+              "source": {
+                "first_block": 658649088,
+                "private_bytes": 0
+              },
+              "target": {
+                "first_block": 658649088,
+                "private_bytes": 0
+              }
+            }
+          }
+        }
+      },
+      {
+        "fixture": "public-twig",
+        "rev": "head",
+        "arm": "on",
+        "samples": {
+          "wall": [
+            0.04,
+            0.04,
+            0.04,
+            0.04,
+            0.04
+          ],
+          "user": [
+            0.01,
+            0.01,
+            0.01,
+            0.01,
+            0.01
+          ],
+          "system": [
+            0.02,
+            0.02,
+            0.02,
+            0.02,
+            0.02
+          ],
+          "rss_bytes": [
+            11878400,
+            11845632,
+            11878400,
+            12156928,
+            12124160
+          ]
+        },
+        "median": {
+          "wall": 0.04,
+          "user": 0.01,
+          "system": 0.02,
+          "rss_bytes": 11878400
+        },
+        "backends": {
+          "on": 5
+        },
+        "sharing": {
+          "files": 162,
+          "same_first_extent": 0,
+          "zero_private": 0,
+          "private_bytes": 4173824,
+          "sample": {
+            ".github/workflows/ci.yml": {
+              "source": {
+                "first_block": 658640896,
+                "private_bytes": 4096
+              },
+              "target": {
+                "first_block": 710365184,
+                "private_bytes": 4096
+              }
+            },
+            ".github/workflows/release.yml": {
+              "source": {
+                "first_block": 658644992,
+                "private_bytes": 4096
+              },
+              "target": {
+                "first_block": 710369280,
+                "private_bytes": 4096
+              }
+            },
+            ".gitignore": {
+              "source": {
+                "first_block": 658649088,
+                "private_bytes": 4096
+              },
+              "target": {
+                "first_block": 710373376,
+                "private_bytes": 4096
+              }
+            }
+          }
+        }
+      },
+      {
+        "fixture": "public-twig",
+        "rev": "head",
+        "arm": "off",
+        "samples": {
+          "wall": [
+            0.03,
+            0.03,
+            0.03,
+            0.03,
+            0.03
+          ],
+          "user": [
+            0.0,
+            0.0,
+            0.0,
+            0.01,
+            0.01
+          ],
+          "system": [
+            0.01,
+            0.01,
+            0.01,
+            0.02,
+            0.02
+          ],
+          "rss_bytes": [
+            11550720,
+            11550720,
+            11550720,
+            11714560,
+            11550720
+          ]
+        },
+        "median": {
+          "wall": 0.03,
+          "user": 0.0,
+          "system": 0.01,
+          "rss_bytes": 11550720
+        },
+        "backends": {
+          "off": 5
+        },
+        "sharing": {
+          "files": 162,
+          "same_first_extent": 0,
+          "zero_private": 0,
+          "private_bytes": 4173824,
+          "sample": {
+            ".github/workflows/ci.yml": {
+              "source": {
+                "first_block": 658640896,
+                "private_bytes": 4096
+              },
+              "target": {
+                "first_block": 699768832,
+                "private_bytes": 4096
+              }
+            },
+            ".github/workflows/release.yml": {
+              "source": {
+                "first_block": 658644992,
+                "private_bytes": 4096
+              },
+              "target": {
+                "first_block": 699772928,
+                "private_bytes": 4096
+              }
+            },
+            ".gitignore": {
+              "source": {
+                "first_block": 658649088,
+                "private_bytes": 4096
+              },
+              "target": {
+                "first_block": 699777024,
+                "private_bytes": 4096
+              }
+            }
+          }
+        }
+      },
+      {
+        "fixture": "public-twig",
+        "rev": "older",
+        "arm": "stock",
+        "samples": {
+          "wall": [
+            0.03,
+            0.03,
+            0.03,
+            0.03,
+            0.03
+          ],
+          "user": [
+            0.01,
+            0.01,
+            0.01,
+            0.01,
+            0.01
+          ],
+          "system": [
+            0.01,
+            0.01,
+            0.01,
+            0.01,
+            0.01
+          ],
+          "rss_bytes": [
+            11517952,
+            11485184,
+            11534336,
+            11583488,
+            11452416
+          ]
+        },
+        "median": {
+          "wall": 0.03,
+          "user": 0.01,
+          "system": 0.01,
+          "rss_bytes": 11517952
+        },
+        "backends": {
+          "stock": 5
+        },
+        "sharing": {
+          "files": 162,
+          "same_first_extent": 0,
+          "zero_private": 0,
+          "private_bytes": 4173824,
+          "sample": {
+            ".github/workflows/ci.yml": {
+              "source": {
+                "first_block": 658640896,
+                "private_bytes": 4096
+              },
+              "target": {
+                "first_block": 816873472,
+                "private_bytes": 4096
+              }
+            },
+            ".github/workflows/release.yml": {
+              "source": {
+                "first_block": 658644992,
+                "private_bytes": 4096
+              },
+              "target": {
+                "first_block": 816877568,
+                "private_bytes": 4096
+              }
+            },
+            ".gitignore": {
+              "source": {
+                "first_block": 658649088,
+                "private_bytes": 4096
+              },
+              "target": {
+                "first_block": 816881664,
+                "private_bytes": 4096
+              }
+            }
+          }
+        }
+      },
+      {
+        "fixture": "public-twig",
+        "rev": "older",
+        "arm": "twig",
+        "samples": {
+          "wall": [
+            0.05,
+            0.05,
+            0.05,
+            0.05,
+            0.05
+          ],
+          "user": [
+            0.02,
+            0.02,
+            0.02,
+            0.02,
+            0.02
+          ],
+          "system": [
+            0.02,
+            0.02,
+            0.02,
+            0.02,
+            0.02
+          ],
+          "rss_bytes": [
+            11452416,
+            11452416,
+            11517952,
+            11501568,
+            11501568
+          ]
+        },
+        "median": {
+          "wall": 0.05,
+          "user": 0.02,
+          "system": 0.02,
+          "rss_bytes": 11501568
+        },
+        "backends": {
+          "fallback": 5
+        },
+        "sharing": {
+          "files": 162,
+          "same_first_extent": 0,
+          "zero_private": 0,
+          "private_bytes": 4173824,
+          "sample": {
+            ".github/workflows/ci.yml": {
+              "source": {
+                "first_block": 658640896,
+                "private_bytes": 4096
+              },
+              "target": {
+                "first_block": 813101056,
+                "private_bytes": 4096
+              }
+            },
+            ".github/workflows/release.yml": {
+              "source": {
+                "first_block": 658644992,
+                "private_bytes": 4096
+              },
+              "target": {
+                "first_block": 813105152,
+                "private_bytes": 4096
+              }
+            },
+            ".gitignore": {
+              "source": {
+                "first_block": 658649088,
+                "private_bytes": 4096
+              },
+              "target": {
+                "first_block": 813109248,
+                "private_bytes": 4096
+              }
+            }
+          }
+        }
+      },
+      {
+        "fixture": "public-twig",
+        "rev": "older",
+        "arm": "on",
+        "samples": {
+          "wall": [
+            0.04,
+            0.04,
+            0.04,
+            0.04,
+            0.04
+          ],
+          "user": [
+            0.01,
+            0.01,
+            0.01,
+            0.01,
+            0.01
+          ],
+          "system": [
+            0.02,
+            0.02,
+            0.02,
+            0.02,
+            0.02
+          ],
+          "rss_bytes": [
+            12500992,
+            11812864,
+            11829248,
+            11780096,
+            11730944
+          ]
+        },
+        "median": {
+          "wall": 0.04,
+          "user": 0.01,
+          "system": 0.02,
+          "rss_bytes": 11812864
+        },
+        "backends": {
+          "on": 5
+        },
+        "sharing": {
+          "files": 162,
+          "same_first_extent": 0,
+          "zero_private": 0,
+          "private_bytes": 4173824,
+          "sample": {
+            ".github/workflows/ci.yml": {
+              "source": {
+                "first_block": 658640896,
+                "private_bytes": 4096
+              },
+              "target": {
+                "first_block": 808763392,
+                "private_bytes": 4096
+              }
+            },
+            ".github/workflows/release.yml": {
+              "source": {
+                "first_block": 658644992,
+                "private_bytes": 4096
+              },
+              "target": {
+                "first_block": 808767488,
+                "private_bytes": 4096
+              }
+            },
+            ".gitignore": {
+              "source": {
+                "first_block": 658649088,
+                "private_bytes": 4096
+              },
+              "target": {
+                "first_block": 808771584,
+                "private_bytes": 4096
+              }
+            }
+          }
+        }
+      },
+      {
+        "fixture": "public-twig",
+        "rev": "older",
+        "arm": "off",
+        "samples": {
+          "wall": [
+            0.03,
+            0.03,
+            0.03,
+            0.03,
+            0.03
+          ],
+          "user": [
+            0.01,
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "system": [
+            0.02,
+            0.01,
+            0.01,
+            0.01,
+            0.01
+          ],
+          "rss_bytes": [
+            11517952,
+            11534336,
+            11550720,
+            11501568,
+            11517952
+          ]
+        },
+        "median": {
+          "wall": 0.03,
+          "user": 0.0,
+          "system": 0.01,
+          "rss_bytes": 11517952
+        },
+        "backends": {
+          "off": 5
+        },
+        "sharing": {
+          "files": 162,
+          "same_first_extent": 0,
+          "zero_private": 0,
+          "private_bytes": 4173824,
+          "sample": {
+            ".github/workflows/ci.yml": {
+              "source": {
+                "first_block": 658640896,
+                "private_bytes": 4096
+              },
+              "target": {
+                "first_block": 804446208,
+                "private_bytes": 4096
+              }
+            },
+            ".github/workflows/release.yml": {
+              "source": {
+                "first_block": 658644992,
+                "private_bytes": 4096
+              },
+              "target": {
+                "first_block": 804450304,
+                "private_bytes": 4096
+              }
+            },
+            ".gitignore": {
+              "source": {
+                "first_block": 658649088,
+                "private_bytes": 4096
+              },
+              "target": {
+                "first_block": 804454400,
+                "private_bytes": 4096
+              }
+            }
+          }
+        }
+      }
+    ],
+    "allocation": [
+      {
+        "fixture": "file-heavy",
+        "arm": "stock",
+        "children": 3,
+        "before": 622522368,
+        "after": 679657472,
+        "delta": 57135104
+      },
+      {
+        "fixture": "file-heavy",
+        "arm": "twig",
+        "children": 3,
+        "before": 622522368,
+        "after": 627523584,
+        "delta": 5001216
+      },
+      {
+        "fixture": "file-heavy",
+        "arm": "on",
+        "children": 3,
+        "before": 622522368,
+        "after": 627773440,
+        "delta": 5251072
+      },
+      {
+        "fixture": "file-heavy",
+        "arm": "off",
+        "children": 3,
+        "before": 622522368,
+        "after": 679612416,
+        "delta": 57090048
+      },
+      {
+        "fixture": "byte-heavy",
+        "arm": "stock",
+        "children": 3,
+        "before": 622526464,
+        "after": 1428008960,
+        "delta": 805482496
+      },
+      {
+        "fixture": "byte-heavy",
+        "arm": "twig",
+        "children": 3,
+        "before": 622526464,
+        "after": 622661632,
+        "delta": 135168
+      },
+      {
+        "fixture": "byte-heavy",
+        "arm": "on",
+        "children": 3,
+        "before": 622526464,
+        "after": 622678016,
+        "delta": 151552
+      },
+      {
+        "fixture": "byte-heavy",
+        "arm": "off",
+        "children": 3,
+        "before": 622526464,
+        "after": 1428008960,
+        "delta": 805482496
+      },
+      {
+        "fixture": "public-twig",
+        "arm": "stock",
+        "children": 3,
+        "before": 622526464,
+        "after": 635498496,
+        "delta": 12972032
+      },
+      {
+        "fixture": "public-twig",
+        "arm": "twig",
+        "children": 3,
+        "before": 622526464,
+        "after": 622878720,
+        "delta": 352256
+      },
+      {
+        "fixture": "public-twig",
+        "arm": "on",
+        "children": 3,
+        "before": 622526464,
+        "after": 635498496,
+        "delta": 12972032
+      },
+      {
+        "fixture": "public-twig",
+        "arm": "off",
+        "children": 3,
+        "before": 622526464,
+        "after": 635498496,
+        "delta": 12972032
+      }
+    ],
+    "incorrect_trees": [],
+    "nonzero_creates": [],
+    "checks": 200,
+    "resets": 0,
+    "reshare": [
+      {
+        "label": "private-reshare",
+        "before": "c2d1c950d1bd491788f1cd41ca26fa34576229a24bc69466b9b88c11a81decd2",
+        "after": "c2d1c950d1bd491788f1cd41ca26fa34576229a24bc69466b9b88c11a81decd2",
+        "changed": [],
+        "inode_changed": 4097,
+        "mtime_changed": 0,
+        "dry_exit": 0,
+        "apply_exit": 0,
+        "dry_metrics": {
+          "wall": 0.15,
+          "user": 0.01,
+          "system": 0.13,
+          "rss_bytes": 8962048
+        },
+        "apply_metrics": {
+          "wall": 2.4,
+          "user": 0.06,
+          "system": 2.07,
+          "rss_bytes": 9420800
+        },
+        "dry": {
+          "scanned": 4099,
+          "eligible": 4097,
+          "already-shared": 0,
+          "reshared": 0,
+          "skipped": 2,
+          "failed": 0,
+          "allocated-before": 16781312,
+          "allocated-after": 16781312,
+          "private-before": 16781312,
+          "private-after": 16781312,
+          "observed-private-reduction": 0,
+          "potential-private-reduction": 16781312,
+          "deduplicated-range-bytes": 0,
+          "allocation-unknown": 0,
+          "stat-clean": 2458,
+          "content-checked": 1639,
+          "content-check-bytes": 1677335,
+          "userspace-compared": 4097,
+          "native-attempts": 0,
+          "native-range-bytes": 0,
+          "clone-attempts": 0,
+          "comparison-bytes": 8388654
+        },
+        "apply": {
+          "scanned": 4099,
+          "eligible": 4097,
+          "already-shared": 0,
+          "reshared": 4097,
+          "skipped": 2,
+          "failed": 0,
+          "allocated-before": 16781312,
+          "allocated-after": 16781312,
+          "private-before": 16781312,
+          "private-after": 0,
+          "observed-private-reduction": 16781312,
+          "potential-private-reduction": 0,
+          "deduplicated-range-bytes": 4194327,
+          "allocation-unknown": 0,
+          "stat-clean": 2458,
+          "content-checked": 1639,
+          "content-check-bytes": 1677335,
+          "userspace-compared": 4097,
+          "native-attempts": 0,
+          "native-range-bytes": 0,
+          "clone-attempts": 4097,
+          "comparison-bytes": 8388654
+        }
+      },
+      {
+        "label": "dirty-reshare",
+        "before": "16c9e60a14c1dc0092194bc39e7f4e7d617b91cfa6cc0ab1f79c9f27f445b985",
+        "after": "16c9e60a14c1dc0092194bc39e7f4e7d617b91cfa6cc0ab1f79c9f27f445b985",
+        "changed": [],
+        "inode_changed": 0,
+        "mtime_changed": 0,
+        "dry_exit": 0,
+        "apply_exit": 0,
+        "dry_metrics": {
+          "wall": 0.07,
+          "user": 0.0,
+          "system": 0.06,
+          "rss_bytes": 8208384
+        },
+        "apply_metrics": {
+          "wall": 0.07,
+          "user": 0.0,
+          "system": 0.06,
+          "rss_bytes": 8503296
+        },
+        "dry": {
+          "scanned": 4099,
+          "eligible": 0,
+          "already-shared": 4096,
+          "reshared": 0,
+          "skipped": 3,
+          "failed": 0,
+          "allocated-before": 16781312,
+          "allocated-after": 16781312,
+          "private-before": 4096,
+          "private-after": 4096,
+          "observed-private-reduction": 0,
+          "potential-private-reduction": 0,
+          "deduplicated-range-bytes": 0,
+          "allocation-unknown": 0,
+          "stat-clean": 0,
+          "content-checked": 0,
+          "content-check-bytes": 0,
+          "userspace-compared": 0,
+          "native-attempts": 0,
+          "native-range-bytes": 0,
+          "clone-attempts": 0,
+          "comparison-bytes": 0
+        },
+        "apply": {
+          "scanned": 4099,
+          "eligible": 0,
+          "already-shared": 4096,
+          "reshared": 0,
+          "skipped": 3,
+          "failed": 0,
+          "allocated-before": 16781312,
+          "allocated-after": 16781312,
+          "private-before": 4096,
+          "private-after": 4096,
+          "observed-private-reduction": 0,
+          "potential-private-reduction": 0,
+          "deduplicated-range-bytes": 0,
+          "allocation-unknown": 0,
+          "stat-clean": 0,
+          "content-checked": 0,
+          "content-check-bytes": 0,
+          "userspace-compared": 0,
+          "native-attempts": 0,
+          "native-range-bytes": 0,
+          "clone-attempts": 0,
+          "comparison-bytes": 0
+        }
+      },
+      {
+        "label": "drift-main-new-sibling-old",
+        "before": "c743acb99223f445f8feb7108274e9c2c9171da6da1f5438d44a828bebd64e49",
+        "after": "c743acb99223f445f8feb7108274e9c2c9171da6da1f5438d44a828bebd64e49",
+        "changed": [],
+        "inode_changed": 3584,
+        "mtime_changed": 0,
+        "dry_exit": 0,
+        "apply_exit": 0,
+        "dry_metrics": {
+          "wall": 0.16,
+          "user": 0.01,
+          "system": 0.14,
+          "rss_bytes": 8978432
+        },
+        "apply_metrics": {
+          "wall": 1.98,
+          "user": 0.04,
+          "system": 1.73,
+          "rss_bytes": 9666560
+        },
+        "dry": {
+          "scanned": 4099,
+          "eligible": 3584,
+          "already-shared": 0,
+          "reshared": 0,
+          "skipped": 515,
+          "failed": 0,
+          "allocated-before": 16781312,
+          "allocated-after": 16781312,
+          "private-before": 16781312,
+          "private-after": 16781312,
+          "observed-private-reduction": 0,
+          "potential-private-reduction": 14680064,
+          "deduplicated-range-bytes": 0,
+          "allocation-unknown": 0,
+          "stat-clean": 2320,
+          "content-checked": 1264,
+          "content-check-bytes": 1294336,
+          "userspace-compared": 3584,
+          "native-attempts": 0,
+          "native-range-bytes": 0,
+          "clone-attempts": 0,
+          "comparison-bytes": 7340032
+        },
+        "apply": {
+          "scanned": 4099,
+          "eligible": 3584,
+          "already-shared": 0,
+          "reshared": 3584,
+          "skipped": 515,
+          "failed": 0,
+          "allocated-before": 16781312,
+          "allocated-after": 16781312,
+          "private-before": 16781312,
+          "private-after": 2101248,
+          "observed-private-reduction": 14680064,
+          "potential-private-reduction": 0,
+          "deduplicated-range-bytes": 3670016,
+          "allocation-unknown": 0,
+          "stat-clean": 2320,
+          "content-checked": 1264,
+          "content-check-bytes": 1294336,
+          "userspace-compared": 3584,
+          "native-attempts": 0,
+          "native-range-bytes": 0,
+          "clone-attempts": 3584,
+          "comparison-bytes": 7340032
+        }
+      },
+      {
+        "label": "mmap-held-across-replace",
+        "before": "c2d1c950d1bd491788f1cd41ca26fa34576229a24bc69466b9b88c11a81decd2",
+        "after": "c2d1c950d1bd491788f1cd41ca26fa34576229a24bc69466b9b88c11a81decd2",
+        "changed": [],
+        "inode_changed": 4097,
+        "mtime_changed": 0,
+        "dry_exit": 0,
+        "apply_exit": 0,
+        "dry_metrics": {
+          "wall": 0.18,
+          "user": 0.01,
+          "system": 0.17,
+          "rss_bytes": 8978432
+        },
+        "apply_metrics": {
+          "wall": 2.25,
+          "user": 0.05,
+          "system": 1.99,
+          "rss_bytes": 9584640
+        },
+        "dry": {
+          "scanned": 4099,
+          "eligible": 4097,
+          "already-shared": 0,
+          "reshared": 0,
+          "skipped": 2,
+          "failed": 0,
+          "allocated-before": 16781312,
+          "allocated-after": 16781312,
+          "private-before": 16781312,
+          "private-after": 16781312,
+          "observed-private-reduction": 0,
+          "potential-private-reduction": 16781312,
+          "deduplicated-range-bytes": 0,
+          "allocation-unknown": 0,
+          "stat-clean": 3858,
+          "content-checked": 239,
+          "content-check-bytes": 243735,
+          "userspace-compared": 4097,
+          "native-attempts": 0,
+          "native-range-bytes": 0,
+          "clone-attempts": 0,
+          "comparison-bytes": 8388654
+        },
+        "apply": {
+          "scanned": 4099,
+          "eligible": 4097,
+          "already-shared": 0,
+          "reshared": 4097,
+          "skipped": 2,
+          "failed": 0,
+          "allocated-before": 16781312,
+          "allocated-after": 16781312,
+          "private-before": 16781312,
+          "private-after": 0,
+          "observed-private-reduction": 16781312,
+          "potential-private-reduction": 0,
+          "deduplicated-range-bytes": 4194327,
+          "allocation-unknown": 0,
+          "stat-clean": 3858,
+          "content-checked": 239,
+          "content-check-bytes": 243735,
+          "userspace-compared": 4097,
+          "native-attempts": 0,
+          "native-range-bytes": 0,
+          "clone-attempts": 4097,
+          "comparison-bytes": 8388654
+        }
+      }
+    ],
+    "sharing": [
+      {
+        "label": "after-switch/stock",
+        "sharing": {
+          "files": 4097,
+          "same_first_extent": 0,
+          "zero_private": 0,
+          "private_bytes": 16781312,
+          "sample": {
+            "files/000/00000.bin": {
+              "source": {
+                "first_block": 815124480,
+                "private_bytes": 4096
+              },
+              "target": {
+                "first_block": 841412608,
+                "private_bytes": 4096
+              }
+            },
+            "files/000/00001.bin": {
+              "source": {
+                "first_block": 22085632,
+                "private_bytes": 4096
+              },
+              "target": {
+                "first_block": 815157248,
+                "private_bytes": 4096
+              }
+            },
+            "files/000/00002.bin": {
+              "source": {
+                "first_block": 22089728,
+                "private_bytes": 4096
+              },
+              "target": {
+                "first_block": 815161344,
+                "private_bytes": 4096
+              }
+            }
+          }
+        }
+      },
+      {
+        "label": "after-switch/twig",
+        "sharing": {
+          "files": 4097,
+          "same_first_extent": 3584,
+          "zero_private": 3584,
+          "private_bytes": 2101248,
+          "sample": {
+            "files/000/00000.bin": {
+              "source": {
+                "first_block": 815124480,
+                "private_bytes": 4096
+              },
+              "target": {
+                "first_block": 869339136,
+                "private_bytes": 4096
+              }
+            },
+            "files/000/00001.bin": {
+              "source": {
+                "first_block": 22085632,
+                "private_bytes": 0
+              },
+              "target": {
+                "first_block": 22085632,
+                "private_bytes": 0
+              }
+            },
+            "files/000/00002.bin": {
+              "source": {
+                "first_block": 22089728,
+                "private_bytes": 0
+              },
+              "target": {
+                "first_block": 22089728,
+                "private_bytes": 0
+              }
+            }
+          }
+        }
+      },
+      {
+        "label": "after-switch/on",
+        "sharing": {
+          "files": 4097,
+          "same_first_extent": 4097,
+          "zero_private": 4097,
+          "private_bytes": 0,
+          "sample": {
+            "files/000/00000.bin": {
+              "source": {
+                "first_block": 815124480,
+                "private_bytes": 0
+              },
+              "target": {
+                "first_block": 815124480,
+                "private_bytes": 0
+              }
+            },
+            "files/000/00001.bin": {
+              "source": {
+                "first_block": 22085632,
+                "private_bytes": 0
+              },
+              "target": {
+                "first_block": 22085632,
+                "private_bytes": 0
+              }
+            },
+            "files/000/00002.bin": {
+              "source": {
+                "first_block": 22089728,
+                "private_bytes": 0
+              },
+              "target": {
+                "first_block": 22089728,
+                "private_bytes": 0
+              }
+            }
+          }
+        }
+      },
+      {
+        "label": "after-switch/off",
+        "sharing": {
+          "files": 4097,
+          "same_first_extent": 0,
+          "zero_private": 0,
+          "private_bytes": 16781312,
+          "sample": {
+            "files/000/00000.bin": {
+              "source": {
+                "first_block": 815124480,
+                "private_bytes": 4096
+              },
+              "target": {
+                "first_block": 693608448,
+                "private_bytes": 4096
+              }
+            },
+            "files/000/00001.bin": {
+              "source": {
+                "first_block": 22085632,
+                "private_bytes": 4096
+              },
+              "target": {
+                "first_block": 926486528,
+                "private_bytes": 4096
+              }
+            },
+            "files/000/00002.bin": {
+              "source": {
+                "first_block": 22089728,
+                "private_bytes": 4096
+              },
+              "target": {
+                "first_block": 926490624,
+                "private_bytes": 4096
+              }
+            }
+          }
+        }
+      },
+      {
+        "label": "before-reshare",
+        "sharing": {
+          "files": 4097,
+          "same_first_extent": 0,
+          "zero_private": 0,
+          "private_bytes": 16781312,
+          "sample": {
+            "files/000/00000.bin": {
+              "source": {
+                "first_block": 815124480,
+                "private_bytes": 4096
+              },
+              "target": {
+                "first_block": 708673536,
+                "private_bytes": 4096
+              }
+            },
+            "files/000/00001.bin": {
+              "source": {
+                "first_block": 22085632,
+                "private_bytes": 4096
+              },
+              "target": {
+                "first_block": 708677632,
+                "private_bytes": 4096
+              }
+            },
+            "files/000/00002.bin": {
+              "source": {
+                "first_block": 22089728,
+                "private_bytes": 4096
+              },
+              "target": {
+                "first_block": 708681728,
+                "private_bytes": 4096
+              }
+            }
+          }
+        }
+      },
+      {
+        "label": "after-reshare",
+        "sharing": {
+          "files": 4097,
+          "same_first_extent": 4097,
+          "zero_private": 4097,
+          "private_bytes": 0,
+          "sample": {
+            "files/000/00000.bin": {
+              "source": {
+                "first_block": 815124480,
+                "private_bytes": 0
+              },
+              "target": {
+                "first_block": 815124480,
+                "private_bytes": 0
+              }
+            },
+            "files/000/00001.bin": {
+              "source": {
+                "first_block": 22085632,
+                "private_bytes": 0
+              },
+              "target": {
+                "first_block": 22085632,
+                "private_bytes": 0
+              }
+            },
+            "files/000/00002.bin": {
+              "source": {
+                "first_block": 22089728,
+                "private_bytes": 0
+              },
+              "target": {
+                "first_block": 22089728,
+                "private_bytes": 0
+              }
+            }
+          }
+        }
+      },
+      {
+        "label": "drift-sharing",
+        "sharing": {
+          "files": 4097,
+          "same_first_extent": 3584,
+          "zero_private": 3584,
+          "private_bytes": 2101248,
+          "sample": {
+            "files/000/00000.bin": {
+              "source": {
+                "first_block": 757608448,
+                "private_bytes": 4096
+              },
+              "target": {
+                "first_block": 761810944,
+                "private_bytes": 4096
+              }
+            },
+            "files/000/00001.bin": {
+              "source": {
+                "first_block": 22085632,
+                "private_bytes": 0
+              },
+              "target": {
+                "first_block": 22085632,
+                "private_bytes": 0
+              }
+            },
+            "files/000/00002.bin": {
+              "source": {
+                "first_block": 22089728,
+                "private_bytes": 0
+              },
+              "target": {
+                "first_block": 22089728,
+                "private_bytes": 0
+              }
+            }
+          }
+        }
+      },
+      {
+        "label": "drift-reset",
+        "before": "c743acb99223f445f8feb7108274e9c2c9171da6da1f5438d44a828bebd64e49",
+        "after": "c743acb99223f445f8feb7108274e9c2c9171da6da1f5438d44a828bebd64e49",
+        "sharing": {
+          "files": 4097,
+          "same_first_extent": 3584,
+          "zero_private": 3584,
+          "private_bytes": 2101248,
+          "sample": {
+            "files/000/00000.bin": {
+              "source": {
+                "first_block": 757608448,
+                "private_bytes": 4096
+              },
+              "target": {
+                "first_block": 791703552,
+                "private_bytes": 4096
+              }
+            },
+            "files/000/00001.bin": {
+              "source": {
+                "first_block": 22085632,
+                "private_bytes": 0
+              },
+              "target": {
+                "first_block": 22085632,
+                "private_bytes": 0
+              }
+            },
+            "files/000/00002.bin": {
+              "source": {
+                "first_block": 22089728,
+                "private_bytes": 0
+              },
+              "target": {
+                "first_block": 22089728,
+                "private_bytes": 0
+              }
+            }
+          }
+        }
+      }
+    ],
+    "concurrent": [
+      {
+        "fixture": "file-heavy",
+        "revision": "92054e50dd289a319e14b401dfff56cd1df1f2f7",
+        "arm": "stock",
+        "label": "concurrent-1",
+        "exit": 0,
+        "backend": "stock",
+        "metrics": {
+          "wall": 1.11,
+          "user": 0.02,
+          "system": 0.33,
+          "rss_bytes": 14630912
+        },
+        "target": "/private/tmp/pwrgit-twig-20261116/volume/run1/wt-210"
+      },
+      {
+        "fixture": "file-heavy",
+        "revision": "92054e50dd289a319e14b401dfff56cd1df1f2f7",
+        "arm": "stock",
+        "label": "concurrent-0",
+        "exit": 0,
+        "backend": "stock",
+        "metrics": {
+          "wall": 1.11,
+          "user": 0.02,
+          "system": 0.32,
+          "rss_bytes": 14565376
+        },
+        "target": "/private/tmp/pwrgit-twig-20261116/volume/run1/wt-209"
+      },
+      {
+        "fixture": "file-heavy",
+        "revision": "92054e50dd289a319e14b401dfff56cd1df1f2f7",
+        "arm": "twig",
+        "label": "concurrent-0",
+        "exit": 0,
+        "backend": "native",
+        "metrics": {
+          "wall": 0.64,
+          "user": 0.09,
+          "system": 0.34,
+          "rss_bytes": 9584640
+        },
+        "target": "/private/tmp/pwrgit-twig-20261116/volume/run1/wt-211"
+      },
+      {
+        "fixture": "file-heavy",
+        "revision": "92054e50dd289a319e14b401dfff56cd1df1f2f7",
+        "arm": "twig",
+        "label": "concurrent-1",
+        "exit": 0,
+        "backend": "native",
+        "metrics": {
+          "wall": 0.67,
+          "user": 0.09,
+          "system": 0.33,
+          "rss_bytes": 9551872
+        },
+        "target": "/private/tmp/pwrgit-twig-20261116/volume/run1/wt-212"
+      },
+      {
+        "fixture": "file-heavy",
+        "revision": "92054e50dd289a319e14b401dfff56cd1df1f2f7",
+        "arm": "on",
+        "label": "concurrent-0",
+        "exit": 0,
+        "backend": "on",
+        "metrics": {
+          "wall": 0.76,
+          "user": 0.03,
+          "system": 0.72,
+          "rss_bytes": 15679488
+        },
+        "target": "/private/tmp/pwrgit-twig-20261116/volume/run1/wt-213"
+      },
+      {
+        "fixture": "file-heavy",
+        "revision": "92054e50dd289a319e14b401dfff56cd1df1f2f7",
+        "arm": "on",
+        "label": "concurrent-1",
+        "exit": 0,
+        "backend": "on",
+        "metrics": {
+          "wall": 0.75,
+          "user": 0.03,
+          "system": 0.71,
+          "rss_bytes": 15826944
+        },
+        "target": "/private/tmp/pwrgit-twig-20261116/volume/run1/wt-214"
+      },
+      {
+        "fixture": "file-heavy",
+        "revision": "92054e50dd289a319e14b401dfff56cd1df1f2f7",
+        "arm": "off",
+        "label": "concurrent-1",
+        "exit": 0,
+        "backend": "off",
+        "metrics": {
+          "wall": 1.2,
+          "user": 0.02,
+          "system": 0.33,
+          "rss_bytes": 14499840
+        },
+        "target": "/private/tmp/pwrgit-twig-20261116/volume/run1/wt-216"
+      },
+      {
+        "fixture": "file-heavy",
+        "revision": "92054e50dd289a319e14b401dfff56cd1df1f2f7",
+        "arm": "off",
+        "label": "concurrent-0",
+        "exit": 0,
+        "backend": "off",
+        "metrics": {
+          "wall": 1.2,
+          "user": 0.02,
+          "system": 0.32,
+          "rss_bytes": 14598144
+        },
+        "target": "/private/tmp/pwrgit-twig-20261116/volume/run1/wt-215"
+      }
+    ],
+    "mmap": [
+      {
+        "label": "mmap-after-replace",
+        "inode_before": 443293,
+        "inode_after": 447460,
+        "descriptor_sha256": "e3a3cd3599cef2eaab4ffc6b7fd6266673fef2f85808e6549f7fb8a763a68ffe",
+        "pathname_sha256": "fa1f7190de0b1d1398bb52f365773d1baa99070a4c4c84dcd10988b791cac64c"
+      }
+    ]
+  },
+  "/private/tmp/pwrgit-twig-20261116/public-aged/results.json": {
+    "timing": [
+      {
+        "fixture": "public-twig",
+        "rev": "head",
+        "arm": "stock",
+        "samples": {
+          "wall": [
+            0.03,
+            0.03,
+            0.03,
+            0.03,
+            0.03
+          ],
+          "user": [
+            0.01,
+            0.01,
+            0.01,
+            0.01,
+            0.01
+          ],
+          "system": [
+            0.01,
+            0.01,
+            0.01,
+            0.01,
+            0.01
+          ],
+          "rss_bytes": [
+            11698176,
+            11567104,
+            11616256,
+            11517952,
+            11567104
+          ]
+        },
+        "median": {
+          "wall": 0.03,
+          "user": 0.01,
+          "system": 0.01,
+          "rss_bytes": 11567104
+        },
+        "backends": {
+          "stock": 5
+        },
+        "sharing": {
+          "files": 162,
+          "same_first_extent": 0,
+          "zero_private": 0,
+          "private_bytes": 4173824,
+          "sample": {
+            ".github/workflows/ci.yml": {
+              "source": {
+                "first_block": 881922048,
+                "private_bytes": 4096
+              },
+              "target": {
+                "first_block": 926285824,
+                "private_bytes": 4096
+              }
+            },
+            ".github/workflows/release.yml": {
+              "source": {
+                "first_block": 881926144,
+                "private_bytes": 4096
+              },
+              "target": {
+                "first_block": 926289920,
+                "private_bytes": 4096
+              }
+            },
+            ".gitignore": {
+              "source": {
+                "first_block": 881930240,
+                "private_bytes": 4096
+              },
+              "target": {
+                "first_block": 926294016,
+                "private_bytes": 4096
+              }
+            }
+          }
+        }
+      },
+      {
+        "fixture": "public-twig",
+        "rev": "head",
+        "arm": "twig",
+        "samples": {
+          "wall": [
+            0.14,
+            0.14,
+            0.14,
+            0.14,
+            0.14
+          ],
+          "user": [
+            0.06,
+            0.06,
+            0.06,
+            0.06,
+            0.06
+          ],
+          "system": [
+            0.04,
+            0.04,
+            0.04,
+            0.04,
+            0.04
+          ],
+          "rss_bytes": [
+            8519680,
+            8568832,
+            8568832,
+            8536064,
+            8503296
+          ]
+        },
+        "median": {
+          "wall": 0.14,
+          "user": 0.06,
+          "system": 0.04,
+          "rss_bytes": 8536064
+        },
+        "backends": {
+          "native": 5
+        },
+        "sharing": {
+          "files": 162,
+          "same_first_extent": 162,
+          "zero_private": 162,
+          "private_bytes": 0,
+          "sample": {
+            ".github/workflows/ci.yml": {
+              "source": {
+                "first_block": 881922048,
+                "private_bytes": 0
+              },
+              "target": {
+                "first_block": 881922048,
+                "private_bytes": 0
+              }
+            },
+            ".github/workflows/release.yml": {
+              "source": {
+                "first_block": 881926144,
+                "private_bytes": 0
+              },
+              "target": {
+                "first_block": 881926144,
+                "private_bytes": 0
+              }
+            },
+            ".gitignore": {
+              "source": {
+                "first_block": 881930240,
+                "private_bytes": 0
+              },
+              "target": {
+                "first_block": 881930240,
+                "private_bytes": 0
+              }
+            }
+          }
+        }
+      },
+      {
+        "fixture": "public-twig",
+        "rev": "head",
+        "arm": "on",
+        "samples": {
+          "wall": [
+            0.04,
+            0.05,
+            0.04,
+            0.05,
+            0.05
+          ],
+          "user": [
+            0.01,
+            0.01,
+            0.01,
+            0.01,
+            0.01
+          ],
+          "system": [
+            0.03,
+            0.03,
+            0.03,
+            0.03,
+            0.03
+          ],
+          "rss_bytes": [
+            9371648,
+            9371648,
+            9338880,
+            9437184,
+            9420800
+          ]
+        },
+        "median": {
+          "wall": 0.05,
+          "user": 0.01,
+          "system": 0.03,
+          "rss_bytes": 9371648
+        },
+        "backends": {
+          "on": 5
+        },
+        "sharing": {
+          "files": 162,
+          "same_first_extent": 162,
+          "zero_private": 162,
+          "private_bytes": 0,
+          "sample": {
+            ".github/workflows/ci.yml": {
+              "source": {
+                "first_block": 881922048,
+                "private_bytes": 0
+              },
+              "target": {
+                "first_block": 881922048,
+                "private_bytes": 0
+              }
+            },
+            ".github/workflows/release.yml": {
+              "source": {
+                "first_block": 881926144,
+                "private_bytes": 0
+              },
+              "target": {
+                "first_block": 881926144,
+                "private_bytes": 0
+              }
+            },
+            ".gitignore": {
+              "source": {
+                "first_block": 881930240,
+                "private_bytes": 0
+              },
+              "target": {
+                "first_block": 881930240,
+                "private_bytes": 0
+              }
+            }
+          }
+        }
+      },
+      {
+        "fixture": "public-twig",
+        "rev": "head",
+        "arm": "off",
+        "samples": {
+          "wall": [
+            0.03,
+            0.02,
+            0.03,
+            0.03,
+            0.02
+          ],
+          "user": [
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "system": [
+            0.01,
+            0.01,
+            0.01,
+            0.01,
+            0.01
+          ],
+          "rss_bytes": [
+            11599872,
+            11550720,
+            11567104,
+            11550720,
+            11632640
+          ]
+        },
+        "median": {
+          "wall": 0.03,
+          "user": 0.0,
+          "system": 0.01,
+          "rss_bytes": 11567104
+        },
+        "backends": {
+          "off": 5
+        },
+        "sharing": {
+          "files": 162,
+          "same_first_extent": 0,
+          "zero_private": 0,
+          "private_bytes": 4173824,
+          "sample": {
+            ".github/workflows/ci.yml": {
+              "source": {
+                "first_block": 881922048,
+                "private_bytes": 4096
+              },
+              "target": {
+                "first_block": 921542656,
+                "private_bytes": 4096
+              }
+            },
+            ".github/workflows/release.yml": {
+              "source": {
+                "first_block": 881926144,
+                "private_bytes": 4096
+              },
+              "target": {
+                "first_block": 921546752,
+                "private_bytes": 4096
+              }
+            },
+            ".gitignore": {
+              "source": {
+                "first_block": 881930240,
+                "private_bytes": 4096
+              },
+              "target": {
+                "first_block": 921550848,
+                "private_bytes": 4096
+              }
+            }
+          }
+        }
+      },
+      {
+        "fixture": "public-twig",
+        "rev": "older",
+        "arm": "stock",
+        "samples": {
+          "wall": [
+            0.03,
+            0.03,
+            0.03,
+            0.03,
+            0.04
+          ],
+          "user": [
+            0.01,
+            0.01,
+            0.01,
+            0.01,
+            0.01
+          ],
+          "system": [
+            0.01,
+            0.01,
+            0.02,
+            0.02,
+            0.02
+          ],
+          "rss_bytes": [
+            11436032,
+            11599872,
+            11796480,
+            12173312,
+            11829248
+          ]
+        },
+        "median": {
+          "wall": 0.03,
+          "user": 0.01,
+          "system": 0.02,
+          "rss_bytes": 11796480
+        },
+        "backends": {
+          "stock": 5
+        },
+        "sharing": {
+          "files": 162,
+          "same_first_extent": 0,
+          "zero_private": 0,
+          "private_bytes": 4173824,
+          "sample": {
+            ".github/workflows/ci.yml": {
+              "source": {
+                "first_block": 881922048,
+                "private_bytes": 4096
+              },
+              "target": {
+                "first_block": 805679104,
+                "private_bytes": 4096
+              }
+            },
+            ".github/workflows/release.yml": {
+              "source": {
+                "first_block": 881926144,
+                "private_bytes": 4096
+              },
+              "target": {
+                "first_block": 805683200,
+                "private_bytes": 4096
+              }
+            },
+            ".gitignore": {
+              "source": {
+                "first_block": 881930240,
+                "private_bytes": 4096
+              },
+              "target": {
+                "first_block": 805687296,
+                "private_bytes": 4096
+              }
+            }
+          }
+        }
+      },
+      {
+        "fixture": "public-twig",
+        "rev": "older",
+        "arm": "twig",
+        "samples": {
+          "wall": [
+            0.05,
+            0.05,
+            0.05,
+            0.05,
+            0.05
+          ],
+          "user": [
+            0.02,
+            0.02,
+            0.02,
+            0.02,
+            0.02
+          ],
+          "system": [
+            0.02,
+            0.02,
+            0.02,
+            0.02,
+            0.02
+          ],
+          "rss_bytes": [
+            11567104,
+            11452416,
+            11501568,
+            11567104,
+            11714560
+          ]
+        },
+        "median": {
+          "wall": 0.05,
+          "user": 0.02,
+          "system": 0.02,
+          "rss_bytes": 11567104
+        },
+        "backends": {
+          "fallback": 5
+        },
+        "sharing": {
+          "files": 162,
+          "same_first_extent": 0,
+          "zero_private": 0,
+          "private_bytes": 4173824,
+          "sample": {
+            ".github/workflows/ci.yml": {
+              "source": {
+                "first_block": 881922048,
+                "private_bytes": 4096
+              },
+              "target": {
+                "first_block": 801202176,
+                "private_bytes": 4096
+              }
+            },
+            ".github/workflows/release.yml": {
+              "source": {
+                "first_block": 881926144,
+                "private_bytes": 4096
+              },
+              "target": {
+                "first_block": 801206272,
+                "private_bytes": 4096
+              }
+            },
+            ".gitignore": {
+              "source": {
+                "first_block": 881930240,
+                "private_bytes": 4096
+              },
+              "target": {
+                "first_block": 801210368,
+                "private_bytes": 4096
+              }
+            }
+          }
+        }
+      },
+      {
+        "fixture": "public-twig",
+        "rev": "older",
+        "arm": "on",
+        "samples": {
+          "wall": [
+            0.04,
+            0.04,
+            0.04,
+            0.05,
+            0.05
+          ],
+          "user": [
+            0.01,
+            0.01,
+            0.01,
+            0.01,
+            0.01
+          ],
+          "system": [
+            0.03,
+            0.03,
+            0.03,
+            0.03,
+            0.03
+          ],
+          "rss_bytes": [
+            9748480,
+            9748480,
+            9830400,
+            9846784,
+            9814016
+          ]
+        },
+        "median": {
+          "wall": 0.04,
+          "user": 0.01,
+          "system": 0.03,
+          "rss_bytes": 9814016
+        },
+        "backends": {
+          "on": 5
+        },
+        "sharing": {
+          "files": 162,
+          "same_first_extent": 149,
+          "zero_private": 149,
+          "private_bytes": 122880,
+          "sample": {
+            ".github/workflows/ci.yml": {
+              "source": {
+                "first_block": 881922048,
+                "private_bytes": 0
+              },
+              "target": {
+                "first_block": 881922048,
+                "private_bytes": 0
+              }
+            },
+            ".github/workflows/release.yml": {
+              "source": {
+                "first_block": 881926144,
+                "private_bytes": 0
+              },
+              "target": {
+                "first_block": 881926144,
+                "private_bytes": 0
+              }
+            },
+            ".gitignore": {
+              "source": {
+                "first_block": 881930240,
+                "private_bytes": 0
+              },
+              "target": {
+                "first_block": 881930240,
+                "private_bytes": 0
+              }
+            }
+          }
+        }
+      },
+      {
+        "fixture": "public-twig",
+        "rev": "older",
+        "arm": "off",
+        "samples": {
+          "wall": [
+            0.03,
+            0.03,
+            0.03,
+            0.03,
+            0.03
+          ],
+          "user": [
+            0.0,
+            0.0,
+            0.0,
+            0.01,
+            0.0
+          ],
+          "system": [
+            0.01,
+            0.01,
+            0.01,
+            0.01,
+            0.01
+          ],
+          "rss_bytes": [
+            11501568,
+            11436032,
+            11583488,
+            11632640,
+            11501568
+          ]
+        },
+        "median": {
+          "wall": 0.03,
+          "user": 0.0,
+          "system": 0.01,
+          "rss_bytes": 11501568
+        },
+        "backends": {
+          "off": 5
+        },
+        "sharing": {
+          "files": 162,
+          "same_first_extent": 0,
+          "zero_private": 0,
+          "private_bytes": 4173824,
+          "sample": {
+            ".github/workflows/ci.yml": {
+              "source": {
+                "first_block": 881922048,
+                "private_bytes": 4096
+              },
+              "target": {
+                "first_block": 795656192,
+                "private_bytes": 4096
+              }
+            },
+            ".github/workflows/release.yml": {
+              "source": {
+                "first_block": 881926144,
+                "private_bytes": 4096
+              },
+              "target": {
+                "first_block": 795660288,
+                "private_bytes": 4096
+              }
+            },
+            ".gitignore": {
+              "source": {
+                "first_block": 881930240,
+                "private_bytes": 4096
+              },
+              "target": {
+                "first_block": 796712960,
+                "private_bytes": 4096
+              }
+            }
+          }
+        }
+      }
+    ],
+    "allocation": [
+      {
+        "fixture": "public-twig",
+        "arm": "stock",
+        "children": 3,
+        "before": 649625600,
+        "after": 662597632,
+        "delta": 12972032
+      },
+      {
+        "fixture": "public-twig",
+        "arm": "twig",
+        "children": 3,
+        "before": 649625600,
+        "after": 649977856,
+        "delta": 352256
+      },
+      {
+        "fixture": "public-twig",
+        "arm": "on",
+        "children": 3,
+        "before": 649625600,
+        "after": 649998336,
+        "delta": 372736
+      },
+      {
+        "fixture": "public-twig",
+        "arm": "off",
+        "children": 3,
+        "before": 649625600,
+        "after": 662601728,
+        "delta": 12976128
+      }
+    ],
+    "incorrect_trees": [],
+    "nonzero_creates": [],
+    "checks": 48,
+    "resets": 0,
+    "reshare": [],
+    "sharing": [],
+    "concurrent": []
+  },
+  "/private/tmp/pwrgit-twig-20261116/lifecycle/results.json": {
+    "timing": [],
+    "allocation": [],
+    "incorrect_trees": [],
+    "nonzero_creates": [],
+    "checks": 56,
+    "resets": 24,
+    "reshare": [
+      {
+        "label": "private-reshare",
+        "before": "c2d1c950d1bd491788f1cd41ca26fa34576229a24bc69466b9b88c11a81decd2",
+        "after": "c2d1c950d1bd491788f1cd41ca26fa34576229a24bc69466b9b88c11a81decd2",
+        "changed": [],
+        "inode_changed": 4097,
+        "mtime_changed": 0,
+        "dry_exit": 0,
+        "apply_exit": 0,
+        "dry_metrics": {
+          "wall": 0.16,
+          "user": 0.02,
+          "system": 0.13,
+          "rss_bytes": 8978432
+        },
+        "apply_metrics": {
+          "wall": 2.25,
+          "user": 0.06,
+          "system": 1.95,
+          "rss_bytes": 9404416
+        },
+        "dry": {
+          "scanned": 4099,
+          "eligible": 4097,
+          "already-shared": 0,
+          "reshared": 0,
+          "skipped": 2,
+          "failed": 0,
+          "allocated-before": 16781312,
+          "allocated-after": 16781312,
+          "private-before": 16781312,
+          "private-after": 16781312,
+          "observed-private-reduction": 0,
+          "potential-private-reduction": 16781312,
+          "deduplicated-range-bytes": 0,
+          "allocation-unknown": 0,
+          "stat-clean": 710,
+          "content-checked": 3387,
+          "content-check-bytes": 3467287,
+          "userspace-compared": 4097,
+          "native-attempts": 0,
+          "native-range-bytes": 0,
+          "clone-attempts": 0,
+          "comparison-bytes": 8388654
+        },
+        "apply": {
+          "scanned": 4099,
+          "eligible": 4097,
+          "already-shared": 0,
+          "reshared": 4097,
+          "skipped": 2,
+          "failed": 0,
+          "allocated-before": 16781312,
+          "allocated-after": 16781312,
+          "private-before": 16781312,
+          "private-after": 0,
+          "observed-private-reduction": 16781312,
+          "potential-private-reduction": 0,
+          "deduplicated-range-bytes": 4194327,
+          "allocation-unknown": 0,
+          "stat-clean": 710,
+          "content-checked": 3387,
+          "content-check-bytes": 3467287,
+          "userspace-compared": 4097,
+          "native-attempts": 0,
+          "native-range-bytes": 0,
+          "clone-attempts": 4097,
+          "comparison-bytes": 8388654
+        }
+      },
+      {
+        "label": "dirty-reshare",
+        "before": "16c9e60a14c1dc0092194bc39e7f4e7d617b91cfa6cc0ab1f79c9f27f445b985",
+        "after": "16c9e60a14c1dc0092194bc39e7f4e7d617b91cfa6cc0ab1f79c9f27f445b985",
+        "changed": [],
+        "inode_changed": 0,
+        "mtime_changed": 0,
+        "dry_exit": 0,
+        "apply_exit": 0,
+        "dry_metrics": {
+          "wall": 0.07,
+          "user": 0.0,
+          "system": 0.06,
+          "rss_bytes": 8192000
+        },
+        "apply_metrics": {
+          "wall": 0.06,
+          "user": 0.0,
+          "system": 0.05,
+          "rss_bytes": 8470528
+        },
+        "dry": {
+          "scanned": 4099,
+          "eligible": 0,
+          "already-shared": 4096,
+          "reshared": 0,
+          "skipped": 3,
+          "failed": 0,
+          "allocated-before": 16781312,
+          "allocated-after": 16781312,
+          "private-before": 4096,
+          "private-after": 4096,
+          "observed-private-reduction": 0,
+          "potential-private-reduction": 0,
+          "deduplicated-range-bytes": 0,
+          "allocation-unknown": 0,
+          "stat-clean": 0,
+          "content-checked": 0,
+          "content-check-bytes": 0,
+          "userspace-compared": 0,
+          "native-attempts": 0,
+          "native-range-bytes": 0,
+          "clone-attempts": 0,
+          "comparison-bytes": 0
+        },
+        "apply": {
+          "scanned": 4099,
+          "eligible": 0,
+          "already-shared": 4096,
+          "reshared": 0,
+          "skipped": 3,
+          "failed": 0,
+          "allocated-before": 16781312,
+          "allocated-after": 16781312,
+          "private-before": 4096,
+          "private-after": 4096,
+          "observed-private-reduction": 0,
+          "potential-private-reduction": 0,
+          "deduplicated-range-bytes": 0,
+          "allocation-unknown": 0,
+          "stat-clean": 0,
+          "content-checked": 0,
+          "content-check-bytes": 0,
+          "userspace-compared": 0,
+          "native-attempts": 0,
+          "native-range-bytes": 0,
+          "clone-attempts": 0,
+          "comparison-bytes": 0
+        }
+      },
+      {
+        "label": "drift-main-new-sibling-old",
+        "before": "c743acb99223f445f8feb7108274e9c2c9171da6da1f5438d44a828bebd64e49",
+        "after": "c743acb99223f445f8feb7108274e9c2c9171da6da1f5438d44a828bebd64e49",
+        "changed": [],
+        "inode_changed": 3584,
+        "mtime_changed": 0,
+        "dry_exit": 0,
+        "apply_exit": 0,
+        "dry_metrics": {
+          "wall": 0.15,
+          "user": 0.01,
+          "system": 0.13,
+          "rss_bytes": 8994816
+        },
+        "apply_metrics": {
+          "wall": 2.02,
+          "user": 0.05,
+          "system": 1.75,
+          "rss_bytes": 9682944
+        },
+        "dry": {
+          "scanned": 4099,
+          "eligible": 3584,
+          "already-shared": 0,
+          "reshared": 0,
+          "skipped": 515,
+          "failed": 0,
+          "allocated-before": 16781312,
+          "allocated-after": 16781312,
+          "private-before": 16781312,
+          "private-after": 16781312,
+          "observed-private-reduction": 0,
+          "potential-private-reduction": 14680064,
+          "deduplicated-range-bytes": 0,
+          "allocation-unknown": 0,
+          "stat-clean": 2146,
+          "content-checked": 1438,
+          "content-check-bytes": 1472512,
+          "userspace-compared": 3584,
+          "native-attempts": 0,
+          "native-range-bytes": 0,
+          "clone-attempts": 0,
+          "comparison-bytes": 7340032
+        },
+        "apply": {
+          "scanned": 4099,
+          "eligible": 3584,
+          "already-shared": 0,
+          "reshared": 3584,
+          "skipped": 515,
+          "failed": 0,
+          "allocated-before": 16781312,
+          "allocated-after": 16781312,
+          "private-before": 16781312,
+          "private-after": 2101248,
+          "observed-private-reduction": 14680064,
+          "potential-private-reduction": 0,
+          "deduplicated-range-bytes": 3670016,
+          "allocation-unknown": 0,
+          "stat-clean": 2146,
+          "content-checked": 1438,
+          "content-check-bytes": 1472512,
+          "userspace-compared": 3584,
+          "native-attempts": 0,
+          "native-range-bytes": 0,
+          "clone-attempts": 3584,
+          "comparison-bytes": 7340032
+        }
+      },
+      {
+        "label": "mmap-held-across-replace",
+        "before": "c2d1c950d1bd491788f1cd41ca26fa34576229a24bc69466b9b88c11a81decd2",
+        "after": "c2d1c950d1bd491788f1cd41ca26fa34576229a24bc69466b9b88c11a81decd2",
+        "changed": [],
+        "inode_changed": 4097,
+        "mtime_changed": 0,
+        "dry_exit": 0,
+        "apply_exit": 0,
+        "dry_metrics": {
+          "wall": 0.17,
+          "user": 0.01,
+          "system": 0.16,
+          "rss_bytes": 8962048
+        },
+        "apply_metrics": {
+          "wall": 2.4,
+          "user": 0.05,
+          "system": 2.12,
+          "rss_bytes": 9601024
+        },
+        "dry": {
+          "scanned": 4099,
+          "eligible": 4097,
+          "already-shared": 0,
+          "reshared": 0,
+          "skipped": 2,
+          "failed": 0,
+          "allocated-before": 16781312,
+          "allocated-after": 16781312,
+          "private-before": 16781312,
+          "private-after": 16781312,
+          "observed-private-reduction": 0,
+          "potential-private-reduction": 16781312,
+          "deduplicated-range-bytes": 0,
+          "allocation-unknown": 0,
+          "stat-clean": 3280,
+          "content-checked": 817,
+          "content-check-bytes": 835607,
+          "userspace-compared": 4097,
+          "native-attempts": 0,
+          "native-range-bytes": 0,
+          "clone-attempts": 0,
+          "comparison-bytes": 8388654
+        },
+        "apply": {
+          "scanned": 4099,
+          "eligible": 4097,
+          "already-shared": 0,
+          "reshared": 4097,
+          "skipped": 2,
+          "failed": 0,
+          "allocated-before": 16781312,
+          "allocated-after": 16781312,
+          "private-before": 16781312,
+          "private-after": 0,
+          "observed-private-reduction": 16781312,
+          "potential-private-reduction": 0,
+          "deduplicated-range-bytes": 4194327,
+          "allocation-unknown": 0,
+          "stat-clean": 3280,
+          "content-checked": 817,
+          "content-check-bytes": 835607,
+          "userspace-compared": 4097,
+          "native-attempts": 0,
+          "native-range-bytes": 0,
+          "clone-attempts": 4097,
+          "comparison-bytes": 8388654
+        }
+      }
+    ],
+    "sharing": [
+      {
+        "label": "after-switch/stock",
+        "sharing": {
+          "files": 4097,
+          "same_first_extent": 0,
+          "zero_private": 0,
+          "private_bytes": 16781312,
+          "sample": {
+            "files/000/00000.bin": {
+              "source": {
+                "first_block": 945758208,
+                "private_bytes": 4096
+              },
+              "target": {
+                "first_block": 980746240,
+                "private_bytes": 4096
+              }
+            },
+            "files/000/00001.bin": {
+              "source": {
+                "first_block": 738099200,
+                "private_bytes": 4096
+              },
+              "target": {
+                "first_block": 946155520,
+                "private_bytes": 4096
+              }
+            },
+            "files/000/00002.bin": {
+              "source": {
+                "first_block": 738103296,
+                "private_bytes": 4096
+              },
+              "target": {
+                "first_block": 946159616,
+                "private_bytes": 4096
+              }
+            }
+          }
+        }
+      },
+      {
+        "label": "after-switch/twig",
+        "sharing": {
+          "files": 4097,
+          "same_first_extent": 3584,
+          "zero_private": 3584,
+          "private_bytes": 2101248,
+          "sample": {
+            "files/000/00000.bin": {
+              "source": {
+                "first_block": 945758208,
+                "private_bytes": 4096
+              },
+              "target": {
+                "first_block": 861159424,
+                "private_bytes": 4096
+              }
+            },
+            "files/000/00001.bin": {
+              "source": {
+                "first_block": 738099200,
+                "private_bytes": 0
+              },
+              "target": {
+                "first_block": 738099200,
+                "private_bytes": 0
+              }
+            },
+            "files/000/00002.bin": {
+              "source": {
+                "first_block": 738103296,
+                "private_bytes": 0
+              },
+              "target": {
+                "first_block": 738103296,
+                "private_bytes": 0
+              }
+            }
+          }
+        }
+      },
+      {
+        "label": "after-switch/on",
+        "sharing": {
+          "files": 4097,
+          "same_first_extent": 4097,
+          "zero_private": 4097,
+          "private_bytes": 0,
+          "sample": {
+            "files/000/00000.bin": {
+              "source": {
+                "first_block": 945758208,
+                "private_bytes": 0
+              },
+              "target": {
+                "first_block": 945758208,
+                "private_bytes": 0
+              }
+            },
+            "files/000/00001.bin": {
+              "source": {
+                "first_block": 738099200,
+                "private_bytes": 0
+              },
+              "target": {
+                "first_block": 738099200,
+                "private_bytes": 0
+              }
+            },
+            "files/000/00002.bin": {
+              "source": {
+                "first_block": 738103296,
+                "private_bytes": 0
+              },
+              "target": {
+                "first_block": 738103296,
+                "private_bytes": 0
+              }
+            }
+          }
+        }
+      },
+      {
+        "label": "after-switch/off",
+        "sharing": {
+          "files": 4097,
+          "same_first_extent": 0,
+          "zero_private": 0,
+          "private_bytes": 16781312,
+          "sample": {
+            "files/000/00000.bin": {
+              "source": {
+                "first_block": 945758208,
+                "private_bytes": 4096
+              },
+              "target": {
+                "first_block": 693710848,
+                "private_bytes": 4096
+              }
+            },
+            "files/000/00001.bin": {
+              "source": {
+                "first_block": 738099200,
+                "private_bytes": 4096
+              },
+              "target": {
+                "first_block": 1114333184,
+                "private_bytes": 4096
+              }
+            },
+            "files/000/00002.bin": {
+              "source": {
+                "first_block": 738103296,
+                "private_bytes": 4096
+              },
+              "target": {
+                "first_block": 1114337280,
+                "private_bytes": 4096
+              }
+            }
+          }
+        }
+      },
+      {
+        "label": "before-reshare",
+        "sharing": {
+          "files": 4097,
+          "same_first_extent": 0,
+          "zero_private": 0,
+          "private_bytes": 16781312,
+          "sample": {
+            "files/000/00000.bin": {
+              "source": {
+                "first_block": 945758208,
+                "private_bytes": 4096
+              },
+              "target": {
+                "first_block": 871223296,
+                "private_bytes": 4096
+              }
+            },
+            "files/000/00001.bin": {
+              "source": {
+                "first_block": 738099200,
+                "private_bytes": 4096
+              },
+              "target": {
+                "first_block": 871227392,
+                "private_bytes": 4096
+              }
+            },
+            "files/000/00002.bin": {
+              "source": {
+                "first_block": 738103296,
+                "private_bytes": 4096
+              },
+              "target": {
+                "first_block": 871231488,
+                "private_bytes": 4096
+              }
+            }
+          }
+        }
+      },
+      {
+        "label": "after-reshare",
+        "sharing": {
+          "files": 4097,
+          "same_first_extent": 4097,
+          "zero_private": 4097,
+          "private_bytes": 0,
+          "sample": {
+            "files/000/00000.bin": {
+              "source": {
+                "first_block": 945758208,
+                "private_bytes": 0
+              },
+              "target": {
+                "first_block": 945758208,
+                "private_bytes": 0
+              }
+            },
+            "files/000/00001.bin": {
+              "source": {
+                "first_block": 738099200,
+                "private_bytes": 0
+              },
+              "target": {
+                "first_block": 738099200,
+                "private_bytes": 0
+              }
+            },
+            "files/000/00002.bin": {
+              "source": {
+                "first_block": 738103296,
+                "private_bytes": 0
+              },
+              "target": {
+                "first_block": 738103296,
+                "private_bytes": 0
+              }
+            }
+          }
+        }
+      },
+      {
+        "label": "drift-sharing",
+        "sharing": {
+          "files": 4097,
+          "same_first_extent": 3584,
+          "zero_private": 3584,
+          "private_bytes": 2101248,
+          "sample": {
+            "files/000/00000.bin": {
+              "source": {
+                "first_block": 990076928,
+                "private_bytes": 4096
+              },
+              "target": {
+                "first_block": 994512896,
+                "private_bytes": 4096
+              }
+            },
+            "files/000/00001.bin": {
+              "source": {
+                "first_block": 738099200,
+                "private_bytes": 0
+              },
+              "target": {
+                "first_block": 738099200,
+                "private_bytes": 0
+              }
+            },
+            "files/000/00002.bin": {
+              "source": {
+                "first_block": 738103296,
+                "private_bytes": 0
+              },
+              "target": {
+                "first_block": 738103296,
+                "private_bytes": 0
+              }
+            }
+          }
+        }
+      },
+      {
+        "label": "drift-reset",
+        "before": "c743acb99223f445f8feb7108274e9c2c9171da6da1f5438d44a828bebd64e49",
+        "after": "c743acb99223f445f8feb7108274e9c2c9171da6da1f5438d44a828bebd64e49",
+        "sharing": {
+          "files": 4097,
+          "same_first_extent": 3584,
+          "zero_private": 3584,
+          "private_bytes": 2101248,
+          "sample": {
+            "files/000/00000.bin": {
+              "source": {
+                "first_block": 990076928,
+                "private_bytes": 4096
+              },
+              "target": {
+                "first_block": 1018150912,
+                "private_bytes": 4096
+              }
+            },
+            "files/000/00001.bin": {
+              "source": {
+                "first_block": 738099200,
+                "private_bytes": 0
+              },
+              "target": {
+                "first_block": 738099200,
+                "private_bytes": 0
+              }
+            },
+            "files/000/00002.bin": {
+              "source": {
+                "first_block": 738103296,
+                "private_bytes": 0
+              },
+              "target": {
+                "first_block": 738103296,
+                "private_bytes": 0
+              }
+            }
+          }
+        }
+      }
+    ],
+    "concurrent": [
+      {
+        "fixture": "file-heavy",
+        "revision": "cc65b0af58f3bf49483f250fb3875d5eeeca9584",
+        "arm": "stock",
+        "label": "concurrent-0",
+        "exit": 0,
+        "backend": "stock",
+        "metrics": {
+          "wall": 1.15,
+          "user": 0.02,
+          "system": 0.33,
+          "rss_bytes": 14565376
+        },
+        "target": "/private/tmp/pwrgit-twig-20261116/volume/lifecycle/wt-29"
+      },
+      {
+        "fixture": "file-heavy",
+        "revision": "cc65b0af58f3bf49483f250fb3875d5eeeca9584",
+        "arm": "stock",
+        "label": "concurrent-1",
+        "exit": 0,
+        "backend": "stock",
+        "metrics": {
+          "wall": 1.15,
+          "user": 0.02,
+          "system": 0.33,
+          "rss_bytes": 14663680
+        },
+        "target": "/private/tmp/pwrgit-twig-20261116/volume/lifecycle/wt-30"
+      },
+      {
+        "fixture": "file-heavy",
+        "revision": "cc65b0af58f3bf49483f250fb3875d5eeeca9584",
+        "arm": "twig",
+        "label": "concurrent-0",
+        "exit": 0,
+        "backend": "native",
+        "metrics": {
+          "wall": 0.71,
+          "user": 0.09,
+          "system": 0.34,
+          "rss_bytes": 9617408
+        },
+        "target": "/private/tmp/pwrgit-twig-20261116/volume/lifecycle/wt-31"
+      },
+      {
+        "fixture": "file-heavy",
+        "revision": "cc65b0af58f3bf49483f250fb3875d5eeeca9584",
+        "arm": "twig",
+        "label": "concurrent-1",
+        "exit": 0,
+        "backend": "native",
+        "metrics": {
+          "wall": 0.75,
+          "user": 0.09,
+          "system": 0.33,
+          "rss_bytes": 9568256
+        },
+        "target": "/private/tmp/pwrgit-twig-20261116/volume/lifecycle/wt-32"
+      },
+      {
+        "fixture": "file-heavy",
+        "revision": "cc65b0af58f3bf49483f250fb3875d5eeeca9584",
+        "arm": "on",
+        "label": "concurrent-0",
+        "exit": 0,
+        "backend": "on",
+        "metrics": {
+          "wall": 0.69,
+          "user": 0.02,
+          "system": 0.66,
+          "rss_bytes": 15695872
+        },
+        "target": "/private/tmp/pwrgit-twig-20261116/volume/lifecycle/wt-33"
+      },
+      {
+        "fixture": "file-heavy",
+        "revision": "cc65b0af58f3bf49483f250fb3875d5eeeca9584",
+        "arm": "on",
+        "label": "concurrent-1",
+        "exit": 0,
+        "backend": "on",
+        "metrics": {
+          "wall": 0.69,
+          "user": 0.02,
+          "system": 0.66,
+          "rss_bytes": 15695872
+        },
+        "target": "/private/tmp/pwrgit-twig-20261116/volume/lifecycle/wt-34"
+      },
+      {
+        "fixture": "file-heavy",
+        "revision": "cc65b0af58f3bf49483f250fb3875d5eeeca9584",
+        "arm": "off",
+        "label": "concurrent-1",
+        "exit": 0,
+        "backend": "off",
+        "metrics": {
+          "wall": 1.19,
+          "user": 0.02,
+          "system": 0.35,
+          "rss_bytes": 14548992
+        },
+        "target": "/private/tmp/pwrgit-twig-20261116/volume/lifecycle/wt-36"
+      },
+      {
+        "fixture": "file-heavy",
+        "revision": "cc65b0af58f3bf49483f250fb3875d5eeeca9584",
+        "arm": "off",
+        "label": "concurrent-0",
+        "exit": 0,
+        "backend": "off",
+        "metrics": {
+          "wall": 1.19,
+          "user": 0.02,
+          "system": 0.34,
+          "rss_bytes": 14581760
+        },
+        "target": "/private/tmp/pwrgit-twig-20261116/volume/lifecycle/wt-35"
+      }
+    ],
+    "mmap": [
+      {
+        "label": "mmap-after-replace",
+        "inode_before": 678714,
+        "inode_after": 682881,
+        "descriptor_sha256": "e3a3cd3599cef2eaab4ffc6b7fd6266673fef2f85808e6549f7fb8a763a68ffe",
+        "pathname_sha256": "fa1f7190de0b1d1398bb52f365773d1baa99070a4c4c84dcd10988b791cac64c"
+      }
+    ]
+  }
+}

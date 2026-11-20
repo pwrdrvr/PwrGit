@@ -1,0 +1,32 @@
+{
+  "url": "https://github.com/openclaw/openclaw",
+  "head": "410c0dda40702e25263b49b8b7d0786a5e49e366",
+  "parent": "4a74c61ae7c438587bc272840d180d16f7c5a283",
+  "clone_depth": 2,
+  "tracked_blobs": 65500,
+  "regular_files": 65498,
+  "nonempty_regular": 65493,
+  "empty_regular": 5,
+  "logical_regular_bytes": 776199748,
+  "symlinks": [
+    {
+      "path": ".claude/skills",
+      "mode": "120000",
+      "kind": "blob",
+      "oid": "2b7a412b8fa0fb7e985b0793321bd4e698f2b6cd",
+      "size": 17
+    },
+    {
+      "path": "apps/macos/Tests/OpenClawIPCTests/GatewayTLSStoreFixture.swift",
+      "mode": "120000",
+      "kind": "blob",
+      "oid": "33019408a314ba5d7e416651727a7ec7ea4cbbb3",
+      "size": 79
+    }
+  ],
+  "executables": 260,
+  "attributes": {
+    ".gitattributes": "* text=auto eol=lf\nCLAUDE.md -text\n# Preserve immutable upstream source and license bytes, including whitespace.\napps/ios/ThirdParty/ESPProvision/ESPProvision/** -whitespace\napps/ios/Resources/Licenses/SwiftProtobuf.txt -whitespace\nui/src/i18n/.i18n/* linguist-generated\napps/.i18n/** linguist-generated\napps/android/app/src/main/res/values-*/strings.xml linguist-generated\napps/android/app/src/main/res/values-*/assistant.xml linguist-generated\napps/android/app/src/thirdParty/res/values-*/accessibility_strings.xml linguist-generated\napps/android/wear/src/main/res/values-*/strings.xml linguist-generated\napps/android/app/src/main/java/ai/openclaw/app/i18n/NativeStringResources.kt linguist-generated\napps/ios/Resources/Localizable.xcstrings linguist-generated\napps/macos/Sources/OpenClaw/Resources/Localizable.xcstrings linguist-generated\napps/ios/**/*.lproj/InfoPlist.strings linguist-generated\n"
+  },
+  "change": " src/agents/auth-profiles/shared-store-bootstrap.ts |  2 +-\n .../doctor-agent-deletion-journal-quarantine.ts    |  2 +-\n .../doctor-agent-deletion-journal-restore.ts       |  2 +-\n src/commands/doctor-agent-lease-refusal.ts         |  2 +-\n src/commands/doctor-database-engine-inspection.ts  |  2 +-\n src/commands/doctor-db-bloat.read.ts               |  2 +-\n src/commands/doctor-db-bloat.ts                    |  2 +-\n src/commands/doctor-migration-backup.ts            |  2 +-\n src/commands/doctor-schema-migrations.ts           |  2 +-\n src/commands/doctor-session-delivery-state.ts      |  2 +-\n .../doctor-session-incognito-key-repair.ts         |  2 +-\n src/commands/doctor-session-transcript-scan.ts     |  2 +-\n .../doctor-telegram-general-topic-conversations.ts |  2 +-\n src/commands/recovery-disk-usage.ts                |  2 +-\n src/cron/store/read-only.ts                        |  2 +-\n src/daemon/launchd-stop.ts                         |  2 +-\n src/daemon/runtime-pin-store.ts                    |  2 +-\n src/daemon/schtasks-process.ts                     |  2 +-\n src/daemon/service-foreground-recovery.ts          |  2 +-\n src/gateway/server-import-boundary.test.ts         | 15 +++++++\n src/infra/client-credential-store.ts               |  2 +-\n src/infra/gateway-owner-lease.ts                   |  2 +-\n src/infra/gateway-processes.ts                     |  2 +-\n src/infra/gateway-startup-owner.ts                 |  2 +-\n src/infra/restart-intent.ts                        |  2 +-\n src/infra/restart-stale-pids.ts                    |  2 +-\n src/infra/sqlite-index-recovery.ts                 |  6 +--\n src/infra/sqlite-integrity-operation.ts            |  2 +-\n src/infra/sqlite-integrity-worker.ts               |  2 +-\n src/infra/sqlite-readonly-worker-context.ts        | 11 +++++\n src/infra/sqlite-readonly-worker-session.test.ts   | 51 +++++++++++++++++++---\n src/infra/sqlite-readonly-worker.ts                |  9 ----\n src/infra/sqlite-snapshot-source.ts                |  2 +-\n src/infra/state-migrations.cold-navigation.ts      |  2 +-\n src/infra/state-migrations.doctor.ts               |  2 +-\n src/infra/state-migrations.legacy-sessions.ts      |  2 +-\n ...tate-migrations.media-persistence-inspection.ts |  2 +-\n src/infra/state-migrations.media-persistence.ts    |  2 +-\n src/infra/state-migrations.shared-auth-store.ts    |  2 +-\n ...te-migrations.transcript-directives-archives.ts |  2 +-\n .../state-migrations.transcript-directives.ts      |  2 +-\n src/infra/update-doctor-migration-attribution.ts   |  7 +--\n src/infra/update-doctor-migration-context.ts       |  2 +-\n src/state/openclaw-agent-db-lease-inspection.ts    |  2 +-\n src/state/openclaw-agent-execution-native.ts       |  2 +-\n .../openclaw-agent-schema-inspection-worker.ts     |  2 +-\n ...claw-database-preflight-agent-scheduler.test.ts |  3 +-\n .../openclaw-database-preflight-agent-scheduler.ts |  2 +-\n src/state/openclaw-state-db-fast-path.ts           |  2 +-\n src/state/openclaw-state-db-open.ts                |  2 +-\n src/state/openclaw-state-db-repair.ts              |  2 +-\n .../openclaw-state-db-task-delivery-recovery.ts    |  6 +--\n src/state/openclaw-state-db.ts                     |  2 +-\n 53 files changed, 124 insertions(+), 74 deletions(-)\n"
+}

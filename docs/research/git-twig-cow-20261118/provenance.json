@@ -1,0 +1,7 @@
+{
+  "twig_source": "ab51be8edcd6bab97592eea74713833dffd72fe6",
+  "release_tag_source": "bdb2253264205db99cf57dca6af699321f7ef514",
+  "compiler": "rustup run 1.95.0 cargo build --release --locked -p git-twig",
+  "fixture_policy": "* text=auto eol=lf",
+  "note": "48 creates; host APFS scout, no isolated-volume allocation; no LFS filters in scout; application integration not modified"
+}
