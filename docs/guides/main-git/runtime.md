@@ -114,10 +114,10 @@ string: a local build of the same source has none.
   Git in use (`refreshActiveGitReflink`, at launch and after every runtime
   switch) said it can. Off is written as `false`, so neither the runtime's
   own config nor its built-in default decides: `.2`'s `etc/gitconfig` forced
-  `true`; `.3` and `.4` set nothing; `2.56.1-dev-pwrgit.1` (which PwrGit
-  ships) sets nothing but turns verified reflinks on when nothing else sets
-  `checkout.reflink`. System scope keeps the user's global and repository
-  config in charge, as for LFS and the keychain.
+  `true`; `.3` and `.4` set nothing; `2.56.1-dev-pwrgit.1` and `.2` (which
+  PwrGit ships) set nothing but turn verified reflinks on when nothing else
+  sets `checkout.reflink`. System scope keeps the user's global and
+  repository config in charge, as for LFS and the keychain.
   An installed Git reads its own system config, which PwrGit never writes, so
   it gets `-c checkout.reflink=true` while on and nothing while off. Known
   gap: an installed `2.56.1-dev-pwrgit.1` or newer then follows its own

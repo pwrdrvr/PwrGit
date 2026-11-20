@@ -15,9 +15,9 @@ import {
 } from "./catalog";
 
 const fixtures = join(__dirname, "fixtures");
-const RELEASE = JSON.parse(readFileSync(join(fixtures, "v2.56.1-dev-pwrgit.1.release.json"), "utf8")) as Record<string, unknown>;
-const CATALOG = readFileSync(join(fixtures, "v2.56.1-dev-pwrgit.1.runtime-manifest.json"));
-const SUMS = readFileSync(join(fixtures, "v2.56.1-dev-pwrgit.1.SHA256SUMS"), "utf8");
+const RELEASE = JSON.parse(readFileSync(join(fixtures, "v2.56.1-dev-pwrgit.2.release.json"), "utf8")) as Record<string, unknown>;
+const CATALOG = readFileSync(join(fixtures, "v2.56.1-dev-pwrgit.2.runtime-manifest.json"));
+const SUMS = readFileSync(join(fixtures, "v2.56.1-dev-pwrgit.2.SHA256SUMS"), "utf8");
 const PIN = JSON.parse(readFileSync(join(__dirname, "..", "..", "..", "..", "custom-git-runtime.json"), "utf8")) as { consumer_sha256: string };
 const KEYS: PlatformKey[] = ["darwin-universal", "linux-x64", "linux-arm64"];
 
@@ -27,21 +27,21 @@ function candidate(key: PlatformKey, release: unknown = RELEASE): ReleaseCandida
   return found;
 }
 
-describe("the published 2.56.1-dev-pwrgit.1 release", () => {
+describe("the published 2.56.1-dev-pwrgit.2 release", () => {
   test("is a GitHub prerelease, and the release a .4 install moves to", () => {
     expect(RELEASE["prerelease"]).toBe(true);
-    for (const key of KEYS) expect(candidate(key).version).toBe("2.56.1-dev-pwrgit.1");
+    for (const key of KEYS) expect(candidate(key).version).toBe("2.56.1-dev-pwrgit.2");
   });
 
-  test("is not offered over a bundle that already is 2.56.1-dev-pwrgit.1", () => {
-    for (const key of KEYS) expect(eligibleReleases([RELEASE], key, "2.56.1-dev-pwrgit.1")).toEqual([]);
+  test("is not offered over a bundle that already is 2.56.1-dev-pwrgit.2", () => {
+    for (const key of KEYS) expect(eligibleReleases([RELEASE], key, "2.56.1-dev-pwrgit.2")).toEqual([]);
   });
 
   test.each(KEYS)("its catalog is accepted for %s with this app's stager pin", (key) => {
     const accepted = acceptCatalog({ candidate: candidate(key), catalogBytes: CATALOG, checksumsText: SUMS, key, consumerSha256: PIN.consumer_sha256 });
-    expect(accepted.catalogSha256).toBe("83e3cd68183fcc5e627a4cbb42de611dcc6fe14d7197346f132ba1a79242051a");
-    expect(accepted.pin.sourceRevision).toBe("2bcfe0dca7f5596f861047cf041ae45d157b982a");
-    expect(accepted.archiveName).toBe(`pwrgit-2.56.1-dev-pwrgit.1-2bcfe0d-${key}.tar.gz`);
+    expect(accepted.catalogSha256).toBe("ba81751bae0ddf08dcc2bf434828d537c291f27d1f232da779f810cd755fc2c6");
+    expect(accepted.pin.sourceRevision).toBe("5dbe39155a9e9796e7af806cfd39ba6c3ca7340c");
+    expect(accepted.archiveName).toBe(`pwrgit-2.56.1-dev-pwrgit.2-5dbe391-${key}.tar.gz`);
   });
 
   test("a catalog for another stager needs an app update, never an install", () => {
@@ -72,7 +72,7 @@ describe("the published 2.56.1-dev-pwrgit.1 release", () => {
     const accept = (c: ReleaseCandidate) =>
       acceptCatalog({ candidate: c, catalogBytes: CATALOG, checksumsText: SUMS, key: "linux-x64", consumerSha256: PIN.consumer_sha256 });
     expect(() => accept(withDigest(`sha256:${"a".repeat(64)}`))).toThrow(/disagree/);
-    expect(accept(withDigest(undefined)).catalogSha256).toMatch(/^83e3cd68/);
+    expect(accept(withDigest(undefined)).catalogSha256).toMatch(/^ba81751b/);
   });
 
   test("SHA256SUMS without the archive's line is refused", () => {
@@ -83,7 +83,7 @@ describe("the published 2.56.1-dev-pwrgit.1 release", () => {
   });
 
   test("assets under another repository or tag never count", () => {
-    for (const host of ["https://github.com/desktop/dugite-native/releases/download/v2.56.1-dev-pwrgit.1/", "https://github.com/huntharo/git/releases/download/v2.56.0-dev-pwrgit.4/"]) {
+    for (const host of ["https://github.com/desktop/dugite-native/releases/download/v2.56.1-dev-pwrgit.2/", "https://github.com/huntharo/git/releases/download/v2.56.0-dev-pwrgit.4/"]) {
       const release = structuredClone(RELEASE) as { assets: Array<Record<string, unknown>> };
       for (const asset of release.assets) asset["browser_download_url"] = host + String(asset["name"]);
       expect(eligibleReleases([release], "linux-x64", "2.56.0-dev-pwrgit.4")).toEqual([]);
