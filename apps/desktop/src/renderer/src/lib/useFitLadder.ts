@@ -32,7 +32,13 @@ export function useFitLadder(
   lastRef: RefObject<HTMLElement | null>,
   steps: readonly string[]
 ): void {
-  useStepLadder(
+  const content = useRef<{
+    row: HTMLElement | null;
+    box: HTMLElement | null;
+    last: HTMLElement | null;
+    observer: MutationObserver | null;
+  } | null>(null);
+  const refit = useStepLadder(
     rowRef,
     () => {
       const box = boxRef.current;
@@ -47,8 +53,52 @@ export function useFitLadder(
         box.getBoundingClientRect().right - inset + 0.5
       );
     },
-    steps
+    steps,
+    {
+      observe: () => boxRef.current,
+      measureOnCommit: false,
+      // A fit covers the mutations already in the row, including its own
+      // synchronous step writes. Drop those records before observer delivery.
+      afterFit: () => {
+        content.current?.observer?.takeRecords();
+      }
+    }
   );
+
+  useLayoutEffect(() => {
+    const row = rowRef.current;
+    const box = boxRef.current;
+    const last = lastRef.current;
+    const previous = content.current;
+    if (previous?.row === row && previous.box === box && previous.last === last) return;
+
+    previous?.observer?.disconnect();
+    let observer: MutationObserver | null = null;
+    if (row !== null && box !== null && last !== null) {
+      // Watch the actual controls, including child state changes and text
+      // hidden by a step. data-mid and data-short supply CSS-generated text.
+      // The toolbars' ARIA states change paint and accessible names only.
+      observer = new MutationObserver(refit);
+      const attributes = ["class", "style", "hidden", "width", "height", "data-mid", "data-short"];
+      observer.observe(box, {
+        subtree: true,
+        childList: true,
+        characterData: true,
+        attributeFilter: attributes
+      });
+      if (row !== box) observer.observe(row, { attributeFilter: attributes });
+      // An inherited text-size or font change can leave the box width intact.
+      observer.observe(document.documentElement, {
+        attributeFilter: ["data-sidebar-text", "data-density", "style"]
+      });
+    }
+    content.current = { row, box, last, observer };
+    refit();
+  });
+  useLayoutEffect(() => () => {
+    content.current?.observer?.disconnect();
+    content.current = null;
+  }, []);
 }
 
 type Fit = {
@@ -56,6 +106,7 @@ type Fit = {
   steps: readonly string[];
   fits: () => boolean;
   affectsHeight: boolean;
+  afterFit: (() => void) | undefined;
 };
 
 type Ladder = {
@@ -76,7 +127,8 @@ function clearSteps(row: HTMLElement, steps: readonly string[]): void {
 function fitRows(active: Fit[]): void {
   // Reset every row before the first layout read. At each depth, finish
   // all reads before writing the next step, so nearby rows share a layout.
-  for (const { row, steps } of active) clearSteps(row, steps);
+  const rows = active;
+  for (const { row, steps } of rows) clearSteps(row, steps);
   for (let depth = 0; active.length > 0; depth++) {
     const advance = active.filter(({ fits }) => !fits());
     active = [];
@@ -85,6 +137,7 @@ function fitRows(active: Fit[]): void {
       if (depth + 1 < fit.steps.length) active.push(fit);
     }
   }
+  for (const fit of rows) fit.afterFit?.();
 }
 
 /** Complete the pending fits for a caller reading geometry in a layout effect. */
@@ -184,11 +237,20 @@ export function useStepLadder(
   rowRef: RefObject<HTMLElement | null>,
   fits: () => boolean,
   steps: readonly string[],
-  { observe = () => rowRef.current, affectsHeight = false }: {
+  {
+    observe = () => rowRef.current,
+    affectsHeight = false,
+    measureOnCommit = true,
+    afterFit
+  }: {
     /** What to watch for width changes, when the stepped element is rigid. */
     observe?: () => Element | null;
     /** Fit first when wrapping can change the space taken by a scrollbar. */
     affectsHeight?: boolean;
+    /** Disable only when changes that affect the predicate request a fit themselves. */
+    measureOnCommit?: boolean;
+    /** Runs after the batch has finished writing the row's steps. */
+    afterFit?: () => void;
   } = {}
 ): () => void {
   const key = steps.join(" ");
@@ -201,13 +263,14 @@ export function useStepLadder(
     const ladder = state.current;
     const row = rowRef.current;
     const previous = ladder.fit;
-    if (previous !== null && (previous.row !== row || previous.steps !== classes)) {
+    const changed = previous === null || previous.row !== row || previous.steps !== classes;
+    if (previous !== null && changed) {
       clearSteps(previous.row, previous.steps);
     }
     ladder.fit =
-      row === null || classes.length === 0 ? null : { row, steps: classes, fits, affectsHeight };
+      row === null || classes.length === 0 ? null : { row, steps: classes, fits, affectsHeight, afterFit };
     watch(ladder, ladder.fit === null ? null : observe());
-    requestFit(ladder);
+    if (measureOnCommit || changed) requestFit(ladder);
   });
   useLayoutEffect(() => {
     const ladder = state.current;
