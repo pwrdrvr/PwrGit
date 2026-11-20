@@ -1,0 +1,53 @@
+name: Electron ZIP diagnostic
+
+on:
+  push:
+    branches: [fix/windows-electron-runtime-extraction]
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    runs-on: windows-2025-vs2026
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v6
+        with:
+          node-version-file: .nvmrc
+      - name: Install dependencies for focused tests
+        run: |
+          corepack enable pnpm
+          pnpm install --frozen-lockfile --ignore-scripts
+      - name: Check the regression with the pre-fix installer
+        shell: pwsh
+        env:
+          TEMP: ${{ runner.temp }}
+          TMP: ${{ runner.temp }}
+        run: |
+          $module = 'apps/desktop/scripts/electron-runtime-cache.mjs'
+          $spec = 'apps/desktop/scripts/ensure-electron-runtime.test.mjs'
+          git restore --source=fd01374f85f5b16c1b9924f06e48ec52b63b2aaf -- $module
+          try {
+            $output = pnpm test $spec -t 'inherited PowerShell modules' --no-color 2>&1
+            $testExit = $LASTEXITCODE
+            $output | Write-Host
+            if ($testExit -eq 0 -or ($output -join "`n") -notmatch 'Electron artifact has an unexpected runtime version or executable') {
+              throw "Expected the pre-fix regression to fail with the runtime validation error (exit $testExit)"
+            }
+          } finally {
+            git restore -- $module
+          }
+      - name: Run the fixed installer tests twice
+        shell: pwsh
+        env:
+          TEMP: ${{ runner.temp }}
+          TMP: ${{ runner.temp }}
+        run: |
+          for ($sample = 1; $sample -le 2; $sample++) {
+            pnpm test apps/desktop/scripts/ensure-electron-runtime.test.mjs --no-color
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          }
