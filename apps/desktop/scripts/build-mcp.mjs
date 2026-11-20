@@ -32,14 +32,18 @@ if (targets.length) {
       "--target",
       target
     ]);
+  const relay = join(output, "pwrgit-mcp");
   run("lipo", [
     "-create",
     ...targets.map((target) =>
       join(root, "crates/pwrgit-mcp/target", target, "release/pwrgit-mcp")
     ),
     "-output",
-    join(output, "pwrgit-mcp")
+    relay
   ]);
+  // The Intel slice can be unsigned, and electron-builder skips signing in PR previews.
+  // Release packaging replaces this ad-hoc signature with its Developer ID signature.
+  run("codesign", ["--force", "--sign", "-", relay]);
 } else {
   run("cargo", ["build", "--locked", "--release", "--manifest-path", manifest]);
   const name = process.platform === "win32" ? "pwrgit-mcp.exe" : "pwrgit-mcp";

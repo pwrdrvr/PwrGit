@@ -1,5 +1,5 @@
-import { spawnSync } from "node:child_process";
-import { cp, mkdir, mkdtemp, readFile, realpath, rm, writeFile } from "node:fs/promises";
+import { execFileSync, spawnSync } from "node:child_process";
+import { cp, mkdir, mkdtemp, readFile, realpath, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import fc from "fast-check";
@@ -75,4 +75,40 @@ it.skipIf(process.platform === "win32")("host builds agree for direct Cargo and 
     fc.array(fc.constantFrom("a", "Z", "9", " ", "-", "_", "é"), { minLength: 1, maxLength: 20 }).map((parts) => `repo ${parts.join("")}`),
     (directory) => compareDiscovery(directory)
   ), { numRuns: 8 });
+});
+
+it.skipIf(process.platform !== "darwin")("the universal relay passes strict signature verification before packaging", async () => {
+  const root = await mkdtemp(path.join(tmpdir(), "pwrgit universal relay-"));
+  try {
+    const desktop = path.join(root, "apps/desktop");
+    const shims = path.join(root, "bin");
+    await mkdir(path.join(desktop, "scripts"), { recursive: true });
+    await mkdir(shims);
+    // Use real linker output and Apple signing tools without compiling Rust in the test suite.
+    for (const command of ["cargo", "rustup"]) await symlink("/usr/bin/true", path.join(shims, command));
+    await cp(new URL("scripts/lib/rust-environment.mjs", repo), path.join(root, "scripts/lib/rust-environment.mjs"));
+    await writeFile(path.join(root, "scripts/check-mcp-rust-licenses.mjs"), "");
+    await cp(new URL("./build-mcp.mjs", import.meta.url), path.join(desktop, "scripts/build-mcp.mjs"));
+
+    for (const [arch, target, linkerFlag] of [
+      ["arm64", "aarch64-apple-darwin", "-adhoc_codesign"],
+      ["x86_64", "x86_64-apple-darwin", "-no_adhoc_codesign"],
+    ]) {
+      const release = path.join(root, "crates/pwrgit-mcp/target", target, "release");
+      await mkdir(release, { recursive: true });
+      execFileSync("/usr/bin/clang", ["-arch", arch, `-Wl,${linkerFlag}`, "-x", "c", "-", "-o", path.join(release, "pwrgit-mcp")], {
+        input: "int main(void) { return 0; }",
+      });
+    }
+
+    execFileSync(process.execPath, [path.join(desktop, "scripts/build-mcp.mjs"), "--universal"], {
+      env: { ...process.env, PATH: [shims, "/usr/bin", "/bin"].join(path.delimiter) },
+    });
+    const relay = path.join(desktop, "build/mcp/pwrgit-mcp");
+    expect(execFileSync("/usr/bin/lipo", ["-archs", relay], { encoding: "utf8" }).trim().split(/\s+/).sort())
+      .toEqual(["arm64", "x86_64"]);
+    execFileSync("/usr/bin/codesign", ["--verify", "--strict", "--all-architectures", relay]);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
 });
