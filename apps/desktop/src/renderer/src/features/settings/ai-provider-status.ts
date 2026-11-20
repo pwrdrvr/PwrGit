@@ -57,6 +57,7 @@ export type AiProviderStatus = {
 };
 
 export type AiProviderStatusInput = {
+  chatGpt?: import("@pwrgit/shared").ChatGptConnection | null;
   codex: CodexProviderDiscovery | null;
   codexLoading: boolean;
   acpDiscovery: AcpAgentDiscovery | null;
@@ -171,7 +172,9 @@ export function describeAiProviders(input: AiProviderStatusInput): AiProviderSta
   const enabled = new Set(input.enabledAgentIds);
   const byId = new Map(input.acpDiscovery?.agents.map((agent) => [agent.id, agent] as const) ?? []);
   return AI_PROVIDER_IDS.map((id) =>
-    id === "codex"
+    id === "chatgpt"
+      ? withSentence({ sub: id, label: "Sign in with ChatGPT", badge: input.chatGpt === undefined || input.chatGpt === null ? "Unknown" : input.chatGpt.planUsage ? "Connected" : "Sign in", meta: input.chatGpt?.label ?? "", ...(input.chatGpt ? { tone: input.chatGpt.planUsage ? "ok" as const : "off" as const } : {}) })
+      : id === "codex"
       ? describeCodexStatus(input.codex, input.codexLoading)
       : describeAcpAgentStatus(
           id,

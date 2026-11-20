@@ -44,6 +44,14 @@ When something else is editing a branch, you want your own work in a
 different directory and a clear view of what changed where. PwrGit is built
 for that.
 
+PwrGit is free. The free app can use your ChatGPT plan for optional commit-message
+drafts and history editing through Settings → AI Providers → Sign in with ChatGPT.
+AI stays off until you opt in for that profile. Optional ChatGPT sign-in stores
+its own tokens encrypted locally, separately for each profile.
+[Learn more](https://help.openai.com/en/articles/20001542-using-your-chatgpt-plan-in-other-apps-and-sites)
+about plan usage, or read the [setup and operator steps](docs/sign-in-with-chatgpt.md).
+
+
 - **<kbd>Command+K</kbd> finds anything.** Repositories, worktrees, local and
   remote branches, and commits by message or SHA, across every profile.
   <kbd>Ctrl+K</kbd> on Windows and Linux.

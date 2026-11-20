@@ -3,6 +3,7 @@
 // persistence, and this file only narrows what crosses IPC and turns throws
 // into Results.
 
+import type { ChatGptAuth } from "./chatgpt-auth";
 import {
   err,
   isBuiltInAcpAgentId,
@@ -58,6 +59,8 @@ export function registerAiProviderHandlers(
   bus: CommandBus,
   options: {
     service: AiProviderService;
+    chatGpt?: ChatGptAuth;
+    resetAgent?: (profileId: string) => Promise<void>;
     store: Pick<AiProviderSettingsStore, "read" | "update">;
     profiles: ProfileLookup;
     /** Fired after a write with the fresh snapshot — index.ts broadcasts it. */
@@ -65,6 +68,26 @@ export function registerAiProviderHandlers(
   }
 ): void {
   const { service, store, profiles } = options;
+
+  async function chatGptCall<T>(profileId: unknown, action: (auth: ChatGptAuth, id: ProfileId) => T | Promise<T>, changed = false): Promise<Result<T, PwrGitError>> {
+    const profile = knownProfile(profiles, profileId);
+    if (!profile.ok) return profile;
+    const auth = options.chatGpt;
+    if (!auth) return err({ kind: "agent", code: "unavailable", message: "ChatGPT sign-in is unavailable." });
+    try {
+      const value = await action(auth, profile.value);
+      if (changed) {
+        await options.resetAgent?.(profile.value);
+        options.onChanged({ profileId: profile.value, settings: store.read(profile.value) });
+      }
+      return ok(value);
+    } catch {
+      return err({ kind: "agent", code: "chatgpt_auth_failed", message: "ChatGPT sign-in could not finish. Try again or check your connection." });
+    }
+  }
+  bus.register("aiProviders:chatGptStatus", (req) => chatGptCall(req.profileId, (auth, id) => auth.status(id)));
+  bus.register("aiProviders:chatGptSignIn", (req) => chatGptCall(req.profileId, (auth, id) => auth.signIn(id), true));
+  bus.register("aiProviders:chatGptSignOut", (req) => chatGptCall(req.profileId, (auth, id) => auth.signOut(id), true));
 
   bus.register("aiProviders:read", (req) => {
     const profile = knownProfile(profiles, req.profileId);
