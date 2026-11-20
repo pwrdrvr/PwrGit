@@ -1,0 +1,61 @@
+name: Electron ZIP diagnostic
+
+on:
+  push:
+    branches: [fix/windows-electron-runtime-extraction]
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    runs-on: ${{ matrix.image }}
+    strategy:
+      fail-fast: false
+      matrix:
+        image: [windows-latest, windows-2025-vs2026]
+        sample: [1, 2]
+    timeout-minutes: 5
+    steps:
+      - name: Compare Windows ZIP tools
+        shell: pwsh
+        env:
+          TEMP: ${{ runner.temp }}
+          TMP: ${{ runner.temp }}
+        run: |
+          $PSVersionTable
+          Get-Command powershell.exe, tar.exe | Select-Object Name, Source, Version | Format-List
+          @'
+          const { spawnSync } = require('node:child_process');
+          const fs = require('node:fs');
+          const path = require('node:path');
+          const root = fs.mkdtempSync(path.join(require('node:os').tmpdir(), 'pwrgit-electron-cache-'));
+          const payload = path.join(root, 'payload');
+          fs.mkdirSync(path.join(payload, 'Electron.app/Contents/MacOS'), { recursive: true });
+          for (const name of ['electron.exe', 'electron', 'Electron.app/Contents/MacOS/Electron', 'version']) {
+            fs.writeFileSync(path.join(payload, name), '44.10.1');
+          }
+          const zip = path.join(root, 'electron.zip');
+          const ps = (script, name = 'powershell.exe') => run(name, ['-NoProfile', '-Command', script]);
+          const q = value => `'${value.replace(/'/g, "''")}'`;
+          function run(command, args) {
+            const {status, stdout, stderr, error} = spawnSync(command, args, {encoding: 'utf8'});
+            console.log(JSON.stringify({command, args, status, stdout, stderr, error}));
+          }
+          console.log('Inherited PSModulePath:', process.env.PSModulePath);
+          ps('$PSVersionTable; Get-Command Expand-Archive, Compress-Archive | ForEach-Object { $_.Module | Format-List Name,Version,Path }');
+          ps(`Compress-Archive -Path ${q(path.join(payload, '*'))} -DestinationPath ${q(zip)}`);
+          run('tar.exe', ['--version']);
+          run('tar.exe', ['-tf', zip]);
+          for (const mode of ['default', 'stop', 'builtin', 'pwsh', 'tar']) {
+            const dir = path.join(root, mode);
+            fs.mkdirSync(dir);
+            const expand = `Expand-Archive -LiteralPath ${q(zip)} -DestinationPath ${q(dir)} -Force`;
+            if (mode === 'tar') run('tar.exe', ['-xf', zip, '-C', dir]);
+            else if (mode === 'builtin') ps(`Import-Module "$PSHOME/Modules/Microsoft.PowerShell.Archive" -ErrorAction Stop; ${expand} -ErrorAction Stop`);
+            else ps(expand + (mode === 'stop' ? ' -ErrorAction Stop' : ''), mode === 'pwsh' ? 'pwsh.exe' : 'powershell.exe');
+            console.log(mode, fs.readdirSync(dir, {recursive: true}), fs.existsSync(path.join(dir, 'version')) && fs.readFileSync(path.join(dir, 'version'), 'utf8'));
+          }
+          fs.rmSync(root, {recursive: true, force: true});
+          '@ | Set-Content -Path probe.cjs
+          node probe.cjs
