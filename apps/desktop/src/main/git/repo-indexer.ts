@@ -226,6 +226,15 @@ type IndexedBranches = {
   remoteNames: string[];
 };
 
+type DerivedBranchValues = [
+  id: string,
+  repoId: string,
+  name: string,
+  fullName: string,
+  remoteName?: string
+];
+type StoredDerivedBranch = [id: string, name: string, fullName: string, remoteName?: string];
+
 async function listIndexedBranches(
   git: GitExec,
   cwd: string
@@ -1632,6 +1641,16 @@ export class RepoIndexer {
     source: "scan" | "manual"
   ): string {
     const id = hashId(path);
+    // Assigning even the same name fires SQLite's UPDATE OF name triggers,
+    // which rewrite the search entries for every branch in the repository.
+    const seen = this.db
+      .prepare(
+        `UPDATE repos SET source = ?, last_seen_at = datetime('now')
+         WHERE id = ? AND profile_id = ? AND name = ?`
+      )
+      .run(source, id, profileId, name);
+    if (seen.changes > 0) return id;
+
     this.db
       .prepare(
         `INSERT INTO repos (id, profile_id, name, path, source, last_seen_at)
@@ -1853,10 +1872,32 @@ export class RepoIndexer {
   private async replaceDerivedBranchRows(
     table: "remote_branches" | "local_branches",
     repoId: string,
-    rows: { id: string; args: unknown[] }[],
+    rows: { id: string; args: DerivedBranchValues }[],
     upsertSql: string,
     signal?: AbortSignal
   ): Promise<void> {
+    signal?.throwIfAborted();
+    // Only use this snapshot to skip an entire matching table, without
+    // yielding. A changed listing takes the normal chunked path, where a
+    // concurrent refresh may write between chunks.
+    const current = this.db
+      .prepare<[string], StoredDerivedBranch>(
+        `SELECT id, name, full_name${table === "remote_branches" ? ", remote_name" : ""}
+         FROM ${table} WHERE repo_id = ?`
+      )
+      .raw()
+      .all(repoId);
+    if (current.length === rows.length) {
+      const byId = new Map(current.map((row) => [row[0], row]));
+      const matches = rows.every(({ id, args: [, , name, fullName, remoteName] }) => {
+        const row = byId.get(id);
+        if (row === undefined) return false;
+        const [, storedName, storedFullName, storedRemoteName] = row;
+        return storedName === name && storedFullName === fullName &&
+          storedRemoteName === remoteName && byId.delete(id);
+      });
+      if (matches) return;
+    }
     const upsert = this.db.prepare(upsertSql);
     for (
       let offset = 0;
