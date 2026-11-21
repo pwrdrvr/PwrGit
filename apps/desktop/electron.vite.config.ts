@@ -162,7 +162,8 @@ export default defineConfig(({ command }) => {
         // Bundling its optional native accelerators can emit a top-level
         // missing-bufferutil error even though ws works without them in Node.
         externalizeDepsPlugin({
-          exclude: ["@pwrgit/shared", "@pwrgit/mcp-server"]
+          // The trace worker is loaded as a self-contained module from app.asar.
+          exclude: ["@pwrgit/shared", "@pwrgit/mcp-server", "stream-json", "stream-chain"]
         }),
         copyMigrationsPlugin()
       ],

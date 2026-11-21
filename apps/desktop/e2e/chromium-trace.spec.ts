@@ -4,6 +4,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { _electron as electron, expect, test } from "@playwright/test";
 import ts from "typescript";
+import { build } from "vite";
 import { cleanEnv } from "./fixtures/electron-app";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -16,12 +17,21 @@ test("rolling Chromium trace retains recent events after overflow and publishes 
   const artifact = info.outputPath("renderer.trace.json");
   await mkdir(dirname(html), { recursive: true });
   await writeFile(html, "<!doctype html><meta charset=utf-8><main>Trace fixture</main>");
-  for (const [name, destination] of [["chromium-trace", controller], ["chromium-trace-worker", worker]] as const) {
-    const source = await readFile(join(HERE, `../src/main/diagnostics/${name}.ts`), "utf8");
-    await writeFile(destination, ts.transpile(source, {
-      target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.ESNext
-    }));
-  }
+  const source = await readFile(join(HERE, "../src/main/diagnostics/chromium-trace.ts"), "utf8");
+  await writeFile(controller, ts.transpile(source, {
+    target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.ESNext
+  }));
+  await build({
+    configFile: false,
+    logLevel: "warn",
+    ssr: { noExternal: true },
+    build: {
+      ssr: join(HERE, "../src/main/diagnostics/chromium-trace-worker.ts"),
+      outDir: dirname(worker),
+      emptyOutDir: false,
+      rollupOptions: { output: { entryFileNames: "chromium-trace-worker.mjs" } }
+    }
+  });
 
   const privateValue = "synthetic-private-trace-value";
   const server = createServer((_req, res) => {

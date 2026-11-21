@@ -239,3 +239,50 @@ it("discards malformed and timed-out exports and releases the recording queue", 
     await rm(directory, { recursive: true, force: true });
   }
 });
+
+it("projects oversized redacted fields like their small equivalents", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "pwrgit-trace-event-oracle-"));
+  // Escaped quotes, controls and Unicode cross read chunks throughout the value.
+  const large = 'private "label" \\ {}[] \n 😀 '.repeat(400_000);
+  const fixture = (privateData: string) => JSON.stringify({
+    traceEvents: [
+      { pid: 2, tid: 3, ts: 10, ph: "I", cat: `${privateData},blink.user_timing`, name: privateData },
+      { pid: 2, tid: 3, ph: "M", name: "thread_name", args: { omitted: { nested: [privateData] }, name: "CrRendererMain" } },
+      { pid: 2, tid: 3, ts: 20, ph: "X", cat: "devtools.timeline", name: "Layout", dur: 5 }
+    ],
+    metadata: { omitted: privateData }
+  });
+  let mono = 0;
+  let raw = "";
+  const trace = new ChromiumTrace(() => ({
+    async startRecording() {},
+    async stopRecording(file = "") {
+      await writeFile(file, raw);
+      return file;
+    }
+  }), () => {}, { monotonicNow: () => ++mono });
+  try {
+    async function capture(privateData: string, basename: string): Promise<unknown> {
+      raw = fixture(privateData);
+      const output = join(directory, basename);
+      await trace.setArmed(true);
+      await expect(trace.capture(output, ++mono)).resolves.toMatchObject({ status: "written" });
+      return JSON.parse(await readFile(output, "utf8"));
+    }
+    const expected = await capture("synthetic", "small.json");
+    expect(expected).toEqual({ traceEvents: [
+      { pid: 2, tid: 3, ts: 10, ph: "I", cat: "blink.user_timing", name: "User timing", s: "t" },
+      { pid: 2, tid: 3, ph: "M", cat: "__metadata", name: "thread_name", args: { name: "CrRendererMain" } },
+      { pid: 2, tid: 3, ts: 20, ph: "X", cat: "devtools.timeline", name: "Layout", dur: 5 }
+    ] });
+    expect(await capture(large, "large.json")).toEqual(expected);
+    raw = '{"traceEvents":[{"omitted":"' + "x".repeat(128 * 1024) + '\\q"}]}';
+    await trace.setArmed(true);
+    await expect(trace.capture(join(directory, "invalid.json"), ++mono)).rejects.toThrow(
+      /^Chromium trace contains invalid JSON/
+    );
+    expect((await readdir(directory)).sort()).toEqual(["large.json", "small.json"]);
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});

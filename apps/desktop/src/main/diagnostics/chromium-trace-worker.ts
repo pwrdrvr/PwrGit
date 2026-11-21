@@ -1,6 +1,7 @@
 import { createReadStream, createWriteStream } from "node:fs";
 import { pipeline } from "node:stream/promises";
 import { workerData } from "node:worker_threads";
+import { traceJsonFragment } from "./chromium-trace-json.ts";
 
 // The native JSON exporter can include URLs, arbitrary User Timing names and
 // nested metadata regardless of enable_argument_filter. Rebuild the artifact
@@ -53,30 +54,16 @@ function safeTraceEvent(value: unknown, allowedCategories: readonly string[]): R
 }
 
 // The native exporter writes traceEvents first, then optional root metadata.
-// Frame objects across chunks, leaving JSON syntax and value parsing to V8.
+// Frame objects across chunks and pass each one to the fragment parser.
 const TRACE_HEADER = /^\s*\{\s*"traceEvents"\s*:\s*\[$/u;
-const MAX_FRAGMENT_CHARS = 8 * 1024 * 1024;
-
-function appendFragment(fragment: string, next: string): string {
-  if (fragment.length + next.length > MAX_FRAGMENT_CHARS) {
-    throw new Error("Chromium trace event or metadata exceeded the filter size limit");
-  }
-  return fragment + next;
-}
-
-function parseJson(fragment: string): unknown {
-  try {
-    return JSON.parse(fragment);
-  } catch {
-    // V8's parser error can quote raw trace data.
-    throw new Error("Chromium trace contains invalid JSON");
-  }
-}
 
 async function* filterTrace(rawPath: string, allowedCategories: readonly string[]): AsyncGenerator<string> {
   const input = createReadStream(rawPath, { encoding: "utf8", highWaterMark: 64 * 1024 });
   let state: "header" | "first" | "event" | "separator" | "next" | "footer" = "header";
-  let fragment = "";
+  let header = "";
+  const event = traceJsonFragment(allowedCategories);
+  const footer = traceJsonFragment();
+  footer.append('{"traceEvents":[]');
   let depth = 0;
   let quoted = false;
   let escaped = false;
@@ -87,16 +74,17 @@ async function* filterTrace(rawPath: string, allowedCategories: readonly string[
     let output = "";
     if (state === "header") {
       const end = chunk.indexOf("[");
-      fragment = appendFragment(fragment, end < 0 ? chunk : chunk.slice(0, end + 1));
+      header += end < 0 ? chunk : chunk.slice(0, end + 1);
+      if (header.length > 8 * 1024 * 1024) throw new Error("Chromium trace has no event array");
       if (end < 0) continue;
-      if (!TRACE_HEADER.test(fragment)) throw new Error("Chromium trace has no event array");
+      if (!TRACE_HEADER.test(header)) throw new Error("Chromium trace has no event array");
       state = "first";
-      fragment = "";
+      header = "";
       cursor = end + 1;
     }
     while (cursor < chunk.length) {
       if (state === "footer") {
-        fragment = appendFragment(fragment, chunk.slice(cursor));
+        footer.append(chunk.slice(cursor));
         break;
       }
       if (state === "event") {
@@ -115,14 +103,13 @@ async function* filterTrace(rawPath: string, allowedCategories: readonly string[
             if (--depth === 0) break;
           }
         }
-        fragment = appendFragment(fragment, chunk.slice(start, cursor));
+        event.append(chunk.slice(start, cursor));
         if (depth !== 0) continue;
-        const safe = safeTraceEvent(parseJson(fragment), allowedCategories);
+        const safe = safeTraceEvent(event.finish(), allowedCategories);
         if (safe !== null) {
           output += (wroteEvent ? "," : "") + JSON.stringify(safe);
           wroteEvent = true;
         }
-        fragment = "";
         state = "separator";
         continue;
       }
@@ -144,7 +131,7 @@ async function* filterTrace(rawPath: string, allowedCategories: readonly string[
     if (output) yield output;
   }
   if (state !== "footer") throw new Error("Chromium trace has an incomplete event array");
-  parseJson('{"traceEvents":[]' + fragment);
+  footer.finish();
   yield "]}";
 }
 
