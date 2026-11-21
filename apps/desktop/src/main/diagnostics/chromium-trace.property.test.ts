@@ -30,7 +30,9 @@ it("assigns each rolling trace to at most one overlapping capture across clock a
           }
         }), (_message, error) => unexpectedErrors.push(error), {
           wallNow: () => wall,
-          monotonicNow: () => ++mono
+          monotonicNow: () => ++mono,
+          // The queue model uses empty exports. The export tests below run the real worker.
+          filterTrace: (_rawPath, filteredPath) => writeFile(filteredPath, emptyTrace)
         });
 
         const saved: string[] = [];

@@ -33,6 +33,7 @@ type TraceOptions = {
   startTimeoutMs?: number;
   stopTimeoutMs?: number;
   filterTimeoutMs?: number;
+  filterTrace?: (rawPath: string, filteredPath: string) => Promise<void>;
   workerModule?: string | URL | undefined;
 };
 
@@ -138,27 +139,8 @@ export class ChromiumTrace {
     try {
       staging = await fs.mkdtemp(path.join(path.dirname(filePath), ".pwrgit-trace-"));
       const filteredPath = path.join(staging, "filtered.json");
-      const module = this.options.workerModule ?? new URL("./chromium-trace-worker.ts", import.meta.url);
-      // Packaged workers live inside app.asar. Resolve the standalone ESM
-      // asset with Electron's filesystem before starting Node's loader.
-      const entry = typeof module === "string"
-        ? new URL(`data:text/javascript;base64,${await fs.readFile(module, "base64")}`)
-        : module;
-      const worker = new Worker(entry, {
-        workerData: { rawPath, filteredPath, allowedCategories: TRACE_CATEGORIES },
-        resourceLimits: { maxOldGenerationSizeMb: 96 }
-      });
-      try {
-        await withDeadline(new Promise<void>((resolve, reject) => {
-          worker.once("error", reject);
-          worker.once("exit", (code) => {
-            if (code === 0) resolve();
-            else reject(new Error(`Chromium trace filter exited with code ${code}`));
-          });
-        }), this.options.filterTimeoutMs ?? FILTER_TIMEOUT_MS, "Filtering Chromium trace");
-      } finally {
-        await worker.terminate();
-      }
+      if (this.options.filterTrace) await this.options.filterTrace(rawPath, filteredPath);
+      else await this.filterInWorker(rawPath, filteredPath);
       await fs.rename(filteredPath, filePath);
       return rawBytes;
     } catch (error) {
@@ -170,6 +152,30 @@ export class ChromiumTrace {
           this.warn("Could not remove filtered trace staging directory", error);
         });
       }
+    }
+  }
+
+  private async filterInWorker(rawPath: string, filteredPath: string): Promise<void> {
+    const module = this.options.workerModule ?? new URL("./chromium-trace-worker.ts", import.meta.url);
+    // Packaged workers live inside app.asar. Resolve the standalone ESM
+    // asset with Electron's filesystem before starting Node's loader.
+    const entry = typeof module === "string"
+      ? new URL(`data:text/javascript;base64,${await fs.readFile(module, "base64")}`)
+      : module;
+    const worker = new Worker(entry, {
+      workerData: { rawPath, filteredPath, allowedCategories: TRACE_CATEGORIES },
+      resourceLimits: { maxOldGenerationSizeMb: 96 }
+    });
+    try {
+      await withDeadline(new Promise<void>((resolve, reject) => {
+        worker.once("error", reject);
+        worker.once("exit", (code) => {
+          if (code === 0) resolve();
+          else reject(new Error(`Chromium trace filter exited with code ${code}`));
+        });
+      }), this.options.filterTimeoutMs ?? FILTER_TIMEOUT_MS, "Filtering Chromium trace");
+    } finally {
+      await worker.terminate();
     }
   }
 
