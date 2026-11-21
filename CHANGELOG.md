@@ -1,5 +1,11 @@
 # Changelog
 
+## v0.61.2 - 2026-11-21
+
+- Pull - Improved profile-wide pulls to start repositories whose saved state shows a clean checkout behind its upstream first, bringing known pending updates forward in the queue. Each checkout is still rechecked before pulling.
+- CPU diagnostics - Improved large Chromium trace exports by streaming and filtering them in a worker instead of the main process thread. Exports support up to 256 MiB of decoded JSON while continuing to omit event arguments and free-form labels, including oversized fields.
+- Repository indexing - Improved refreshes by skipping redundant SQLite branch writes and repository-name updates when indexed values are unchanged. Overlapping branch reconciliations for the same repository now run in sequence so an older reconciliation cannot delete newer indexed rows.
+
 ## v0.61.1 - 2026-11-21
 
 - Startup profiling - Improved Settings' Startup CPU Profiling to capture only the next launch and turn itself off as that launch starts. A copyable completion notice lists the session folder and files actually saved, including partial or failed captures. The environment override continues to profile every launch where it is set.
