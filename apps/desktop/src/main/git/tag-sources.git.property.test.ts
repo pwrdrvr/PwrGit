@@ -53,6 +53,29 @@ function git(repo: string, ...args: string[]): string {
   }).trim();
 }
 
+function localTagState(repo: string) {
+  // Read the three namespaces together, since the model checks them after
+  // every command and each Git launch is expensive on Windows.
+  const listing = git(
+    repo,
+    "for-each-ref",
+    "--format=%(objectname) %(refname)",
+    "refs/tags",
+    "refs/pwrgit/incoming-tags",
+    "refs/pwrgit/replaced-tags"
+  );
+  const tags = new Map<string, string>();
+  const incoming: string[] = [];
+  const pins = new Set<string>();
+  for (const line of listing.split("\n")) {
+    const [objectId = "", ref = ""] = line.split(/\s+/);
+    if (ref.startsWith("refs/tags/")) tags.set(ref.slice(10), objectId);
+    else if (ref.startsWith("refs/pwrgit/incoming-tags")) incoming.push(ref);
+    else if (ref.startsWith("refs/pwrgit/replaced-tags")) pins.add(objectId);
+  }
+  return { tags, incoming, pins };
+}
+
 function setup(repo: string): void {
   git(repo, "config", "user.name", "Tag Fixture");
   git(repo, "config", "user.email", "tags@example.test");
@@ -71,8 +94,7 @@ function tagsOf(listing: string): Map<string, string> {
   return tags;
 }
 /** name -> peeled commit, from `git ls-remote` (a `^{}` line peels a tag object). */
-function originPeeled(origin: string): Map<string, string> {
-  const listing = execFileSync("git", ["ls-remote", "--tags", origin], { cwd: tmpdir(), env, encoding: "utf8" });
+function originPeeled(listing: string): Map<string, string> {
   const peeled = new Map<string, string>();
   for (const line of listing.split("\n")) {
     const [objectId = "", ref = ""] = line.split(/\s+/);
@@ -82,8 +104,8 @@ function originPeeled(origin: string): Map<string, string> {
   }
   return peeled;
 }
-const localTags = (repo: string) => tagsOf(git(repo, "for-each-ref", "--format=%(objectname) %(refname)", "refs/tags"));
-const originTags = (origin: string) => tagsOf(execFileSync("git", ["ls-remote", "--tags", origin], { cwd: tmpdir(), env, encoding: "utf8" }));
+const originListing = (origin: string) =>
+  execFileSync("git", ["ls-remote", "--tags", origin], { cwd: tmpdir(), env, encoding: "utf8" });
 
 type Model = {
   local: Map<string, string>;
@@ -113,12 +135,16 @@ function oracleDiffers(model: Model): number {
   return [...model.local.keys()].filter((name) => oracleStatus(model, name) === "differs").length;
 }
 
-async function check(model: Model, real: Real, compared: boolean): Promise<void> {
-  expect(localTags(real.local)).toEqual(model.local);
-  expect(git(real.local, "for-each-ref", "refs/pwrgit/incoming-tags")).toBe("");
-  const pins = git(real.local, "for-each-ref", "--format=%(objectname)", "refs/pwrgit/replaced-tags");
+async function check(
+  model: Model,
+  real: Real,
+  compared: boolean,
+  refs = localTagState(real.local)
+): Promise<void> {
+  expect(refs.tags).toEqual(model.local);
+  expect(refs.incoming).toEqual([]);
   for (const id of model.replaced) {
-    expect(pins.split("\n")).toContain(id);
+    expect(refs.pins).toContain(id);
     expect(() => git(real.local, "cat-file", "-e", id)).not.toThrow();
   }
   if (model.listed === null) return;
@@ -208,11 +234,11 @@ class Sync implements Command {
   async run(model: Model, real: Real): Promise<void> {
     const result = this.how === "fetch" ? await fetchRemote(systemGit, real.local) : await pullFastForward(systemGit, real.local);
     expect(result.ok).toBe(true);
-    const after = localTags(real.local);
-    for (const [name, id] of model.local) expect(after.get(name), `${this.how} moved ${name}`).toBe(id);
-    model.local = after;
+    const after = localTagState(real.local);
+    for (const [name, id] of model.local) expect(after.tags.get(name), `${this.how} moved ${name}`).toBe(id);
+    model.local = after.tags;
     // A sync never compares, so the stored count may lag until the next check.
-    await check(model, real, false);
+    await check(model, real, false, after);
   }
   toString = () => this.how;
 }
@@ -222,8 +248,9 @@ class Refresh implements Command {
   async run(model: Model, real: Real): Promise<void> {
     const result = await real.bus.dispatch("tag:refreshRemote", { repoId: "repo-1", mode: "explicit" });
     expect(result.ok).toBe(true);
-    model.listed = originTags(real.origin);
-    model.listedTargets = originPeeled(real.origin);
+    const listing = originListing(real.origin);
+    model.listed = tagsOf(listing);
+    model.listedTargets = originPeeled(listing);
     await check(model, real, true);
   }
   toString = () => "refresh";
@@ -246,7 +273,7 @@ class Take implements Command {
     this.taken = name;
     const reviewed = model.listed!.get(name)!;
     const before = model.local.get(name) ?? null;
-    const current = originTags(real.origin).get(name);
+    const current = tagsOf(originListing(real.origin)).get(name);
     const result = await real.bus.dispatch("tag:adoptRemote", {
       repoId: "repo-1",
       name,
@@ -369,14 +396,6 @@ beforeAll(() => {
   git(publisher, "push", "-q", "-f", "origin", "main", "refs/tags/v2");
 });
 
-/*
- * Budget: about 0.3s per run through the handlers on Linux, 12 runs in ~3.7s.
- * Real Git on the Windows runner is 6-13x slower (tag-source-handlers.test.ts:
- * 1.1s on Linux, 9-13s on Windows), so 12 runs there passed the 20s test
- * timeout. Windows runs 2: a platform smoke of the same model, which Linux
- * and macOS search properly.
- */
-
 /** Windows may still hold a directory a moment after Git exits; afterAll retries. */
 function removeRun(root: string): void {
   try {
@@ -414,7 +433,7 @@ function start(): { model: Model; real: Real } {
   registerBranchHandlers(bus, db, indexer, refresher, operations, settings);
   registerGraphHandlers(bus, db, new WorktreeStateService(db, systemGit));
   return {
-    model: { local: localTags(local), listed: null, listedTargets: null, keeps: new Map(), replaced: [] },
+    model: { local: localTagState(local).tags, listed: null, listedTargets: null, keeps: new Map(), replaced: [] },
     real: { bus, db, root, local, publisher, origin }
   };
 }
@@ -433,6 +452,8 @@ describe("published tags against git", () => {
           removeRun(real.root);
         }
       }),
+      // Windows smoke-tests the same model with two sequences because each
+      // Git launch costs more on that runner. Linux and macOS sample twelve.
       { numRuns: process.platform === "win32" ? 2 : 12 }
     );
   });

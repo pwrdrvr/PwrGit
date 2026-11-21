@@ -140,6 +140,32 @@ test("the repository row drops marks, then its count's word, before its name", (
   }
 });
 
+test("commits that move the roving tab stop reuse the repository name fit", async () => {
+  const reads = await page.evaluate(async () => {
+    const { __harness } = window as unknown as {
+      __harness: { benchmark: (kind: "commit", rounds: number) => Promise<void> };
+    };
+    const scrollWidth = Object.getOwnPropertyDescriptor(Element.prototype, "scrollWidth")!;
+    let nameReads = 0;
+    Object.defineProperty(Element.prototype, "scrollWidth", {
+      ...scrollWidth,
+      get(this: Element) {
+        if (this.matches(".repo-row__name")) nameReads++;
+        return scrollWidth.get!.call(this);
+      }
+    });
+    try {
+      // The tab stop changes, while the name and every in-flow control stay put.
+      await __harness.benchmark("commit", 4);
+      return nameReads;
+    } finally {
+      Object.defineProperty(Element.prototype, "scrollWidth", scrollWidth);
+    }
+  });
+  expect(reads).toBe(0);
+  expect(await readScenes()).toEqual(scenes);
+});
+
 // Run on the base and candidate with the same harness, Electron and host.
 // Record Chromium's renderer counters without imposing a wall-time gate in CI.
 test("benchmark sidebar fitting across commits and resizes", async () => {

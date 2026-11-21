@@ -66,7 +66,7 @@ import { useListReorder } from "./useListReorder";
 import { PinIcon, WorktreeRow } from "./WorktreeRow";
 import { PinnedBranchRow, pinnedBranchRowId } from "./PinnedBranchRow";
 import { RepoRefsSections, type RefsBrowserRequest } from "./RepoRefsSections";
-import { useStepLadder } from "../../lib/useFitLadder";
+import { useContentStepLadder, useStepLadder } from "../../lib/useFitLadder";
 import { WorktreeGlyph } from "../../lib/WorktreeGlyph";
 import {
   headingsFit,
@@ -313,7 +313,7 @@ export function RepoRow({
   // The row gives up its marks, then its count's word, before the name is
   // cut (Sidebar Section Headings, 3d). The star and the kebab never step.
   // Whole is measured at subpixel precision, as the name's hover card is.
-  useStepLadder(
+  useContentStepLadder(
     rowRef,
     () => nameRef.current === null || !isCutShort(nameRef.current),
     REPO_ROW_FIT_STEPS
