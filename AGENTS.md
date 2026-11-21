@@ -13,9 +13,11 @@ change.
    as they are. If they do not match, run `source ~/.nvm/nvm.sh && nvm use`
    first. A wrong-Node install does not fail at install time. It fails later,
    as a broken test or database. Each checkout/worktree needs its own `pnpm i`.
-2. **Run `pnpm lint` before pushing.** It is exactly what CI's Typecheck job
-   runs. New repo-wide checks go in its chain in the root `package.json`, not
-   in a new CI step.
+2. **Run `pnpm lint` before pushing code changes.** It is exactly what CI's
+   Typecheck job runs. For release-only version/changelog checkpoints, follow
+   the release skill's exact-source CI gate instead of repeating local checks.
+   New repo-wide checks go in its chain in the root `package.json`, not in a
+   new CI step.
 3. **A PR that changes visible UI has before/after screenshots** with
    contrived data. You don't need the live app:
    [docs/pr-screenshots.md](docs/pr-screenshots.md) covers harness renders,

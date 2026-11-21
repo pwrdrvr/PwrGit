@@ -205,22 +205,28 @@ repository's default branch:
    - Minor - Dependency updates and small interface polish.
    ```
 
-6. Run the metadata gate and the same pre-signing gates as `release.yml` before
-   committing:
+6. Use existing successful CI for the exact release-branch source commit as
+   the pre-commit validation gate. For `main`, inspect the latest `CI` push run
+   whose `headSha` equals the fetched `origin/main` SHA; require `completed`
+   and `success`. Retain its run URL, SHA and conclusion. A successful older
+   commit or a PR head/merge run is not evidence for the selected main commit.
+   Pending CI means wait; failed, cancelled, missing or unexpectedly skipped
+   CI means stop, not rerun locally or bypass it. Retain successful native
+   transport CI for that same source SHA as release evidence too.
+
+   Do not repeat dependency installation, lint/typecheck, Rust checks, native
+   builds, unit tests or production builds locally merely to cut a release.
+   Check metadata only:
 
    ```bash
    RELEASE_TAG=v<version> pnpm release:check
-   pnpm lint
-   pnpm test
-   pnpm build
    ```
 
-   Run `pnpm --filter @pwrgit/desktop package:dryrun` when a local macOS
-   packaging smoke is appropriate. No native rebuild belongs in that sequence:
-   one `pnpm i` leaves `better-sqlite3` built for both ABIs, so tests and
-   packaging share an install. If a native ABI error does surface,
-   `pnpm --filter @pwrgit/desktop run rebuild:electron-native` repairs
-   whichever half is stale (see the root `AGENTS.md`).
+   The version/changelog-only checkpoint may use its parent's successful CI;
+   confirm those are its only changes. The tag-triggered release workflow
+   still validates the actual tagged checkpoint before signing/publication.
+   Local diagnostic tests or packaging smokes require a separate need or an
+   explicit request; they are not routine release prerequisites.
 
 ## Commit And Land
 
@@ -235,14 +241,15 @@ git log -1 --show-signature --format=fuller
 Use a signed, non-force direct push to the lifecycle-selected release branch
 (`main` for the active train). The maintainer has authorized this as the default
 release path, matching PwrAgnt. Do not open a routine release-metadata PR or wait
-for PR CI: local gates above and the guarded tag-triggered release workflow
+for PR CI: the exact-source CI gate above and the guarded tag-triggered release workflow
 remain required. Ordinary main-branch CI may still run; do not add skip markers
 or weaken workflow checks to avoid it.
 
 Fetch immediately before pushing and confirm the current remote release branch
-is an ancestor of the tested checkpoint. If it advanced with untested changes,
-integrate and review those changes and rerun the applicable gates before
-publishing; never force-push over concurrent work.
+is the source parent of the metadata-only checkpoint. If it advanced, integrate
+and review the changes, update release notes as needed, and require successful
+CI for that new exact source SHA before publishing. Do not substitute a local
+test run or force-push over concurrent work.
 
 ```bash
 git fetch origin <release-branch> --tags
@@ -265,8 +272,10 @@ commit; if a locally signed landed commit is required, stop and ask rather than
 silently substituting that merge.
 
 After either path, identify the actual remote release-branch commit and verify
-its tree matches the validated tree. If the remote advanced again, review and
-validate the added changes before selecting the release commit. Do not assume
+its tree matches the intended metadata-only checkpoint on the CI-validated
+source. If the remote advanced again, review the added changes and require
+successful CI for the newly selected source SHA before selecting the release
+commit. Do not assume
 the checkout's branch name or its pre-push HEAD proves what landed.
 
 Rerun the metadata gate on the landed release-branch commit:

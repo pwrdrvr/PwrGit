@@ -84,27 +84,35 @@ heading must agree.
 git fetch origin <release-branch> --tags
 pnpm distribution:audit --output <ignored-directory>/distribution-audit.json
 RELEASE_TAG=vX.Y.Z pnpm release:check
-pnpm lint
-pnpm build:native
-pnpm test
-pnpm build
 ```
+
+Before the metadata-only commit, require the latest `CI` push run for the exact
+fetched release-branch source SHA to be completed successfully. Retain that SHA,
+run URL and conclusion, plus successful native transport CI for the same SHA.
+An older green main run or a PR run does not validate a newer source commit.
+Wait for pending CI; stop on failed, cancelled, missing or unexpectedly skipped
+CI. Do not duplicate install, lint/typecheck, Rust checks, native builds, tests
+or production builds locally as release prerequisites.
 
 Commit the version and changelog together in an SSH-signed checkpoint and push
 it directly, without force, to `<release-branch>` (`main` for the active train).
 This is the maintainer-authorized default: do not create a routine release
 metadata PR and spend another PR CI run before the guarded release workflow.
-Local gates above still apply; ordinary main-branch CI is not disabled.
+The metadata-only checkpoint may reuse its source parent's successful CI when
+only the version and changelog changed. Ordinary main-branch CI remains enabled,
+and the guarded tag workflow validates the actual release checkpoint again.
 
 Fetch immediately before pushing. If the remote advanced beyond the validated
-base, integrate and review the concurrent changes and rerun applicable gates;
+base, integrate and review the concurrent changes and require successful CI for
+the new exact source SHA;
 never overwrite them. Use a template-based metadata PR only if branch protection
 rejects direct push, then wait for required checks and squash merge. A
 non-fast-forward rejection is a sync/validation issue, not a reason to force-push.
 
 After landing, fetch again, identify the actual remote commit, and verify its
-tree matches the validated tree. Review and validate any newly landed changes
-before selecting the release commit. Rerun the metadata check there and create
+tree matches the intended metadata-only checkpoint on the CI-validated source.
+Review newly landed changes and require their exact-source CI before selecting
+the release commit. Rerun the metadata check there and create
 a signed annotated tag. Pushing the tag starts the workflow. A manual dispatch
 is allowed only for a tag that already exists in the repository.
 
