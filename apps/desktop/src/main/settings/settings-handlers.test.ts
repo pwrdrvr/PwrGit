@@ -47,6 +47,7 @@ describe("settings handlers", () => {
     expect(r.value.diagnostics.heapMonitorEnabled).toBe(false);
     expect(r.value.diagnostics.resourceUsageEnabled).toBe(false);
     expect(r.value.diagnostics.hotCpuProfilingTriggerMode).toBe("sustained");
+    expect(r.value.diagnostics.hotCpuProfilingCaptureChromiumTrace).toBe(false);
     expect(r.value.updates).toEqual({
       train: "stable",
       channel: "latest",
@@ -73,7 +74,11 @@ describe("settings handlers", () => {
     const r = await bus.dispatch("settings:update", {
       patch: {
         general: { developerMode: true, searchAllProfiles: true },
-        diagnostics: { hotCpuProfilingEnabled: true, heapMonitorEnabled: true }
+        diagnostics: {
+          hotCpuProfilingEnabled: true,
+          hotCpuProfilingCaptureChromiumTrace: true,
+          heapMonitorEnabled: true
+        }
       }
     });
     expect(r.ok).toBe(true);
@@ -81,12 +86,14 @@ describe("settings handlers", () => {
     expect(r.value.general.developerMode).toBe(true);
     expect(r.value.general.searchAllProfiles).toBe(true);
     expect(r.value.diagnostics.hotCpuProfilingEnabled).toBe(true);
+    expect(r.value.diagnostics.hotCpuProfilingCaptureChromiumTrace).toBe(true);
     // Untouched keys keep their defaults.
     expect(r.value.diagnostics.hotCpuProfilingStartDelayMs).toBe(0);
     expect(changes).toHaveLength(1);
     // Only the changed keys are stored sparsely.
     expect(service.get().diagnostics).toEqual({
       hotCpuProfilingEnabled: true,
+      hotCpuProfilingCaptureChromiumTrace: true,
       heapMonitorEnabled: true
     });
   });

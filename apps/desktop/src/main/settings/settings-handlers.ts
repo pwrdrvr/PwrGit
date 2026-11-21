@@ -161,6 +161,10 @@ function sanitizePatch(patch: AppSettingsPatch): {
     ) {
       diagnostics.hotCpuProfilingTriggerMode = diag.hotCpuProfilingTriggerMode;
     }
+    if (typeof diag.hotCpuProfilingCaptureChromiumTrace === "boolean") {
+      diagnostics.hotCpuProfilingCaptureChromiumTrace =
+        diag.hotCpuProfilingCaptureChromiumTrace;
+    }
     if (typeof diag.hotCpuProfilingCaptureHeapSnapshot === "boolean") {
       diagnostics.hotCpuProfilingCaptureHeapSnapshot =
         diag.hotCpuProfilingCaptureHeapSnapshot;

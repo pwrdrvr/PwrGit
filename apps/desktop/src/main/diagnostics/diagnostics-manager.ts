@@ -5,7 +5,7 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 import { writeHeapSnapshot } from "node:v8";
-import { app, type BrowserWindow } from "electron";
+import { app, contentTracing, type BrowserWindow } from "electron";
 import type { DiagnosticsSettings, HotCpuProfileCapturedEvent } from "@pwrgit/shared";
 import { getDiagLogger } from "./diag-log";
 import {
@@ -19,8 +19,9 @@ import {
   resolveHotCpuProfileConfig,
   type HotCpuProfileConfig
 } from "./hot-cpu-profile-config";
-import { createHotCpuProfileSession } from "./hot-cpu-profile-session";
+import { createHotCpuProfileSession, type HotCpuProfileSession } from "./hot-cpu-profile-session";
 import { HotCpuProfiler } from "./hot-cpu-profiler";
+import { ChromiumTrace } from "./chromium-trace";
 import { createMainProcessHotCpuTarget } from "./main-process-hot-cpu-target";
 import { resolveStartupCpuProfileConfig } from "./startup-cpu-profile-config";
 import { createStartupCpuProfileSession } from "./startup-cpu-profile-session";
@@ -91,6 +92,11 @@ export class DiagnosticsManager {
   private syncQueue: Promise<void> = Promise.resolve();
   private pendingSyncs = 0;
   private shuttingDown = false;
+  private chromiumTraceEnabled = false;
+  private reconfiguringRenderers = false;
+  private readonly chromiumTrace = new ChromiumTrace(
+    () => contentTracing, (message, error) => log.warn(message, error)
+  );
 
   constructor(options: {
     outputRoot: string;
@@ -120,16 +126,17 @@ export class DiagnosticsManager {
     };
     this.windows.set(id, entry);
     window.on("closed", () => {
-      const closing = this.windows.get(id);
-      this.windows.delete(id);
-      if (closing !== undefined) {
-        this.enqueueSync(async () => {
-          await closing.heapMonitor?.stop("window-closed");
-          await discardSessionIfEmpty(closing.heapSessionDir);
-          await closing.hotCpuProfiler?.stop("window-closed");
-          await discardSessionIfEmpty(closing.hotCpuSessionDir);
-        });
-      }
+      this.enqueueSync(async () => {
+        try {
+          await entry.heapMonitor?.stop("window-closed");
+          await discardSessionIfEmpty(entry.heapSessionDir);
+          await entry.hotCpuProfiler?.stop("window-closed");
+          await discardSessionIfEmpty(entry.hotCpuSessionDir);
+        } finally {
+          this.windows.delete(id);
+          await this.reconcileChromiumTrace();
+        }
+      });
     });
 
     this.enqueueSync(async () => {
@@ -139,7 +146,17 @@ export class DiagnosticsManager {
       if (this.hotCpuConfig.enabled) {
         await this.startWindowHotCpuProfiler(entry, this.hotCpuConfig);
       }
+      await this.reconcileChromiumTrace();
     });
+  }
+
+  /** The first window is a prospective renderer. Only wait for the bounded
+   * native trace start, not a full sync of unrelated diagnostics. */
+  async prepareFirstRendererTrace(): Promise<void> {
+    const settings = this.getDiagnostics();
+    if (!settings.hotCpuProfilingCaptureChromiumTrace || this.shuttingDown) return;
+    const { heapConfig, hotCpuConfig } = this.resolveMonitorConfigs(settings);
+    if (hotCpuConfig.enabled && !heapConfig.enabled) await this.chromiumTrace.setArmed(true);
   }
 
   /** Re-resolve configs from Settings and start/stop/restart monitors. */
@@ -153,9 +170,14 @@ export class DiagnosticsManager {
   shutdown(): Promise<void> {
     this.shuttingDown = true;
     this.enqueueSync(async () => {
-      await this.stopResourceUsage();
-      await this.stopHeapMonitoring("app-quit");
-      await this.stopHotCpuProfiling("app-quit");
+      try {
+        await this.stopResourceUsage();
+        await this.stopHeapMonitoring("app-quit");
+        await this.stopHotCpuProfiling("app-quit");
+      } finally {
+        this.chromiumTraceEnabled = false;
+        await this.chromiumTrace.setArmed(false);
+      }
     });
     return this.syncQueue;
   }
@@ -164,7 +186,7 @@ export class DiagnosticsManager {
    *  running, or a queued sync may be about to start one. Quit is deferred
    *  for the flush only when this is true. */
   hasPendingWork(): boolean {
-    if (this.pendingSyncs > 0 || this.mainHeapMonitor !== null || this.mainHotCpuProfiler !== null || this.stopResourceMonitoring !== null) return true;
+    if (this.pendingSyncs > 0 || this.mainHeapMonitor !== null || this.mainHotCpuProfiler !== null || this.stopResourceMonitoring !== null || this.chromiumTraceEnabled) return true;
     for (const entry of this.windows.values()) {
       if (entry.heapMonitor !== null || entry.hotCpuProfiler !== null) return true;
     }
@@ -192,6 +214,48 @@ export class DiagnosticsManager {
     } else {
       await this.stopResourceUsage();
     }
+    const { heapConfig, hotCpuConfig } = this.resolveMonitorConfigs(settings);
+    const heapKey = JSON.stringify(heapConfig);
+    const hotCpuKey = JSON.stringify(hotCpuConfig);
+    const heapChanged = heapKey !== this.heapConfigKey;
+    const hotCpuChanged = hotCpuKey !== this.hotCpuConfigKey;
+    this.chromiumTraceEnabled = settings.hotCpuProfilingCaptureChromiumTrace &&
+      hotCpuConfig.enabled && !heapConfig.enabled;
+    // Stop rearming first. The old profilers still own their active triggers
+    // and can export before we discard an unclaimed trace below.
+    this.reconfiguringRenderers = heapChanged || hotCpuChanged;
+    try {
+      if (heapChanged) {
+        // Heap monitoring owns the renderer debugger while enabled.
+        await this.stopWindowHotCpuProfilers("heap-config-changed");
+        await this.stopHeapMonitoring("config-changed");
+        this.heapConfig = heapConfig;
+        this.heapConfigKey = heapKey;
+        if (heapConfig.enabled) {
+          await this.startHeapMonitoring(heapConfig);
+        }
+      }
+
+      if (hotCpuChanged) {
+        await this.stopHotCpuProfiling("config-changed");
+        this.hotCpuConfig = hotCpuConfig;
+        this.hotCpuConfigKey = hotCpuKey;
+        if (hotCpuConfig.enabled) {
+          await this.startMainHotCpuProfiler(hotCpuConfig);
+        }
+      }
+      if ((heapChanged || hotCpuChanged) && hotCpuConfig.enabled) {
+        for (const entry of this.windows.values()) {
+          await this.startWindowHotCpuProfiler(entry, hotCpuConfig);
+        }
+      }
+    } finally {
+      this.reconfiguringRenderers = false;
+      await this.reconcileChromiumTrace();
+    }
+  }
+
+  private resolveMonitorConfigs(settings: DiagnosticsSettings) {
     const heapConfig = resolveHeapMonitorConfig({
       enabled: settings.heapMonitorEnabled,
       outputRoot: this.outputRoot
@@ -204,37 +268,21 @@ export class DiagnosticsManager {
       captureHeapSnapshot: settings.hotCpuProfilingCaptureHeapSnapshot,
       heapSnapshotLimit: settings.hotCpuProfilingHeapSnapshotLimit
     });
+    return { heapConfig, hotCpuConfig };
+  }
 
-    const heapKey = JSON.stringify(heapConfig);
-    const heapChanged = heapKey !== this.heapConfigKey;
-    if (heapChanged) {
-      // Heap monitoring owns the renderer debugger while enabled. Flush hot
-      // recordings before it attaches, and re-arm after it releases ownership.
-      await this.stopWindowHotCpuProfilers("heap-config-changed");
-      await this.stopHeapMonitoring("config-changed");
-      this.heapConfig = heapConfig;
-      this.heapConfigKey = heapKey;
-      if (heapConfig.enabled) {
-        await this.startHeapMonitoring(heapConfig);
+  private async reconcileChromiumTrace(): Promise<void> {
+    if (this.reconfiguringRenderers || this.shuttingDown) return;
+    const windows = [...this.windows.values()];
+    if (this.chromiumTraceEnabled) {
+      if (windows.some((entry) => entry.hotCpuProfiler?.canCaptureAnotherProfile())) {
+        await this.chromiumTrace.setArmed(true);
+        return;
       }
+      // A renderer at its limit may still be exporting its final trigger.
+      if (windows.some((entry) => entry.hotCpuProfiler?.hasTriggeredProfile())) return;
     }
-
-    const hotCpuKey = JSON.stringify(hotCpuConfig);
-    if (hotCpuKey !== this.hotCpuConfigKey) {
-      await this.stopHotCpuProfiling("config-changed");
-      this.hotCpuConfig = hotCpuConfig;
-      this.hotCpuConfigKey = hotCpuKey;
-      if (hotCpuConfig.enabled) {
-        await this.startMainHotCpuProfiler(hotCpuConfig);
-        for (const entry of this.windows.values()) {
-          await this.startWindowHotCpuProfiler(entry, hotCpuConfig);
-        }
-      }
-    } else if (heapChanged && hotCpuConfig.enabled) {
-      for (const entry of this.windows.values()) {
-        await this.startWindowHotCpuProfiler(entry, hotCpuConfig);
-      }
-    }
+    await this.chromiumTrace.setArmed(false);
   }
 
   private async stopResourceUsage(): Promise<void> {
@@ -384,12 +432,36 @@ export class DiagnosticsManager {
         isDestroyed: () => contents.isDestroyed(),
         takeHeapSnapshot: (filePath) => contents.takeHeapSnapshot(filePath)
       },
+      onProfileArtifactWritten: (filePath, triggerAtMs, triggerMonotonicMs) =>
+        this.saveChromiumTrace(session.session, filePath, triggerAtMs, triggerMonotonicMs),
+      onProfileFinished: () => { void this.reconcileChromiumTrace(); },
       onProfileWritten: (event) => this.onHotCpuProfileCaptured?.(event, entry.profileId),
       onHeapSnapshotLimitReached: () => {
         this.onHotCpuHeapSnapshotLimitReached();
       }
     });
     await entry.hotCpuProfiler.start();
+  }
+
+  private async saveChromiumTrace(
+    session: HotCpuProfileSession, profilePath: string, triggerAtMs: number,
+    triggerMonotonicMs: number
+  ): Promise<void> {
+    if (!this.getDiagnostics().hotCpuProfilingCaptureChromiumTrace) return;
+    const filename = `${path.parse(profilePath).name}.trace.json`;
+    const result = await this.chromiumTrace.capture(
+      path.join(session.directoryPath, filename), triggerMonotonicMs
+    ).catch((error: unknown) => ({
+      status: "failed" as const,
+      error: error instanceof Error ? error.message : String(error)
+    }));
+    if (result.status === "failed") log.warn("Could not save Chromium trace", result.error);
+    if (result.status === "written") await session.registerArtifact(filename);
+    await session.appendEvent({
+      capturedAt: new Date().toISOString(),
+      type: `chromium-trace-${result.status}`,
+      detail: { filename, triggerAtMs, ...result }
+    });
   }
 }
 
