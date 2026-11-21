@@ -101,6 +101,52 @@ export function useFitLadder(
   }, []);
 }
 
+/** A stepped row whose in-flow content is all inside the stepped element. */
+export function useContentStepLadder(
+  rowRef: RefObject<HTMLElement | null>,
+  fits: () => boolean,
+  steps: readonly string[]
+): void {
+  const content = useRef<{ row: HTMLElement; observer: MutationObserver } | null>(null);
+  const refit = useStepLadder(rowRef, fits, steps, {
+    measureOnCommit: false,
+    afterFit: () => {
+      // The fit already covered these changes, including its own step writes.
+      content.current?.observer.takeRecords();
+    }
+  });
+
+  useLayoutEffect(() => {
+    const row = rowRef.current;
+    const previous = content.current;
+    if (previous?.row === row) {
+      // Ancestor layout effects can flush fits to read final row geometry.
+      if (previous.observer.takeRecords().length > 0) refit();
+      return;
+    }
+
+    previous?.observer.disconnect();
+    content.current = null;
+    if (row === null) return;
+    const observer = new MutationObserver(refit);
+    observer.observe(row, {
+      subtree: true,
+      childList: true,
+      characterData: true,
+      attributeFilter: ["class", "style", "hidden", "width", "height"]
+    });
+    // Inherited text changes can change the fit without resizing the row.
+    observer.observe(document.documentElement, {
+      attributeFilter: ["data-sidebar-text", "data-density", "style"]
+    });
+    content.current = { row, observer };
+  });
+  useLayoutEffect(() => () => {
+    content.current?.observer.disconnect();
+    content.current = null;
+  }, []);
+}
+
 type Fit = {
   row: HTMLElement;
   steps: readonly string[];
