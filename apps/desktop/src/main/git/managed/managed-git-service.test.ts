@@ -132,6 +132,21 @@ describe("ManagedGitService", () => {
     expect(leftovers()).toEqual([]);
   });
 
+  test.skipIf(process.platform === "win32").each(["022", "027", "077"])("installs with the sealed inventory modes under umask %s", async (mask) => {
+    // Vitest's forks pool isolates this process-wide setting from other files.
+    const previous = process.umask(0o022);
+    try {
+      const version = "2.56.0-dev-pwrgit.5";
+      const { svc } = service(serve([build(version)]));
+      process.umask(Number.parseInt(mask, 8));
+      // Installation checks the extracted bytes and modes against the sealed inventory.
+      const status = await svc.install(version);
+      expect(status.builds).toEqual([expect.objectContaining({ version })]);
+    } finally {
+      process.umask(previous);
+    }
+  });
+
   test("a download whose bytes differ from the release is refused before it is unpacked", async () => {
     const five = build("2.56.0-dev-pwrgit.5");
     const server = serve([five]);

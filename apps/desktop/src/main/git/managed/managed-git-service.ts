@@ -162,7 +162,8 @@ async function defaultExtract(archive: string, destination: string, signal: Abor
   const members = (await runTar(["-tzf", archive], signal)).split(/\r?\n/).filter((name) => name !== "");
   const unsafe = members.find(unsafeArchiveMember);
   if (unsafe !== undefined) throw new Error(`The archive has an unsafe member (${unsafe}), so nothing was unpacked.`);
-  await runTar(["-xzf", archive, "-C", destination], signal);
+  // Keep the modes sealed in the inventory regardless of the app's umask.
+  await runTar(["-xpzf", archive, "-C", destination], signal);
 }
 
 function defaultProcessAlive(pid: number): boolean {
