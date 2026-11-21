@@ -173,7 +173,7 @@ export default defineConfig(({ command }) => {
           input: { index: resolve(__dirname, "src/main/index.ts") },
           output: {
             entryFileNames: (chunk) =>
-              chunk.name === "prune-size-worker" ? "[name].mjs" : "[name].js"
+              chunk.name.endsWith("-worker") ? "[name].mjs" : "[name].js"
           }
         }
       }

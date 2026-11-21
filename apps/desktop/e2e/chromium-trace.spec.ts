@@ -11,14 +11,17 @@ const HERE = dirname(fileURLToPath(import.meta.url));
 test("rolling Chromium trace retains recent events after overflow and publishes only safe fields", async ({}, info) => {
   test.setTimeout(90_000);
   const html = info.outputPath("index.html");
-  const controller = info.outputPath("chromium-trace.cjs");
+  const controller = info.outputPath("chromium-trace.mjs");
+  const worker = info.outputPath("chromium-trace-worker.mjs");
   const artifact = info.outputPath("renderer.trace.json");
   await mkdir(dirname(html), { recursive: true });
   await writeFile(html, "<!doctype html><meta charset=utf-8><main>Trace fixture</main>");
-  const source = await readFile(join(HERE, "../src/main/diagnostics/chromium-trace.ts"), "utf8");
-  await writeFile(controller, ts.transpile(source, {
-    target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS, esModuleInterop: true
-  }));
+  for (const [name, destination] of [["chromium-trace", controller], ["chromium-trace-worker", worker]] as const) {
+    const source = await readFile(join(HERE, `../src/main/diagnostics/${name}.ts`), "utf8");
+    await writeFile(destination, ts.transpile(source, {
+      target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.ESNext
+    }));
+  }
 
   const privateValue = "synthetic-private-trace-value";
   const server = createServer((_req, res) => {
@@ -61,7 +64,7 @@ test("rolling Chromium trace retains recent events after overflow and publishes 
           raw = await fs.readFile(written, "utf8");
           return written;
         }
-      }), (message, error) => warnings.push(`${message}: ${String(error)}`), { bufferSizeKb: 1024 });
+      }), (message, error) => warnings.push(`${message}: ${String(error)}`), { bufferSizeKb: 1024, workerModule: args.worker });
 
       await trace.setArmed(true);
       await win.webContents.executeJavaScript("performance.mark('early-overflow-marker')");
@@ -98,7 +101,7 @@ test("rolling Chromium trace retains recent events after overflow and publishes 
         recent: events.some((event) => event.name === "recent-overflow-marker"),
         hadPrivateUrl: raw.includes(args.url)
       };
-    }, { controller, artifact, privateValue, url });
+    }, { controller, worker, artifact, privateValue, url });
 
     expect(result.warnings).toEqual([]);
     expect(result.capture.status).toBe("written");
