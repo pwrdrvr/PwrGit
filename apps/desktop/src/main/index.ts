@@ -168,6 +168,8 @@ import {
   DiagnosticsManager,
   startStartupCpuProfiling
 } from "./diagnostics/diagnostics-manager";
+import { takeStartupCpuProfileRequest } from "./diagnostics/startup-cpu-request";
+import { StartupCpuProfileNotice } from "./diagnostics/startup-cpu-notice";
 import { rebuildAppMenu } from "./menu";
 import { checkForAppUpdatesFromMenu } from "./menu-update-check";
 import { createProfileWindows } from "./profile-windows";
@@ -561,6 +563,17 @@ if (!gotSingleInstanceLock) {
       getDiagnostics: () =>
         settingsSnapshot(settings, diagnosticsOutputRoot, appVersion)
           .diagnostics,
+      // Resource recording's expiry is written by main, at the start of a
+      // legacy recording and when one ends. The manager already acts on it.
+      persistDiagnostics: (patch) => {
+        settings.update({
+          diagnostics: { ...settings.get().diagnostics, ...patch }
+        });
+        emitEvent(
+          "settings:changed",
+          settingsSnapshot(settings, diagnosticsOutputRoot, appVersion)
+        );
+      },
       onHotCpuProfileCaptured: (event, profileId) => {
         emitEvent("diagnostics:cpuProfileCaptured", { ...event, profileId, sourceHostname: cpuCaptureHostname, appIdentity: cpuCaptureIdentity });
       },
@@ -581,12 +594,20 @@ if (!gotSingleInstanceLock) {
       }
     });
     // Startup CPU profiling must begin before the first window exists to
-    // cover window creation; enabled via Settings toggle or PWRGIT_* env.
+    // cover window creation. Settings arms one launch (taken here, so it is
+    // already off by the time anyone opens Settings); PWRGIT_* env arms every
+    // launch that carries it.
+    const startupCpuNotice = new StartupCpuProfileNotice({
+      captured: (event) => emitEvent("diagnostics:startupCpuProfileCaptured", event),
+      dismissed: (sessionId) => emitEvent("diagnostics:startupCpuProfileDismissed", { sessionId })
+    });
+    startupCpuNotice.register(bus);
     const startupCpu = await startStartupCpuProfiling({
-      enabled: settingsSnapshot(settings, diagnosticsOutputRoot, appVersion)
-        .diagnostics
-        .startupCpuProfilingEnabled,
-      outputRoot: diagnosticsOutputRoot
+      enabled: takeStartupCpuProfileRequest(settings),
+      outputRoot: diagnosticsOutputRoot,
+      onCompleted: (event) => {
+        startupCpuNotice.publish({ ...event, sourceHostname: cpuCaptureHostname, appIdentity: cpuCaptureIdentity });
+      }
     });
     let startupCpuWindowPending = startupCpu !== null;
     const profiles = new ProfileService(db);

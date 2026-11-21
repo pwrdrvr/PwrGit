@@ -1,8 +1,13 @@
 # Investigating long-running CPU and energy use
 
 Resource recording is **off by default**. Enable **Settings → Troubleshooting
-→ Resource Usage Recording → Record resource usage** for a representative
-session. It starts and stops live, independently of heap/CPU profiling.
+→ Resource Usage Recording → Record resource usage for 24 hours** for a
+representative session. It starts live, independently of heap/CPU profiling,
+and turns itself off 24 hours after it was turned on. The stop time is stored
+with the setting, so a restart continues the same recording instead of
+starting a new day; Settings shows when it stops. Turning it off early stops
+it immediately. A setting saved by an older build (on, with no stop time) is
+given 24 hours from the first launch that reads it.
 When off, it does not sample processes, retain Git counters, create a timer,
 or write resource files. Nothing is uploaded automatically.
 
@@ -10,8 +15,9 @@ When enabled, PwrGit writes one sample per minute to `resources` under the
 diagnostics folder shown at the top of Troubleshooting (`~/Library/Application
 Support/PwrGit/diagnostics/resources` on macOS). UTC hourly NDJSON files retain
 the last 24 hours plus the current hour. Existing `main.log` still records
-individual operations. Turn recording off after collecting the session;
-existing files remain available for inspection.
+individual operations. When recording stops, by expiry or by hand, existing
+files remain available for inspection; older files are pruned only when a
+later recording writes.
 
 After leaving the build running through the workload of interest, summarize
 the last 12 hours from the repository root:

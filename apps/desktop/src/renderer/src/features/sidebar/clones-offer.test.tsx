@@ -53,7 +53,8 @@ beforeEach(async () => {
   accepted = vi.fn();
   dispatch.mockImplementation(async (name: string) =>
     ok(name === "maintenance:clonesOffer" ? ({ kind: "bytes", bytes: 3 * GIB, atLeast: false } satisfies ClonesOffer)
-      : name === "remote:activities" ? [] : { status: "idle" }));
+      : name === "remote:activities" ? []
+      : name === "diagnostics:readStartupCpuProfile" ? null : { status: "idle" }));
   container = document.createElement("div");
   document.body.append(container);
   root = createRoot(container);

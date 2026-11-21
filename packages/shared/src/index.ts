@@ -36,3 +36,4 @@ export * from "./recency";
 export * from "./managed-git";
 export * from "./repo-search";
 export * from "./hot-cpu-profile";
+export * from "./startup-cpu-profile";

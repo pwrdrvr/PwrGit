@@ -1,5 +1,6 @@
 // Ported from PwrAgnt (diagnostics/startup-cpu-profile-config.ts). Enabled by
-// the Settings toggle (profiles every launch while on) or PWRGIT_STARTUP_CPU_PROFILING.
+// the Settings toggle (one launch: see startup-cpu-request.ts) or
+// PWRGIT_STARTUP_CPU_PROFILING (every launch whose environment carries it).
 import path from "node:path";
 
 const DEFAULT_POST_LOAD_DURATION_MS = 5_000;
@@ -9,6 +10,8 @@ export type StartupCpuProfileConfig =
   | { enabled: false }
   | {
       enabled: true;
+      /** The env var wins when both ask: it is what repeats. */
+      armedBy: "settings" | "env";
       outputRoot: string;
       postLoadDurationMs: number;
       hardTimeoutMs: number;
@@ -36,15 +39,14 @@ export function resolveStartupCpuProfileConfig(options: {
   env?: NodeJS.ProcessEnv;
 }): StartupCpuProfileConfig {
   const env = options.env ?? process.env;
-  if (
-    options.enabled !== true &&
-    !isEnabled(env["PWRGIT_STARTUP_CPU_PROFILING"])
-  ) {
+  const envForced = isEnabled(env["PWRGIT_STARTUP_CPU_PROFILING"]);
+  if (options.enabled !== true && !envForced) {
     return { enabled: false };
   }
 
   return {
     enabled: true,
+    armedBy: envForced ? "env" : "settings",
     outputRoot: path.resolve(
       env["PWRGIT_STARTUP_CPU_PROFILING_DIR"] ?? options.outputRoot
     ),

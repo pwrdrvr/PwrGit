@@ -32,6 +32,7 @@ import type { SettingsService } from "./settings-service";
 import { resolveHeapMonitorConfig } from "../diagnostics/heap-monitor-config";
 import { resolveHotCpuProfileConfig } from "../diagnostics/hot-cpu-profile-config";
 import { resolveStartupCpuProfileConfig } from "../diagnostics/startup-cpu-profile-config";
+import { nextResourceUsageSettings } from "../diagnostics/resource-usage-window";
 
 /** Stored settings are sparse; snapshots are fully defaulted. */
 export function settingsSnapshot(
@@ -272,7 +273,16 @@ export function registerSettingsHandlers(
     } = {
       general: { ...stored.general, ...sanitized.general },
       experimental: { ...stored.experimental, ...sanitized.experimental },
-      diagnostics: { ...stored.diagnostics, ...sanitized.diagnostics }
+      diagnostics: {
+        ...stored.diagnostics,
+        ...sanitized.diagnostics,
+        // Main stamps the recording's expiry; a renderer cannot supply one.
+        ...nextResourceUsageSettings(
+          stored.diagnostics ?? {},
+          sanitized.diagnostics.resourceUsageEnabled,
+          Date.now()
+        )
+      }
     };
     // Persist both axes whenever the user touches Updates, including
     // stable/latest, so a Beta binary does not re-infer after they pick
