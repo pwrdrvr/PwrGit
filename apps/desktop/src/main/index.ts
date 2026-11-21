@@ -23,6 +23,7 @@ import {
   resolveUpdateSelection,
   sanitizeSettingsRoute,
   type AppAppearance,
+  type DiagnosticsSettings,
   type Profile,
   type BranchReveal
 } from "@pwrgit/shared";
@@ -558,6 +559,16 @@ if (!gotSingleInstanceLock) {
     const mcpPolicy = new McpPolicyStore(
       join(app.getPath("userData"), "mcp-policy.json")
     );
+    // Main-owned diagnostics writes: persist, then tell every window.
+    const persistDiagnostics = (patch: Partial<DiagnosticsSettings>): void => {
+      settings.update({
+        diagnostics: { ...settings.get().diagnostics, ...patch }
+      });
+      emitEvent(
+        "settings:changed",
+        settingsSnapshot(settings, diagnosticsOutputRoot, appVersion)
+      );
+    };
     const diagnostics = new DiagnosticsManager({
       outputRoot: diagnosticsOutputRoot,
       getDiagnostics: () =>
@@ -565,34 +576,20 @@ if (!gotSingleInstanceLock) {
           .diagnostics,
       // Resource recording's expiry is written by main, at the start of a
       // legacy recording and when one ends. The manager already acts on it.
-      persistDiagnostics: (patch) => {
-        settings.update({
-          diagnostics: { ...settings.get().diagnostics, ...patch }
-        });
-        emitEvent(
-          "settings:changed",
-          settingsSnapshot(settings, diagnosticsOutputRoot, appVersion)
-        );
-      },
+      persistDiagnostics,
       onHotCpuProfileCaptured: (event, profileId) => {
         emitEvent("diagnostics:cpuProfileCaptured", { ...event, profileId, sourceHostname: cpuCaptureHostname, appIdentity: cpuCaptureIdentity });
       },
       onHotCpuHeapSnapshotLimitReached: () => {
         // Mirror PwrAgnt: a session that hits its heap-snapshot cap turns the
         // capture flag off so the next arm doesn't silently refill the disk.
-        settings.update({
-          diagnostics: {
-            ...settings.get().diagnostics,
-            hotCpuProfilingCaptureHeapSnapshot: false
-          }
-        });
-        emitEvent(
-          "settings:changed",
-          settingsSnapshot(settings, diagnosticsOutputRoot, appVersion)
-        );
+        persistDiagnostics({ hotCpuProfilingCaptureHeapSnapshot: false });
         diagnostics.sync();
       }
     });
+    // A resource recording's stop timer can run late across sleep; check the
+    // wall clock again on wake.
+    powerMonitor.on("resume", () => diagnostics.recheckResourceUsage());
     // Startup CPU profiling must begin before the first window exists to
     // cover window creation. Settings arms one launch (taken here, so it is
     // already off by the time anyone opens Settings); PWRGIT_* env arms every

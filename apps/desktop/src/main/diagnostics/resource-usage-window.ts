@@ -6,8 +6,9 @@ export type ResourceUsageWindow =
   | { state: "off" }
   | { state: "recording"; expiresAtMs: number }
   | { state: "expired" }
-  /** On with no readable expiry: a setting written before recordings were
-   *  bounded, or a hand-edited file. Granted a fresh window from now. */
+  /** On with no usable expiry: a setting written before recordings were
+   *  bounded, a hand-edited file, or a stop time further out than one
+   *  recording (the clock moved back). Granted a fresh window from now. */
   | { state: "unbounded" };
 
 /** Whether resource recording should run at `nowMs`, by wall clock. */
@@ -16,11 +17,13 @@ export function resolveResourceUsageWindow(settings: ResourceUsageSettings, nowM
   const expiresAtMs = typeof settings.resourceUsageExpiresAt === "string"
     ? Date.parse(settings.resourceUsageExpiresAt)
     : Number.NaN;
-  if (!Number.isFinite(expiresAtMs)) return { state: "unbounded" };
+  // Further out than one recording is not a stop time to trust. Clamping it
+  // per call would slide forward forever; a fresh stored window ends.
+  if (!Number.isFinite(expiresAtMs) || expiresAtMs > nowMs + RESOURCE_USAGE_RECORDING_MS) {
+    return { state: "unbounded" };
+  }
   if (nowMs >= expiresAtMs) return { state: "expired" };
-  // A stored expiry further out than one recording (clock moved back, edited
-  // file) must not become an open-ended recording.
-  return { state: "recording", expiresAtMs: Math.min(expiresAtMs, nowMs + RESOURCE_USAGE_RECORDING_MS) };
+  return { state: "recording", expiresAtMs };
 }
 
 export function resourceUsageExpiry(nowMs: number): string {

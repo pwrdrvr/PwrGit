@@ -38,9 +38,10 @@ import { RendererStartupCpuProfiler } from "./renderer-startup-cpu-profiler";
 import { watchResourceUsage } from "./resource-monitor";
 import { resolveResourceUsageWindow, resourceUsageExpiry } from "./resource-usage-window";
 
-/** Longest wait between wall-clock checks of a recording's expiry. A single
- *  24-hour timeout runs on a clock that pauses while the machine sleeps. */
-const RESOURCE_EXPIRY_CHECK_MAX_MS = 60_000;
+/** Longest wait between wall-clock checks of a recording's expiry. Timers run
+ *  on a clock that can pause while the machine sleeps; index.ts re-checks on
+ *  resume (`recheckResourceUsage`), and this cap is only the backstop. */
+const RESOURCE_EXPIRY_CHECK_MAX_MS = 60 * 60_000;
 
 const log = getDiagLogger("pwrgit:diagnostics");
 
@@ -216,6 +217,13 @@ export class DiagnosticsManager {
     return false;
   }
 
+  /** Re-check the resource recording's stop time by wall clock, e.g. after
+   *  the system resumes from sleep, when a pending timer may be late. */
+  recheckResourceUsage(): void {
+    if (this.shuttingDown) return;
+    this.enqueueSync(() => this.syncResourceUsage(this.getDiagnostics()));
+  }
+
   /** Resolves once work already queued (including a timer's expiry check)
    *  has run, without queueing a sync of its own. */
   whenIdle(): Promise<void> {
@@ -340,20 +348,23 @@ export class DiagnosticsManager {
       this.scheduleResourceExpiryCheck(window.expiresAtMs - now);
       return;
     }
-    await this.stopResourceUsage();
+    // Persist before awaiting the sampler's last write: `settings` is only
+    // current until then, and a turn-on that lands during the await must not
+    // be overwritten with "off".
     if (window.state === "expired") {
       log.info("resource recording reached its 24-hour limit; samples are kept", {
         directory: path.join(this.outputRoot, "resources")
       });
       this.persistDiagnostics?.({ resourceUsageEnabled: false, resourceUsageExpiresAt: null });
     }
+    await this.stopResourceUsage();
   }
 
   private scheduleResourceExpiryCheck(remainingMs: number): void {
     const timer = setTimeout(() => {
       if (this.resourceExpiryTimer !== timer) return;
       this.resourceExpiryTimer = null;
-      this.enqueueSync(() => this.syncResourceUsage(this.getDiagnostics()));
+      this.recheckResourceUsage();
     }, Math.min(Math.max(remainingMs, 0), RESOURCE_EXPIRY_CHECK_MAX_MS));
     timer.unref?.();
     this.resourceExpiryTimer = timer;
@@ -561,7 +572,7 @@ export type StartupCpuDiagnostics = {
 
 /** What the startup session actually left on disk, in a fixed order. A
  *  profiler that reported success but wrote nothing is listed as missing. */
-export async function listStartupCpuArtifacts(session: StartupCpuProfileSession): Promise<{
+async function listStartupCpuArtifacts(session: StartupCpuProfileSession): Promise<{
   artifacts: StartupCpuProfileArtifact[];
   missing: StartupCpuProfileCapturedEvent["missing"];
 }> {

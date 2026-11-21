@@ -14,7 +14,7 @@ import { watchResourceUsage } from "./resource-monitor";
 // starts". Real Settings writes (settings:update), the real manager, a real
 // settings file that survives restarts, and fake timers whose clock is also
 // Date.now(). Only the sampler is a stand-in: running = started − stopped.
-const sampler = vi.hoisted(() => ({ running: 0, starts: 0 }));
+const sampler = vi.hoisted(() => ({ running: 0, starts: 0, stopGate: Promise.resolve() }));
 vi.mock("electron", () => ({ app: {} }));
 vi.mock("../logs", () => ({ logMain: vi.fn() }));
 vi.mock("./resource-monitor", () => ({
@@ -25,6 +25,7 @@ vi.mock("./resource-monitor", () => ({
     return async () => {
       if (!stopped) sampler.running--;
       stopped = true;
+      await sampler.stopGate; // The sampler's last pending write.
     };
   })
 }));
@@ -141,6 +142,103 @@ it("never lets a renderer patch choose or extend the stop time", async () => {
     await bus.dispatch("settings:update", { patch: { diagnostics: { resourceUsageEnabled: true } } });
     expect(settingsSnapshot(settings, directory).diagnostics.resourceUsageExpiresAt).toBe(first);
   } finally {
+    vi.useRealTimers();
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+async function manager(file: string, directory: string) {
+  const settings = new SettingsService(file);
+  const created = new DiagnosticsManager({
+    outputRoot: directory,
+    getDiagnostics: () => settingsSnapshot(settings, directory).diagnostics,
+    onHotCpuHeapSnapshotLimitReached: () => undefined,
+    persistDiagnostics: (patch) => {
+      settings.update({ diagnostics: { ...settings.get().diagnostics, ...patch } });
+    }
+  });
+  await created.sync();
+  return created;
+}
+
+it("treats a stored stop time more than 24 hours out as untrusted and still stops within 24 hours", async () => {
+  vi.useFakeTimers({ now: START });
+  sampler.running = 0;
+  const directory = mkdtempSync(join(tmpdir(), "pwrgit-resource-window-"));
+  const file = join(directory, "settings.json");
+  new SettingsService(file).update({ diagnostics: { resourceUsageEnabled: true, resourceUsageExpiresAt: "2099-01-01T00:00:00.000Z" } });
+  const running = await manager(file, directory);
+  try {
+    expect(sampler.running).toBe(1);
+    const stored = () => settingsSnapshot(new SettingsService(file), directory).diagnostics;
+    expect(stored().resourceUsageExpiresAt).toBe(new Date(START + RESOURCE_USAGE_RECORDING_MS).toISOString());
+    await vi.advanceTimersByTimeAsync(RESOURCE_USAGE_RECORDING_MS);
+    await running.whenIdle();
+    expect(sampler.running).toBe(0);
+    expect(stored().resourceUsageEnabled).toBe(false);
+  } finally {
+    await running.shutdown();
+    vi.useRealTimers();
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+it("stops on wake when the wall clock passed the stop time while timers were paused", async () => {
+  vi.useFakeTimers({ now: START });
+  sampler.running = 0;
+  const directory = mkdtempSync(join(tmpdir(), "pwrgit-resource-window-"));
+  const file = join(directory, "settings.json");
+  new SettingsService(file).update({ diagnostics: { resourceUsageEnabled: true, resourceUsageExpiresAt: new Date(START + HOUR).toISOString() } });
+  const running = await manager(file, directory);
+  try {
+    expect(sampler.running).toBe(1);
+    // Sleep: the wall clock moves, the timer clock does not.
+    vi.setSystemTime(START + 2 * HOUR);
+    running.recheckResourceUsage();
+    await running.whenIdle();
+    expect(sampler.running).toBe(0);
+    expect(settingsSnapshot(new SettingsService(file), directory).diagnostics.resourceUsageEnabled).toBe(false);
+  } finally {
+    await running.shutdown();
+    vi.useRealTimers();
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+it("a turn-on made while an expired recording is still flushing stays on", async () => {
+  vi.useFakeTimers({ now: START });
+  sampler.running = 0;
+  const directory = mkdtempSync(join(tmpdir(), "pwrgit-resource-window-"));
+  const file = join(directory, "settings.json");
+  new SettingsService(file).update({ diagnostics: { resourceUsageEnabled: true, resourceUsageExpiresAt: new Date(START + HOUR).toISOString() } });
+  const settings = new SettingsService(file);
+  const bus = new CommandBus();
+  const running: DiagnosticsManager = new DiagnosticsManager({
+    outputRoot: directory,
+    getDiagnostics: () => settingsSnapshot(settings, directory).diagnostics,
+    onHotCpuHeapSnapshotLimitReached: () => undefined,
+    persistDiagnostics: (patch) => {
+      settings.update({ diagnostics: { ...settings.get().diagnostics, ...patch } });
+    }
+  });
+  registerSettingsHandlers(bus, settings, { diagnosticsOutputRoot: directory, onChanged: () => { void running.sync(); } });
+  let flush!: () => void;
+  try {
+    await running.sync();
+    sampler.stopGate = new Promise((resolve) => { flush = resolve; });
+    await vi.advanceTimersByTimeAsync(HOUR); // Expires; the stop is now waiting on its write.
+    await bus.dispatch("settings:update", { patch: { diagnostics: { resourceUsageEnabled: true } } });
+    flush();
+    await running.whenIdle();
+    await running.whenIdle();
+    const stored = settingsSnapshot(new SettingsService(file), directory).diagnostics;
+    expect(stored.resourceUsageEnabled).toBe(true);
+    expect(stored.resourceUsageExpiresAt).toBe(new Date(START + HOUR + RESOURCE_USAGE_RECORDING_MS).toISOString());
+    expect(sampler.running).toBe(1);
+  } finally {
+    flush?.();
+    sampler.stopGate = Promise.resolve();
+    await running.shutdown();
     vi.useRealTimers();
     rmSync(directory, { recursive: true, force: true });
   }
