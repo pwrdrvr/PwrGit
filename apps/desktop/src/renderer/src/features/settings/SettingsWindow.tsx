@@ -615,6 +615,9 @@ function SettingsSectionBody(props: {
       onHotCpuTriggerModeChange={(mode) => {
         updateDiagnostics({ hotCpuProfilingTriggerMode: mode });
       }}
+      onHotCpuCaptureChromiumTraceChange={(enabled) => {
+        updateDiagnostics({ hotCpuProfilingCaptureChromiumTrace: enabled });
+      }}
       onHotCpuCaptureHeapSnapshotChange={(enabled) => {
         updateDiagnostics({ hotCpuProfilingCaptureHeapSnapshot: enabled });
       }}

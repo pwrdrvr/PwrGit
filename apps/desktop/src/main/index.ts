@@ -1549,8 +1549,6 @@ if (!gotSingleInstanceLock) {
     app.on("will-quit", () => void agentAccess.dispose());
     registerAgentAccessHandlers(bus, agentAccess);
     if (settings.get().localAgentAccessEnabled === true) await agentAccess.setEnabled(true);
-    diagnostics.sync(); // start any settings-enabled monitors at boot
-
     registerIpc(bus, {
       onWebContentsDestroyed: (webContentsId) => {
         githubHandlers.releaseWebContents(webContentsId);
@@ -1708,6 +1706,8 @@ if (!gotSingleInstanceLock) {
 
     // Boot into the last-used profile's window (its rescan kicks off inside).
     const activeId = profiles.getActiveId();
+    if (activeId !== null) await diagnostics.prepareFirstRendererTrace();
+    void diagnostics.sync();
     if (activeId !== null) openProfileWindow(activeId);
     refreshMenu();
 

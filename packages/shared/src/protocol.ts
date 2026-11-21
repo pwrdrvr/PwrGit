@@ -834,6 +834,8 @@ export type DiagnosticsSettings = {
   hotCpuProfilingEnabled: boolean;
   hotCpuProfilingStartDelayMs: HotCpuStartDelayMs;
   hotCpuProfilingTriggerMode: HotCpuTriggerMode;
+  /** Keep a rolling Chromium trace while renderer hot CPU capture is armed. */
+  hotCpuProfilingCaptureChromiumTrace: boolean;
   /** Also capture renderer heap snapshots around each hot-CPU profile. */
   hotCpuProfilingCaptureHeapSnapshot: boolean;
   /** 1..HOT_CPU_HEAP_SNAPSHOT_LIMIT_MAX snapshots per session. */
@@ -869,6 +871,7 @@ export const DIAGNOSTICS_DEFAULTS: DiagnosticsSettings = {
   hotCpuProfilingEnabled: false,
   hotCpuProfilingStartDelayMs: 0,
   hotCpuProfilingTriggerMode: "sustained",
+  hotCpuProfilingCaptureChromiumTrace: false,
   hotCpuProfilingCaptureHeapSnapshot: false,
   hotCpuProfilingHeapSnapshotLimit: 2,
   startupCpuProfilingEnabled: false
