@@ -105,9 +105,9 @@ export function seal(root: string, options: { version: string; key: PlatformKey;
   };
 }
 
-/** `tar -czf` of a payload's contents, as the release archives are. */
+/** `tar -czf` of a payload's contents, without a root entry, as in releases. */
 export function archive(root: string, target: string): Buffer {
-  execFileSync("tar", ["-czf", target, "-C", root, "."]);
+  execFileSync("tar", ["-czf", target, "-C", root, ...readdirSync(root)]);
   return readFileSync(target);
 }
 

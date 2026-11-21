@@ -1,11 +1,12 @@
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { execFileSync } from "node:child_process";
+import { chmodSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, test } from "vitest";
 import type { ManagedGitProgress, ManagedGitTrack } from "@pwrgit/shared";
 import { MANAGED_GIT_RELEASES_URL, type PlatformKey } from "./catalog";
 import { ManagedGitService, type ManagedGitSelection } from "./managed-git-service";
-import { archive, fixtureRelease, rawTarGz, sha256, writePayload, type FixtureRelease } from "./test-fixture";
+import { archive, fixtureRelease, rawTarGz, seal, sha256, writePayload, type FixtureRelease } from "./test-fixture";
 import { verifyManagedRuntime } from "./verify-runtime";
 
 const CONSUMER = "03a2dac8d3bd2a97f28c580a617b09aeb950ce03e8489b6c604da4e3488a6bf4";
@@ -132,6 +133,41 @@ describe("ManagedGitService", () => {
     expect(leftovers()).toEqual([]);
   });
 
+  test.skipIf(process.platform === "win32").each([
+    { mask: "022", gitMode: 0o775, metadataMode: 0o664 },
+    { mask: "027", gitMode: 0o751, metadataMode: 0o642 },
+    { mask: "077", gitMode: 0o755, metadataMode: 0o640 }
+  ])("installs with the sealed inventory modes under umask $mask", async ({ mask, gitMode, metadataMode }) => {
+    // Vitest's forks pool isolates this process-wide setting from other files.
+    const previous = process.umask(0o022);
+    try {
+      const version = "2.56.0-dev-pwrgit.5";
+      const key = "linux-x64";
+      const payload = join(scratch, "payload");
+      writePayload(payload, { version, key });
+      chmodSync(join(payload, "bin", "git"), gitMode);
+      chmodSync(join(payload, "pwrgit-build.json"), metadataMode);
+      const pin = seal(payload, { version, key });
+      const inventory = JSON.parse(readFileSync(join(payload, "runtime-files.json"), "utf8")) as Record<string, { mode?: number }>;
+      const release = fixtureRelease({
+        version, key,
+        archive: archive(payload, join(scratch, "fixture.tar.gz")),
+        inventorySha256: pin.asset.inventory_sha256,
+        consumerSha256: CONSUMER
+      });
+      const { svc } = service(serve([release]));
+      process.umask(Number.parseInt(mask, 8));
+      const status = await svc.install(version);
+      expect(status.builds.map((build) => build.version)).toEqual([version]);
+      const installed = svc.payloadDir(status.builds[0]!.id);
+      for (const [path, { mode }] of Object.entries(inventory)) {
+        if (mode !== undefined) expect(lstatSync(join(installed, path)).mode & 0o7777, path).toBe(mode);
+      }
+    } finally {
+      process.umask(previous);
+    }
+  });
+
   test("a download whose bytes differ from the release is refused before it is unpacked", async () => {
     const five = build("2.56.0-dev-pwrgit.5");
     const server = serve([five]);
@@ -156,6 +192,32 @@ describe("ManagedGitService", () => {
     expect(progress.at(-1)).toMatchObject({ phase: "failed", failedPhase: "verifying" });
     expect(existsSync(join(root(), "versions"))).toBe(false);
     expect(leftovers()).toEqual([]);
+  });
+
+  test.runIf(process.platform === "darwin")("a failed install cleans up an archive with an immutable file flag", async () => {
+    const version = "2.56.0-dev-pwrgit.5";
+    const key = "linux-x64";
+    const payload = join(scratch, "payload");
+    const pin = writePayload(payload, { version, key });
+    const helper = join(payload, "bin", "git-lfs");
+    writeFileSync(helper, "changed after sealing\n");
+    const target = join(scratch, "fixture.tar.gz");
+    try {
+      execFileSync("/usr/bin/chflags", ["uchg", helper]);
+      execFileSync("/usr/bin/tar", ["-czf", target, "-C", payload, ...readdirSync(payload)]);
+      const release = fixtureRelease({
+        version, key,
+        archive: readFileSync(target),
+        inventorySha256: pin.asset.inventory_sha256,
+        consumerSha256: CONSUMER
+      });
+      const { svc } = service(serve([release]));
+      await expect(svc.install(version)).rejects.toThrow(/bytes, mode or link changed: bin\/git-lfs/);
+      expect(leftovers()).toEqual([]);
+    } finally {
+      // Let the fixture be removed even when extraction incorrectly restores the flag.
+      execFileSync("/usr/bin/chflags", ["-R", "nouchg", scratch]);
+    }
   });
 
   test.each([

@@ -162,7 +162,12 @@ async function defaultExtract(archive: string, destination: string, signal: Abor
   const members = (await runTar(["-tzf", archive], signal)).split(/\r?\n/).filter((name) => name !== "");
   const unsafe = members.find(unsafeArchiveMember);
   if (unsafe !== undefined) throw new Error(`The archive has an unsafe member (${unsafe}), so nothing was unpacked.`);
-  await runTar(["-xzf", archive, "-C", destination], signal);
+  // bsdtar's -p also restores metadata such as immutable flags that prevent cleanup.
+  const version = await runTar(["--version"], signal);
+  const metadataOptions = version.startsWith("bsdtar ")
+    ? ["--no-fflags", "--no-mac-metadata"]
+    : ["--no-selinux"];
+  await runTar(["-xpzf", archive, "-m", "--no-same-owner", "--no-acls", "--no-xattrs", ...metadataOptions, "-C", destination], signal);
 }
 
 function defaultProcessAlive(pid: number): boolean {
