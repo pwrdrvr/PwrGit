@@ -85,6 +85,7 @@ export class HotCpuProfiler {
   private readonly now: () => Date;
   private readonly onHeapSnapshotLimitReached: (() => void | Promise<void>) | undefined;
   private readonly onSampleCaptured: (() => void) | undefined;
+  private readonly onProfileArtifactWritten: ((profilePath: string, triggerAtMs: number) => Promise<void>) | undefined;
   private readonly onProfileWritten: ((event: HotCpuProfileCapturedEvent) => void | Promise<void>) | undefined;
   private readonly session: HotCpuProfileSession;
   private readonly target: HotCpuTarget;
@@ -125,6 +126,7 @@ export class HotCpuProfiler {
     now?: () => Date;
     onHeapSnapshotLimitReached?: () => void | Promise<void>;
     onProfileWritten?: (event: HotCpuProfileCapturedEvent) => void | Promise<void>;
+    onProfileArtifactWritten?: (profilePath: string, triggerAtMs: number) => Promise<void>;
     /**
      * Fires once per completed sampling iteration, after the sample has been
      * written and any profile it triggered has started.
@@ -143,6 +145,7 @@ export class HotCpuProfiler {
     this.now = options.now ?? (() => new Date());
     this.onHeapSnapshotLimitReached = options.onHeapSnapshotLimitReached;
     this.onProfileWritten = options.onProfileWritten;
+    this.onProfileArtifactWritten = options.onProfileArtifactWritten;
     this.onSampleCaptured = options.onSampleCaptured;
     this.session = options.session;
     this.target = options.target;
@@ -649,6 +652,12 @@ export class HotCpuProfiler {
           reason,
         },
       });
+
+      if (this.lastProfileAtMs !== null) {
+        await this.onProfileArtifactWritten?.(profilePath, this.lastProfileAtMs).catch((error) => {
+          this.logger.warn("CPU profile companion artifact failed", error);
+        });
+      }
 
       if (
         !this.stopped &&

@@ -67,6 +67,7 @@ export function DiagnosticsSettings(props: {
   onHotCpuEnabledChange: (enabled: boolean) => void;
   onHotCpuStartDelayChange: (delayMs: HotCpuStartDelayMs) => void;
   onHotCpuTriggerModeChange: (mode: HotCpuTriggerMode) => void;
+  onHotCpuCaptureChromiumTraceChange: (enabled: boolean) => void;
   onHotCpuCaptureHeapSnapshotChange: (enabled: boolean) => void;
   onHotCpuHeapSnapshotLimitChange: (limit: number) => void;
   onStartupCpuEnabledChange: (enabled: boolean) => void;
@@ -219,6 +220,19 @@ export function DiagnosticsSettings(props: {
                 options={TRIGGER_MODE_OPTIONS}
                 value={diag.hotCpuProfilingTriggerMode}
                 onChange={props.onHotCpuTriggerModeChange}
+              />
+            }
+          />
+          <SettingsField
+            label="Chromium performance trace"
+            sub="With renderer hot CPU capture armed, keep a rolling trace of layout, paint, and compositing."
+            help="Saves the trace locally beside the CPU profile. Recording adds overhead, so turn it off after investigating."
+            control={
+              <SettingsSwitch
+                checked={diag.hotCpuProfilingCaptureChromiumTrace}
+                disabled={props.saving}
+                label="Chromium performance trace"
+                onChange={props.onHotCpuCaptureChromiumTraceChange}
               />
             }
           />

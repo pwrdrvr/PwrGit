@@ -5,7 +5,7 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 import { writeHeapSnapshot } from "node:v8";
-import { app, type BrowserWindow } from "electron";
+import { app, contentTracing, type BrowserWindow } from "electron";
 import type { DiagnosticsSettings, HotCpuProfileCapturedEvent } from "@pwrgit/shared";
 import { getDiagLogger } from "./diag-log";
 import {
@@ -19,8 +19,9 @@ import {
   resolveHotCpuProfileConfig,
   type HotCpuProfileConfig
 } from "./hot-cpu-profile-config";
-import { createHotCpuProfileSession } from "./hot-cpu-profile-session";
+import { createHotCpuProfileSession, type HotCpuProfileSession } from "./hot-cpu-profile-session";
 import { HotCpuProfiler } from "./hot-cpu-profiler";
+import { ChromiumTrace } from "./chromium-trace";
 import { createMainProcessHotCpuTarget } from "./main-process-hot-cpu-target";
 import { resolveStartupCpuProfileConfig } from "./startup-cpu-profile-config";
 import { createStartupCpuProfileSession } from "./startup-cpu-profile-session";
@@ -91,6 +92,10 @@ export class DiagnosticsManager {
   private syncQueue: Promise<void> = Promise.resolve();
   private pendingSyncs = 0;
   private shuttingDown = false;
+  private chromiumTraceEnabled = false;
+  private readonly chromiumTrace = new ChromiumTrace(
+    () => contentTracing, (message, error) => log.warn(message, error)
+  );
 
   constructor(options: {
     outputRoot: string;
@@ -153,9 +158,14 @@ export class DiagnosticsManager {
   shutdown(): Promise<void> {
     this.shuttingDown = true;
     this.enqueueSync(async () => {
-      await this.stopResourceUsage();
-      await this.stopHeapMonitoring("app-quit");
-      await this.stopHotCpuProfiling("app-quit");
+      try {
+        await this.stopResourceUsage();
+        await this.stopHeapMonitoring("app-quit");
+        await this.stopHotCpuProfiling("app-quit");
+      } finally {
+        this.chromiumTraceEnabled = false;
+        await this.chromiumTrace.setArmed(false);
+      }
     });
     return this.syncQueue;
   }
@@ -164,7 +174,7 @@ export class DiagnosticsManager {
    *  running, or a queued sync may be about to start one. Quit is deferred
    *  for the flush only when this is true. */
   hasPendingWork(): boolean {
-    if (this.pendingSyncs > 0 || this.mainHeapMonitor !== null || this.mainHotCpuProfiler !== null || this.stopResourceMonitoring !== null) return true;
+    if (this.pendingSyncs > 0 || this.mainHeapMonitor !== null || this.mainHotCpuProfiler !== null || this.stopResourceMonitoring !== null || this.chromiumTraceEnabled) return true;
     for (const entry of this.windows.values()) {
       if (entry.heapMonitor !== null || entry.hotCpuProfiler !== null) return true;
     }
@@ -204,6 +214,9 @@ export class DiagnosticsManager {
       captureHeapSnapshot: settings.hotCpuProfilingCaptureHeapSnapshot,
       heapSnapshotLimit: settings.hotCpuProfilingHeapSnapshotLimit
     });
+    this.chromiumTraceEnabled = settings.hotCpuProfilingCaptureChromiumTrace &&
+      hotCpuConfig.enabled && !heapConfig.enabled;
+    await this.chromiumTrace.setArmed(this.chromiumTraceEnabled);
 
     const heapKey = JSON.stringify(heapConfig);
     const heapChanged = heapKey !== this.heapConfigKey;
@@ -384,12 +397,35 @@ export class DiagnosticsManager {
         isDestroyed: () => contents.isDestroyed(),
         takeHeapSnapshot: (filePath) => contents.takeHeapSnapshot(filePath)
       },
+      onProfileArtifactWritten: (filePath, triggerAtMs) =>
+        this.saveChromiumTrace(session.session, filePath, triggerAtMs),
       onProfileWritten: (event) => this.onHotCpuProfileCaptured?.(event, entry.profileId),
       onHeapSnapshotLimitReached: () => {
         this.onHotCpuHeapSnapshotLimitReached();
       }
     });
     await entry.hotCpuProfiler.start();
+  }
+
+  private async saveChromiumTrace(
+    session: HotCpuProfileSession, profilePath: string, triggerAtMs: number
+  ): Promise<void> {
+    if (!this.chromiumTraceEnabled) return;
+    const filename = `${path.parse(profilePath).name}.trace.json`;
+    const result = await this.chromiumTrace.capture(
+      path.join(session.directoryPath, filename), triggerAtMs,
+      () => this.chromiumTraceEnabled && !this.shuttingDown
+    ).catch((error: unknown) => ({
+      status: "failed" as const,
+      error: error instanceof Error ? error.message : String(error)
+    }));
+    if (result.status === "failed") log.warn("Could not save Chromium trace", result.error);
+    if (result.status === "written") await session.registerArtifact(filename);
+    await session.appendEvent({
+      capturedAt: new Date().toISOString(),
+      type: `chromium-trace-${result.status}`,
+      detail: { filename, triggerAtMs, ...result }
+    });
   }
 }
 

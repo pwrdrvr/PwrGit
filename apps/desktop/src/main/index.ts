@@ -1549,7 +1549,11 @@ if (!gotSingleInstanceLock) {
     app.on("will-quit", () => void agentAccess.dispose());
     registerAgentAccessHandlers(bus, agentAccess);
     if (settings.get().localAgentAccessEnabled === true) await agentAccess.setEnabled(true);
-    diagnostics.sync(); // start any settings-enabled monitors at boot
+    const diagnosticsReady = diagnostics.sync();
+    // Arm the rolling browser trace before creating the first renderer.
+    if (settings.get().diagnostics?.hotCpuProfilingCaptureChromiumTrace === true) {
+      await diagnosticsReady;
+    }
 
     registerIpc(bus, {
       onWebContentsDestroyed: (webContentsId) => {
