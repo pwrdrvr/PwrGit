@@ -115,18 +115,21 @@ export class DiagnosticsManager {
   private shuttingDown = false;
   private chromiumTraceEnabled = false;
   private reconfiguringRenderers = false;
-  private readonly chromiumTrace = new ChromiumTrace(
-    () => contentTracing, (message, error) => log.warn(message, error)
-  );
+  private readonly chromiumTrace: ChromiumTrace;
 
   constructor(options: {
     outputRoot: string;
+    chromiumTraceWorker?: string;
     getDiagnostics: () => DiagnosticsSettings;
     onHotCpuProfileCaptured?: (event: HotCpuProfileCapturedEvent, profileId: string | null) => void | Promise<void>;
     onHotCpuHeapSnapshotLimitReached: () => void;
     persistDiagnostics?: (patch: Partial<DiagnosticsSettings>) => void;
   }) {
     this.outputRoot = options.outputRoot;
+    this.chromiumTrace = new ChromiumTrace(
+      () => contentTracing, (message, error) => log.warn(message, error),
+      { workerModule: options.chromiumTraceWorker }
+    );
     this.persistDiagnostics = options.persistDiagnostics;
     this.getDiagnostics = options.getDiagnostics;
     this.onHotCpuProfileCaptured = options.onHotCpuProfileCaptured;

@@ -154,7 +154,9 @@ profiles; untriggered recordings do not produce a `.cpuprofile`.
 renderer captures when enabled. The `.trace.json` beside the CPU profile
 contains timing events for layout, paint and compositing. The export omits
 event arguments and free-form labels, retaining timing fields and known
-event and track names. Unfiltered data is staged in a private temporary
+event and track names. A worker filters up to 256 MiB of decoded JSON from
+Chromium's rolling buffer. The session log records the raw byte count and limit
+when the export size is known. Unfiltered data is staged in a private temporary
 directory and removed after export. If Chromium tracing fails to start or
 export, hot CPU profiling can still run and publish CPU profiles.
 

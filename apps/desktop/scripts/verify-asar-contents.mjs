@@ -58,10 +58,10 @@ const asar = require("@electron/asar");
 const listing = asar
   .listPackage(asarPath, { isPack: false })
   .map((entry) => entry.replace(/\\/g, "/"));
-const pruneWorkerEntry = "out/main/prune-size-worker.mjs";
+const workerEntries = ["/out/main/prune-size-worker.mjs", "/out/main/chromium-trace-worker.mjs"];
 const required = [
   "/out/main/index.js",
-  `/${pruneWorkerEntry}`
+  ...workerEntries
 ];
 
 const missing = required.filter((entry) => !listing.includes(entry));
@@ -72,10 +72,12 @@ if (missing.length > 0) {
   process.exit(1);
 }
 
-const pruneWorkerFile = asar.statFile(asarPath, asarExtractPath(`/${pruneWorkerEntry}`), false);
-if (!("offset" in pruneWorkerFile) || pruneWorkerFile.unpacked) {
-  console.error(`verify-asar-contents: prune worker must be packed: ${pruneWorkerEntry}`);
-  process.exit(1);
+for (const entry of workerEntries) {
+  const workerFile = asar.statFile(asarPath, asarExtractPath(entry), false);
+  if (!("offset" in workerFile) || workerFile.unpacked) {
+    console.error(`verify-asar-contents: worker must be packed: ${entry}`);
+    process.exit(1);
+  }
 }
 
 // Each rule: [label, regex]. Anything matching → fail.

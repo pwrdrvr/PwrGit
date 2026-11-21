@@ -1,4 +1,4 @@
-import { mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, open, readdir, readFile, rm, stat, truncate, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import fc from "fast-check";
@@ -30,7 +30,9 @@ it("assigns each rolling trace to at most one overlapping capture across clock a
           }
         }), (_message, error) => unexpectedErrors.push(error), {
           wallNow: () => wall,
-          monotonicNow: () => ++mono
+          monotonicNow: () => ++mono,
+          // The queue model uses empty exports. The export tests below run the real worker.
+          filterTrace: (_rawPath, filteredPath) => writeFile(filteredPath, emptyTrace)
         });
 
         const saved: string[] = [];
@@ -96,6 +98,190 @@ it("bounds a missing start acknowledgement and an export that never completes", 
     await trace.setArmed(true);
     await expect(trace.capture(output, ++mono)).resolves.toMatchObject({ status: "written" });
     expect(JSON.parse(await readFile(output, "utf8"))).toEqual({ traceEvents: [] });
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+
+it("publishes the allowlisted projection of a trace larger than the former 96 MiB limit", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "pwrgit-large-trace-oracle-"));
+  const output = join(directory, "trace.json");
+  const compound = {
+    cat: "devtools.timeline,private-category",
+    name: "Layout",
+    ph: "X",
+    pid: 120,
+    tid: 141,
+    ts: 2_010,
+    dur: 830,
+    args: { beginData: { frame: "private-layout-frame" }, endData: { root: Array.from({ length: 128 }, (_, id) => ({
+      nodeId: id, x: id * 5, y: id * 10, width: 852, height: 26
+    })) } }
+  };
+  const privateTiming = {
+    cat: "blink.user_timing",
+    name: "private-user-timing \" braces ][{} \\ emoji 😀",
+    ph: "I",
+    pid: 120,
+    tid: 141,
+    ts: 2_840
+  };
+  const dropped = { ...compound, cat: "private-category" };
+  const eventsPerBatch = 256;
+  const batch = Array.from({ length: eventsPerBatch }, () => `${JSON.stringify(dropped)},\n`).join("");
+  const batches = Math.ceil((97 * 1024 * 1024) / Buffer.byteLength(batch));
+  let rawPath: string | undefined;
+  let rawBytes = 0;
+  let mono = 0;
+  try {
+    const trace = new ChromiumTrace(() => ({
+      async startRecording() {},
+      async stopRecording(file = "") {
+        rawPath = file;
+        const raw = await open(file, "w");
+        try {
+          await raw.write('{"traceEvents":[\n');
+          for (let index = 0; index < batches; index++) await raw.write(batch);
+          await raw.write(`${JSON.stringify(compound)},${JSON.stringify(privateTiming)}],
+            "metadata": {"private": "private-metadata"} }`);
+          rawBytes = (await raw.stat()).size;
+        } finally {
+          await raw.close();
+        }
+        return file;
+      }
+    }), () => {}, { monotonicNow: () => ++mono });
+
+    await trace.setArmed(true);
+    const result = await trace.capture(output, ++mono);
+    expect(result).toMatchObject({ status: "written", rawBytes, rawLimitBytes: 256 * 1024 * 1024 });
+    expect(rawBytes).toBeGreaterThan(96 * 1024 * 1024);
+    expect(JSON.parse(await readFile(output, "utf8"))).toEqual({ traceEvents: [
+      { cat: "devtools.timeline", name: "Layout", ph: "X", pid: 120, tid: 141, ts: 2_010, dur: 830 },
+      { cat: "blink.user_timing", name: "User timing", ph: "I", pid: 120, tid: 141, ts: 2_840, s: "t" }
+    ] });
+    await expect(stat(rawPath!)).rejects.toMatchObject({ code: "ENOENT" });
+    expect(await readdir(directory)).toEqual(["trace.json"]);
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+}, 15_000);
+
+
+it("reports measured and allowed bytes when a raw export is over budget", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "pwrgit-trace-budget-"));
+  const output = join(directory, "trace.json");
+  let mono = 0;
+  let rawPath: string | undefined;
+  const limit = 256 * 1024 * 1024;
+  const trace = new ChromiumTrace(() => ({
+    async startRecording() {},
+    async stopRecording(file = "") {
+      rawPath = file;
+      await writeFile(file, "");
+      await truncate(file, limit + 1);
+      return file;
+    }
+  }), () => {}, { monotonicNow: () => ++mono });
+  try {
+    await trace.setArmed(true);
+    await expect(trace.capture(output, ++mono)).rejects.toThrow(
+      `Chromium trace exceeded the export size limit (${limit + 1} raw bytes, ${limit} byte limit)`
+    );
+    await expect(stat(rawPath!)).rejects.toMatchObject({ code: "ENOENT" });
+    expect(await readdir(directory)).toEqual([]);
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+it("discards malformed and timed-out exports and releases the recording queue", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "pwrgit-trace-filter-failure-"));
+  const output = join(directory, "trace.json");
+  const stalledWorker = new URL(`data:text/javascript,${encodeURIComponent(`
+    import { workerData } from "node:worker_threads";
+    import { writeFileSync } from "node:fs";
+    writeFileSync(workerData.filteredPath, '{"traceEvents":[');
+    setInterval(() => {}, 1_000);
+  `)}`);
+  let rawPath: string | undefined;
+  let mono = 0;
+  const options = { monotonicNow: () => ++mono, filterTimeoutMs: 500, workerModule: stalledWorker };
+  let malformed = false;
+  let nativeStarts = 0;
+  const trace = new ChromiumTrace(() => ({
+    async startRecording() { nativeStarts++; },
+    async stopRecording(file = "") {
+      rawPath = file;
+      await writeFile(file, malformed ? '{"traceEvents":[{"name":private-invalid-data}]}' : emptyTrace);
+      return file;
+    }
+  }), () => {}, options);
+  try {
+    await trace.setArmed(true);
+    const capture = trace.capture(output, ++mono);
+    const rearm = trace.setArmed(true);
+    await expect(capture).rejects.toThrow(/Filtering Chromium trace timed out.*raw bytes/);
+    await rearm;
+    expect(nativeStarts).toBe(2);
+    await expect(stat(rawPath!)).rejects.toMatchObject({ code: "ENOENT" });
+    expect(await readdir(directory)).toEqual([]);
+
+    options.workerModule = new URL("./chromium-trace-worker.ts", import.meta.url);
+    malformed = true;
+    const failure = await trace.capture(output, ++mono).catch((error: Error) => error.message);
+    expect(failure).toMatch(/^Chromium trace contains invalid JSON .*raw bytes/);
+    expect(failure).not.toContain("private-invalid-data");
+    await expect(stat(rawPath!)).rejects.toMatchObject({ code: "ENOENT" });
+    expect(await readdir(directory)).toEqual([]);
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+it("projects oversized redacted fields like their small equivalents", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "pwrgit-trace-event-oracle-"));
+  // Escaped quotes, controls and Unicode cross read chunks throughout the value.
+  const large = 'private "label" \\ {}[] \n 😀 '.repeat(400_000);
+  const fixture = (privateData: string) => JSON.stringify({
+    traceEvents: [
+      { pid: 2, tid: 3, ts: 10, ph: "I", cat: `${privateData},blink.user_timing`, name: privateData },
+      { pid: 2, tid: 3, ph: "M", name: "thread_name", args: { omitted: { nested: [privateData] }, name: "CrRendererMain" } },
+      { pid: 2, tid: 3, ts: 20, ph: "X", cat: "devtools.timeline", name: "Layout", dur: 5 }
+    ],
+    metadata: { omitted: privateData }
+  });
+  let mono = 0;
+  let raw = "";
+  const trace = new ChromiumTrace(() => ({
+    async startRecording() {},
+    async stopRecording(file = "") {
+      await writeFile(file, raw);
+      return file;
+    }
+  }), () => {}, { monotonicNow: () => ++mono });
+  try {
+    async function capture(privateData: string, basename: string): Promise<unknown> {
+      raw = fixture(privateData);
+      const output = join(directory, basename);
+      await trace.setArmed(true);
+      await expect(trace.capture(output, ++mono)).resolves.toMatchObject({ status: "written" });
+      return JSON.parse(await readFile(output, "utf8"));
+    }
+    const expected = await capture("synthetic", "small.json");
+    expect(expected).toEqual({ traceEvents: [
+      { pid: 2, tid: 3, ts: 10, ph: "I", cat: "blink.user_timing", name: "User timing", s: "t" },
+      { pid: 2, tid: 3, ph: "M", cat: "__metadata", name: "thread_name", args: { name: "CrRendererMain" } },
+      { pid: 2, tid: 3, ts: 20, ph: "X", cat: "devtools.timeline", name: "Layout", dur: 5 }
+    ] });
+    expect(await capture(large, "large.json")).toEqual(expected);
+    raw = '{"traceEvents":[{"omitted":"' + "x".repeat(128 * 1024) + '\\q"}]}';
+    await trace.setArmed(true);
+    await expect(trace.capture(join(directory, "invalid.json"), ++mono)).rejects.toThrow(
+      /^Chromium trace contains invalid JSON/
+    );
+    expect((await readdir(directory)).sort()).toEqual(["large.json", "small.json"]);
   } finally {
     await rm(directory, { recursive: true, force: true });
   }
