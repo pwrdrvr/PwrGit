@@ -17,15 +17,20 @@ export type BulkSyncHandlers = {
   releaseWebContents: (webContentsId: number) => void;
 };
 
-type RepoRow = { id: string; name: string; path: string };
+type RepoRow = {
+  id: string;
+  name: string;
+  path: string;
+  /** 1 when a present checkout's stored state, still for the branch it has
+   * checked out, is clean and behind its upstream without being ahead: a
+   * fast-forward Try pull can very likely make. */
+  pullPending: number;
+};
 type WorktreeRow = {
   id: string;
   repoId: string;
   branch: string;
   path: string;
-  /** 1 when stored state shows a clean checkout behind its upstream and not
-   * ahead of it — what the sidebar's ↓ badge is advertising. */
-  pullPending: number | null;
 };
 
 export function profileRepos(
@@ -40,21 +45,26 @@ export function profileRepos(
   const repos = db
     .prepare(
       // A hidden repository sits out Fetch all and Try pull all.
-      `SELECT id, name, path FROM repos r
+      `SELECT id, name, path,
+         EXISTS (
+           -- Stored state only orders the run's starts; Try pull re-inspects
+           -- every checkout itself.
+           SELECT 1 FROM worktrees w
+           JOIN worktree_state s ON s.worktree_id = w.id
+           WHERE w.repo_id = r.id AND w.missing = 0 AND s.branch = w.branch
+             AND s.has_upstream = 1 AND s.behind > 0 AND s.ahead = 0
+             AND s.dirty = 0
+         ) AS pullPending
+       FROM repos r
        WHERE profile_id = ? AND ${visibleRepoSql("r")}
        ORDER BY name COLLATE NOCASE, name, id`
     )
     .all(profileId) as RepoRow[];
   const worktrees = db
     .prepare(
-      `SELECT w.id, w.repo_id AS repoId, w.branch, w.path,
-         (s.has_upstream = 1 AND s.behind > 0 AND s.ahead = 0 AND s.dirty = 0)
-           AS pullPending
+      `SELECT w.id, w.repo_id AS repoId, w.branch, w.path
        FROM worktrees w
        JOIN repos r ON r.id = w.repo_id
-       -- Stored state is only a hint for start order; Try pull re-inspects
-       -- every checkout itself.
-       LEFT JOIN worktree_state s ON s.worktree_id = w.id
        -- A checkout that is gone has nothing to pull; the repo-level fetch
        -- still runs from the primary.
        WHERE r.profile_id = ? AND w.missing = 0 AND ${visibleRepoSql("r")}
@@ -70,14 +80,13 @@ export function profileRepos(
   const wanted = repoIds === undefined ? null : new Set(repoIds);
   return repos
     .filter((repo) => wanted === null || wanted.has(repo.id))
-    .map((repo) => {
-      const rows = byRepo.get(repo.id) ?? [];
-      return {
-        ...repo,
-        worktrees: rows.map(({ repoId: _repoId, pullPending: _pending, ...row }) => row),
-        ...(rows.some((row) => row.pullPending === 1) ? { pullPending: true } : {})
-      };
-    });
+    .map(({ pullPending, ...repo }) => ({
+      ...repo,
+      ...(pullPending === 1 ? { pullPending: true } : {}),
+      worktrees: (byRepo.get(repo.id) ?? []).map(
+        ({ repoId: _repoId, ...row }) => row
+      )
+    }));
 }
 
 /** Profile-wide fetch and conservative pull handlers with cooperative cancel. */

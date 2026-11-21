@@ -77,7 +77,7 @@ describe("bulk sync and the profile's folders", () => {
 
 describe("profileRepos and pending pulls", () => {
   // Rule: a repository is marked as having a pending pull exactly when one of
-  // its present checkouts has stored state that is behind its upstream, not
+  // its present checkouts has stored state, for the branch still checked out, that is behind its upstream, not
   // ahead and clean (what Try pull can fast-forward). Another profile's
   // identical rows never mark this profile's repositories.
   it("marks only this profile's repositories with a clean, behind checkout", () => {
@@ -108,7 +108,10 @@ describe("profileRepos and pending pulls", () => {
     seed(mine, "d-diverged", [{ ...clean, behind: 1, ahead: 1 }]);
     seed(mine, "e-no-upstream", [{ ...clean, upstream: 0, behind: 1 }]);
     seed(mine, "f-gone", [clean, { ...clean, behind: 1, missing: 1 }]);
-    seed(theirs, "g-theirs", [{ ...clean, behind: 5 }]);
+    seed(mine, "g-switched", [{ ...clean, behind: 1 }]);
+    // The checkout moved to another branch since its state was stored.
+    db.prepare("UPDATE worktrees SET branch = 'other' WHERE id = 'g-switched-wt0'").run();
+    seed(theirs, "h-theirs", [{ ...clean, behind: 5 }]);
 
     const repos = profileRepos(db, mine);
     expect(repos?.map((repo) => [repo.id, repo.pullPending === true])).toEqual([
@@ -117,7 +120,8 @@ describe("profileRepos and pending pulls", () => {
       ["c-dirty", false],
       ["d-diverged", false],
       ["e-no-upstream", false],
-      ["f-gone", false]
+      ["f-gone", false],
+      ["g-switched", false]
     ]);
     // Worktree inputs carry no stored-state columns.
     expect(repos?.find((repo) => repo.id === "b-behind")?.worktrees).toEqual([
