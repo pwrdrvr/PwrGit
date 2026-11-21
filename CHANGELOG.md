@@ -1,5 +1,10 @@
 # Changelog
 
+## v0.61.1 - 2026-11-21
+
+- Startup profiling - Improved Settings' Startup CPU Profiling to capture only the next launch and turn itself off as that launch starts. A copyable completion notice lists the session folder and files actually saved, including partial or failed captures. The environment override continues to profile every launch where it is set.
+- Resource recording - Fixed Resource Usage Recording to stop automatically after 24 hours, keeping the same stop time across restarts and showing it in Settings. Older settings without a stop time, or settings with an invalid future stop time, receive a fresh, bounded recording window; turning recording back on while an expired session finishes is preserved. Saved samples remain available under the existing retention policy.
+
 ## v0.61.0 - 2026-11-21
 
 - CPU diagnostics - Added an opt-in Chromium performance trace under Troubleshooting > Hot CPU Profiling. Renderer CPU captures can now save a matching local trace of layout, paint and compositing from a rolling 32 MiB buffer. Exported traces omit event arguments and free-form labels. Tracing is off by default, adds overhead while armed, and retains a variable amount of history depending on event volume.
