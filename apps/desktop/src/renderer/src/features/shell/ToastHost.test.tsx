@@ -61,7 +61,8 @@ beforeEach(async () => {
   // Command-aware: the host now also mounts the live-activity cards, whose
   // store asks for a snapshot on mount and expects a list back.
   dispatchMock.mockImplementation((name: string) =>
-    Promise.resolve(ok(name === "remote:activities" ? [] : { status: "idle" }))
+    Promise.resolve(ok(name === "remote:activities" ? []
+      : name === "diagnostics:readStartupCpuProfile" ? null : { status: "idle" }))
   );
   subscribeMock.mockReturnValue(() => undefined);
   let current: Toast[] = [];

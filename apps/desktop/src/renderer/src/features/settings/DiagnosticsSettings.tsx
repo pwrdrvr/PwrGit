@@ -122,6 +122,7 @@ export function DiagnosticsSettings(props: {
 
       <ResourceUsageSection
         enabled={diag.resourceUsageEnabled}
+        expiresAt={diag.resourceUsageExpiresAt}
         saving={props.saving}
         onChange={props.onResourceUsageEnabledChange}
       />
@@ -272,10 +273,10 @@ export function DiagnosticsSettings(props: {
       <SettingsSection
         eyebrow="CPU"
         title="Startup CPU Profiling"
-        description="Profile the main process and the first window from launch until shortly after first paint. Applies on the next launch and stays on for every launch until turned off."
+        description="Profile the main process and the first window from launch until shortly after first paint, for one launch. When the capture finishes, a notice lists the saved profiles with a Copy button."
         chip={
           env.startupCpuProfilingForcedOn
-            ? "On (env)"
+            ? "Every launch (env)"
             : startupOn
               ? "Next launch"
               : "Off"
@@ -284,18 +285,20 @@ export function DiagnosticsSettings(props: {
       >
         <div className="settings-fields">
           <SettingsField
-            label="Profile startup"
-            sub="Writes main.cpuprofile and renderer.cpuprofile per launch."
+            label="Profile next launch"
+            sub="Writes main.cpuprofile and renderer.cpuprofile to a new session folder."
             help={
               env.startupCpuProfilingForcedOn
-                ? "Forced on by PWRGIT_STARTUP_CPU_PROFILING in this app's environment — the switch only controls the setting."
-                : "Remember to turn this back off — every launch writes a new session directory while it's on."
+                ? "PWRGIT_STARTUP_CPU_PROFILING in this app's environment profiles every launch. The switch only arms the next one."
+                : diag.startupCpuProfilingEnabled
+                  ? "Armed. Quit and reopen PwrGit to capture; the switch turns itself off as that launch starts."
+                  : "One launch only: the switch turns itself off when that launch starts."
             }
             control={
               <SettingsSwitch
                 checked={diag.startupCpuProfilingEnabled}
                 disabled={props.saving}
-                label="Profile startup"
+                label="Profile next launch"
                 onChange={props.onStartupCpuEnabledChange}
               />
             }

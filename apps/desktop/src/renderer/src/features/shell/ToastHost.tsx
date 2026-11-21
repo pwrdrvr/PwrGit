@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import type { Repo } from "@pwrgit/shared";
+import type { Repo, StartupCpuProfileCapturedEvent } from "@pwrgit/shared";
 import { AppUpdateToast } from "../update/AppUpdateToast";
 import { ReleaseNotesLink } from "../update/ReleaseNotesLink";
 import { RemoteActivityToast } from "../remote/RemoteActivityToast";
@@ -7,10 +7,15 @@ import { CodexVersionNotice } from "../settings/CodexVersionNotice";
 import { GitIdentityNotice } from "../identity/GitIdentityNotice";
 import { dispatch, subscribe } from "../../lib/pwrgit";
 import { AppNoticeToast } from "./AppNoticeToast";
-import { cpuProfileNotice } from "./cpu-profile-notice";
+import {
+  cpuProfileNotice,
+  startupCpuProfileNotice,
+  startupCpuProfileNoticeKey
+} from "./cpu-profile-notice";
 import {
   dismissToast,
   dismissToastGroup,
+  dismissToastKey,
   showInfoToast,
   subscribeToasts,
   type Toast,
@@ -61,6 +66,25 @@ export function ToastHost({
     if (event.profileId !== null && event.profileId !== profileId) return;
     showInfoToast(cpuProfileNotice(event));
   }), [profileId]);
+  useEffect(() => {
+    // App-wide, like a main-process capture. A window that mounts after the
+    // capture finished (or while main was still loading it) reads it once;
+    // one that was already listening hears the broadcast. Same key either way.
+    let live = true;
+    const show = (event: StartupCpuProfileCapturedEvent) => {
+      showInfoToast(startupCpuProfileNotice(event, () => {
+        void dispatch("diagnostics:dismissStartupCpuProfile", { sessionId: event.sessionId });
+      }));
+    };
+    const offCaptured = subscribe("diagnostics:startupCpuProfileCaptured", show);
+    const offDismissed = subscribe("diagnostics:startupCpuProfileDismissed", ({ sessionId }) => {
+      dismissToastKey(startupCpuProfileNoticeKey(sessionId));
+    });
+    void dispatch("diagnostics:readStartupCpuProfile", undefined).then((result) => {
+      if (live && result.ok && result.value) show(result.value);
+    });
+    return () => { live = false; offCaptured(); offDismissed(); };
+  }, []);
 
   const seenGroups = new Set<string>();
 

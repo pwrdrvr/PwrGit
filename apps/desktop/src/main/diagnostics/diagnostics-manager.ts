@@ -6,7 +6,12 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { writeHeapSnapshot } from "node:v8";
 import { app, contentTracing, type BrowserWindow } from "electron";
-import type { DiagnosticsSettings, HotCpuProfileCapturedEvent } from "@pwrgit/shared";
+import type {
+  DiagnosticsSettings,
+  HotCpuProfileCapturedEvent,
+  StartupCpuProfileArtifact,
+  StartupCpuProfileCapturedEvent
+} from "@pwrgit/shared";
 import { getDiagLogger } from "./diag-log";
 import {
   resolveHeapMonitorConfig,
@@ -24,10 +29,18 @@ import { HotCpuProfiler } from "./hot-cpu-profiler";
 import { ChromiumTrace } from "./chromium-trace";
 import { createMainProcessHotCpuTarget } from "./main-process-hot-cpu-target";
 import { resolveStartupCpuProfileConfig } from "./startup-cpu-profile-config";
-import { createStartupCpuProfileSession } from "./startup-cpu-profile-session";
+import {
+  createStartupCpuProfileSession,
+  type StartupCpuProfileSession
+} from "./startup-cpu-profile-session";
 import { MainProcessCpuProfiler } from "./main-process-cpu-profiler";
 import { RendererStartupCpuProfiler } from "./renderer-startup-cpu-profiler";
 import { watchResourceUsage } from "./resource-monitor";
+import { resolveResourceUsageWindow, resourceUsageExpiry } from "./resource-usage-window";
+
+/** Longest wait between wall-clock checks of a recording's expiry. A single
+ *  24-hour timeout runs on a clock that pauses while the machine sleeps. */
+const RESOURCE_EXPIRY_CHECK_MAX_MS = 60_000;
 
 const log = getDiagLogger("pwrgit:diagnostics");
 
@@ -73,6 +86,13 @@ async function discardSessionIfEmpty(
 
 export class DiagnosticsManager {
   private stopResourceMonitoring: (() => Promise<void>) | null = null;
+  private resourceExpiryTimer: ReturnType<typeof setTimeout> | null = null;
+  /** Expiry granted to a recording that was on with none stored, kept here
+   *  too so it still ends if persisting it failed. */
+  private unboundedResourceExpiresAtMs: number | null = null;
+  /** Main-owned diagnostics writes (resource recording expiry). index.ts
+   *  persists the patch and broadcasts settings:changed; it must not re-sync. */
+  private readonly persistDiagnostics: ((patch: Partial<DiagnosticsSettings>) => void) | undefined;
   private readonly outputRoot: string;
   private readonly getDiagnostics: () => DiagnosticsSettings;
   private readonly onHotCpuProfileCaptured: ((event: HotCpuProfileCapturedEvent, profileId: string | null) => void | Promise<void>) | undefined;
@@ -103,8 +123,10 @@ export class DiagnosticsManager {
     getDiagnostics: () => DiagnosticsSettings;
     onHotCpuProfileCaptured?: (event: HotCpuProfileCapturedEvent, profileId: string | null) => void | Promise<void>;
     onHotCpuHeapSnapshotLimitReached: () => void;
+    persistDiagnostics?: (patch: Partial<DiagnosticsSettings>) => void;
   }) {
     this.outputRoot = options.outputRoot;
+    this.persistDiagnostics = options.persistDiagnostics;
     this.getDiagnostics = options.getDiagnostics;
     this.onHotCpuProfileCaptured = options.onHotCpuProfileCaptured;
     this.onHotCpuHeapSnapshotLimitReached =
@@ -169,6 +191,7 @@ export class DiagnosticsManager {
    *  index.ts drains this (with a timeout) before windows close. */
   shutdown(): Promise<void> {
     this.shuttingDown = true;
+    this.clearResourceExpiryTimer();
     this.enqueueSync(async () => {
       try {
         await this.stopResourceUsage();
@@ -193,6 +216,12 @@ export class DiagnosticsManager {
     return false;
   }
 
+  /** Resolves once work already queued (including a timer's expiry check)
+   *  has run, without queueing a sync of its own. */
+  whenIdle(): Promise<void> {
+    return this.syncQueue;
+  }
+
   private enqueueSync(task: () => Promise<void>): void {
     this.pendingSyncs += 1;
     this.syncQueue = this.syncQueue
@@ -209,11 +238,7 @@ export class DiagnosticsManager {
     if (this.shuttingDown) return;
 
     const settings = this.getDiagnostics();
-    if (settings.resourceUsageEnabled === true) {
-      this.stopResourceMonitoring ??= watchResourceUsage(path.join(this.outputRoot, "resources"));
-    } else {
-      await this.stopResourceUsage();
-    }
+    await this.syncResourceUsage(settings);
     const { heapConfig, hotCpuConfig } = this.resolveMonitorConfigs(settings);
     const heapKey = JSON.stringify(heapConfig);
     const hotCpuKey = JSON.stringify(hotCpuConfig);
@@ -283,6 +308,60 @@ export class DiagnosticsManager {
       if (windows.some((entry) => entry.hotCpuProfiler?.hasTriggeredProfile())) return;
     }
     await this.chromiumTrace.setArmed(false);
+  }
+
+  /**
+   * Run resource recording only inside its window: from the moment it was
+   * turned on until the stored expiry, across restarts. At expiry, stop
+   * sampling and turn the setting off; the samples already written stay on
+   * disk under the monitor's own 24-hour retention.
+   */
+  private async syncResourceUsage(settings: DiagnosticsSettings): Promise<void> {
+    this.clearResourceExpiryTimer();
+    if (this.shuttingDown) return;
+    const now = Date.now();
+    let window = resolveResourceUsageWindow(settings, now);
+    if (window.state === "unbounded") {
+      if (this.unboundedResourceExpiresAtMs === null) {
+        const expiresAt = resourceUsageExpiry(now);
+        this.unboundedResourceExpiresAtMs = Date.parse(expiresAt);
+        log.info("resource recording had no stop time; it stops 24 hours from now", { expiresAt });
+        this.persistDiagnostics?.({ resourceUsageExpiresAt: expiresAt });
+      }
+      window = now < this.unboundedResourceExpiresAtMs
+        ? { state: "recording", expiresAtMs: this.unboundedResourceExpiresAtMs }
+        : { state: "expired" };
+    } else {
+      this.unboundedResourceExpiresAtMs = null;
+    }
+
+    if (window.state === "recording") {
+      this.stopResourceMonitoring ??= watchResourceUsage(path.join(this.outputRoot, "resources"));
+      this.scheduleResourceExpiryCheck(window.expiresAtMs - now);
+      return;
+    }
+    await this.stopResourceUsage();
+    if (window.state === "expired") {
+      log.info("resource recording reached its 24-hour limit; samples are kept", {
+        directory: path.join(this.outputRoot, "resources")
+      });
+      this.persistDiagnostics?.({ resourceUsageEnabled: false, resourceUsageExpiresAt: null });
+    }
+  }
+
+  private scheduleResourceExpiryCheck(remainingMs: number): void {
+    const timer = setTimeout(() => {
+      if (this.resourceExpiryTimer !== timer) return;
+      this.resourceExpiryTimer = null;
+      this.enqueueSync(() => this.syncResourceUsage(this.getDiagnostics()));
+    }, Math.min(Math.max(remainingMs, 0), RESOURCE_EXPIRY_CHECK_MAX_MS));
+    timer.unref?.();
+    this.resourceExpiryTimer = timer;
+  }
+
+  private clearResourceExpiryTimer(): void {
+    if (this.resourceExpiryTimer !== null) clearTimeout(this.resourceExpiryTimer);
+    this.resourceExpiryTimer = null;
   }
 
   private async stopResourceUsage(): Promise<void> {
@@ -480,9 +559,36 @@ export type StartupCpuDiagnostics = {
   isRecording: () => boolean;
 };
 
+/** What the startup session actually left on disk, in a fixed order. A
+ *  profiler that reported success but wrote nothing is listed as missing. */
+export async function listStartupCpuArtifacts(session: StartupCpuProfileSession): Promise<{
+  artifacts: StartupCpuProfileArtifact[];
+  missing: StartupCpuProfileCapturedEvent["missing"];
+}> {
+  const candidates: Array<[StartupCpuProfileArtifact["kind"], string]> = [
+    ["main-profile", session.mainProfilePath],
+    ["renderer-profile", session.rendererProfilePath],
+    ["heap-snapshot", session.mainHeapSnapshotPath],
+    ["heap-snapshot", session.rendererHeapSnapshotPath],
+    ["manifest", session.manifestPath],
+    ["events", session.eventsPath]
+  ];
+  const present = await Promise.all(candidates.map(async ([, filePath]) =>
+    fs.stat(filePath).then((stat) => stat.isFile() && stat.size > 0, () => false)
+  ));
+  const artifacts = candidates
+    .filter((_, index) => present[index])
+    .map(([kind, filePath]) => ({ kind, filename: path.basename(filePath), path: filePath }));
+  const missing = (["main-profile", "renderer-profile"] as const)
+    .filter((kind) => !artifacts.some((artifact) => artifact.kind === kind));
+  return { artifacts, missing };
+}
+
 export async function startStartupCpuProfiling(options: {
   enabled: boolean;
   outputRoot: string;
+  /** Called once when the session is closed and its manifest written. */
+  onCompleted?: (event: StartupCpuProfileCapturedEvent) => void;
 }): Promise<StartupCpuDiagnostics | null> {
   const config = resolveStartupCpuProfileConfig({
     enabled: options.enabled,
@@ -499,6 +605,7 @@ export async function startStartupCpuProfiling(options: {
     return null;
   }
   const session = created.session;
+  const startedAt = new Date().toISOString();
   log.info("startup CPU session directory", {
     directory: session.directoryPath
   });
@@ -555,14 +662,31 @@ export async function startStartupCpuProfiling(options: {
       }
     }
 
-    await session.complete({
-      status: mainOk && rendererOk ? "completed" : "partial",
-      completedAt: new Date().toISOString()
-    });
+    const status = mainOk && rendererOk ? "completed" : mainOk || rendererOk ? "partial" : "failed";
+    const completedAt = new Date().toISOString();
+    await session.complete({ status, completedAt });
     log.info("startup CPU profiling finished", {
       reason,
+      status,
       directory: session.directoryPath
     });
+    if (options.onCompleted !== undefined) {
+      try {
+        options.onCompleted({
+          sessionId: session.id,
+          sessionDirectory: session.directoryPath,
+          sessionDirectoryName: session.directoryName,
+          status,
+          reason,
+          armedBy: config.armedBy,
+          startedAt,
+          completedAt,
+          ...await listStartupCpuArtifacts(session)
+        });
+      } catch (error) {
+        log.error("startup CPU completion notice failed", error);
+      }
+    }
 
     if (config.quitOnComplete) {
       app.quit();

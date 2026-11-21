@@ -11,6 +11,7 @@
 // graph, and rebase entries.
 
 import type { HotCpuProfileCapturedEvent } from "./hot-cpu-profile";
+import type { StartupCpuProfileCapturedEvent } from "./startup-cpu-profile";
 import type { ForgeHostMap } from "./forge-remote";
 import type { ContributionIdentity, ContributionSnapshot } from "./contributions";
 import type { GhDefaultRepository, HookRun, IgnoreDestination, IgnoreOptions, IgnorePatternChoice, IgnoredSummary, RepositorySetup, SetupIgnoreTest } from "./git-discovery";
@@ -825,9 +826,17 @@ export type ForgeHostRow = {
   label?: string;
 };
 
+/** A resource recording started in Settings stops this long after it starts. */
+export const RESOURCE_USAGE_RECORDING_MS = 24 * 60 * 60_000;
+
 export type DiagnosticsSettings = {
-  /** Record local minute-level Electron CPU and Git workload samples. */
+  /** Record local minute-level Electron CPU and Git workload samples, for
+   *  `RESOURCE_USAGE_RECORDING_MS` from when it was turned on. */
   resourceUsageEnabled: boolean;
+  /** ISO time the current recording stops. Main-owned: stamped when the
+   *  switch turns on, cleared when it turns off or expires. Never taken from
+   *  a renderer patch. */
+  resourceUsageExpiresAt: string | null;
   /** Sample main + renderer heaps; auto-snapshot on growth spikes. */
   heapMonitorEnabled: boolean;
   /** Arm main-process and renderer CPU profiling with pre-trigger history. */
@@ -840,7 +849,8 @@ export type DiagnosticsSettings = {
   hotCpuProfilingCaptureHeapSnapshot: boolean;
   /** 1..HOT_CPU_HEAP_SNAPSHOT_LIMIT_MAX snapshots per session. */
   hotCpuProfilingHeapSnapshotLimit: number;
-  /** Profile app startup (main + first window) on every launch while on. */
+  /** Profile the next app startup (main + first window) once. Main clears it
+   *  as that launch begins, so it never repeats on its own. */
   startupCpuProfilingEnabled: boolean;
 };
 
@@ -867,6 +877,7 @@ export const EXPERIMENTAL_DEFAULTS: ExperimentalSettings = {
 
 export const DIAGNOSTICS_DEFAULTS: DiagnosticsSettings = {
   resourceUsageEnabled: false,
+  resourceUsageExpiresAt: null,
   heapMonitorEnabled: false,
   hotCpuProfilingEnabled: false,
   hotCpuProfilingStartDelayMs: 0,
@@ -2762,6 +2773,10 @@ export interface Commands {
 
   // Reveal a path in the OS file manager (Finder / Explorer / …).
   "shell:revealPath": { req: { path: string }; res: null };
+  // This launch's startup CPU capture, until someone dismisses its notice.
+  // A window that mounts after the capture finished reads it here.
+  "diagnostics:readStartupCpuProfile": { req: void; res: StartupCpuProfileCapturedEvent | null };
+  "diagnostics:dismissStartupCpuProfile": { req: { sessionId: string }; res: null };
   "shell:openPath": { req: { path: string }; res: null };
   // Open a URL in the default browser (e.g. a PR link).
   "shell:openExternal": { req: { url: string }; res: null };
@@ -2886,6 +2901,10 @@ export interface Events {
   "ui:copyDiagnostics": { profileId: string | null; copied: boolean };
   /** Main captures are app-wide (null); renderer captures belong to one profile. */
   "diagnostics:cpuProfileCaptured": HotCpuProfileCapturedEvent & { profileId: string | null };
+  /** This launch's startup capture finished (app-wide; never a hot trigger). */
+  "diagnostics:startupCpuProfileCaptured": StartupCpuProfileCapturedEvent;
+  /** Its notice was dismissed in one window; the others drop theirs too. */
+  "diagnostics:startupCpuProfileDismissed": { sessionId: string };
   /** App settings changed (any window) — payload is the fresh snapshot. */
   "settings:changed": AppSettingsSnapshot;
   /** Git identity config changed through PwrGit, or a launch notice was

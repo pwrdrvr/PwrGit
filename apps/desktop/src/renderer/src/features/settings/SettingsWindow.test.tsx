@@ -326,13 +326,51 @@ it("keeps resource recording off until explicitly toggled in Troubleshooting", a
   });
   await render();
   await act(async () => navButton("Troubleshooting").click());
-  const toggle = container.querySelector<HTMLButtonElement>('[role="switch"][aria-label="Record resource usage"]');
+  const toggle = container.querySelector<HTMLButtonElement>('[role="switch"][aria-label="Record resource usage for 24 hours"]');
   expect(toggle?.getAttribute("aria-checked")).toBe("false");
   for (const enabled of [true, false]) {
     await act(async () => toggle!.click());
     expect(mocks.dispatch).toHaveBeenCalledWith("settings:update", { patch: { diagnostics: { resourceUsageEnabled: enabled } } });
     expect(toggle?.getAttribute("aria-checked")).toBe(String(enabled));
   }
+});
+
+it("shows when a resource recording stops, and turns the switch off when main ends it", async () => {
+  const expiresAt = "2026-11-21T18:43:00.000Z";
+  mocks.dispatch.mockImplementation(async (name, req) =>
+    name === "settings:read"
+      ? ok({ ...SNAPSHOT, diagnostics: { ...DIAGNOSTICS_DEFAULTS, resourceUsageEnabled: true, resourceUsageExpiresAt: expiresAt } })
+      : answer(name, req));
+  await render();
+  await act(async () => navButton("Troubleshooting").click());
+  const section = () => container.querySelector<HTMLElement>('section[aria-label="Resource Usage Recording"]')!;
+  const toggle = () => container.querySelector<HTMLButtonElement>('[role="switch"][aria-label="Record resource usage for 24 hours"]')!;
+  expect(toggle().getAttribute("aria-checked")).toBe("true");
+  const stop = new Date(expiresAt).toLocaleString(undefined, { weekday: "short", month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
+  expect(section().textContent).toContain(`Stops automatically ${stop}`);
+  expect(section().textContent).toContain("turns itself off 24 hours after it starts");
+
+  // Main's expiry: settings:changed with the recording off and no stop time.
+  const changed = mocks.subscribe.mock.calls.filter(([name]) => name === "settings:changed").map(([, handler]) => handler);
+  expect(changed.length).toBeGreaterThan(0);
+  await act(async () => {
+    for (const handler of changed) handler({ ...SNAPSHOT, diagnostics: { ...DIAGNOSTICS_DEFAULTS } });
+  });
+  expect(toggle().getAttribute("aria-checked")).toBe("false");
+  expect(section().textContent).not.toContain("Stops automatically");
+});
+
+it("labels startup profiling as one launch, with no reminder to turn it back off", async () => {
+  mocks.dispatch.mockImplementation(async (name, req) =>
+    name === "settings:read"
+      ? ok({ ...SNAPSHOT, diagnostics: { ...DIAGNOSTICS_DEFAULTS, startupCpuProfilingEnabled: true } })
+      : answer(name, req));
+  await render();
+  await act(async () => navButton("Troubleshooting").click());
+  const toggle = container.querySelector<HTMLButtonElement>('[role="switch"][aria-label="Profile next launch"]');
+  expect(toggle?.getAttribute("aria-checked")).toBe("true");
+  expect(container.textContent).toContain("the switch turns itself off as that launch starts");
+  expect(container.textContent).not.toContain("Remember to turn this back off");
 });
 
 /** Addressed by its visible label, never its accessible name — the name is the
