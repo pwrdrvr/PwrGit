@@ -23,6 +23,9 @@ type WorktreeRow = {
   repoId: string;
   branch: string;
   path: string;
+  /** 1 when stored state shows a clean checkout behind its upstream and not
+   * ahead of it — what the sidebar's ↓ badge is advertising. */
+  pullPending: number | null;
 };
 
 export function profileRepos(
@@ -44,9 +47,14 @@ export function profileRepos(
     .all(profileId) as RepoRow[];
   const worktrees = db
     .prepare(
-      `SELECT w.id, w.repo_id AS repoId, w.branch, w.path
+      `SELECT w.id, w.repo_id AS repoId, w.branch, w.path,
+         (s.has_upstream = 1 AND s.behind > 0 AND s.ahead = 0 AND s.dirty = 0)
+           AS pullPending
        FROM worktrees w
        JOIN repos r ON r.id = w.repo_id
+       -- Stored state is only a hint for start order; Try pull re-inspects
+       -- every checkout itself.
+       LEFT JOIN worktree_state s ON s.worktree_id = w.id
        -- A checkout that is gone has nothing to pull; the repo-level fetch
        -- still runs from the primary.
        WHERE r.profile_id = ? AND w.missing = 0 AND ${visibleRepoSql("r")}
@@ -62,12 +70,14 @@ export function profileRepos(
   const wanted = repoIds === undefined ? null : new Set(repoIds);
   return repos
     .filter((repo) => wanted === null || wanted.has(repo.id))
-    .map((repo) => ({
-      ...repo,
-      worktrees: (byRepo.get(repo.id) ?? []).map(
-        ({ repoId: _repoId, ...row }) => row
-      )
-    }));
+    .map((repo) => {
+      const rows = byRepo.get(repo.id) ?? [];
+      return {
+        ...repo,
+        worktrees: rows.map(({ repoId: _repoId, pullPending: _pending, ...row }) => row),
+        ...(rows.some((row) => row.pullPending === 1) ? { pullPending: true } : {})
+      };
+    });
 }
 
 /** Profile-wide fetch and conservative pull handlers with cooperative cancel. */
