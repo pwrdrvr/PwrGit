@@ -304,6 +304,7 @@ type ChangeRequestMatch = {
  * The GitExec is injected so the scan logic is testable against system git.
  */
 export class RepoIndexer {
+  private readonly branchIndexTurns = new Map<string, Promise<void>>();
   private readonly yieldToEventLoop: () => Promise<void>;
   private readonly branchWriteChunkSize: number;
   private readonly discoveryYieldEvery: number;
@@ -1720,11 +1721,27 @@ export class RepoIndexer {
     signal?: AbortSignal
   ): Promise<void> {
     signal?.throwIfAborted();
-    await this.syncRemoteBranchRows(repoId, branches, remoteNames, signal);
-    signal?.throwIfAborted();
-    await this.syncLocalBranchRows(repoId, branches, signal);
-    signal?.throwIfAborted();
-    this.markRemoteBranchesIndexed(repoId);
+    // A newer listing must compare against the rows left by the earlier
+    // reconciliation, including its stale deletes. Only SQLite work takes
+    // a turn here, so Git listings and other repositories can still overlap.
+    const previous = this.branchIndexTurns.get(repoId) ?? Promise.resolve();
+    const turn = previous.then(async () => {
+      signal?.throwIfAborted();
+      await this.syncRemoteBranchRows(repoId, branches, remoteNames, signal);
+      signal?.throwIfAborted();
+      await this.syncLocalBranchRows(repoId, branches, signal);
+      signal?.throwIfAborted();
+      this.markRemoteBranchesIndexed(repoId);
+    });
+    const tail = turn.catch(() => undefined);
+    this.branchIndexTurns.set(repoId, tail);
+    try {
+      await turn;
+    } finally {
+      if (this.branchIndexTurns.get(repoId) === tail) {
+        this.branchIndexTurns.delete(repoId);
+      }
+    }
   }
 
   private async syncRemoteBranchRows(
@@ -1877,17 +1894,21 @@ export class RepoIndexer {
     signal?: AbortSignal
   ): Promise<void> {
     signal?.throwIfAborted();
-    // Only use this snapshot to skip an entire matching table, without
-    // yielding. A changed listing takes the normal chunked path, where a
-    // concurrent refresh may write between chunks.
-    const current = this.db
-      .prepare<[string], StoredDerivedBranch>(
-        `SELECT id, name, full_name${table === "remote_branches" ? ", remote_name" : ""}
-         FROM ${table} WHERE repo_id = ?`
-      )
-      .raw()
-      .all(repoId);
-    if (current.length === rows.length) {
+    // Check the indexed count before materializing any branch metadata.
+    // A different count goes straight to the chunked reconciliation.
+    const count = this.db
+      .prepare<[string], number>(`SELECT count(*) FROM ${table} WHERE repo_id = ?`)
+      .pluck()
+      .get(repoId);
+    if (count === rows.length) {
+      if (count === 0) return;
+      const current = this.db
+        .prepare<[string], StoredDerivedBranch>(
+          `SELECT id, name, full_name${table === "remote_branches" ? ", remote_name" : ""}
+           FROM ${table} WHERE repo_id = ?`
+        )
+        .raw()
+        .all(repoId);
       const byId = new Map(current.map((row) => [row[0], row]));
       const matches = rows.every(({ id, args: [, , name, fullName, remoteName] }) => {
         const row = byId.get(id);
@@ -1896,7 +1917,7 @@ export class RepoIndexer {
         return storedName === name && storedFullName === fullName &&
           storedRemoteName === remoteName && byId.delete(id);
       });
-      if (matches) return;
+      if (matches && byId.size === 0) return;
     }
     const upsert = this.db.prepare(upsertSql);
     for (

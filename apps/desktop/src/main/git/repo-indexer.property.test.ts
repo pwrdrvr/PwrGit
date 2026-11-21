@@ -26,6 +26,14 @@ function oracleRefs(dir: string, prefix: string): string[] {
     .map((ref) => ref.slice(prefix.length));
 }
 
+function deferred(): { promise: Promise<void>; resolve: () => void } {
+  let resolve!: () => void;
+  const promise = new Promise<void>((done) => {
+    resolve = done;
+  });
+  return { promise, resolve };
+}
+
 beforeAll(() => {
   scratch = realpathSync.native(mkdtempSync(join(tmpdir(), "pwrgit-index-oracle-")));
   upstream = join(scratch, "upstream");
@@ -33,7 +41,7 @@ beforeAll(() => {
   git(scratch, "init", "-q", "-b", "main", upstream);
   git(upstream, "-c", "user.name=Oracle", "-c", "user.email=oracle@example.test",
     "-c", "commit.gpgSign=false", "commit", "-q", "--allow-empty", "-m", "root");
-  git(scratch, "clone", "-q", upstream, checkout);
+  git(scratch, "clone", "-q", "--origin", "origin", upstream, checkout);
 });
 
 afterAll(() => {
@@ -113,6 +121,88 @@ it("reconciles refs with scoped search and starts no branch transactions for mat
       }
     }
   ), { numRuns: 8 });
+});
+
+it("indexes a recreated ref when refreshes reconcile different Git listings", async () => {
+  const keeper = "oracle-a-keeper";
+  const recreated = "oracle-z-recreated";
+  const db = openDatabase(":memory:");
+  const olderPaused = deferred();
+  const releaseOlder = deferred();
+  const newerListed = deferred();
+  const releaseNewer = deferred();
+  const pending: Promise<unknown>[] = [];
+  let pauseOlder = false;
+  let pauseNewer = false;
+  let watchGit = false;
+  let gitReads = 0;
+  try {
+    const profile = new ProfileService(db).create({
+      name: "Mine", email: "mine@example.test", roots: [checkout]
+    });
+    const systemGit = createSystemGit();
+    const indexer = new RepoIndexer(db, async (...args) => {
+      if (!watchGit) return systemGit(...args);
+      gitReads += 1;
+      try {
+        return await systemGit(...args);
+      } finally {
+        gitReads -= 1;
+        if (gitReads === 0) newerListed.resolve();
+      }
+    }, {
+      branchWriteChunkSize: 1,
+      yieldToEventLoop: async () => {
+        if (pauseOlder) {
+          pauseOlder = false;
+          olderPaused.resolve();
+          await releaseOlder.promise;
+        } else if (pauseNewer) {
+          pauseNewer = false;
+          await releaseNewer.promise;
+        }
+      }
+    });
+    git(checkout, "fetch", "-q", "--prune", "origin");
+    git(checkout, "branch", keeper);
+    git(checkout, "branch", recreated);
+    const [repo] = await indexer.rescanProfile(profile);
+    if (repo === undefined) throw new Error("fixture checkout was not indexed");
+
+    git(checkout, "branch", "-D", recreated);
+    pauseOlder = true;
+    const older = indexer.refreshRepoRemoteBranches(repo.id);
+    pending.push(older);
+    await olderPaused.promise;
+
+    git(checkout, "branch", recreated);
+    watchGit = true;
+    pauseNewer = true;
+    const newer = indexer.refreshRepoRemoteBranches(repo.id);
+    pending.push(newer);
+    await newerListed.promise;
+    // Let the listing's promise continuations reach the first write yield,
+    // finish early, or wait for the older reconciliation's turn.
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    watchGit = false;
+    pauseNewer = false;
+    releaseOlder.resolve();
+    expect((await older).ok).toBe(true);
+    releaseNewer.resolve();
+    expect((await newer).ok).toBe(true);
+
+    const hits = indexer.searchAll("oracle", { profileId: profile.id, allProfiles: false })
+      .filter(({ kind }) => kind === "local_branch")
+      .map(({ name }) => name)
+      .sort();
+    expect(hits).toEqual(oracleRefs(checkout, "refs/heads/"));
+  } finally {
+    releaseOlder.resolve();
+    releaseNewer.resolve();
+    await Promise.allSettled(pending);
+    db.close();
+    git(checkout, "branch", "-D", keeper, recreated);
+  }
 });
 
 it("keeps scan recency without rewriting search rows for an unchanged repository", async () => {
