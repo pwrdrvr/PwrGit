@@ -144,6 +144,14 @@ records triggers, failures, pre-trigger duration, and shutdown. Open
 inspect JavaScript stacks. Settings changes and app shutdown flush triggered
 profiles; untriggered recordings do not produce a `.cpuprofile`.
 
+**Chromium performance trace** adds a rolling 32 MiB browser trace to
+renderer captures when enabled. The `.trace.json` beside the CPU profile
+contains timing events for layout, paint and compositing. The export omits
+event arguments and free-form labels, retaining timing fields and known
+event and track names. Unfiltered data is staged in a private temporary
+directory and removed after export. If Chromium tracing fails to start or
+export, hot CPU profiling can still run and publish CPU profiles.
+
 Completed captures produce a standing CPU notice using PwrAgnt's compact
 header, copy/close icons, and arrow navigation. Copy includes the source host,
 app identity, capture time and trigger, session/profile names and full paths,

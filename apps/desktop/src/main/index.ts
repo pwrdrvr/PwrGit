@@ -1549,12 +1549,6 @@ if (!gotSingleInstanceLock) {
     app.on("will-quit", () => void agentAccess.dispose());
     registerAgentAccessHandlers(bus, agentAccess);
     if (settings.get().localAgentAccessEnabled === true) await agentAccess.setEnabled(true);
-    const diagnosticsReady = diagnostics.sync();
-    // Arm the rolling browser trace before creating the first renderer.
-    if (settings.get().diagnostics?.hotCpuProfilingCaptureChromiumTrace === true) {
-      await diagnosticsReady;
-    }
-
     registerIpc(bus, {
       onWebContentsDestroyed: (webContentsId) => {
         githubHandlers.releaseWebContents(webContentsId);
@@ -1712,6 +1706,8 @@ if (!gotSingleInstanceLock) {
 
     // Boot into the last-used profile's window (its rescan kicks off inside).
     const activeId = profiles.getActiveId();
+    if (activeId !== null) await diagnostics.prepareFirstRendererTrace();
+    void diagnostics.sync();
     if (activeId !== null) openProfileWindow(activeId);
     refreshMenu();
 

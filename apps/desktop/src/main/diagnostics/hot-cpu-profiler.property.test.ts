@@ -1,9 +1,9 @@
 import { EventEmitter } from "node:events";
-import { mkdtemp, readFile, readdir, rm } from "node:fs/promises";
+import { mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { Profiler } from "node:inspector";
-import type { BrowserWindow, ProcessMetric } from "electron";
+import { app, contentTracing, type BrowserWindow, type ProcessMetric } from "electron";
 import fc from "fast-check";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { DIAGNOSTICS_DEFAULTS } from "@pwrgit/shared";
@@ -12,7 +12,10 @@ import { HotCpuProfiler } from "./hot-cpu-profiler";
 import { createHotCpuProfileSession } from "./hot-cpu-profile-session";
 import { resolveHotCpuProfileConfig } from "./hot-cpu-profile-config";
 
-vi.mock("electron", () => ({ app: { getVersion: () => "test", getAppMetrics: () => [] } }));
+vi.mock("electron", () => ({
+  app: { getVersion: () => "test", getAppMetrics: vi.fn(() => []) },
+  contentTracing: { startRecording: vi.fn(), stopRecording: vi.fn() }
+}));
 vi.mock("../logs", () => ({ logMain: vi.fn() }));
 const logger = { info: () => {}, warn: () => {}, error: () => {} };
 const versions = { appVersion: "test", electronVersion: "test", chromeVersion: "test", nodeVersion: process.version };
@@ -67,7 +70,161 @@ async function session(root: string) {
   return result.session;
 }
 
-afterEach(() => { vi.useRealTimers(); vi.restoreAllMocks(); });
+afterEach(() => {
+  vi.useRealTimers();
+  vi.restoreAllMocks();
+  vi.unstubAllEnvs();
+  vi.mocked(app.getAppMetrics).mockReset().mockReturnValue([]);
+  vi.mocked(contentTracing.startRecording).mockReset();
+  vi.mocked(contentTracing.stopRecording).mockReset();
+});
+
+describe("Chromium trace follows the renderer capture lifecycle", () => {
+  it("lets the first window proceed if native trace start never acknowledges", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    vi.mocked(contentTracing.startRecording).mockImplementation(() => new Promise<never>(() => {}));
+    vi.mocked(contentTracing.stopRecording).mockRejectedValue(
+      new Error("Failed to stop tracing - no trace in progress")
+    );
+    const manager = new DiagnosticsManager({
+      outputRoot: tmpdir(),
+      getDiagnostics: () => ({
+        ...DIAGNOSTICS_DEFAULTS,
+        hotCpuProfilingEnabled: true,
+        hotCpuProfilingCaptureChromiumTrace: true
+      }),
+      onHotCpuHeapSnapshotLimitReached: () => {}
+    });
+    try {
+      let mayOpen = false;
+      const preparing = manager.prepareFirstRendererTrace().then(() => { mayOpen = true; });
+      await vi.advanceTimersByTimeAsync(999);
+      expect(mayOpen).toBe(false);
+      await vi.advanceTimersByTimeAsync(1);
+      await preparing;
+      expect(mayOpen).toBe(true);
+    } finally {
+      await manager.shutdown();
+    }
+  });
+
+  it.each(["disarm", "heap", "exhaust", "close", "timeout"] as const)(
+    "preserves triggered captures and releases the trace when renderers %s",
+    async (transition) => {
+      const directory = await mkdtemp(join(tmpdir(), "pwrgit-trace-lifecycle-"));
+      let settings = {
+        ...DIAGNOSTICS_DEFAULTS,
+        hotCpuProfilingEnabled: true,
+        hotCpuProfilingTriggerMode: "spike" as const,
+        hotCpuProfilingCaptureChromiumTrace: true
+      };
+      vi.stubEnv("PWRGIT_HOT_CPU_PROFILING_START_DELAY_MS", "20");
+      vi.stubEnv("PWRGIT_HOT_CPU_PROFILING_INTERVAL_MS", "20");
+      vi.stubEnv("PWRGIT_HOT_CPU_PROFILING_MAX_PROFILES", transition === "timeout" ? "2" : "1");
+      vi.stubEnv("PWRGIT_HOT_CPU_PROFILING_DURATION_MS",
+        transition === "exhaust" || transition === "timeout" ? "50" : "60000");
+
+      let cpu = transition === "close" ? 0 : 90;
+      let destroyed = false;
+      const started = vi.mocked(contentTracing.startRecording);
+      let nativeRecording = false;
+      let exports = 0;
+      const hangs = transition === "timeout";
+      started.mockImplementation(async () => {
+        expect(nativeRecording).toBe(false);
+        nativeRecording = true;
+      });
+      vi.mocked(contentTracing.stopRecording).mockImplementation(async (file) => {
+        if (!nativeRecording) throw new Error("Failed to stop tracing - no trace in progress");
+        nativeRecording = false;
+        exports++;
+        if (hangs && exports === 1) await new Promise<never>(() => {});
+        if (file) await writeFile(file, JSON.stringify({ traceEvents: [] }));
+        return file ?? join(directory, "discarded.json");
+      });
+      const reads = vi.mocked(app.getAppMetrics).mockImplementation(() => [{
+        pid: 42,
+        cpu: { percentCPUUsage: cpu, idleWakeupsPerSecond: 0 },
+        memory: { workingSetSize: 1, peakWorkingSetSize: 1 }
+      }] as ProcessMetric[]);
+      const notify = vi.fn();
+      const manager = new DiagnosticsManager({
+        outputRoot: directory,
+        getDiagnostics: () => settings,
+        onHotCpuHeapSnapshotLimitReached: () => {},
+        onHotCpuProfileCaptured: notify
+      });
+      const window = Object.assign(new EventEmitter(), {
+        isDestroyed: () => destroyed,
+        webContents: {
+          id: 1, getOSProcessId: () => 42, isDestroyed: () => destroyed,
+          debugger: recorder().debugger
+        }
+      });
+      try {
+        if (transition === "close" || transition === "exhaust") {
+          await manager.sync();
+          expect(started).not.toHaveBeenCalled();
+        }
+        manager.attachWindow(window as unknown as BrowserWindow);
+        await manager.sync();
+        expect(nativeRecording).toBe(true);
+        const rendererDirectory = (await Promise.all((await readdir(directory)).map(async (name) => {
+          const path = join(directory, name);
+          const manifest = JSON.parse(await readFile(join(path, "session.json"), "utf8"));
+          return manifest.target === "renderer" ? path : null;
+        }))).find((path) => path !== null)!;
+
+        if (transition === "close") {
+          destroyed = true;
+          window.emit("closed");
+          await manager.sync();
+          expect(notify).not.toHaveBeenCalled();
+        } else {
+          await vi.waitFor(async () => {
+            const events = await readFile(join(rendererDirectory, "events.ndjson"), "utf8");
+            expect(events).toContain('"type":"profile-started"');
+          });
+          if (transition === "disarm" || transition === "heap") {
+            settings = {
+              ...settings,
+              hotCpuProfilingEnabled: transition !== "disarm",
+              heapMonitorEnabled: transition === "heap"
+            };
+            await manager.sync();
+          }
+          if (hangs) cpu = 0;
+          await vi.waitFor(() => expect(notify).toHaveBeenCalledOnce(), { timeout: 6_000 });
+          const artifacts = JSON.parse(await readFile(join(rendererDirectory, "session.json"), "utf8")).artifacts;
+          expect(artifacts).toEqual(hangs
+            ? ["renderer-hot-0001.cpuprofile"]
+            : ["renderer-hot-0001.cpuprofile", "renderer-hot-0001.trace.json"]);
+          if (hangs) {
+            // CPU sampling continues even though native trace export never acknowledged.
+            const readCount = reads.mock.calls.length;
+            await vi.waitFor(() => expect(reads.mock.calls.length).toBeGreaterThan(readCount));
+            settings = { ...settings, hotCpuProfilingEnabled: false };
+            await manager.sync();
+          }
+        }
+        await vi.waitFor(() => expect(nativeRecording).toBe(false));
+        if (transition === "exhaust" || transition === "close") {
+          cpu = 0;
+          const next = Object.assign(new EventEmitter(), {
+            isDestroyed: () => false,
+            webContents: { ...window.webContents, id: 2, isDestroyed: () => false, debugger: recorder().debugger }
+          });
+          manager.attachWindow(next as unknown as BrowserWindow);
+          await manager.sync();
+          expect(nativeRecording).toBe(true);
+        }
+      } finally {
+        await manager.shutdown();
+        await rm(directory, { recursive: true, force: true });
+      }
+    }, 9_000
+  );
+});
 
 describe("hot CPU recorder invariants", () => {
   it("retains work from the hot interval before its sampling trigger, including across rotations", async () => {

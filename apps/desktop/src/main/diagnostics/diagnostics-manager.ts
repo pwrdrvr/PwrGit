@@ -93,6 +93,7 @@ export class DiagnosticsManager {
   private pendingSyncs = 0;
   private shuttingDown = false;
   private chromiumTraceEnabled = false;
+  private reconfiguringRenderers = false;
   private readonly chromiumTrace = new ChromiumTrace(
     () => contentTracing, (message, error) => log.warn(message, error)
   );
@@ -125,16 +126,17 @@ export class DiagnosticsManager {
     };
     this.windows.set(id, entry);
     window.on("closed", () => {
-      const closing = this.windows.get(id);
-      this.windows.delete(id);
-      if (closing !== undefined) {
-        this.enqueueSync(async () => {
-          await closing.heapMonitor?.stop("window-closed");
-          await discardSessionIfEmpty(closing.heapSessionDir);
-          await closing.hotCpuProfiler?.stop("window-closed");
-          await discardSessionIfEmpty(closing.hotCpuSessionDir);
-        });
-      }
+      this.enqueueSync(async () => {
+        try {
+          await entry.heapMonitor?.stop("window-closed");
+          await discardSessionIfEmpty(entry.heapSessionDir);
+          await entry.hotCpuProfiler?.stop("window-closed");
+          await discardSessionIfEmpty(entry.hotCpuSessionDir);
+        } finally {
+          this.windows.delete(id);
+          await this.reconcileChromiumTrace();
+        }
+      });
     });
 
     this.enqueueSync(async () => {
@@ -144,7 +146,17 @@ export class DiagnosticsManager {
       if (this.hotCpuConfig.enabled) {
         await this.startWindowHotCpuProfiler(entry, this.hotCpuConfig);
       }
+      await this.reconcileChromiumTrace();
     });
+  }
+
+  /** The first window is a prospective renderer. Only wait for the bounded
+   * native trace start, not a full sync of unrelated diagnostics. */
+  async prepareFirstRendererTrace(): Promise<void> {
+    const settings = this.getDiagnostics();
+    if (!settings.hotCpuProfilingCaptureChromiumTrace || this.shuttingDown) return;
+    const { heapConfig, hotCpuConfig } = this.resolveMonitorConfigs(settings);
+    if (hotCpuConfig.enabled && !heapConfig.enabled) await this.chromiumTrace.setArmed(true);
   }
 
   /** Re-resolve configs from Settings and start/stop/restart monitors. */
@@ -202,6 +214,48 @@ export class DiagnosticsManager {
     } else {
       await this.stopResourceUsage();
     }
+    const { heapConfig, hotCpuConfig } = this.resolveMonitorConfigs(settings);
+    const heapKey = JSON.stringify(heapConfig);
+    const hotCpuKey = JSON.stringify(hotCpuConfig);
+    const heapChanged = heapKey !== this.heapConfigKey;
+    const hotCpuChanged = hotCpuKey !== this.hotCpuConfigKey;
+    this.chromiumTraceEnabled = settings.hotCpuProfilingCaptureChromiumTrace &&
+      hotCpuConfig.enabled && !heapConfig.enabled;
+    // Stop rearming first. The old profilers still own their active triggers
+    // and can export before we discard an unclaimed trace below.
+    this.reconfiguringRenderers = heapChanged || hotCpuChanged;
+    try {
+      if (heapChanged) {
+        // Heap monitoring owns the renderer debugger while enabled.
+        await this.stopWindowHotCpuProfilers("heap-config-changed");
+        await this.stopHeapMonitoring("config-changed");
+        this.heapConfig = heapConfig;
+        this.heapConfigKey = heapKey;
+        if (heapConfig.enabled) {
+          await this.startHeapMonitoring(heapConfig);
+        }
+      }
+
+      if (hotCpuChanged) {
+        await this.stopHotCpuProfiling("config-changed");
+        this.hotCpuConfig = hotCpuConfig;
+        this.hotCpuConfigKey = hotCpuKey;
+        if (hotCpuConfig.enabled) {
+          await this.startMainHotCpuProfiler(hotCpuConfig);
+        }
+      }
+      if ((heapChanged || hotCpuChanged) && hotCpuConfig.enabled) {
+        for (const entry of this.windows.values()) {
+          await this.startWindowHotCpuProfiler(entry, hotCpuConfig);
+        }
+      }
+    } finally {
+      this.reconfiguringRenderers = false;
+      await this.reconcileChromiumTrace();
+    }
+  }
+
+  private resolveMonitorConfigs(settings: DiagnosticsSettings) {
     const heapConfig = resolveHeapMonitorConfig({
       enabled: settings.heapMonitorEnabled,
       outputRoot: this.outputRoot
@@ -214,40 +268,21 @@ export class DiagnosticsManager {
       captureHeapSnapshot: settings.hotCpuProfilingCaptureHeapSnapshot,
       heapSnapshotLimit: settings.hotCpuProfilingHeapSnapshotLimit
     });
-    this.chromiumTraceEnabled = settings.hotCpuProfilingCaptureChromiumTrace &&
-      hotCpuConfig.enabled && !heapConfig.enabled;
-    await this.chromiumTrace.setArmed(this.chromiumTraceEnabled);
+    return { heapConfig, hotCpuConfig };
+  }
 
-    const heapKey = JSON.stringify(heapConfig);
-    const heapChanged = heapKey !== this.heapConfigKey;
-    if (heapChanged) {
-      // Heap monitoring owns the renderer debugger while enabled. Flush hot
-      // recordings before it attaches, and re-arm after it releases ownership.
-      await this.stopWindowHotCpuProfilers("heap-config-changed");
-      await this.stopHeapMonitoring("config-changed");
-      this.heapConfig = heapConfig;
-      this.heapConfigKey = heapKey;
-      if (heapConfig.enabled) {
-        await this.startHeapMonitoring(heapConfig);
+  private async reconcileChromiumTrace(): Promise<void> {
+    if (this.reconfiguringRenderers || this.shuttingDown) return;
+    const windows = [...this.windows.values()];
+    if (this.chromiumTraceEnabled) {
+      if (windows.some((entry) => entry.hotCpuProfiler?.canCaptureAnotherProfile())) {
+        await this.chromiumTrace.setArmed(true);
+        return;
       }
+      // A renderer at its limit may still be exporting its final trigger.
+      if (windows.some((entry) => entry.hotCpuProfiler?.hasTriggeredProfile())) return;
     }
-
-    const hotCpuKey = JSON.stringify(hotCpuConfig);
-    if (hotCpuKey !== this.hotCpuConfigKey) {
-      await this.stopHotCpuProfiling("config-changed");
-      this.hotCpuConfig = hotCpuConfig;
-      this.hotCpuConfigKey = hotCpuKey;
-      if (hotCpuConfig.enabled) {
-        await this.startMainHotCpuProfiler(hotCpuConfig);
-        for (const entry of this.windows.values()) {
-          await this.startWindowHotCpuProfiler(entry, hotCpuConfig);
-        }
-      }
-    } else if (heapChanged && hotCpuConfig.enabled) {
-      for (const entry of this.windows.values()) {
-        await this.startWindowHotCpuProfiler(entry, hotCpuConfig);
-      }
-    }
+    await this.chromiumTrace.setArmed(false);
   }
 
   private async stopResourceUsage(): Promise<void> {
@@ -397,8 +432,9 @@ export class DiagnosticsManager {
         isDestroyed: () => contents.isDestroyed(),
         takeHeapSnapshot: (filePath) => contents.takeHeapSnapshot(filePath)
       },
-      onProfileArtifactWritten: (filePath, triggerAtMs) =>
-        this.saveChromiumTrace(session.session, filePath, triggerAtMs),
+      onProfileArtifactWritten: (filePath, triggerAtMs, triggerMonotonicMs) =>
+        this.saveChromiumTrace(session.session, filePath, triggerAtMs, triggerMonotonicMs),
+      onProfileFinished: () => { void this.reconcileChromiumTrace(); },
       onProfileWritten: (event) => this.onHotCpuProfileCaptured?.(event, entry.profileId),
       onHeapSnapshotLimitReached: () => {
         this.onHotCpuHeapSnapshotLimitReached();
@@ -408,13 +444,13 @@ export class DiagnosticsManager {
   }
 
   private async saveChromiumTrace(
-    session: HotCpuProfileSession, profilePath: string, triggerAtMs: number
+    session: HotCpuProfileSession, profilePath: string, triggerAtMs: number,
+    triggerMonotonicMs: number
   ): Promise<void> {
-    if (!this.chromiumTraceEnabled) return;
+    if (!this.getDiagnostics().hotCpuProfilingCaptureChromiumTrace) return;
     const filename = `${path.parse(profilePath).name}.trace.json`;
     const result = await this.chromiumTrace.capture(
-      path.join(session.directoryPath, filename), triggerAtMs,
-      () => this.chromiumTraceEnabled && !this.shuttingDown
+      path.join(session.directoryPath, filename), triggerMonotonicMs
     ).catch((error: unknown) => ({
       status: "failed" as const,
       error: error instanceof Error ? error.message : String(error)
