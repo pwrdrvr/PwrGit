@@ -1,5 +1,12 @@
 # Changelog
 
+## v0.61.0 - 2026-11-21
+
+- CPU diagnostics - Added an opt-in Chromium performance trace under Troubleshooting > Hot CPU Profiling. Renderer CPU captures can now save a matching local trace of layout, paint and compositing from a rolling 32 MiB buffer. Exported traces omit event arguments and free-form labels. Tracing is off by default, adds overhead while armed, and retains a variable amount of history depending on event volume.
+- Bundled Git - Updated macOS and Linux to PwrDrvr Git 2.56.1-dev-pwrgit.2, based on Git 2.56.1. Git LFS remains 3.7.1, Windows retains its existing Git runtime, and explicitly selected Git paths remain unchanged. The bundled runtime continues to honor PwrGit's copy-on-write setting; this release does not add a filter-verification control to Clones maintenance.
+- Sidebar performance - Avoided resetting and remeasuring repository names for keyboard tab-stop changes and equivalent repository refreshes. Names still refit when content, width, text appearance or fonts change, retaining the existing truncation steps and tooltips. Controlled renderer fixtures showed fewer fit checks and less layout work; installed-app CPU-spike frequency, GPU use and battery savings remain unmeasured.
+- Git downloads - Fixed valid managed Git downloads being rejected under restrictive file-creation permissions. Extraction now preserves the sealed archive's file modes while excluding ownership and unrelated filesystem metadata; archive path and inventory verification remain required.
+
 ## v0.60.4 - 2026-11-20
 
 - Toolbar fitting - Avoided redundant fitting on equivalent toolbar updates while retaining refits when controls, text, available width, fonts or inherited appearance change. Fixed a delayed Git LFS chip leaving the Worktree Header's last control clipped at narrow widths. Repository rows, section headings, badges and title-bar fitting retain their existing scheduling.
