@@ -17,7 +17,15 @@ export type BulkSyncHandlers = {
   releaseWebContents: (webContentsId: number) => void;
 };
 
-type RepoRow = { id: string; name: string; path: string };
+type RepoRow = {
+  id: string;
+  name: string;
+  path: string;
+  /** 1 when a present checkout's stored state, still for the branch it has
+   * checked out, is clean and behind its upstream without being ahead: a
+   * fast-forward Try pull can very likely make. */
+  pullPending: number;
+};
 type WorktreeRow = {
   id: string;
   repoId: string;
@@ -37,7 +45,17 @@ export function profileRepos(
   const repos = db
     .prepare(
       // A hidden repository sits out Fetch all and Try pull all.
-      `SELECT id, name, path FROM repos r
+      `SELECT id, name, path,
+         EXISTS (
+           -- Stored state only orders the run's starts; Try pull re-inspects
+           -- every checkout itself.
+           SELECT 1 FROM worktrees w
+           JOIN worktree_state s ON s.worktree_id = w.id
+           WHERE w.repo_id = r.id AND w.missing = 0 AND s.branch = w.branch
+             AND s.has_upstream = 1 AND s.behind > 0 AND s.ahead = 0
+             AND s.dirty = 0
+         ) AS pullPending
+       FROM repos r
        WHERE profile_id = ? AND ${visibleRepoSql("r")}
        ORDER BY name COLLATE NOCASE, name, id`
     )
@@ -62,8 +80,9 @@ export function profileRepos(
   const wanted = repoIds === undefined ? null : new Set(repoIds);
   return repos
     .filter((repo) => wanted === null || wanted.has(repo.id))
-    .map((repo) => ({
+    .map(({ pullPending, ...repo }) => ({
       ...repo,
+      ...(pullPending === 1 ? { pullPending: true } : {}),
       worktrees: (byRepo.get(repo.id) ?? []).map(
         ({ repoId: _repoId, ...row }) => row
       )

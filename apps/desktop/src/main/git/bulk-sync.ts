@@ -43,6 +43,9 @@ export type BulkSyncRepoInput = {
     branch: string;
     path: string;
   }>;
+  /** Stored worktree state already shows a clean checkout behind its upstream
+   * and not ahead of it: a fast-forward this pull can very likely make. */
+  pullPending?: boolean;
 };
 
 type LockRunner = <T>(id: string, operation: () => Promise<T>) => Promise<T>;
@@ -853,9 +856,28 @@ function countResults(results: BulkSyncRepoResult[]): BulkSyncCounts {
 }
 
 /**
+ * The order repositories start in. A pull starts the repositories whose stored
+ * state already shows a pending fast-forward first, so the commits the sidebar
+ * is advertising land before an unrelated fetch sweep; everything else keeps
+ * its input order. A fetch has nothing known to gain and runs in input order.
+ */
+export function bulkSyncStartOrder(
+  repos: readonly BulkSyncRepoInput[],
+  mode: BulkSyncMode
+): number[] {
+  const order = repos.map((_, index) => index);
+  if (mode === "fetch") return order;
+  return [
+    ...order.filter((index) => repos[index]!.pullPending === true),
+    ...order.filter((index) => repos[index]!.pullPending !== true)
+  ];
+}
+
+/**
  * Run a bounded profile-wide sync. Repositories are the concurrency unit, so
  * worktrees sharing refs fetch once and are inspected serially under one repo
- * lock. Results stay in input order even though progress arrives by completion.
+ * lock. Repositories start in `bulkSyncStartOrder`; results stay in input
+ * order even though progress arrives by completion.
  */
 export async function bulkSyncRepositories(
   git: GitExec,
@@ -866,7 +888,8 @@ export async function bulkSyncRepositories(
   const startedAt = now().toISOString();
   const totalRepos = repos.length;
   const results: Array<BulkSyncRepoResult | undefined> = new Array(totalRepos);
-  let nextIndex = 0;
+  const startOrder = bulkSyncStartOrder(repos, options.mode);
+  let nextStart = 0;
   let completedRepos = 0;
   const runRepository: LockRunner =
     options.runRepository ?? ((_id, operation) => operation());
@@ -905,9 +928,9 @@ export async function bulkSyncRepositories(
   const worker = async (): Promise<void> => {
     for (;;) {
       if (isAborted(options.signal)) return;
-      const index = nextIndex;
-      nextIndex += 1;
-      if (index >= repos.length) return;
+      if (nextStart >= startOrder.length) return;
+      const index = startOrder[nextStart]!;
+      nextStart += 1;
       const repo = repos[index]!;
       options.onProgress?.({
         operationId: options.operationId,

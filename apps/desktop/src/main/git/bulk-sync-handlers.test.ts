@@ -1,9 +1,10 @@
 import { describe, expect, it, vi } from "vitest";
 import { ok } from "@pwrgit/shared";
 import { CommandBus } from "../command-bus";
-import type { DB } from "../persistence/db";
+import { openDatabase, type DB } from "../persistence/db";
+import { ProfileService } from "../profiles/profile-service";
 import { execGit } from "./dugite";
-import { registerBulkSyncHandlers } from "./bulk-sync-handlers";
+import { profileRepos, registerBulkSyncHandlers } from "./bulk-sync-handlers";
 import { WorktreeOperationQueue } from "./worktree-operation-queue";
 
 vi.mock("../ipc", () => ({ emitEvent: vi.fn() }));
@@ -71,5 +72,62 @@ describe("bulk sync and the profile's folders", () => {
       profileId: "nobody", operationId: "bulk-2", mode: "fetch"
     });
     expect(onRunStart).toHaveBeenCalledExactlyOnceWith("profile-1");
+  });
+});
+
+describe("profileRepos and pending pulls", () => {
+  // Rule: a repository is marked as having a pending pull exactly when one of
+  // its present checkouts has stored state, for the branch still checked out, that is behind its upstream, not
+  // ahead and clean (what Try pull can fast-forward). Another profile's
+  // identical rows never mark this profile's repositories.
+  it("marks only this profile's repositories with a clean, behind checkout", () => {
+    const db = openDatabase(":memory:");
+    const profiles = new ProfileService(db);
+    const mine = profiles.create({ name: "mine", email: "mine@example.com", roots: [] }).id;
+    const theirs = profiles.create({ name: "theirs", email: "theirs@example.com", roots: [] }).id;
+    type State = { upstream: number; ahead: number; behind: number; dirty: number; missing?: number } | null;
+    const seed = (profileId: string, id: string, states: State[]): void => {
+      db.prepare("INSERT INTO repos (id, profile_id, name, path) VALUES (?, ?, ?, ?)")
+        .run(id, profileId, id, `/checkouts/${id}`);
+      states.forEach((state, index) => {
+        const wt = `${id}-wt${index}`;
+        db.prepare(
+          "INSERT INTO worktrees (id, repo_id, branch, path, is_primary, missing) VALUES (?, ?, ?, ?, ?, ?)"
+        ).run(wt, id, `b${index}`, `/checkouts/${id}/${index}`, index === 0 ? 1 : 0, state?.missing ?? 0);
+        if (state === null) return;
+        db.prepare(
+          `INSERT INTO worktree_state (worktree_id, branch, has_upstream, ahead, behind, dirty)
+           VALUES (?, ?, ?, ?, ?, ?)`
+        ).run(wt, `b${index}`, state.upstream, state.ahead, state.behind, state.dirty);
+      });
+    };
+    const clean = { upstream: 1, ahead: 0, behind: 0, dirty: 0 };
+    seed(mine, "a-current", [clean, null]);
+    seed(mine, "b-behind", [clean, { ...clean, behind: 2 }]);
+    seed(mine, "c-dirty", [{ ...clean, behind: 1, dirty: 3 }]);
+    seed(mine, "d-diverged", [{ ...clean, behind: 1, ahead: 1 }]);
+    seed(mine, "e-no-upstream", [{ ...clean, upstream: 0, behind: 1 }]);
+    seed(mine, "f-gone", [clean, { ...clean, behind: 1, missing: 1 }]);
+    seed(mine, "g-switched", [{ ...clean, behind: 1 }]);
+    // The checkout moved to another branch since its state was stored.
+    db.prepare("UPDATE worktrees SET branch = 'other' WHERE id = 'g-switched-wt0'").run();
+    seed(theirs, "h-theirs", [{ ...clean, behind: 5 }]);
+
+    const repos = profileRepos(db, mine);
+    expect(repos?.map((repo) => [repo.id, repo.pullPending === true])).toEqual([
+      ["a-current", false],
+      ["b-behind", true],
+      ["c-dirty", false],
+      ["d-diverged", false],
+      ["e-no-upstream", false],
+      ["f-gone", false],
+      ["g-switched", false]
+    ]);
+    // Worktree inputs carry no stored-state columns.
+    expect(repos?.find((repo) => repo.id === "b-behind")?.worktrees).toEqual([
+      { id: "b-behind-wt0", branch: "b0", path: "/checkouts/b-behind/0" },
+      { id: "b-behind-wt1", branch: "b1", path: "/checkouts/b-behind/1" }
+    ]);
+    expect(profileRepos(db, theirs)?.map((repo) => repo.pullPending)).toEqual([true]);
   });
 });

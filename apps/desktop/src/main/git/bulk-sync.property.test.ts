@@ -212,3 +212,42 @@ describe("bulk sync termination property", () => {
     }));
   });
 });
+
+describe("bulk sync start order property", () => {
+  // Rule: a pull starts every repository already known to have a pending
+  // fast-forward before any other repository, whatever the worker count; each
+  // group keeps its input order, and results stay in input order. A fetch has
+  // no known work to favour and starts in input order.
+  it("starts known pulls first and reports in input order", async () => {
+    await fc.assert(fc.asyncProperty(
+      fc.array(fc.boolean(), { minLength: 1, maxLength: 8 }),
+      fc.integer({ min: 1, max: 3 }),
+      fc.constantFrom<BulkSyncMode>("fetch", "soft-pull"),
+      async (pending, concurrency, mode) => {
+        const repos = pending.map((flag, index) => ({
+          ...repository(index),
+          ...(flag ? { pullPending: true } : {})
+        }));
+        const started: string[] = [];
+        const git: GitExec = async (args) => {
+          if (args[0] === "remote") return ok({ stdout: "origin\n", stderr: "", exitCode: 0 });
+          if (args[0] === "config") return ok({ stdout: "", stderr: "", exitCode: 1 });
+          return ok({ stdout: "", stderr: "", exitCode: 0 });
+        };
+        const summary = await bulkSyncRepositories(git, repos, {
+          operationId: "start-order", mode, concurrency,
+          onProgress: (event) => {
+            if (event.phase === "repo_started") started.push(event.repoId!);
+          }
+        });
+        const ids = repos.map((repo) => repo.id);
+        // Oracle: a stable partition of the input, computed independently.
+        const expected = mode === "fetch"
+          ? ids
+          : [...ids.filter((_, i) => pending[i]), ...ids.filter((_, i) => !pending[i])];
+        expect(started).toEqual(expected);
+        expect(summary.results.map((result) => result.repoId)).toEqual(ids);
+      }
+    ));
+  });
+});
