@@ -34,6 +34,8 @@ export const BULK_SYNC_CONCURRENCY = 3;
 /** Each repository worker runs at most four independent checkout operations. */
 export const BULK_WORKTREE_CONCURRENCY = 4;
 
+const HEAD_REVISIONS = ["--revs-only", "HEAD", "--symbolic-full-name", "HEAD", "--"];
+
 export type BulkSyncRepoInput = {
   id: string;
   name: string;
@@ -377,7 +379,7 @@ async function inspectWorktree(
   // HEAD argument. The trailing -- keeps filenames out of revision parsing.
   const pathArgs = BULK_OPERATION_STATE_PATHS.flatMap((path) => ["--git-path", path]);
   const checkout = await git(
-    ["rev-parse", ...pathArgs, "--revs-only", "HEAD", "--symbolic-full-name", "HEAD", "--"],
+    ["rev-parse", ...pathArgs, ...HEAD_REVISIONS],
     worktree.path,
     NO_OPTIONAL_LOCKS
   );
@@ -672,6 +674,28 @@ async function softPullWorktree(
   if (second.kind === "result") return second.value;
   report("Fast-forwarding…");
   if (isAborted(signal)) return cancelled();
+  // A switch to a sibling tracking the same upstream can pass every upstream
+  // check. Read HEAD again after inspecting operation paths and ancestry.
+  const checkout = await checked(git, ["rev-parse", ...HEAD_REVISIONS], worktree.path);
+  if (isAborted(signal)) return cancelled();
+  const [head, ref] = checkout.ok ? checkout.value.stdout.trimEnd().split(/\r?\n/) : [];
+  const expectedRef = `refs/heads/${second.value.branch}`;
+  let sameBranch = ref === expectedRef;
+  // A tag named HEAD can suppress the symbolic name without suppressing the
+  // OID. Ask Git for the exact symbolic ref in that case.
+  if (ref === undefined && head === second.value.head) {
+    const symbolic = await checked(git, ["symbolic-ref", "--quiet", "HEAD"], worktree.path);
+    if (isAborted(signal)) return cancelled();
+    sameBranch = symbolic.ok && symbolic.value.stdout.trim() === expectedRef;
+  }
+  if (head !== second.value.head || !sameBranch) {
+    return worktreeResult(worktree, {
+      branch: second.value.branch,
+      outcome: "skipped",
+      reason: "unsafe_state",
+      message: "The checked-out branch or commit could not be verified before the fast-forward."
+    });
+  }
   // Checkout can partially write files before it moves HEAD. Preserve bulk
   // pull's non-interruptible mutation semantics: keep this merge and its final
   // verification under the worktree lock, outside cancellation and watchdogs.

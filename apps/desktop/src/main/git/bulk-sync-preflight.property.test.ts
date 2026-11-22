@@ -259,8 +259,10 @@ describe("bulk pull remote preflight, with Git as the oracle", () => {
     expect(f.calls.filter((c) => c.args[0] === "status" && c.args.includes("--untracked-files=no")).map((c) => c.cwd)).toEqual([path]);
     // Both live inspections still read status and operation markers. Each
     // operation-path lookup also resolves branch and HEAD in the same child.
-    // The only separate HEAD read verifies the completed merge.
+    // One final ref and OID read guards the mutation. The standalone HEAD
+    // read verifies the completed merge.
     expect(f.calls.filter((c) => c.args[0] === "branch")).toHaveLength(0);
+    expect(f.calls.filter((c) => c.args[0] === "rev-parse" && c.args.includes("--revs-only") && !c.args.includes("--git-path"))).toHaveLength(1);
     expect(f.calls.filter((c) => c.args[0] === "rev-parse" && c.args.at(-1) === "HEAD")).toHaveLength(1);
   });
 
@@ -287,6 +289,27 @@ describe("bulk pull remote preflight, with Git as the oracle", () => {
     expect(outcome.results[0]?.worktrees[0]?.reason).toBe(change === "dirt" ? "dirty" : "unsafe_state");
     expect(f.calls.some((call) => call.args[0] === "merge")).toBe(false);
     expect(git(f.path, "rev-parse", "HEAD")).toBe(before);
+  });
+
+  it("refuses a different checkout of the same commit after the final operation-path probe", async () => {
+    const f = fixture();
+    const before = git(f.path, "rev-parse", "HEAD");
+    git(f.path, "branch", "--track", "replacement", "origin/main");
+    f.advance();
+    let pathProbes = 0;
+    const exec: GitExec = async (args, cwd, options) => {
+      const result = await f.exec(args, cwd, options);
+      if (args.includes("--git-path") && ++pathProbes === 2) {
+        git(f.path, "switch", "replacement");
+      }
+      return result;
+    };
+    const result = await bulkSyncRepositories(exec, [f.input], { operationId: "late-switch", mode: "soft-pull" });
+    expect(pathProbes).toBe(2);
+    expect(git(f.path, "symbolic-ref", "HEAD")).toBe("refs/heads/replacement");
+    expect(git(f.path, "rev-parse", "refs/heads/main")).toBe(before);
+    expect(git(f.path, "rev-parse", "refs/heads/replacement")).toBe(before);
+    expect(result.results[0]?.worktrees[0]).toMatchObject({ outcome: "skipped", reason: "unsafe_state" });
   });
 
   it("handles an ambiguous HEAD ref through the individual checkout probes", async () => {

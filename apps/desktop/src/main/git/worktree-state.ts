@@ -9,7 +9,7 @@ import { NO_OPTIONAL_LOCKS, requireExit0, type GitExec } from "./dugite";
 import { checkoutExists } from "./worktree-liveness";
 import { checkoutCommonGitDir, nestedWorktreePathspec } from "@pwrgit/mcp-server/nested-worktrees";
 import { WorktreeOperationQueue } from "./worktree-operation-queue";
-import { readDefaultComparisons, readShallowBoundary, type DefaultComparisons } from "./worktree-default-comparison";
+import { defaultComparisonApplies, readDefaultComparisons, type DefaultComparisons } from "./worktree-default-comparison";
 
 /** A probe found `branch`'s configured upstream deleted. */
 export type UpstreamGoneChange = {
@@ -618,12 +618,12 @@ export class WorktreeStateService {
         this.git, wt.repo_path, value.ref, oid, defaultBatch.branches
       );
       const batch = await pending;
-      // Each checkout just read its live status and revalidated the default.
-      // A moved tip, missing row or replaced checkout uses the ordinary probe.
+      // Verify the short name and graph in this checkout after its live status.
+      // A moved tip, changed graph or replaced checkout uses the ordinary probe.
       const entry = batch?.byHead.get(parsed.head);
       if (entry === undefined || batch?.base !== oid ||
         await checkoutCommonGitDir(wt.path) !== batch.commonDir ||
-        await readShallowBoundary(batch.commonDir) !== batch.shallowBoundary) return null;
+        !await defaultComparisonApplies(this.git, wt.path, value.ref, batch)) return null;
       return entry;
     });
     const [lastActivityAt, lastAuthoredAt, { value: def }, defaultComparison] = await Promise.all([
@@ -816,8 +816,8 @@ export class WorktreeStateService {
     const branches = worktrees.filter(({ branch }) =>
       branch !== "" && !branch.startsWith("detached@") && !/[\r\n]/.test(branch)
     ).map(({ branch }) => `refs/heads/${branch}`);
-    // This setup costs four Git reads and Git's comparison memory grows with
-    // the number of tips. Batch the families where it can pay for itself.
+    // Batch families large enough to amortize setup. Git's comparison memory
+    // grows with the number of tips.
     const defaultBatch: DefaultBatchRequest | undefined =
       branches.length >= 8 && branches.length <= 256 ? { branches } : undefined;
     await mapLimit(worktrees, concurrency, async ({ id }) => {

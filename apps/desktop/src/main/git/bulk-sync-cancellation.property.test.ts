@@ -12,8 +12,8 @@ const repo: BulkSyncRepoInput = {
   worktrees: [{ id: "main", branch: "main", path: "/bulk-cancel-fixture" }]
 };
 
-type Probe = "remote" | "remote_config" | "status" | "state" | "upstream_name" | "upstream_head" | "branch_remote" | "ancestry";
-const probes: Probe[] = ["remote", "remote_config", "status", "state", "upstream_name", "upstream_head", "branch_remote", "ancestry"];
+type Probe = "remote" | "remote_config" | "status" | "state" | "upstream_name" | "upstream_head" | "branch_remote" | "ancestry" | "checkout";
+const probes: Probe[] = ["remote", "remote_config", "status", "state", "upstream_name", "upstream_head", "branch_remote", "ancestry", "checkout"];
 const localHead = "1".repeat(40);
 const upstreamHead = "2".repeat(40);
 
@@ -28,7 +28,8 @@ function scenario(intercept: (probe: Probe | "merge" | "verify_head", options?: 
       command === "status" ? "status" :
       command === "merge-base" ? "ancestry" : command === "merge" ? "merge" :
       command === "rev-parse" ? (args.includes("--git-path") ? "state" :
-        args.at(-1) === "HEAD" ? "verify_head" : args.includes("--abbrev-ref") ? "upstream_name" : "upstream_head") : undefined;
+        args.includes("--revs-only") ? "checkout" : args.at(-1) === "HEAD" ? "verify_head" :
+          args.includes("--abbrev-ref") ? "upstream_name" : "upstream_head") : undefined;
     if (probe !== undefined && await intercept(probe, options)) {
       return err({ kind: "git", code: "aborted", message: "Stopped at a probe." });
     }
@@ -40,6 +41,7 @@ function scenario(intercept: (probe: Probe | "merge" | "verify_head", options?: 
     else if (probe === "upstream_name") stdout = "origin/main\n";
     else if (probe === "upstream_head") stdout = `${upstreamHead}\n`;
     else if (probe === "branch_remote") stdout = "origin\n";
+    else if (probe === "checkout") stdout = `${localHead}\nrefs/heads/main\n`;
     else if (probe === "state") {
       const paths = args.filter((_, i) => args[i - 1] === "--git-path");
       stdout = [
@@ -56,7 +58,7 @@ function scenario(intercept: (probe: Probe | "merge" | "verify_head", options?: 
 async function assertCancelledProbe(probe: Probe, secondInspection: boolean): Promise<void> {
   const controller = new AbortController();
   let seen = 0;
-  const wanted = secondInspection && probe !== "remote" && probe !== "remote_config" ? 2 : 1;
+  const wanted = secondInspection && probe !== "remote" && probe !== "remote_config" && probe !== "checkout" ? 2 : 1;
   const { git, updated } = scenario(async (current) => {
     if (current !== probe || ++seen !== wanted) return false;
     controller.abort();

@@ -1,5 +1,5 @@
 import { execFileSync } from "node:child_process";
-import { mkdtempSync, realpathSync, rmSync } from "node:fs";
+import { mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
@@ -235,6 +235,74 @@ describe.each(["regressions", 0, 1, 2, 3, 4] as const)("worktree default ancestr
           divergedFromDefault: !related,
           lastActivityAt: git(primary, "log", "-1", "--format=%cI", row.head)
         });
+      }
+    }
+  });
+
+  it("reads only enough default history to distinguish near-tip divergence from unrelated history", async () => {
+    const base = commits[6]!;
+    const countedGit: GitExec = (args, cwd, options) => {
+      calls.push([...args]);
+      return realGit(args, cwd, options);
+    };
+    git(primary, "reset", "--hard", base);
+    calls = [];
+    const contained = await readDefaultComparisons(countedGit, primary, "main", base, ["refs/heads/base"]);
+    expect(contained?.byHead.get(commits[0]!)).toMatchObject({ behindDefault: 1, mergedIntoDefault: true });
+    expect(calls.filter(([command]) => command === "rev-list")).toEqual([]);
+    calls = [];
+    const diverged = await readDefaultComparisons(countedGit, primary, "main", base, ["refs/heads/left"]);
+    expect(diverged?.byHead.get(commits[3]!)).toMatchObject({ behindDefault: 1, divergedFromDefault: false });
+    expect(calls.filter(([command]) => command === "rev-list")).toEqual([
+      ["rev-list", "--count", "--max-count=2", base]
+    ]);
+  });
+
+  it.each(["replace", "graft", "private ref"] as const)("uses checkout-local ancestry when a later worktree sees a %s change", async (kind) => {
+    const repoId = (db.prepare("SELECT repo_id FROM worktrees WHERE id = ?")
+      .get(worktreeId) as { repo_id: string }).repo_id;
+    const prefix = kind === "private ref" ? "private" : kind;
+    const branches = Array.from({ length: 8 }, (_, i) => `${prefix}-${i}`);
+    const lateBranch = branches.at(-1)!;
+    const latePath = join(root, lateBranch);
+    const base = commits[6]!;
+    const head = commits[0]!;
+    git(primary, "reset", "--hard", base);
+    for (const branch of branches) git(primary, "worktree", "add", "-b", branch, join(root, branch), head);
+    const indexed = await new RepoIndexer(db, realGit).refreshRepoWorktrees(repoId);
+    if (!indexed.ok) throw new Error(indexed.error.message);
+    const rows = (db.prepare("SELECT id, branch FROM worktrees WHERE repo_id = ? ORDER BY branch")
+      .all(repoId) as Array<{ id: string; branch: string }>).filter(({ branch }) => branches.includes(branch));
+    const grafts = join(primary, ".git", "info", "grafts");
+    const def = kind === "private ref" ? "worktree/main" : "main";
+    if (kind === "private ref") git(primary, "branch", "-m", "main", def);
+    let changed = false;
+    const exec: GitExec = async (args, cwd, options) => {
+      if (args[0] === "status" && cwd === latePath && !changed) {
+        changed = true;
+        if (kind === "replace") git(primary, "replace", base, commits[5]!);
+        if (kind === "graft") writeFileSync(grafts, `${base}\n`);
+        if (kind === "private ref") git(latePath, "update-ref", "refs/worktree/main", commits[5]!);
+      }
+      return realGit(args, cwd, options);
+    };
+    try {
+      const isolated = new WorktreeStateService(db, exec);
+      await isolated.resolveDefaultBranch(repoId, primary);
+      await isolated.refreshMany(rows, 1);
+      expect(changed).toBe(true);
+      const merge = await realGit(["merge-base", head, def], latePath);
+      if (!merge.ok) throw new Error(merge.error.message);
+      expect(merge.value.exitCode).toBe(1);
+      expect(isolated.getCached(rows.at(-1)!.id)).toMatchObject({
+        head, defaultBranch: def, mergedIntoDefault: false, behindDefault: 0, divergedFromDefault: true
+      });
+    } finally {
+      if (kind === "replace" && changed) git(primary, "replace", "-d", base);
+      if (kind === "graft") rmSync(grafts, { force: true });
+      if (kind === "private ref") {
+        git(latePath, "update-ref", "-d", "refs/worktree/main");
+        git(primary, "branch", "-m", def, "main");
       }
     }
   });

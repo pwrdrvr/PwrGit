@@ -10,12 +10,17 @@ export type DefaultComparison = {
   lastActivityAt: string;
 };
 
-export type DefaultComparisons = {
+type DefaultComparisonBase = {
   commonDir: string;
   base: string;
   shallowBoundary: string | undefined;
+};
+
+export type DefaultComparisons = DefaultComparisonBase & {
   byHead: Map<string, DefaultComparison>;
 };
+
+const DEFAULT_COUNT_LIMIT = 2048;
 
 const existsOrUnreadable = (path: string): Promise<boolean> =>
   access(path).then(() => true, (cause: NodeJS.ErrnoException) => cause.code !== "ENOENT");
@@ -23,10 +28,26 @@ const existsOrUnreadable = (path: string): Promise<boolean> =>
 const localOnly = { env: { ...NO_OPTIONAL_LOCKS.env, GIT_NO_LAZY_FETCH: "1" } };
 
 /** The common shallow boundary determines the parent edges Git can walk. */
-export function readShallowBoundary(commonDir: string): Promise<string | undefined | null> {
+function readShallowBoundary(commonDir: string): Promise<string | undefined | null> {
   return readFile(join(commonDir, "shallow"), "utf8").catch(
     (cause: NodeJS.ErrnoException) => cause.code === "ENOENT" ? undefined : null
   );
+}
+
+/** Check the default in this checkout, where a private ref can shadow it.
+ * Extra OIDs from the glob mean that replacement refs may change the graph. */
+export async function defaultComparisonApplies(
+  git: GitExec, path: string, defaultRef: string, snapshot: DefaultComparisonBase
+): Promise<boolean> {
+  const [revision, shallowBoundary, grafts] = await Promise.all([
+    git([
+      "rev-parse", "--revs-only", "--glob=refs/replace/*", `${defaultRef}^{commit}`, "--"
+    ], path, localOnly),
+    readShallowBoundary(snapshot.commonDir),
+    existsOrUnreadable(join(snapshot.commonDir, "info", "grafts"))
+  ]);
+  return revision.ok && revision.value.exitCode === 0 &&
+    revision.value.stdout.trim() === snapshot.base && shallowBoundary === snapshot.shallowBoundary && !grafts;
 }
 
 /** Batch comparisons against one pinned default commit. Git does the graph
@@ -48,18 +69,13 @@ export async function readDefaultComparisons(
   ]);
   if (shallowBoundary === null || grafts) return null;
 
-  const [refs, count] = await Promise.all([
-    git([
-      "for-each-ref", "--stdin",
-      `--format=%(refname)%00%(objectname)%00%(ahead-behind:${base})%00%(committerdate:iso8601-strict)`
-    ], path, { ...localOnly, input: [...branches, "refs/replace", ""].join("\n") }),
-    git(["rev-list", "--count", base], path, localOnly)
-  ]);
-  if (!refs.ok || refs.value.exitCode !== 0 || !count.ok || count.value.exitCode !== 0) return null;
-  const reachable = Number(count.value.stdout.trim());
-  if (!Number.isSafeInteger(reachable) || reachable <= 0) return null;
+  const refs = await git([
+    "for-each-ref", "--stdin",
+    `--format=%(refname)%00%(objectname)%00%(ahead-behind:${base})%00%(committerdate:iso8601-strict)`
+  ], path, { ...localOnly, input: [...branches, "refs/replace", ""].join("\n") });
+  if (!refs.ok || refs.value.exitCode !== 0) return null;
 
-  const byHead = new Map<string, DefaultComparison>();
+  const pairs: Array<{ head: string; ahead: number; behind: number; date: string }> = [];
   for (const line of refs.value.stdout.trimEnd().split("\n")) {
     const [name, head, pair, date] = line.split("\0");
     if (name?.startsWith("refs/replace/")) return null;
@@ -68,10 +84,29 @@ export async function readDefaultComparisons(
     if (match === null) continue;
     const ahead = Number(match[1]);
     const behind = Number(match[2]);
-    if (!Number.isSafeInteger(ahead) || !Number.isSafeInteger(behind) || behind > reachable) continue;
-    // D minus H contains all of D iff their reachable sets are disjoint.
-    // H minus D is empty iff H itself is reachable from D.
-    const divergedFromDefault = behind === reachable;
+    if (!Number.isSafeInteger(ahead) || !Number.isSafeInteger(behind)) continue;
+    pairs.push({ head, ahead, behind, date });
+  }
+
+  // A tip with zero on either side is already known to share ancestry.
+  // For the other tips, counting one more commit than their behind value is
+  // sufficient to show that the default has something in common with them.
+  const maxBehind = pairs.reduce((max, { ahead, behind }) =>
+    ahead > 0 && behind < DEFAULT_COUNT_LIMIT ? Math.max(max, behind) : max, 0);
+  let reachable = 0;
+  if (maxBehind > 0) {
+    const count = await git(["rev-list", "--count", `--max-count=${maxBehind + 1}`, base], path, localOnly);
+    if (!count.ok || count.value.exitCode !== 0) return null;
+    reachable = Number(count.value.stdout.trim());
+    if (!Number.isSafeInteger(reachable) || reachable <= 0 || reachable > maxBehind + 1) return null;
+  }
+
+  const byHead = new Map<string, DefaultComparison>();
+  for (const { head, ahead, behind, date } of pairs) {
+    const needsCount = ahead > 0 && behind > 0;
+    // Use the checkout-local merge base when the bounded count cannot decide.
+    if (needsCount && (behind >= DEFAULT_COUNT_LIMIT || behind > reachable)) continue;
+    const divergedFromDefault = needsCount && behind === reachable;
     byHead.set(head, {
       behindDefault: divergedFromDefault ? 0 : behind,
       mergedIntoDefault: ahead === 0,
@@ -79,16 +114,6 @@ export async function readDefaultComparisons(
       lastActivityAt: date.trim()
     });
   }
-  // The legacy per-checkout walks use the short default ref. Verify its exact
-  // meaning after the batch, in case it was shadowed or moved during the read.
-  const [shorthand, replacements, nowShallow, nowGrafts] = await Promise.all([
-    git(["rev-parse", "--verify", "--quiet", `${defaultRef}^{commit}`], path, localOnly),
-    git(["for-each-ref", "--format=%(refname)", "refs/replace"], path, localOnly),
-    readShallowBoundary(commonDir),
-    existsOrUnreadable(join(commonDir, "info", "grafts"))
-  ]);
-  if (!shorthand.ok || shorthand.value.exitCode !== 0 || shorthand.value.stdout.trim() !== base ||
-    !replacements.ok || replacements.value.exitCode !== 0 || replacements.value.stdout.trim() !== "" ||
-    nowShallow !== shallowBoundary || nowGrafts) return null;
-  return { commonDir, base, shallowBoundary, byHead };
+  const snapshot = { commonDir, base, shallowBoundary, byHead };
+  return await defaultComparisonApplies(git, path, defaultRef, snapshot) ? snapshot : null;
 }
