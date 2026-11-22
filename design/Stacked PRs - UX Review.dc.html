@@ -275,7 +275,7 @@
       <!-- ================================================================ TURN 0 -->
       <section class="dv-turn" id="t0" data-screen-label="Turn 0 Brief">
         <div class="dv-thd"><a class="dv-tid" href="#t0">0</a><span class="dv-tname">Brief: we never built stacked PRs, and the team already stacks with gh stack</span></div>
-        <p class="dv-sub">Harold, 2026-11-22: “Did we build Stacked PR GUI support and operation support in PwrGit? I feel like we didn’t.” <b>We didn’t.</b> PwrGit draws a stack’s branches as one lane train and prints <code>→ base</code> on a pull-request row whose base isn’t the default branch. That’s all. Nothing stores a branch’s parent. Nothing rebases with <code>--onto</code> or <code>--update-refs</code>. Nothing opens a PR or changes its base. There’s no undo. Meanwhile PwrAgent’s contributors stack with GitHub’s own <code>gh stack</code> (v0.3.0). It keeps a catalog at <code>$GIT_COMMON_DIR/gh-stack</code> and a stack object on GitHub. <b>Goal:</b> make stacks something you can see and operate in PwrGit and through its MCP server, without inventing a fourth stack format. <b>Open decisions for review:</b> where stack state lives (1a is recommended), where stacks show (2a), and how agents get write access (5b). Everything here is a proposal. Nothing is built. All data is invented.</p>
+        <p class="dv-sub">Harold, 2026-11-22: “Did we build Stacked PR GUI support and operation support in PwrGit? I feel like we didn’t.” <b>We didn’t.</b> PwrGit draws a stack’s branches as one lane train and prints <code>→ base</code> on a pull-request row whose base isn’t the default branch. That’s all. Nothing stores a branch’s parent. Nothing rebases with <code>--onto</code> or <code>--update-refs</code>. Nothing opens a PR or changes its base. There’s no undo. Meanwhile PwrAgent’s contributors stack with GitHub’s own <code>gh stack</code> (v0.3.0). It keeps a catalog at <code>$GIT_COMMON_DIR/gh-stack</code> and a stack object on GitHub. <b>Goal:</b> make stacks something you can see and operate in PwrGit and through its MCP server, without inventing a fourth stack format. <b>Open decisions for review:</b> where stack state lives (1a is recommended), where stacks show (2a), and how agents get write access (5b). PwrAgent’s companion design is <b>PwrAgent#4190</b>. It copies this engine into its own package and shares only gh stack’s catalog and locks with PwrGit. Everything here is a proposal. Nothing is built. All data is invented.</p>
         <div class="dv-opts">
           <div class="dv-opt" id="0a" data-screen-label="0a What exists">
             <div class="dv-olabel"><a class="dv-oid" href="#0a">0a</a>What PwrGit has to build on</div>
@@ -321,8 +321,11 @@
   }]
 }
 <span class="c"># base = the parent tip this branch was last built on: the --onto anchor</span>
-<span class="c"># gh-stack.lock / gh-stack-operation.lock: taken by PwrGit before any write</span></pre>
-            <p class="note"><b>Why:</b> it already exists in this team’s clones, and it already records the hard part. <code>base</code> is the parent tip each branch was built on, which is the exact anchor a restack needs. It lives in the common dir, so every worktree sees the same stacks. That matters most for PwrAgent, where every thread is a worktree. A <code>gh stack view</code> after a PwrGit restack shows the same thing PwrGit does. An unknown <code>schemaVersion</code> drops PwrGit to read-only. It never guesses at a newer format.</p>
+<span class="c"># flock, LOCK_EX|LOCK_NB, 100 ms retry, 5 s timeout, never unlinked:</span>
+<span class="c">#   gh-stack-operation.lock  whole command (PwrGit: the apply window only)</span>
+<span class="c">#   gh-stack.lock            catalog write: SHA-256 CAS, temp + fsync + rename</span>
+<span class="c"># busy while: gh-stack-rebase-state · gh-stack-modify-state · gh-stack-migration · pwragent-stack-op.json</span></pre>
+            <p class="note"><b>Why:</b> it already exists in this team’s clones, and it already records the hard part. <code>base</code> is the parent tip each branch was built on, which is the exact anchor a restack needs. It lives in the common dir, so every worktree sees the same stacks. That matters most for PwrAgent, where every thread is a worktree. A <code>gh stack view</code> after a PwrGit restack shows the same thing PwrGit does. An unknown <code>schemaVersion</code> drops PwrGit to read-only. It never guesses at a newer format. gh stack re-marshals from Go structs and drops unknown fields, so PwrGit adds no fields of its own. Its journal and undo refs live outside the catalog (<code>pwrgit-stack-op.json</code>, <code>refs/pwrgit/undo/*</code>), and so do PwrAgent’s.</p>
           </div>
           <div class="dv-opt" id="1b" data-screen-label="1b Options weighed">
             <div class="dv-olabel"><a class="dv-oid" href="#1b">1b</a>The alternatives, and what each loses</div>
@@ -548,7 +551,9 @@
 <span class="w">git rebase origin/main windows/scheduler</span>      <span class="c"># replays #651 over its own squash → conflicts</span>
 <span class="k">git replay --onto origin/main 7b3d0f5..windows/scheduler</span>
                                           <span class="c"># 7b3d0f5 = catalog base: only #652's commits move</span>
-<span class="c"># forge order matters:</span>
+<span class="c"># linked stack: GitHub owns the bases. It retargets #652 itself, and nothing is deleted remotely</span>
+<span class="k">GET /repos/acme/orbit-deploy/stacks</span>       <span class="c"># confirm #651 dropped out and #652 → main</span>
+<span class="c"># unlinked stack or GitLab: order matters</span>
 <span class="k">PATCH #652 base → main</span>                   <span class="c"># 1. retarget the child first</span>
 <span class="k">git push origin :windows/model</span>            <span class="c"># 2. only then delete; deleting an open PR's base closes it</span></pre>
             <p class="note">The catalog’s <code>base</code> is what makes this safe without a heuristic. gh-stack v0.1.1 got the boundary wrong after a squash (upstream <code>#586</code>, recorded in PwrAgent’s <code>docs/gh-stack-workflow.md</code>). PwrGit takes the newest of the catalog base, the parent’s last-known tip, and the fork point. It then proves that the commit list it replays equals the child’s own commits by patch-id. If they differ, the plan stops before Run.</p>
@@ -558,7 +563,7 @@
             <div class="find" style="width: 470px">
               <div class="fitem"><span class="pin acc">1</span><div><h4><code>--update-refs</code> skips them, so we don’t use it</h4><p>Git won’t update a ref that’s checked out in another worktree. It warns and moves on, and the stack comes out half-restacked. PwrGit moves refs itself, in one <code>update-ref</code> transaction with each planned old tip as the expected value.</p></div></div>
               <div class="fitem"><span class="pin acc">2</span><div><h4>Then each checked-out worktree follows with <code>read-tree -m -u &lt;old&gt; &lt;new&gt;</code></h4><p>Once the ref has moved, <code>reset --keep</code> would see HEAD already at the target and leave the old files behind. A two-tree <code>read-tree -m -u</code> moves the index and files from the old tip to the new one, as a checkout does. Before Run, the plan intersects each worktree’s dirty files with the files the restack changes. An empty intersection means its changes ride along. A non-empty one blocks the whole plan before any ref moves and names the files. Stash them, or finish them, then restack.</p></div></div>
-              <div class="fitem"><span class="pin acc">3</span><div><h4>An agent mid-turn is a dirty worktree with a pulse</h4><p>PwrAgent will gate this harder. It won’t restack under a running turn without the thread’s consent. That’s its design to do, and it’s handed off with this board.</p></div></div>
+              <div class="fitem"><span class="pin acc">3</span><div><h4>An agent mid-turn is a dirty worktree with a pulse</h4><p>PwrAgent gates this harder. It won’t restack under a running turn without the thread’s consent. That’s in PwrAgent#4190. While its <code>pwragent-stack-op.json</code> exists, PwrGit treats the clone as busy, and PwrAgent does the same for PwrGit’s journal.</p></div></div>
             </div>
           </div>
           <div class="dv-opt" id="4d" data-screen-label="4d Undo and leases">
@@ -603,7 +608,7 @@
                   <div class="ln"><em>Refs</em><span>3 move in one transaction · undo kept</span></div>
                   <div class="ln"><em>Worktrees</em><span>⌂ orbit-deploy.windows-api · clean, follows with read-tree -m -u</span></div>
                   <div class="ln"><em>Push</em><span class="w">4 branches, atomic, each leased to its last-fetched sha</span></div>
-                  <div class="ln"><em>GitHub</em><span>open #654 (draft) into windows/api · link 4 PRs into a stack</span></div>
+                  <div class="ln"><em>GitHub</em><span>open #654 (draft) into windows/api · add it to the linked stack (append-only)</span></div>
                 </div>
                 <div class="ft"><span class="chkbx"><i></i>Allow local restacks for this session</span><span class="sp"></span><button class="sbtn" type="button">Deny</button><button class="sbtn" type="button">Local only</button><button class="sbtn pri" type="button">Approve</button></div>
               </div>
@@ -643,9 +648,9 @@
                 <div class="fitem"><span class="pin acc">3</span><div><h4>Move all or nothing</h4><p>One <code>git update-ref --stdin</code> transaction (<code>start / update new old / prepare / commit</code>). The expected old values make stale plans fail.</p></div></div>
                 <div class="fitem"><span class="pin acc">4</span><div><h4>Worktrees follow</h4><p><code>read-tree -m -u &lt;old&gt; &lt;new&gt;</code> in each checked-out worktree, after a dirty-files ∩ changed-files preflight.</p></div></div>
                 <div class="fitem"><span class="pin acc">5</span><div><h4>Prove it</h4><p>Each branch’s patch-id multiset is equal before and after. Commits that went empty because trunk already has them are listed, never dropped silently.</p></div></div>
-                <div class="fitem"><span class="pin acc">6</span><div><h4>Push atomically, with leases</h4><p><code>--atomic</code> plus an explicit <code>--force-with-lease=ref:sha</code> per branch. Retarget PRs before deleting a merged base.</p></div></div>
-                <div class="fitem"><span class="pin acc">7</span><div><h4>Share the catalog</h4><p>Read and write gh stack’s schema v1 under <code>gh-stack.lock</code>. Refuse while <code>gh-stack-operation.lock</code> or a gh stack journal is active.</p></div></div>
-                <div class="fitem"><span class="pin acc">8</span><div><h4>Serialize locally</h4><p>Stack operations take the repository lock in <code>WorktreeOperationQueue</code>, then each affected worktree’s lock, in that order.</p></div></div>
+                <div class="fitem"><span class="pin acc">6</span><div><h4>Push atomically, with leases</h4><p><code>--atomic</code> plus an explicit <code>--force-with-lease=ref:sha</code> per branch. A linked stack’s bases are GitHub’s, so PwrGit never PATCHes them. An unlinked stack retargets before deleting a merged base.</p></div></div>
+                <div class="fitem"><span class="pin acc">7</span><div><h4>Share the catalog</h4><p>gh stack’s schema v1, written by SHA-256 compare-and-swap under its <code>flock</code>s, held only for the apply window. Refuse while gh stack’s or PwrAgent’s journal exists.</p></div></div>
+                <div class="fitem"><span class="pin acc">8</span><div><h4>Serialize locally</h4><p>The repository lock in <code>WorktreeOperationQueue</code>, then each affected worktree’s lock, then gh stack’s operation lock, then its catalog lock.</p></div></div>
               </div>
             </div>
           </div>
@@ -656,6 +661,7 @@
               <div class="fitem"><span class="pin ok">O</span><div><h4>gh stack as an oracle</h4><p>On identical fixtures, <code>gh stack rebase</code> and PwrGit’s restack produce the same trees. A catalog PwrGit wrote reads back unchanged through <code>gh stack view --json</code>.</p></div></div>
               <div class="fitem"><span class="pin ok">P</span><div><h4>Forecast soundness</h4><p>Property test: if the forecast says clean, apply doesn’t conflict. If it names files, those are the files <code>rebase --onto</code> stops on.</p></div></div>
               <div class="fitem"><span class="pin ok">S</span><div><h4>The squash-merge regression</h4><p>The gh-stack #586 shape, rebuilt from PwrAgent’s recorded incident, must sync with zero conflicts. It must fail on a naive <code>rebase origin/main</code>.</p></div></div>
+              <div class="fitem"><span class="pin ok">I</span><div><h4>Interop, shared with PwrAgent’s copy</h4><p>PwrAgent copies this engine rather than sharing a package, and the same tests keep both copies honest. A catalog edited by gh stack, PwrGit and PwrAgent in turn loses no stack. A hash mismatch makes the writer redo its edit. A held lock times out at 5 s and is never forced. Each journal blocks every mutation.</p></div></div>
             </div>
           </div>
           <div class="dv-opt" id="6c" data-screen-label="6c Phasing">
@@ -664,12 +670,12 @@
               <div class="tr head" style="grid-template-columns: 60px 260px minmax(0, 1fr)"><span>Phase</span><span>Ships</span><span>Why this order</span></div>
               <div class="tr" style="grid-template-columns: 60px 260px minmax(0, 1fr)"><span class="mn">P0</span><span><b>See stacks.</b> Catalog reader, PR-base inference, Stacks section, health chips, position chips, read MCP tools and the stacks resource.</span><span>Read-only and safe. It’s also the answer to “why is my PR showing the parent’s commits”.</span></div>
               <div class="tr" style="grid-template-columns: 60px 260px minmax(0, 1fr)"><span class="mn">P1</span><span><b>Restack.</b> Replay, transaction, worktree follow, proofs, undo, new branch on top, adopt and remove.</span><span>Local-only, and undo covers all of it.</span></div>
-              <div class="tr" style="grid-template-columns: 60px 260px minmax(0, 1fr)"><span class="mn">P2</span><span><b>Publish.</b> Submit (atomic leased push, open PRs, retarget, link stack) and Sync after merge.</span><span>PwrGit’s first forge writes. It needs P1’s plan and undo to be trustworthy first.</span></div>
-              <div class="tr" style="grid-template-columns: 60px 260px minmax(0, 1fr)"><span class="mn">P3</span><span><b>Shape and delegate.</b> Drag to reorder with live forecast, fold, move onto, plan/apply over MCP with the approval sheet, merge stack bottom-up.</span><span>The parts that need everything above. This is also what PwrAgent builds its stack-managing agents on.</span></div>
+              <div class="tr" style="grid-template-columns: 60px 260px minmax(0, 1fr)"><span class="mn">P2</span><span><b>Publish.</b> Submit (atomic leased push, open PRs, then create, add to, or unstack and relink the GitHub stack) and Sync after merge.</span><span>PwrGit’s first forge writes. It needs P1’s plan and undo to be trustworthy first.</span></div>
+              <div class="tr" style="grid-template-columns: 60px 260px minmax(0, 1fr)"><span class="mn">P3</span><span><b>Shape and delegate.</b> Drag to reorder with live forecast, fold, move onto, plan/apply over MCP with the approval sheet, and merge stack: one <code>merge-async</code> up to a PR on a linked stack, bottom-up elsewhere.</span><span>The parts that need everything above. This is also what PwrAgent builds its stack-managing agents on.</span></div>
             </div>
           </div>
         </div>
-        <p class="dv-next"><b>Next:</b> review 1a, 2a and 5b · pin the GitHub stack-object endpoint from gh-stack v0.3.0’s source before P2 · PwrAgent’s board (agents creating and restacking stacks, stacks across threads) builds on this one.</p>
+        <p class="dv-next"><b>Next:</b> review 1a, 2a and 5b · gh stack’s locks and stack API are pinned from v0.3.0 source (<code>2a49e67</code>) · PwrAgent’s board, where agents create and restack stacks across threads, is PwrAgent#4190.</p>
       </section>
     </x-dc>
 
@@ -703,7 +709,7 @@
         rev: { m: 0, s: 0, a: 0, u: 0 },
         stale: {}, unpushed: {}, merged: {}, gone: {}, fresh: {},
         trunk: "8c1d2e0", trunkBefore: "8c1d2e0", trunkMoved: false, squash: {}, pushed: { m: 0, s: 0, a: 0, u: -1 }, syncFrom: "", syncChild: "",
-        phase: "idle", kind: "", steps: [], at: -1, nextOrder: null,
+        phase: "idle", kind: "", steps: [], at: -1, nextOrder: null, linked: true,
         conflict: false, undo: null, undoable: false, toast: "", ledger: [], op: 412
       };
 
@@ -794,9 +800,10 @@
             if (i === 0) steps.push(this.replayStep(s, id, "main", "excluding " + N[b].name + " (--onto main " + this.head(s, b) + "), so #" + s.pr[b] + "’s commits aren’t replayed over their own squash."));
             else steps.push(this.replayStep(s, id, N[ids[i - 1]].name + "@new"));
           });
-          steps.push({ t: "retarget #" + s.pr[child] + " base " + N[b].name + " → main", sub: "After every replay is clean, and before the branch is deleted. Deleting an open PR’s base closes it.", fc: "", fcKind: "", eff: { kind: "retarget", id: child, base: "main" } });
-          steps.push({ t: "update-ref transaction · " + ids.length + " refs, delete " + N[b].name, sub: "Its worktree is clean, and the branch is in main by PR.", fc: "", fcKind: "", eff: { kind: "txn", ids: ids, collapse: b } });
-          steps.push({ t: "update the stack on GitHub · " + ids.filter((id) => s.pr[id]).length + " PRs", sub: "GitHub draws the stack on each PR from this.", fc: "", fcKind: "", eff: { kind: "none" } });
+          if (s.linked) steps.push({ t: "GitHub retargets #" + s.pr[child] + " base " + N[b].name + " → main", sub: "The stack is linked, so GitHub owns its bases. PwrGit doesn’t PATCH them.", fc: "", fcKind: "", eff: { kind: "retarget", id: child, base: "main" } });
+          else steps.push({ t: "retarget #" + s.pr[child] + " base " + N[b].name + " → main", sub: "Unlinked stack: after every replay is clean, and before the branch is deleted. Deleting an open PR’s base closes it.", fc: "", fcKind: "", eff: { kind: "retarget", id: child, base: "main" } });
+          steps.push({ t: "update-ref transaction · " + ids.length + " refs, delete local " + N[b].name, sub: "Its worktree is clean, and the branch is in main by PR. The remote branch is left to GitHub.", fc: "", fcKind: "", eff: { kind: "txn", ids: ids, collapse: b } });
+          if (s.linked) steps.push({ t: "re-read the stack · GET /repos/acme/orbit-deploy/stacks", sub: "Confirms GitHub dropped #" + s.pr[b] + " and retargeted #" + s.pr[child] + ".", fc: "", fcKind: "", eff: { kind: "none" } });
           this.stage("sync", steps, "Sync · #" + s.pr[b] + " merged", "Follow a squash merge without replaying it.", { syncFrom: b, syncChild: child });
         }
         submit() {
@@ -808,9 +815,12 @@
           if (!push.length && !drift.length) { this.setState({ toast: "Nothing to submit. GitHub already matches the stack." }); return; }
           const steps = [];
           if (push.length) steps.push({ t: "push " + push.length + " · --atomic", sub: push.map((id) => N[id].name + " leased to " + (s.pushed[id] >= 0 ? SHAS[id][Math.min(s.pushed[id], SHAS[id].length - 1)] : "nothing (must not exist)")).join(" · "), fc: "", fcKind: "", eff: { kind: "push", ids: push } });
-          drift.forEach((id) => steps.push({ t: "retarget #" + s.pr[id] + " base " + s.prBase[id] + " → " + this.parentOf(s, id), sub: "GitHub follows the stack’s order.", fc: "", fcKind: "", eff: { kind: "retarget", id: id, base: this.parentOf(s, id) } }));
+          const relink = s.linked && drift.length > 0;
+          if (relink) steps.push({ t: "unstack on GitHub · POST …/stacks/1/unstack", sub: "A linked stack is append-only and GitHub owns its bases. A reorder unstacks, retargets, then relinks.", fc: "", fcKind: "", eff: { kind: "unlink" } });
+          drift.forEach((id) => steps.push({ t: "retarget #" + s.pr[id] + " base " + s.prBase[id] + " → " + this.parentOf(s, id), sub: "The stack is unlinked, so PwrGit sets the base.", fc: "", fcKind: "", eff: { kind: "retarget", id: id, base: this.parentOf(s, id) } }));
           create.forEach((id) => steps.push({ t: "open #654 " + N[id].name + " → " + this.parentOf(s, id) + " (draft)", sub: "Title from the first commit. Body left to you.", fc: "", fcKind: "", eff: { kind: "create", id: id } }));
-          steps.push({ t: "link " + s.order.length + " PRs into the stack on GitHub", sub: "The same stack object gh stack submit writes.", fc: "", fcKind: "", eff: { kind: "none" } });
+          if (s.linked && !relink && create.length) steps.push({ t: "add #654 to the stack · POST …/stacks/1/add", sub: "Append-only, which is all this is.", fc: "", fcKind: "", eff: { kind: "none" } });
+          else if (!s.linked || relink) steps.push({ t: "link " + s.order.length + " PRs bottom → top · POST …/stacks", sub: "The same stack object gh stack submit writes.", fc: "", fcKind: "", eff: { kind: "link" } });
           this.stage("submit", steps, "Submit · " + s.order.length + " branches", "Atomic: GitHub sees all of these pushes or none of them.");
         }
         reorder() {
@@ -831,7 +841,7 @@
         /* ---------- running ---------- */
         run() {
           const s = this.state; if (s.phase !== "plan") return;
-          const snap = { order: s.order, rev: s.rev, stale: s.stale, unpushed: s.unpushed, merged: s.merged, gone: s.gone, pr: s.pr, prBase: s.prBase, trunk: s.trunk, pushed: s.pushed };
+          const snap = { order: s.order, rev: s.rev, stale: s.stale, unpushed: s.unpushed, merged: s.merged, gone: s.gone, pr: s.pr, prBase: s.prBase, trunk: s.trunk, pushed: s.pushed, linked: s.linked };
           this.setState({ phase: "running", at: 0, undo: clone(snap), toast: "" });
           this.stop(); this.timer = setTimeout(() => this.tick(), STEP_MS);
         }
@@ -846,6 +856,10 @@
             s.prBase[eff.id] = eff.base;
           } else if (eff.kind === "push") {
             s.fresh = {}; eff.ids.forEach((id) => { delete s.unpushed[id]; s.pushed[id] = s.rev[id]; s.fresh[id] = true; });
+          } else if (eff.kind === "unlink") {
+            s.linked = false;
+          } else if (eff.kind === "link") {
+            s.linked = true;
           } else if (eff.kind === "create") {
             s.pr[eff.id] = 654; s.prBase[eff.id] = this.parentOf(s, eff.id); s.fresh[eff.id] = true;
           }
@@ -868,8 +882,8 @@
           const gone = s.syncFrom ? N[s.syncFrom].name : "";
           const L = {
             restack: ["✓ replayed in memory · no worktree touched until the end", "✓ every commit once · patch-ids match, " + replayed + " of " + replayed, "✓ refs moved in one transaction against the planned tips", "✓ undo kept at refs/pwrgit/undo/op-0" + s.op, "· nothing pushed · Submit pushes with a lease"],
-            sync: s.syncFrom ? ["✓ #" + s.pr[s.syncFrom] + "’s commits skipped, 0 replayed over the squash", "✓ #" + s.pr[s.syncChild] + " retargeted to main before " + gone + " was deleted", "✓ refs moved in one transaction · local " + gone + " removed", "· pushes wait for Submit · GitHub stack updated"] : [],
-            submit: ["✓ pushed atomically · each lease named its expected sha", "✓ PR bases follow the stack", "✓ stack linked on GitHub"],
+            sync: s.syncFrom ? ["✓ #" + s.pr[s.syncFrom] + "’s commits skipped, 0 replayed over the squash", "✓ #" + s.pr[s.syncChild] + " retargeted to main" + (s.linked ? " by GitHub · linked stack, no PATCH" : " before " + gone + " was deleted"), "✓ refs moved in one transaction · local " + gone + " removed", "· pushes wait for Submit · stack re-read from GitHub"] : [],
+            submit: ["✓ pushed atomically · each lease named its expected sha", "✓ PR bases follow the stack", s.steps.some((x) => x.eff.kind === "unlink") ? "✓ unstacked, retargeted, relinked bottom → top" : "✓ stack on GitHub matches"],
             reorder: ["✓ both replays clean on their new parents", "✓ patch-ids match · nothing dropped", "✓ one transaction · undo kept", "· GitHub base differs until Submit"]
           }[k] || [];
           s.ledger = L.map((t, i) => ({ t: t, cls: t.charAt(0) === "·" ? "n" : "", delay: i * 90 }));

@@ -7,8 +7,15 @@ every operation in turn 3.
 
 Scope: stack state, the stack engine (restack, sync, submit, reorder), the
 Stacks sidebar section, the stack view, lineage-graph annotations, undo, and
-the first write tools on PwrGit's MCP server. PwrAgent builds its
-agent-managed stacks on this. That is designed separately, in that repository.
+the first write tools on PwrGit's MCP server.
+
+PwrAgent's design is pwrdrvr/PwrAgent#4190 (`docs/design/stacked-prs.md`).
+There is **no shared package**. PwrAgent copies this engine design into its
+own `packages/owner-core` and owns that copy. Whichever app builds the engine
+first, the other copies the code. The copies stay honest through the same
+tests: §8's model and atomicity tests, the gh stack v0.3.0 interop oracle, and
+the #586 fixture. The two apps share only gh stack's catalog and its two
+locks (§2). Each keeps its own journal and undo refs.
 
 ## 1. What exists, and what is missing
 
@@ -61,16 +68,38 @@ worktree shares it:
 `base` is the field that matters. It records the parent tip a branch was last
 built on, which is the `--onto` anchor every restack needs.
 
-Rules:
+Rules (from gh stack v0.3.0 source at `2a49e67`, `internal/stack/lock.go`):
 
-- Writes are made under `gh-stack.lock`, taken the way gh stack takes it.
-  Confirm the mechanism in v0.3.0's source before P1. While
-  `gh-stack-operation.lock` or a gh stack recovery journal is active, every
-  stack operation is refused with "gh stack is mid-operation in this clone".
+- **Two `flock` files in the common dir.** gh stack holds
+  `gh-stack-operation.lock` for a whole command and takes `gh-stack.lock` for
+  catalog writes, always in that order. Both are taken with
+  `LOCK_EX|LOCK_NB`, retried every 100 ms, and give up after 5 s. On Windows
+  it's `LockFileEx` on byte 0. The files hold no PID and are never unlinked.
+  So "busy" means a non-blocking lock attempt fails, never "the file exists".
+- **PwrGit takes the same locks in the same order, and only for the apply
+  window.** Planning runs unlocked, because apply re-checks every expected tip
+  and the catalog hash anyway. Holding the operation lock any longer makes a
+  `gh stack` command run elsewhere fail after its 5 s timeout.
+- **A catalog write is a compare-and-swap on the file's SHA-256.** Read and
+  hash, change only the stack being edited, then re-hash under
+  `gh-stack.lock`. If the hash changed, re-read and redo the edit. Write a
+  temp sibling, fsync it, rename it over the catalog, then fsync the
+  directory.
+- **Add no fields to the catalog.** gh stack re-marshals from Go structs, so
+  its next write drops any unknown field. Anything PwrGit-specific lives in
+  PwrGit's journal or SQLite, never in the catalog.
+- **Journals that mean "this clone is busy".** While any of these exist, every
+  mutating stack operation is refused, with the owner named ("gh stack is
+  mid-rebase in this clone"):
+  - gh stack's `gh-stack-rebase-state`, `gh-stack-modify-state` and
+    `gh-stack-migration`;
+  - PwrAgent's `pwragent-stack-op.json`.
+
+  PwrGit's own journal is `pwrgit-stack-op.json`, and its undo refs are
+  `refs/pwrgit/undo/*`. PwrAgent treats that journal the same way and keeps
+  its undo refs under `refs/pwragent/undo/*`.
 - An unknown `schemaVersion` drops PwrGit to read-only. PwrGit never rewrites
   a newer format.
-- Writes are read-modify-write of only the stack being changed. Unrelated
-  stacks in the same file are kept byte-for-byte where possible.
 - GitLab has no stack object. The same schema goes in
   `$GIT_COMMON_DIR/pwrgit-stack`, and the "link on forge" step is skipped.
 
@@ -97,7 +126,7 @@ surfaced as *drift* and is never resolved silently.
 | needs restack | `tip(parent) != base` |
 | parent merged | The forge says the parent's PR is merged. Without a forge, `git cherry <trunk> <parent>` is empty. Ancestry alone is never the test, because squash merges defeat it. |
 | needs push | local head ≠ PR `headOid` |
-| drift | PR `baseRefName` ≠ catalog parent |
+| drift | PR `baseRefName` ≠ catalog parent. On a linked GitHub stack, GitHub owns the bases, so the fix is to unstack and relink, never a PATCH (§4). |
 | remote ahead | The remote head isn't the sha PwrGit last fetched or pushed for that branch (the catalog `head` at the last sync, or the PR `headOid`), and isn't contained in the local head. A restack's own rewrite never trips this: the old remote head is expected to stop being an ancestor. PwrGit never force-pushes over a remote that's ahead, lease or not. |
 
 These are pure functions of (catalog, refs, PR list). They live in
@@ -169,11 +198,15 @@ child `C`:
    `merge-base --fork-point`. The patch-id proof then shows that only C's own
    commits moved. This is the shape of github/gh-stack#586. A regression
    fixture is built from PwrAgent's recorded incident (§8).
-3. **Retarget C's PR to trunk before anything deletes P's branch.** On GitHub,
-   deleting an open PR's base branch closes that PR.
+3. **Linked GitHub stack: leave the forge alone.** Once a stack is linked,
+   GitHub owns its PR bases and retargets C itself. gh stack never PATCHes a
+   base on a linked stack, and its `sync` never retargets or deletes branches.
+   PwrGit does the same and re-reads the stack (`GET …/stacks`) to confirm.
+   **Unlinked stack, or GitLab:** retarget C's PR to trunk *before* anything
+   deletes P's remote branch. On GitHub, deleting an open PR's base branch
+   closes that PR.
 4. Delete local `P`, and its worktree if it's clean and finished, through the
-   existing branch-lifecycle guards.
-5. Update the stack object on the forge.
+   existing branch-lifecycle guards. The remote branch is left to the forge.
 
 **Submit.**
 
@@ -189,9 +222,19 @@ branch that has never been pushed, the empty lease
 already have advanced. After the push, Submit:
 
 - opens missing PRs (draft by default) with `base = parent`;
-- retargets drifted bases;
-- links the stack object. Use the same API gh stack's `submit` and `link` use,
-  and pin the endpoint from v0.3.0's source before P2.
+- links or extends the stack object, as gh stack's `submit` and `link` do:
+  - `POST /repos/{o}/{r}/stacks` creates a stack from at least 2 PRs, bottom
+    to top;
+  - `POST /repos/{o}/{r}/stacks/{n}/add` appends. It is append-only;
+  - `POST /repos/{o}/{r}/stacks/{n}/unstack` dissolves a stack;
+  - `GET /repos/{o}/{r}/stacks` lists stacks. A 404 means the repo has none.
+- handles drift by stack state:
+  - **Unlinked stack:** retarget drifted bases, then link.
+  - **Linked stack:** GitHub owns the bases. A change that isn't an append
+    at the top (reorder, move onto, fold, inserting a branch) is planned as
+    unstack, then PwrGit retargets the bases while the stack is unlinked, then
+    relinks bottom to top. The plan shows all three steps, so nobody is
+    surprised that the stack is briefly unlinked.
 
 GitLab: MRs are opened and retargeted, and a managed block in each MR
 description lists the stack between
@@ -210,7 +253,12 @@ the markers is touched.
 
 1. the repository lock in `WorktreeOperationQueue`;
 2. each affected worktree's lock;
-3. `gh-stack.lock` (catalog writes only).
+3. `gh-stack-operation.lock`, for the apply window only;
+4. `gh-stack.lock`, for the catalog write only.
+
+Each gh stack lock is `LOCK_EX|LOCK_NB`, retried every 100 ms, and gives up
+after 5 s, the same budget gh stack uses. A timeout is reported as "gh stack
+is running in this clone". It is never forced.
 
 ## 5. Operations
 
@@ -220,12 +268,12 @@ the markers is touched.
 | adopt | Writes the catalog for an inferred chain. If a branch isn't on its parent's tip, it is a restack too. |
 | restack (from a branch, or all) | Replays each stale branch and everything above it. |
 | sync | Fetches, handles merged parents (§4), then restacks. |
-| submit | Leased atomic push, open or retarget PRs, link the stack. |
+| submit | Leased atomic push, open PRs, then link or extend the stack. On a linked stack, any change that isn't an append is unstack, retarget, relink (§4). |
 | reorder | Replays in the new order. The live forecast runs while dragging (debounced `merge-tree`). |
 | move onto | Reparents a branch and the branches above it onto another branch or trunk. |
 | fold | Fast-forwards the parent to the child, deletes the child, and reparents the grandchildren. |
 | remove | Detach, which drops the branch's commits from its children, or forget, which is catalog only. |
-| merge stack | Merges bottom-up. Each merge waits for the previous one to land, and sync runs between them. Merge-queue aware via the existing `pr:enqueue`. |
+| merge stack | Linked GitHub stack: one `PUT /repos/{o}/{r}/pulls/{n}/merge-async` merges everything up to PR `n`, with `merge_action` set to `merge_queue` or `direct_merge`. gh stack turns auto-merge off on stacked PRs, and PwrGit doesn't turn it on. Unlinked stack or GitLab: merge bottom-up, with each merge waiting for the previous one to land and sync running between them, through the existing `pr:enqueue` when there is a queue. |
 
 ## 6. UI
 
@@ -299,6 +347,14 @@ check catches a stale plan, a human acting in the UI, and a second agent.
   and is skipped elsewhere with a visible reason.
 - **Forecast soundness (property).** If the forecast says clean, apply doesn't
   conflict. If it names files, those are the files `rebase --onto` stops on.
+- **Interop.** These tests are shared with PwrAgent's copy of the engine:
+  - A catalog edited by gh stack, PwrGit and PwrAgent in turn keeps every
+    stack.
+  - A hash mismatch makes the writer redo its edit, never overwrite.
+  - A held `gh-stack-operation.lock` or `gh-stack.lock` times out at 5 s
+    without forcing.
+  - Each journal (`gh-stack-rebase-state`, `gh-stack-modify-state`,
+    `gh-stack-migration`, `pwragent-stack-op.json`) blocks every mutation.
 - **Regression.** The gh-stack #586 shape syncs with zero conflicts. Confirm
   the test fails against a naive `rebase origin/main`.
 - **Atomicity.** Fault injection between `prepare` and `commit`, and a
@@ -310,14 +366,14 @@ check catches a stale plan, a human acting in the UI, and a second agent.
 |---|---|---|
 | P0 | Catalog reader, inference, health, Stacks section, position chips, read MCP tools, stacks resource | Read-only |
 | P1 | Restack, worktree follow, proofs, undo, new branch on top, adopt, remove | Model and atomicity tests |
-| P2 | Submit, sync after merge, GitLab managed block | Oracle and #586 regression; stack-object endpoint pinned |
-| P3 | Reorder with live forecast, fold, move onto, MCP plan/apply with consent sheet, merge stack | Forecast property test |
+| P2 | Submit (create, add, unstack and relink the stack object), sync after merge, GitLab managed block | Oracle, interop and #586 regression |
+| P3 | Reorder with live forecast, fold, move onto, MCP plan/apply with consent sheet, merge stack (`merge-async`) | Forecast property test |
 
 ## 10. Open questions
 
-1. The exact locking protocol behind `gh-stack.lock` and
-   `gh-stack-operation.lock`, and where v0.3.0 writes its recovery journal.
-2. The GitHub API behind the stack object (`gh stack link`), and whether it is
-   generally available or in preview for the org.
+1. *Resolved* (gh stack v0.3.0 `2a49e67`, via PwrAgent#4190): the locks,
+   compare-and-swap catalog writes and journals described in §2.
+2. *Resolved* (same source): the stack object API, GitHub owning the bases of
+   a linked stack, and `merge-async` (§4, §5).
 3. Whether a stack that spans two remotes (a fork's CI PR plus the upstream
    PR) is one stack or two. The proposal is one, keyed by the upstream PRs.
