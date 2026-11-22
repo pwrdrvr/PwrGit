@@ -12,6 +12,7 @@ import type {
   StartupCpuProfileArtifact,
   StartupCpuProfileCapturedEvent
 } from "@pwrgit/shared";
+import { QUIT_FLUSH_DEADLINE_MS } from "../bounded-shutdown";
 import { getDiagLogger } from "./diag-log";
 import {
   resolveHeapMonitorConfig,
@@ -195,6 +196,9 @@ export class DiagnosticsManager {
    *  index.ts drains this (with a timeout) before windows close. */
   shutdown(): Promise<void> {
     this.shuttingDown = true;
+    // Leave time in the app's quit drain to terminate the filter worker and
+    // remove its private scratch files if the export is still in progress.
+    const clearTraceDeadline = this.chromiumTrace.beginShutdown(QUIT_FLUSH_DEADLINE_MS - 1_000);
     this.clearResourceExpiryTimer();
     this.enqueueSync(async () => {
       try {
@@ -206,7 +210,7 @@ export class DiagnosticsManager {
         await this.chromiumTrace.setArmed(false);
       }
     });
-    return this.syncQueue;
+    return this.syncQueue.finally(clearTraceDeadline);
   }
 
   /** Whether `shutdown` has anything to flush: a monitor or profiler is

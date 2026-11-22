@@ -1,3 +1,4 @@
+import { addAbortListener } from "node:events";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -10,7 +11,8 @@ const TRACE_CATEGORIES = ["devtools.timeline", "blink.user_timing", "cc", "viz"]
 const MAX_RAW_TRACE_BYTES = 288 * 1024 * 1024;
 const START_TIMEOUT_MS = 1_000;
 const STOP_TIMEOUT_MS = 4_000;
-const FILTER_TIMEOUT_MS = 5_000;
+// Full-size exports exceeded five seconds on both Linux and Windows CI.
+const FILTER_TIMEOUT_MS = 15_000;
 
 // Electron 44 types call this recording_mode, but the object is passed through
 // to Chromium's TraceConfig dictionary parser, which reads record_mode.
@@ -56,6 +58,8 @@ export class ChromiumTrace {
   private queue: Promise<unknown> = Promise.resolve();
   private recording: { wallMs: number; monotonicMs: number } | null = null;
   private pendingCapture: { cancel: () => void; done: Promise<ChromiumTraceCapture> } | null = null;
+  private readonly shutdownFilter = new AbortController();
+  private shutdownTimer: ReturnType<typeof setTimeout> | undefined;
   // A native promise may never settle. After a timeout, stop and discard any
   // unconfirmed native recording before accepting another trigger.
   private nativeMayBeRecording = false;
@@ -65,6 +69,14 @@ export class ChromiumTrace {
     private readonly warn: (message: string, error: unknown) => void,
     private readonly options: TraceOptions = {}
   ) {}
+
+  /** Shorten the worker deadline even if filtering started before quit. */
+  beginShutdown(filterBudgetMs: number): () => void {
+    const timer = this.shutdownTimer ??= setTimeout(() => {
+      this.shutdownFilter.abort(new Error("Filtering Chromium trace timed out during shutdown"));
+    }, filterBudgetMs).unref();
+    return () => clearTimeout(timer);
+  }
 
   setArmed(armed: boolean): Promise<void> {
     return this.enqueue(async () => {
@@ -183,6 +195,8 @@ export class ChromiumTrace {
   }
 
   private async filterInWorker(rawPath: string, filteredPath: string): Promise<void> {
+    const shutdown = this.shutdownFilter.signal;
+    shutdown.throwIfAborted();
     const module = this.options.workerModule ?? new URL("./chromium-trace-worker.ts", import.meta.url);
     // Packaged workers live inside app.asar. Resolve the standalone ESM
     // asset with Electron's filesystem before starting Node's loader.
@@ -193,8 +207,10 @@ export class ChromiumTrace {
       workerData: { rawPath, filteredPath, allowedCategories: TRACE_CATEGORIES },
       resourceLimits: { maxOldGenerationSizeMb: 96 }
     });
+    let onShutdown: ReturnType<typeof addAbortListener> | undefined;
     try {
       await withDeadline(new Promise<void>((resolve, reject) => {
+        onShutdown = addAbortListener(shutdown, () => reject(shutdown.reason));
         worker.once("error", reject);
         worker.once("exit", (code) => {
           if (code === 0) resolve();
@@ -202,6 +218,7 @@ export class ChromiumTrace {
         });
       }), this.options.filterTimeoutMs ?? FILTER_TIMEOUT_MS, "Filtering Chromium trace");
     } finally {
+      onShutdown?.[Symbol.dispose]();
       await worker.terminate();
     }
   }

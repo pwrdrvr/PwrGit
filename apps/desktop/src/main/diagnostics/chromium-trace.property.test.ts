@@ -1,13 +1,19 @@
 import { createHash } from "node:crypto";
 import { createReadStream } from "node:fs";
-import { mkdtemp, open, readdir, readFile, rm, stat, truncate, writeFile } from "node:fs/promises";
+import { mkdtemp, open, readdir, readFile, rename, rm, stat, truncate, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import fc from "fast-check";
-import { expect, it } from "vitest";
+import { expect, it, vi } from "vitest";
 import { ChromiumTrace } from "./chromium-trace";
 
 const emptyTrace = JSON.stringify({ traceEvents: [] });
+const stalledWorker = new URL(`data:text/javascript,${encodeURIComponent(`
+  import { workerData } from "node:worker_threads";
+  import { writeFileSync } from "node:fs";
+  writeFileSync(workerData.filteredPath, '{"traceEvents":[');
+  setInterval(() => {}, 1_000);
+`)}`);
 
 it("reserves one frozen export across overlapping triggers, rearming, disarm and clock adjustments", async () => {
   await fc.assert(fc.asyncProperty(
@@ -158,23 +164,26 @@ it("streams the allowlisted projection at the full 288 MiB export limit", async 
   const batches = Math.floor((limit - Buffer.byteLength(header + tail)) / Buffer.byteLength(batch));
   const padding = limit - Buffer.byteLength(header + tail) - batches * Buffer.byteLength(batch);
   let rawPath: string | undefined;
-  let rawBytes = 0;
   let mono = 0;
   try {
+    // Generate the fixture before the stop deadline starts. The fake backend
+    // hands off an existing file, while the real worker still reads all bytes.
+    const fixture = join(directory, "native-fixture.json");
+    const raw = await open(fixture, "w");
+    try {
+      await raw.write(header);
+      for (let index = 0; index < batches; index++) await raw.write(batch);
+      await raw.write(tail);
+      await raw.write(" ".repeat(padding));
+      expect((await raw.stat()).size).toBe(limit);
+    } finally {
+      await raw.close();
+    }
     const trace = new ChromiumTrace(() => ({
       async startRecording() {},
       async stopRecording(file = "") {
         rawPath = file;
-        const raw = await open(file, "w");
-        try {
-          await raw.write(header);
-          for (let index = 0; index < batches; index++) await raw.write(batch);
-          await raw.write(tail);
-          await raw.write(" ".repeat(padding));
-          rawBytes = (await raw.stat()).size;
-        } finally {
-          await raw.close();
-        }
+        await rename(fixture, file);
         return file;
       }
     }), () => {}, { monotonicNow: () => ++mono });
@@ -182,7 +191,6 @@ it("streams the allowlisted projection at the full 288 MiB export limit", async 
     await trace.setArmed(true);
     const result = await trace.capture(output, ++mono);
     expect(result).toMatchObject({ status: "written", rawBytes: limit, rawLimitBytes: limit });
-    expect(rawBytes).toBe(limit);
     const projectedCommit = { pid: 120, tid: 141, cat: "cc", name: "Commit", ph: "X", ts: 2_010, dur: 830 };
     const projectedTail = [
       { pid: 120, tid: 141, cat: "devtools.timeline", name: "Layout", ph: "X", ts: 2_010, dur: 830 },
@@ -200,7 +208,7 @@ it("streams the allowlisted projection at the full 288 MiB export limit", async 
   } finally {
     await rm(directory, { recursive: true, force: true });
   }
-}, 15_000);
+}, 30_000);
 
 
 it("reports measured and allowed bytes when a raw export is over budget", async () => {
@@ -236,12 +244,6 @@ it("reports measured and allowed bytes when a raw export is over budget", async 
 it("discards malformed and timed-out exports and releases the recording queue", async () => {
   const directory = await mkdtemp(join(tmpdir(), "pwrgit-trace-filter-failure-"));
   const output = join(directory, "trace.json");
-  const stalledWorker = new URL(`data:text/javascript,${encodeURIComponent(`
-    import { workerData } from "node:worker_threads";
-    import { writeFileSync } from "node:fs";
-    writeFileSync(workerData.filteredPath, '{"traceEvents":[');
-    setInterval(() => {}, 1_000);
-  `)}`);
   let rawPath: string | undefined;
   let mono = 0;
   const options = { monotonicNow: () => ++mono, filterTimeoutMs: 500, workerModule: stalledWorker };
@@ -274,6 +276,43 @@ it("discards malformed and timed-out exports and releases the recording queue", 
     await expect(stat(rawPath!)).rejects.toMatchObject({ code: "ENOENT" });
     expect(await readdir(directory)).toEqual([]);
   } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+it("allows filtering past five seconds and cleans up when the shutdown budget expires", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "pwrgit-trace-filter-shutdown-"));
+  let rawPath: string | undefined;
+  let mono = 0;
+  const trace = new ChromiumTrace(() => ({
+    async startRecording() {},
+    async stopRecording(file = "") {
+      rawPath = file;
+      await writeFile(file, emptyTrace);
+      return file;
+    }
+  }), () => {}, { monotonicNow: () => ++mono, workerModule: stalledWorker });
+
+  vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+  let result: Promise<unknown> | undefined;
+  try {
+    await trace.setArmed(true);
+    result = trace.capture(join(directory, "trace.json"), ++mono).catch((error: Error) => error);
+    await vi.waitFor(async () => {
+      const staging = (await readdir(directory)).find((name) => name.startsWith(".pwrgit-trace-"));
+      expect(staging).toBeDefined();
+      await expect(readFile(join(directory, staging!, "filtered.json"), "utf8")).resolves.toBe('{"traceEvents":[');
+    }, { timeout: 3_000 });
+    await vi.advanceTimersByTimeAsync(5_001);
+    trace.beginShutdown(100);
+    await vi.advanceTimersByTimeAsync(100);
+    await expect(result).resolves.toMatchObject({ message: expect.stringMatching(/filtering Chromium trace timed out during shutdown/i) });
+    await expect(stat(rawPath!)).rejects.toMatchObject({ code: "ENOENT" });
+    expect(await readdir(directory)).toEqual([]);
+  } finally {
+    await vi.advanceTimersByTimeAsync(15_000);
+    vi.useRealTimers();
+    await result;
     await rm(directory, { recursive: true, force: true });
   }
 });
