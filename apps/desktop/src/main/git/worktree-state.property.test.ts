@@ -271,14 +271,17 @@ describe.each(["regressions", 0, 1, 2, 3, 4] as const)("worktree default ancestr
     for (const branch of branches) git(primary, "worktree", "add", "-b", branch, join(root, branch), head);
     const indexed = await new RepoIndexer(db, realGit).refreshRepoWorktrees(repoId);
     if (!indexed.ok) throw new Error(indexed.error.message);
-    const rows = (db.prepare("SELECT id, branch FROM worktrees WHERE repo_id = ? ORDER BY branch")
-      .all(repoId) as Array<{ id: string; branch: string }>).filter(({ branch }) => branches.includes(branch));
+    const rows = (db.prepare("SELECT id, branch, path FROM worktrees WHERE repo_id = ? ORDER BY branch")
+      .all(repoId) as Array<{ id: string; branch: string; path: string }>).filter(({ branch }) => branches.includes(branch));
+    const late = rows.find(({ branch }) => branch === lateBranch);
+    if (late === undefined) throw new Error("late worktree not indexed");
     const grafts = join(primary, ".git", "info", "grafts");
     const def = kind === "private ref" ? "worktree/main" : "main";
     if (kind === "private ref") git(primary, "branch", "-m", "main", def);
     let changed = false;
     const exec: GitExec = async (args, cwd, options) => {
-      if (args[0] === "status" && cwd === latePath && !changed) {
+      // Git's indexed path can use different separators from node:path on Windows.
+      if (args[0] === "status" && cwd === late.path && !changed) {
         changed = true;
         if (kind === "replace") git(primary, "replace", base, commits[5]!);
         if (kind === "graft") writeFileSync(grafts, `${base}\n`);
@@ -294,7 +297,7 @@ describe.each(["regressions", 0, 1, 2, 3, 4] as const)("worktree default ancestr
       const merge = await realGit(["merge-base", head, def], latePath);
       if (!merge.ok) throw new Error(merge.error.message);
       expect(merge.value.exitCode).toBe(1);
-      expect(isolated.getCached(rows.at(-1)!.id)).toMatchObject({
+      expect(isolated.getCached(late.id)).toMatchObject({
         head, defaultBranch: def, mergedIntoDefault: false, behindDefault: 0, divergedFromDefault: true
       });
     } finally {
