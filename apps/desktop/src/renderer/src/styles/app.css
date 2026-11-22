@@ -7517,6 +7517,11 @@ button.agent-menu__item:hover {
   );
   animation: bulk-sync-stripes 900ms linear infinite;
 }
+/* The sync face already has a busy glyph and a live count. Keep the pattern
+   in its 2px bar without repainting it on every animation frame. */
+.bulk-sync__bar.sidebar-toolbar__progress > .is-in-flight {
+  animation: none;
+}
 .bulk-sync__bar > .is-in-flight.is-halted {
   background: repeating-linear-gradient(
     -45deg,
