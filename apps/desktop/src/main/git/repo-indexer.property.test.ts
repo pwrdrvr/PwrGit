@@ -13,15 +13,23 @@ let scratch: string;
 let checkout: string;
 let upstream: string;
 
-function git(dir: string, ...args: string[]): string {
+function git(dir: string, args: string[], input?: string): string {
   return execFileSync("git", [
     "-C", dir, "-c", `core.hooksPath=${join(scratch, "no-hooks")}`, ...args
-  ], { encoding: "utf8" }).trim();
+  ], { cwd: tmpdir(), encoding: "utf8", input }).trim();
 }
 
-function oracleRefs(dir: string, prefix: string): string[] {
-  return git(dir, "for-each-ref", "--format=%(refname)", prefix)
-    .split("\n")
+/** Seed or clean up a property's generated branches in one Git transaction. */
+function writeFixtureRefs(dir: string, commands: string[]): void {
+  git(dir, ["update-ref", "--stdin"], `${commands.join("\n")}\n`);
+}
+
+function readRefs(dir: string, ...prefixes: string[]): string[] {
+  return git(dir, ["for-each-ref", "--format=%(refname)", ...prefixes]).split("\n");
+}
+
+function oracleBranchNames(refs: string[], prefix: string): string[] {
+  return refs
     .filter((ref) => ref.startsWith(`${prefix}oracle-`))
     .map((ref) => ref.slice(prefix.length));
 }
@@ -38,10 +46,10 @@ beforeAll(() => {
   scratch = realpathSync.native(mkdtempSync(join(tmpdir(), "pwrgit-index-oracle-")));
   upstream = join(scratch, "upstream");
   checkout = join(scratch, "checkout");
-  git(scratch, "init", "-q", "-b", "main", upstream);
-  git(upstream, "-c", "user.name=Oracle", "-c", "user.email=oracle@example.test",
-    "-c", "commit.gpgSign=false", "commit", "-q", "--allow-empty", "-m", "root");
-  git(scratch, "clone", "-q", "--origin", "origin", upstream, checkout);
+  git(scratch, ["init", "-q", "-b", "main", upstream]);
+  git(upstream, ["-c", "user.name=Oracle", "-c", "user.email=oracle@example.test",
+    "-c", "commit.gpgSign=false", "commit", "-q", "--allow-empty", "-m", "root"]);
+  git(scratch, ["clone", "-q", "--origin", "origin", upstream, checkout]);
 });
 
 afterAll(() => {
@@ -53,17 +61,18 @@ it("reconciles refs with scoped search and starts no branch transactions for mat
     fc.uniqueArray(fc.integer({ min: 0, max: 20 }), { minLength: 2, maxLength: 5 }),
     fc.integer({ min: 1, max: 4 }),
     async (suffixes, chunkSize) => {
+      const localBranches = suffixes.map((suffix) => `oracle-local-${suffix}`);
+      const remoteBranches = suffixes.map((suffix) => `oracle-remote-${suffix}`);
+      const renamed = "oracle-renamed";
       const db = openDatabase(":memory:");
       try {
         const profiles = new ProfileService(db);
         const mine = profiles.create({ name: "Mine", email: "mine@example.test", roots: [checkout] });
         const theirs = profiles.create({ name: "Theirs", email: "theirs@example.test", roots: [upstream] });
         const indexer = new RepoIndexer(db, createSystemGit(), { branchWriteChunkSize: chunkSize });
-        for (const suffix of suffixes) {
-          git(checkout, "branch", `oracle-local-${suffix}`);
-          git(upstream, "branch", `oracle-remote-${suffix}`);
-        }
-        git(checkout, "fetch", "-q", "--prune", "origin");
+        writeFixtureRefs(checkout, localBranches.map((name) => `create refs/heads/${name} HEAD`));
+        writeFixtureRefs(upstream, remoteBranches.map((name) => `create refs/heads/${name} HEAD`));
+        git(checkout, ["fetch", "-q", "--prune", "origin"]);
         await indexer.rescanProfile(theirs);
         const [repo] = await indexer.rescanProfile(mine);
         if (repo === undefined) throw new Error("fixture checkout was not indexed");
@@ -73,8 +82,9 @@ it("reconciles refs with scoped search and starts no branch transactions for mat
             .filter(({ kind }) => kind === "local_branch" || kind === "remote_branch")
             .map(({ profileId, kind, name }) => ({ profileId, kind, name }));
         const checkSearch = () => {
-          const local = oracleRefs(checkout, "refs/heads/");
-          const remote = oracleRefs(checkout, "refs/remotes/origin/");
+          const refs = readRefs(checkout, "refs/heads/", "refs/remotes/origin/");
+          const local = oracleBranchNames(refs, "refs/heads/");
+          const remote = oracleBranchNames(refs, "refs/remotes/origin/");
           const hits = search(mine.id);
           expect(hits).toEqual(expect.arrayContaining([
             ...local.map((name) => ({ profileId: mine.id, kind: "local_branch", name })),
@@ -102,10 +112,9 @@ it("reconciles refs with scoped search and starts no branch transactions for mat
         expect(db.prepare("SELECT DISTINCT remote_name FROM remote_branches WHERE repo_id = ?")
           .pluck().all(repo.id)).toEqual(["origin"]);
 
-        const [first] = suffixes;
-        git(checkout, "branch", "-m", `oracle-local-${first}`, "oracle-renamed");
-        git(upstream, "branch", "-D", `oracle-remote-${first}`);
-        git(checkout, "fetch", "-q", "--prune", "origin");
+        git(checkout, ["branch", "-m", localBranches[0]!, renamed]);
+        git(upstream, ["branch", "-D", remoteBranches[0]!]);
+        git(checkout, ["fetch", "-q", "--prune", "origin"]);
         await expect(Promise.all([
           indexer.refreshRepoRemoteBranches(repo.id),
           indexer.refreshRepoRemoteBranches(repo.id)
@@ -114,10 +123,10 @@ it("reconciles refs with scoped search and starts no branch transactions for mat
         expect(search(theirs.id)).toEqual(otherHits);
       } finally {
         db.close();
-        for (const dir of [checkout, upstream]) {
-          const branches = oracleRefs(dir, "refs/heads/");
-          if (branches.length > 0) git(dir, "branch", "-D", ...branches);
-        }
+        // A rename or deletion may already have removed some refs. Git
+        // accepts a delete without an expected old ID for a missing ref.
+        writeFixtureRefs(checkout, [...localBranches, renamed].map((name) => `delete refs/heads/${name}`));
+        writeFixtureRefs(upstream, remoteBranches.map((name) => `delete refs/heads/${name}`));
       }
     }
   ), { numRuns: 8 });
@@ -163,19 +172,19 @@ it("indexes a recreated ref when refreshes reconcile different Git listings", as
         }
       }
     });
-    git(checkout, "fetch", "-q", "--prune", "origin");
-    git(checkout, "branch", keeper);
-    git(checkout, "branch", recreated);
+    git(checkout, ["fetch", "-q", "--prune", "origin"]);
+    git(checkout, ["branch", keeper]);
+    git(checkout, ["branch", recreated]);
     const [repo] = await indexer.rescanProfile(profile);
     if (repo === undefined) throw new Error("fixture checkout was not indexed");
 
-    git(checkout, "branch", "-D", recreated);
+    git(checkout, ["branch", "-D", recreated]);
     pauseOlder = true;
     const older = indexer.refreshRepoRemoteBranches(repo.id);
     pending.push(older);
     await olderPaused.promise;
 
-    git(checkout, "branch", recreated);
+    git(checkout, ["branch", recreated]);
     watchGit = true;
     pauseNewer = true;
     const newer = indexer.refreshRepoRemoteBranches(repo.id);
@@ -195,13 +204,13 @@ it("indexes a recreated ref when refreshes reconcile different Git listings", as
       .filter(({ kind }) => kind === "local_branch")
       .map(({ name }) => name)
       .sort();
-    expect(hits).toEqual(oracleRefs(checkout, "refs/heads/"));
+    expect(hits).toEqual(oracleBranchNames(readRefs(checkout, "refs/heads/"), "refs/heads/"));
   } finally {
     releaseOlder.resolve();
     releaseNewer.resolve();
     await Promise.allSettled(pending);
     db.close();
-    git(checkout, "branch", "-D", keeper, recreated);
+    git(checkout, ["branch", "-D", keeper, recreated]);
   }
 });
 
@@ -212,7 +221,7 @@ it("keeps scan recency without rewriting search rows for an unchanged repository
     const mine = profiles.create({ name: "Mine", email: "mine@example.test", roots: [checkout] });
     const theirs = profiles.create({ name: "Theirs", email: "theirs@example.test", roots: [checkout] });
     const indexer = new RepoIndexer(db, createSystemGit());
-    git(checkout, "branch", "oracle-recency");
+    git(checkout, ["branch", "oracle-recency"]);
     await indexer.rescanProfile(mine);
 
     db.exec(`
@@ -233,6 +242,6 @@ it("keeps scan recency without rewriting search rows for an unchanged repository
       .toEqual([expect.objectContaining({ profileId: theirs.id, kind: "local_branch", name: "oracle-recency" })]);
   } finally {
     db.close();
-    git(checkout, "branch", "-D", "oracle-recency");
+    git(checkout, ["branch", "-D", "oracle-recency"]);
   }
 });
