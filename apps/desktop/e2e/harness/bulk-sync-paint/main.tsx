@@ -5,6 +5,7 @@ import type {
   Profile,
   Repo
 } from "@pwrgit/shared";
+import { useLayoutEffect } from "react";
 import { createRoot } from "react-dom/client";
 import { Sidebar } from "../../../src/renderer/src/features/sidebar/Sidebar";
 import {
@@ -54,6 +55,7 @@ const emit = (event: string, payload: unknown) => {
   for (const handler of listeners.get(event) ?? []) handler(payload);
 };
 const updated = new Set<string>();
+let committedRepos: Repo[] = [];
 let run: { id: string; finish: (summary: BulkSyncSummary) => void } | undefined;
 let completed = 0;
 let targetedReads = 0;
@@ -124,6 +126,9 @@ const noop = () => undefined;
 const ready = { status: "ready" } as const;
 function App() {
   const tree = useRepoTree(profile.id);
+  useLayoutEffect(() => {
+    committedRepos = tree.repos;
+  }, [tree.repos]);
   return (
     <div className="pane pane--sidebar" style={{ width: 320, height: "100vh" }}>
       <Sidebar
@@ -191,12 +196,23 @@ function finish() {
 
 export const bulkSyncPaint = {
   ready: (async () => {
-    await Promise.all(['500 11px "Geist Sans"', '600 11px "Geist Mono"'].map((font) => document.fonts.load(font)));
+    await Promise.all([
+      '500 11px "Geist Sans"', '600 11px "Geist Sans"', '600 11px "Geist Mono"'
+    ].map((font) => document.fonts.load(font)));
     createRoot(document.getElementById("root")!).render(<App />);
     await nextFrame();
   })(),
   start,
   complete,
+  get refreshesCommitted() {
+    return committedRepos.length === repos.length && committedRepos.every((repo) =>
+      !updated.has(repo.id) || repo.worktrees[0]?.behind === 0
+    );
+  },
+  async afterPaint() {
+    await nextFrame();
+    await nextFrame();
+  },
   async workload({ detail, invalidate }: { detail: boolean; invalidate: boolean }) {
     // Three worker lanes, ten repositories per lane. Distinct timer tasks
     // stand in for IPC delivery. The batch finishes in about five seconds.

@@ -50,6 +50,7 @@ async function ready(page: Page): Promise<void> {
   await page.waitForFunction(() => "bulkSyncPaint" in window);
   await page.evaluate(() => window.bulkSyncPaint.ready);
   await expect(page.getByRole("button", { name: "Try pull all" })).toBeEnabled();
+  await page.evaluate(async () => { await document.fonts.ready; });
 }
 
 async function start(page: Page): Promise<void> {
@@ -171,6 +172,10 @@ benchmark("measures automatic pull paint and CPU", async ({ harness: { app, page
               detail: scenario !== "no-detail", invalidate: scenario !== "no-invalidation"
             }), scenario);
           await expect(page.locator(progressCount)).toHaveCount(0);
+          // The pull receipt can finish ahead of the last targeted read.
+          // Include the sidebar's commit and its next paint in the sample.
+          await page.waitForFunction(() => window.bulkSyncPaint.refreshesCommitted);
+          await page.evaluate(() => window.bulkSyncPaint.afterPaint());
           expect(delivery.completed).toBe(30);
           if (scenario === "no-invalidation") expect(delivery.targetedReads).toBe(0);
           else expect(delivery.targetedReads).toBeGreaterThan(0);
