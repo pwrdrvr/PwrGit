@@ -1,3 +1,4 @@
+import type { StackSnapshot } from "./stacks";
 // Typed Commands + Events registry — the single source of truth for the
 // command-bus across main / preload / renderer.
 //
@@ -1085,6 +1086,11 @@ export interface Commands {
   "identity:clearRepoOverride": {
     req: { repoId: string };
     res: FolderIdentityReport;
+  };
+
+  "stack:list": {
+    req: { repoId: RepoId; profileId: ProfileId };
+    res: StackSnapshot;
   };
 
   // Repos & discovery (U6)

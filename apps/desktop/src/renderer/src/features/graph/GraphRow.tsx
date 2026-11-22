@@ -1,9 +1,10 @@
 import { memo, useMemo, useRef, type MouseEvent } from "react";
-import type { Commit, LaneBranchInfo, MovedTag, PrSummary } from "@pwrgit/shared";
+import type { Commit, LaneBranchInfo, MovedTag, PrSummary, RepositoryStack, StackPosition } from "@pwrgit/shared";
 import { BranchGlyph } from "../../lib/BranchGlyph";
 import { CheckoutGlyph } from "../../lib/CheckoutGlyph";
 import { AuthorAvatar } from "./AuthorAvatar";
 import { hoverIntentHandlers, type HoverIntent } from "../../lib/hoverIntent";
+import { StackPositionChip } from "../stacks/StackViews";
 import { PrChip } from "../sidebar/PrChip";
 import { prChipLabel } from "../sidebar/pr-status";
 import { TagGlyph } from "../../lib/TagGlyph";
@@ -113,7 +114,10 @@ export function GraphRow({
   onOpenContextMenu,
   onOpenBranchMenu,
   onRevealWorktree,
-  onTakeTag
+  onTakeTag,
+  stackPositions,
+  oldStackBases,
+  onOpenStack
 }: {
   vm: GraphRowVM;
   laneCount: number;
@@ -130,6 +134,9 @@ export function GraphRow({
   flashing: boolean;
   /** branch name → PR / worktree adornments for tip chips. */
   branchInfo?: Record<string, LaneBranchInfo>;
+  stackPositions?: ReadonlyMap<string, StackPosition>;
+  oldStackBases?: ReadonlyMap<string, StackPosition>;
+  onOpenStack?: (stack: RepositoryStack) => void;
   /** The author's linked forge avatar, from main's people store. Absent
    *  draws initials. */
   authorAvatarUrl?: string | undefined;
@@ -177,8 +184,11 @@ export function GraphRow({
   const width = Math.max(1, laneCount) * LANE_W;
   const color = laneColor(row.lane);
   const chipCount = refs.length + remoteRefs.length;
+  const bracket = refs.length ? refs.map(ref => stackPositions?.get(ref)).find(position => position !== undefined) : undefined;
+  const oldStackBase = oldStackBases?.get(commit.hash);
   const isTip = chipCount > 0;
-  const chipNames = [...refs, ...remoteRefs];
+  const orderedRefs = bracket ? [bracket.layer.branch, ...refs.filter(ref => ref !== bracket.layer.branch)] : refs;
+  const chipNames = [...orderedRefs, ...remoteRefs];
   const canTakeTag = onTakeTag !== undefined;
   const hasPersonButton = onShowPerson !== undefined;
   const movedTag = canTakeTag ? vm.tagMoved : undefined;
@@ -188,22 +198,24 @@ export function GraphRow({
   const lineRef = useRef<HTMLDivElement>(null);
   const stripRef = useRef<HTMLSpanElement>(null);
   const { localChips, remoteChips, chipContent } = useMemo(() => {
-    const localChips = refs.slice(0, MAX_REF_CHIPS).map((name) => {
+    const localChips = orderedRefs.slice(0, bracket ? 1 : MAX_REF_CHIPS).map((name, index) => {
       const info = branchInfo?.[name];
       return {
         name,
         pr: info?.pr?.number === pullRequest?.number ? undefined : info?.pr,
-        worktreeId: info?.worktreeId
+        worktreeId: info?.worktreeId,
+        position: index === 0 ? stackPositions?.get(name) : undefined
       };
     });
-    const remoteChips = remoteRefs.slice(0, MAX_REF_CHIPS - localChips.length);
+    const occupied = localChips.length + localChips.filter(chip => chip.position).length;
+    const remoteChips = remoteRefs.slice(0, MAX_REF_CHIPS - occupied);
     // A graph or PR refresh can replace every row model. Refit only when a
     // row's meta line can change size. Folded names and PR status colors,
     // for example, update in React without changing the strip's geometry.
     const chipContent = !isTip && vm.tag === undefined ? "" : JSON.stringify([
       chipCount,
-      localChips.map(({ name, pr, worktreeId }) => [
-        name, pr && prChipLabel(pr), worktreeId !== undefined
+      localChips.map(({ name, pr, worktreeId, position }) => [
+        name, pr && prChipLabel(pr), worktreeId !== undefined, position?.index, position?.stack.layers.length
       ]),
       remoteChips,
       pullRequest && prChipLabel(pullRequest),
@@ -213,11 +225,12 @@ export function GraphRow({
       isHead,
       commit.isMerge,
       isMine ? "you" : commit.authorName,
-      hasPersonButton
+      hasPersonButton,
+      oldStackBase !== undefined
     ]);
     return { localChips, remoteChips, chipContent };
   }, [
-    refs, remoteRefs, branchInfo, pullRequest, isTip, chipCount, vm.tag, movedTag,
+    orderedRefs, bracket, remoteRefs, branchInfo, pullRequest, isTip, chipCount, vm.tag, movedTag, oldStackBase, stackPositions,
     publishedTags, isHead, commit.isMerge, isMine, commit.authorName, hasPersonButton
   ]);
   const chipFit = useRefChipFit(
@@ -229,7 +242,7 @@ export function GraphRow({
   );
   // While measuring (null), the tag and every capped chip render rigid, plus
   // the pill.
-  const shownChips = chipFit?.shown ?? Math.min(chipCount, MAX_REF_CHIPS);
+  const shownChips = chipFit?.shown ?? localChips.length + remoteChips.length;
   const squeezeClass = chipFit?.squeeze === true ? " is-squeezed" : "";
   const tagFit = chipFit?.tag ?? "whole";
   const foldedChips = chipNames.slice(shownChips);
@@ -345,6 +358,10 @@ export function GraphRow({
           />
         )}
         </svg>
+        {bracket && onOpenStack && <button type="button" className="stack-graph-bracket"
+          aria-label={`Open stack for ${bracket.layer.branch}`}
+          style={{ color }}
+          onClick={event => { event.stopPropagation(); onOpenStack(bracket.stack); }} />}
       </div>
 
       <div className="commit-body">
@@ -466,6 +483,9 @@ export function GraphRow({
               </button>
             ))}
           {isHead && <span className="commit-tag commit-tag--head">HEAD</span>}
+          {oldStackBase && <span className="commit-tag" {...hoverTooltip(tip, `Recorded parent tip of ${oldStackBase.layer.branch}`)}>
+            Old parent tip
+          </span>}
           {/* Chips are capped — a commit tipped by dozens of stale branches
               must not flood the row — and fitted: a chip the row has no room
               for folds into the +N pill whole rather than being clipped
@@ -476,7 +496,7 @@ export function GraphRow({
               className={`ref-chips${chipFit?.shown === 0 ? " is-folded" : ""}`}
               {...hoverTooltip(tip, chipNames.join("\n"))}
             >
-              {localChips.slice(0, shownChips).map(({ name, pr, worktreeId }) => (
+              {localChips.slice(0, shownChips).map(({ name, pr, worktreeId, position }) => (
                 <span key={name} className={`ref-group${squeezeClass}`}>
                   <button
                     type="button"
@@ -492,6 +512,7 @@ export function GraphRow({
                     <BranchGlyph size={8} strokeWidth={2.6} />
                     <span className="ref-chip__name">{name}</span>
                   </button>
+                  {position && onOpenStack && <StackPositionChip position={position} onSelect={() => onOpenStack(position.stack)} />}
                   {pr !== undefined && <PrChip pr={pr} />}
                   {worktreeId !== undefined && (
                     <button

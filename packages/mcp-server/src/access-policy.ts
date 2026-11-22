@@ -31,6 +31,7 @@ export const MCP_AGENT_CAPABILITIES = [
   "repository.roots.read",
   "repository.checkout.locate",
   "repository.metadata.read",
+  "repository.stack.read",
   "forge.status.read",
   "status.subscribe",
   "app.navigate"
@@ -57,6 +58,11 @@ export const MCP_AGENT_CAPABILITY_DETAILS: Record<
     label: "Read repository metadata",
     detail: "Read app repositories, recent selections, branches, worktrees, and aggregate status.",
     danger: "sensitive"
+  },
+  "repository.stack.read": {
+    label: "Read stacked pull requests",
+    detail: "Read tracked and inferred stacks and their local branch health in authorized repositories.",
+    danger: "standard"
   },
   "forge.status.read": {
     label: "Read forge status",

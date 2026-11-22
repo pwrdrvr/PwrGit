@@ -18,6 +18,8 @@ import {
   type LaneGraph,
   type MovedTag,
   type PrSummary,
+  type RepositoryStack,
+  type StackPosition,
   type RebaseOperation
 } from "@pwrgit/shared";
 import { announce } from "../../lib/announce";
@@ -259,9 +261,13 @@ export function LineageGraph({
   onCommitsChange,
   onOpenCommit,
   onRevealWorktree,
-  onRevealCreatedWorktree
+  onRevealCreatedWorktree,
+  stacks,
+  onOpenStack
 }: {
   repoId: string;
+  stacks?: RepositoryStack[];
+  onOpenStack?: (stack: RepositoryStack) => void;
   /** Repository name, shown when a dialog needs to name what it acts on. */
   repoName: string;
   worktreeId: string;
@@ -289,6 +295,17 @@ export function LineageGraph({
   /** Select a worktree just created here, once the repo tree lists it. */
   onRevealCreatedWorktree: (worktreeId: string) => void;
 }) {
+  const stackAnnotations = useMemo(() => {
+    if (!stacks?.length) return undefined;
+    const positions = new Map<string, StackPosition>();
+    const oldBases = new Map<string, StackPosition>();
+    for (const stack of stacks) stack.layers.forEach((layer, index) => {
+      const position = { stack, layer, index: index + 1 };
+      if (!positions.has(layer.branch)) positions.set(layer.branch, position);
+      if (layer.base && layer.health.needsRestack && !oldBases.has(layer.base)) oldBases.set(layer.base, position);
+    });
+    return { positions, oldBases };
+  }, [stacks]);
   const [data, setData] = useState<LaneGraph | null>(null);
   const [scope, setScope] = useState<Scope>("active");
   const [loading, setLoading] = useState(true);
@@ -1356,6 +1373,9 @@ export function LineageGraph({
                 contextOpen={hoveredCommit === vm.commit.hash && commitContext.visible}
                 flashing={flash === vm.commit.hash}
                 branchInfo={data?.branches ?? {}}
+                {...(stackAnnotations && onOpenStack ? {
+                  stackPositions: stackAnnotations.positions, oldStackBases: stackAnnotations.oldBases, onOpenStack
+                } : {})}
                 authorAvatarUrl={
                   linkedIdentity(people[commitAuthorPersonKey(vm.commit.authorEmail)])
                     ?.avatarUrl

@@ -20,6 +20,9 @@ export type AppBackend = {
   catalog(): AppCatalog | Promise<AppCatalog>;
   open(repo: AppRepository, worktreeId?: string): Promise<void>;
   refresh(repo: AppRepository): Promise<void>;
+  stackList?(repo: AppRepository): Promise<{
+    schemaVersion: number; readOnly: boolean; stacks: { id: string }[]; busy?: string;
+  }>;
 };
 
 export function registerAppTools(mcp: McpServer, backend: AppBackend, authorizer: McpAuthorizer) {
