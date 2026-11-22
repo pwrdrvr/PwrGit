@@ -161,9 +161,10 @@ profile is saved, a worker filters up to
 288 MiB of decoded JSON from Chromium's rolling buffer. The session log
 records the raw byte count and limit when the export size is known. One
 unfiltered capture can wait in a private temporary directory at a time. It is
-removed after export or discarded if tracing is disabled or its CPU profile
-fails. If Chromium tracing fails to start or export, hot CPU profiling can
-still run and publish CPU profiles.
+removed after export or discarded if tracing is disabled, its CPU profile
+fails to finish within the configured follow-up plus 15 seconds, or the trace
+reaches its shutdown deadline. If Chromium tracing fails to start or export,
+hot CPU profiling can still run and publish CPU profiles.
 
 Completed captures produce a standing CPU notice using PwrAgnt's compact
 header, copy/close icons, and arrow navigation. Copy includes the source host,

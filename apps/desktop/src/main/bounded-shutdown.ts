@@ -30,6 +30,8 @@ export const QUIT_FLUSH_DEADLINE_MS = 10_000;
 /** One diagnostics deadline shared by normal quit and explicit update installs. */
 export function createQuitDrain(options: {
   stop: () => void | Promise<void>;
+  /** Remaining time when the drain starts or its deadline gets shorter. */
+  onDeadline?: (remainingMs: number) => void;
   resumeQuit: () => void;
   warn: (message: string, error?: unknown) => void;
   /**
@@ -67,6 +69,7 @@ export function createQuitDrain(options: {
         ),
       ms
     );
+    options.onDeadline?.(ms);
   };
 
   const flush = (): Promise<void> => {

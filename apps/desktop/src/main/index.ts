@@ -1588,6 +1588,7 @@ if (!gotSingleInstanceLock) {
       }
     });
     const quitDrain = createQuitDrain({
+      onDeadline: (remainingMs) => diagnostics.limitTraceShutdown(remainingMs),
       stop: async () => {
         // Start independently, retaining the agent's existing 1.5s limit
         // inside the shared 10s deadline rather than adding a serial wait.

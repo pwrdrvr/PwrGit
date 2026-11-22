@@ -188,17 +188,27 @@ export class DiagnosticsManager {
 
   /** Re-resolve configs from Settings and start/stop/restart monitors. */
   sync(): Promise<void> {
-    this.enqueueSync(() => this.syncInner());
+    // An explicit opt-out cancels immediately, even if a monitor is stopping
+    // on the diagnostics queue and has yet to finish its CPU profile.
+    const disarmTrace = this.getDiagnostics().hotCpuProfilingCaptureChromiumTrace
+      ? undefined : this.chromiumTrace.setArmed(false);
+    this.enqueueSync(async () => {
+      await disarmTrace;
+      await this.syncInner();
+    });
     return this.syncQueue;
+  }
+
+  limitTraceShutdown(remainingMs: number): void {
+    // Leave time to terminate the worker and remove private scratch files.
+    this.chromiumTrace.beginShutdown(remainingMs - 1_000);
   }
 
   /** Stop everything. Resolves once final events/manifests are flushed —
    *  index.ts drains this (with a timeout) before windows close. */
   shutdown(): Promise<void> {
     this.shuttingDown = true;
-    // Leave time in the app's quit drain to terminate the filter worker and
-    // remove its private scratch files if the export is still in progress.
-    const clearTraceDeadline = this.chromiumTrace.beginShutdown(QUIT_FLUSH_DEADLINE_MS - 1_000);
+    this.limitTraceShutdown(QUIT_FLUSH_DEADLINE_MS);
     this.clearResourceExpiryTimer();
     this.enqueueSync(async () => {
       try {
@@ -210,7 +220,7 @@ export class DiagnosticsManager {
         await this.chromiumTrace.setArmed(false);
       }
     });
-    return this.syncQueue.finally(clearTraceDeadline);
+    return this.syncQueue.finally(() => this.chromiumTrace.clearShutdownTimer());
   }
 
   /** Whether `shutdown` has anything to flush: a monitor or profiler is
@@ -314,7 +324,7 @@ export class DiagnosticsManager {
   private async reconcileChromiumTrace(): Promise<void> {
     if (this.reconfiguringRenderers || this.shuttingDown) return;
     const windows = [...this.windows.values()];
-    if (this.chromiumTraceEnabled) {
+    if (this.chromiumTraceEnabled && this.getDiagnostics().hotCpuProfilingCaptureChromiumTrace) {
       if (windows.some((entry) => entry.hotCpuProfiler?.canCaptureAnotherProfile())) {
         await this.chromiumTrace.setArmed(true);
         return;
@@ -530,7 +540,7 @@ export class DiagnosticsManager {
         takeHeapSnapshot: (filePath) => contents.takeHeapSnapshot(filePath)
       },
       onProfileTriggered: (filePath, triggerAtMs, triggerMonotonicMs) =>
-        this.startChromiumTraceCapture(session.session, filePath, triggerAtMs, triggerMonotonicMs),
+        this.startChromiumTraceCapture(session.session, filePath, triggerAtMs, triggerMonotonicMs, config.profileDurationMs),
       onProfileFinished: () => { void this.reconcileChromiumTrace(); },
       onProfileWritten: (event) => this.onHotCpuProfileCaptured?.(event, entry.profileId),
       onHeapSnapshotLimitReached: () => {
@@ -542,7 +552,7 @@ export class DiagnosticsManager {
 
   private startChromiumTraceCapture(
     session: HotCpuProfileSession, profilePath: string, triggerAtMs: number,
-    triggerMonotonicMs: number
+    triggerMonotonicMs: number, profileDurationMs: number
   ): ((profileWritten: boolean) => Promise<void>) | undefined {
     if (!this.getDiagnostics().hotCpuProfilingCaptureChromiumTrace) return;
     const filename = `${path.parse(profilePath).name}.trace.json`;
@@ -550,16 +560,21 @@ export class DiagnosticsManager {
     const profileWritten = new Promise<boolean>((resolve) => { completeProfile = resolve; });
     const capture = this.chromiumTrace.capture(
       path.join(session.directoryPath, filename), triggerMonotonicMs,
-      async () => await profileWritten && this.getDiagnostics().hotCpuProfilingCaptureChromiumTrace
-    ).catch((error: unknown) => ({
-      status: "failed" as const,
-      error: error instanceof Error ? error.message : String(error)
-    }));
+      async () => await profileWritten && this.getDiagnostics().hotCpuProfilingCaptureChromiumTrace,
+      profileDurationMs
+    ).catch((error: unknown) => {
+      const message = error instanceof Error ? error.message : String(error);
+      log.warn("Could not save Chromium trace", message);
+      return { status: "failed" as const, error: message };
+    }).finally(() => {
+      // A timed-out trace must release the slot even if its renderer never
+      // finishes the CPU profile and never calls onProfileFinished.
+      void this.reconcileChromiumTrace();
+    });
     return async (written) => {
       completeProfile(written);
       const result = await capture;
       if (!written || (result.status === "skipped" && result.reason === "canceled")) return;
-      if (result.status === "failed") log.warn("Could not save Chromium trace", result.error);
       if (result.status === "written") await session.registerArtifact(filename);
       await session.appendEvent({
         capturedAt: new Date().toISOString(),

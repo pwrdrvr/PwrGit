@@ -15,9 +15,18 @@ const stalledWorker = new URL(`data:text/javascript,${encodeURIComponent(`
   setInterval(() => {}, 1_000);
 `)}`);
 
+async function waitForPartialExport(directory: string): Promise<void> {
+  await vi.waitFor(async () => {
+    const staging = (await readdir(directory)).find((name) => name.startsWith(".pwrgit-trace-"));
+    expect(staging).toBeDefined();
+    await expect(readFile(join(directory, staging!, "filtered.json"), "utf8")).resolves.toBe('{"traceEvents":[');
+  }, { timeout: 3_000 });
+}
+
 it("reserves one frozen export across overlapping triggers, rearming, disarm and clock adjustments", async () => {
   await fc.assert(fc.asyncProperty(
-    fc.array(fc.tuple(fc.integer({ min: 2, max: 5 }), fc.integer({ min: 1, max: 1000 }), fc.constantFrom("publish", "profile-failed", "disarm")), { minLength: 1, maxLength: 12 }),
+    fc.array(fc.tuple(fc.integer({ min: 2, max: 5 }), fc.integer({ min: 1, max: 1000 }),
+      fc.constantFrom("publish", "profile-failed", "disarm", "disarm-after-filtering")), { minLength: 1, maxLength: 12 }),
     async (rounds) => {
       const directory = await mkdtemp(join(tmpdir(), "pwrgit-trace-model-"));
       try {
@@ -25,6 +34,7 @@ it("reserves one frozen export across overlapping triggers, rearming, disarm and
         let wall = 100_000;
         let nativeRecording = false;
         let rawPath: string | undefined;
+        let filterCheckpoint: (() => Promise<void>) | undefined;
         const unexpectedErrors: unknown[] = [];
         const trace = new ChromiumTrace(() => ({
           async startRecording() {
@@ -42,7 +52,10 @@ it("reserves one frozen export across overlapping triggers, rearming, disarm and
           wallNow: () => wall,
           monotonicNow: () => ++mono,
           // The queue model uses empty exports. The export tests below run the real worker.
-          filterTrace: (_rawPath, filteredPath) => writeFile(filteredPath, emptyTrace)
+          filterTrace: async (_rawPath, filteredPath) => {
+            await writeFile(filteredPath, emptyTrace);
+            await filterCheckpoint?.();
+          }
         });
 
         const saved: string[] = [];
@@ -64,8 +77,26 @@ it("reserves one frozen export across overlapping triggers, rearming, disarm and
           expect(await readFile(rawPath!, "utf8")).toBe(emptyTrace);
           expect((await readdir(directory)).sort()).toEqual(saved.sort());
 
-          if (settlement === "disarm") await trace.setArmed(false);
-          else completeProfile(settlement === "publish");
+          if (settlement === "disarm") {
+            await trace.setArmed(false);
+          } else if (settlement === "disarm-after-filtering") {
+            let reachedCheckpoint!: () => void;
+            let releaseFilter!: () => void;
+            const reached = new Promise<void>((resolve) => { reachedCheckpoint = resolve; });
+            const released = new Promise<void>((resolve) => { releaseFilter = resolve; });
+            filterCheckpoint = () => {
+              reachedCheckpoint();
+              return released;
+            };
+            completeProfile(true);
+            await reached;
+            const disarm = trace.setArmed(false);
+            releaseFilter();
+            await disarm;
+            filterCheckpoint = undefined;
+          } else {
+            completeProfile(settlement === "publish");
+          }
           if (settlement === "publish") {
             expect(await capture).toMatchObject({ status: "written" });
             saved.push(names[0]!);
@@ -89,6 +120,49 @@ it("reserves one frozen export across overlapping triggers, rearming, disarm and
       }
     }
   ), { numRuns: 25 });
+});
+
+it.each(["profile deadline", "shutdown"] as const)("releases a stalled CPU profile's trace reservation on %s", async (stop) => {
+  const directory = await mkdtemp(join(tmpdir(), "pwrgit-trace-profile-stalled-"));
+  let rawPath: string | undefined;
+  let mono = 0;
+  let nativeStarts = 0;
+  const trace = new ChromiumTrace(() => ({
+    async startRecording() { nativeStarts++; },
+    async stopRecording(file = "") {
+      rawPath = file;
+      await writeFile(file, emptyTrace);
+      return file;
+    }
+  }), () => {}, { monotonicNow: () => ++mono });
+  vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+  try {
+    await trace.setArmed(true);
+    let markWaiting!: () => void;
+    const waiting = new Promise<void>((resolve) => { markWaiting = resolve; });
+    const output = join(directory, "trace.json");
+    const result = trace.capture(output, ++mono, () => {
+      markWaiting();
+      return new Promise<never>(() => {});
+    }).catch((error: Error) => error);
+    await waiting;
+    if (stop === "shutdown") trace.beginShutdown(1_000);
+    await vi.advanceTimersByTimeAsync(stop === "shutdown" ? 1_000 : 15_000);
+    await vi.waitFor(async () => {
+      await expect(stat(rawPath!)).rejects.toMatchObject({ code: "ENOENT" });
+    }, { timeout: 500 });
+    const message = stop === "shutdown" ? /Chromium trace timed out during shutdown/i : /waiting for CPU profile timed out/i;
+    expect(await result).toMatchObject({ message: expect.stringMatching(message) });
+    expect(await readdir(directory)).toEqual([]);
+    if (stop === "profile deadline") {
+      await trace.setArmed(true);
+      expect(nativeStarts).toBe(2);
+    }
+  } finally {
+    await trace.setArmed(false);
+    vi.useRealTimers();
+    await rm(directory, { recursive: true, force: true });
+  }
 });
 
 it("bounds a missing start acknowledgement and an export that never completes", async () => {
@@ -280,7 +354,7 @@ it("discards malformed and timed-out exports and releases the recording queue", 
   }
 });
 
-it("allows filtering past five seconds and cleans up when the shutdown budget expires", async () => {
+it.each(["disarm", "hurried shutdown"] as const)("discards a filter already in progress on %s", async (stop) => {
   const directory = await mkdtemp(join(tmpdir(), "pwrgit-trace-filter-shutdown-"));
   let rawPath: string | undefined;
   let mono = 0;
@@ -293,26 +367,35 @@ it("allows filtering past five seconds and cleans up when the shutdown budget ex
     }
   }), () => {}, { monotonicNow: () => ++mono, workerModule: stalledWorker });
 
-  vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+  vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "performance"] });
   let result: Promise<unknown> | undefined;
+  let disarm: Promise<void> | undefined;
   try {
     await trace.setArmed(true);
     result = trace.capture(join(directory, "trace.json"), ++mono).catch((error: Error) => error);
-    await vi.waitFor(async () => {
-      const staging = (await readdir(directory)).find((name) => name.startsWith(".pwrgit-trace-"));
-      expect(staging).toBeDefined();
-      await expect(readFile(join(directory, staging!, "filtered.json"), "utf8")).resolves.toBe('{"traceEvents":[');
-    }, { timeout: 3_000 });
+    await waitForPartialExport(directory);
+    if (stop === "hurried shutdown") trace.beginShutdown(9_000);
     await vi.advanceTimersByTimeAsync(5_001);
-    trace.beginShutdown(100);
-    await vi.advanceTimersByTimeAsync(100);
-    await expect(result).resolves.toMatchObject({ message: expect.stringMatching(/filtering Chromium trace timed out during shutdown/i) });
+    if (stop === "hurried shutdown") {
+      trace.beginShutdown(1_000);
+      await vi.advanceTimersByTimeAsync(1_000);
+    } else {
+      disarm = trace.setArmed(false);
+    }
+    await vi.waitFor(async () => {
+      await expect(stat(rawPath!)).rejects.toMatchObject({ code: "ENOENT" });
+    }, { timeout: 500 });
+    const expected = stop === "disarm" ? { status: "skipped", reason: "canceled" }
+      : { message: expect.stringMatching(/Chromium trace timed out during shutdown/i) };
+    expect(await result).toMatchObject(expected);
+    await disarm;
     await expect(stat(rawPath!)).rejects.toMatchObject({ code: "ENOENT" });
     expect(await readdir(directory)).toEqual([]);
   } finally {
     await vi.advanceTimersByTimeAsync(15_000);
     vi.useRealTimers();
     await result;
+    await disarm;
     await rm(directory, { recursive: true, force: true });
   }
 });
