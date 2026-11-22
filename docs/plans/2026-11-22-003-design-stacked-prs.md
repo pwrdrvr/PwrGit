@@ -98,7 +98,7 @@ surfaced as *drift* and is never resolved silently.
 | parent merged | The forge says the parent's PR is merged. Without a forge, `git cherry <trunk> <parent>` is empty. Ancestry alone is never the test, because squash merges defeat it. |
 | needs push | local head ≠ PR `headOid` |
 | drift | PR `baseRefName` ≠ catalog parent |
-| remote ahead | The remote head isn't an ancestor of the local head. PwrGit never force-pushes over this, lease or not. |
+| remote ahead | The remote head isn't the sha PwrGit last fetched or pushed for that branch (the catalog `head` at the last sync, or the PR `headOid`), and isn't contained in the local head. A restack's own rewrite never trips this: the old remote head is expected to stop being an ancestor. PwrGit never force-pushes over a remote that's ahead, lease or not. |
 
 These are pure functions of (catalog, refs, PR list). They live in
 `packages/shared` so the renderer, main and MCP compute the same answer.
@@ -135,8 +135,13 @@ operation:
    `start`, then `update refs/heads/<b> <new> <expected-old>` for each ref,
    then `prepare` and `commit`. Every ref moves or none does. An expected-old
    mismatch means the plan is stale, and nothing changes.
-3. Each checked-out worktree follows with `git reset --keep <new>`. Preflight
-   has already shown this can't refuse.
+3. Each checked-out worktree follows with `git read-tree -m -u <old> <new>`.
+   That's a two-tree merge that moves the index and files from the old tip to
+   the new one and carries local changes along, the way `checkout` does.
+   Preflight has already shown it can't refuse. `reset --keep <new>` is wrong
+   here: after the transaction, HEAD already points at `<new>`, so it has
+   nothing to carry, and the worktree would keep the old tree, which reads as
+   the restack undone in `git status`.
 4. It updates the catalog (`head`, `base`) under the lock.
 5. The forge steps run in a fixed order, described below.
 
@@ -177,7 +182,9 @@ git push --atomic <remote> --force-with-lease=<b>:<expected> <new>:<b> …
 ```
 
 `--atomic` means GitHub sees all of the pushes or none of them. The lease
-always names its expected sha (the last-fetched PR `headOid`). A bare
+always names its expected sha: the last-fetched PR `headOid`, or, for a
+branch that has never been pushed, the empty lease
+`--force-with-lease=<b>:`, which means "must not exist yet". A bare
 `--force-with-lease` trusts a remote-tracking ref that a background fetch may
 already have advanced. After the push, Submit:
 

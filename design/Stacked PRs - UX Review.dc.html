@@ -275,7 +275,7 @@
       <!-- ================================================================ TURN 0 -->
       <section class="dv-turn" id="t0" data-screen-label="Turn 0 Brief">
         <div class="dv-thd"><a class="dv-tid" href="#t0">0</a><span class="dv-tname">Brief: we never built stacked PRs, and the team already stacks with gh stack</span></div>
-        <p class="dv-sub">Harold, 2026-11-22: “Did we build Stacked PR GUI support and operation support in PwrGit? I feel like we didn’t.” <b>We didn’t.</b> PwrGit draws a stack’s branches as one lane train and prints <code>→ base</code> on a pull-request row whose base isn’t the default branch. That’s all. Nothing stores a branch’s parent. Nothing rebases with <code>--onto</code> or <code>--update-refs</code>. Nothing opens a PR or changes its base. There’s no undo. Meanwhile PwrAgent’s contributors stack with GitHub’s own <code>gh stack</code> (v0.3.0). It keeps a catalog at <code>$GIT_COMMON_DIR/gh-stack</code> and a stack object on GitHub. <b>Goal:</b> make stacks something you can see and operate in PwrGit and through its MCP server, without inventing a fourth stack format. <b>Open decisions for review:</b> where stack state lives (2a is recommended), where stacks show (3a), and how agents get write access (6b). Everything here is a proposal. Nothing is built. All data is invented.</p>
+        <p class="dv-sub">Harold, 2026-11-22: “Did we build Stacked PR GUI support and operation support in PwrGit? I feel like we didn’t.” <b>We didn’t.</b> PwrGit draws a stack’s branches as one lane train and prints <code>→ base</code> on a pull-request row whose base isn’t the default branch. That’s all. Nothing stores a branch’s parent. Nothing rebases with <code>--onto</code> or <code>--update-refs</code>. Nothing opens a PR or changes its base. There’s no undo. Meanwhile PwrAgent’s contributors stack with GitHub’s own <code>gh stack</code> (v0.3.0). It keeps a catalog at <code>$GIT_COMMON_DIR/gh-stack</code> and a stack object on GitHub. <b>Goal:</b> make stacks something you can see and operate in PwrGit and through its MCP server, without inventing a fourth stack format. <b>Open decisions for review:</b> where stack state lives (1a is recommended), where stacks show (2a), and how agents get write access (5b). Everything here is a proposal. Nothing is built. All data is invented.</p>
         <div class="dv-opts">
           <div class="dv-opt" id="0a" data-screen-label="0a What exists">
             <div class="dv-olabel"><a class="dv-oid" href="#0a">0a</a>What PwrGit has to build on</div>
@@ -344,7 +344,7 @@
               <div class="tr" style="grid-template-columns: 160px 150px minmax(0, 1fr)"><span><b>Parent merged</b></span><span><span class="bdg merged">parent merged</span></span><span>The forge reports the parent’s PR merged. For a forge-less repo, <code>git cherry trunk parent</code> is empty. Ancestry alone misses squash merges, so it’s never the only test.</span></div>
               <div class="tr" style="grid-template-columns: 160px 150px minmax(0, 1fr)"><span><b>Needs push</b></span><span><span class="bdg push">needs push</span></span><span>The local head ≠ the head last fetched for its PR (<code>headOid</code>).</span></div>
               <div class="tr" style="grid-template-columns: 160px 150px minmax(0, 1fr)"><span><b>Drift</b></span><span><span class="bdg drift">GitHub base ≠ stack</span></span><span>The PR’s <code>baseRefName</code> ≠ the catalog parent.</span></div>
-              <div class="tr" style="grid-template-columns: 160px 150px minmax(0, 1fr)"><span><b>Someone else pushed</b></span><span><span class="bdg drift">remote ahead</span></span><span>The remote head isn’t an ancestor of the local head. PwrGit never pushes over it, not even with a lease. Pull it first.</span></div>
+              <div class="tr" style="grid-template-columns: 160px 150px minmax(0, 1fr)"><span><b>Someone else pushed</b></span><span><span class="bdg drift">remote ahead</span></span><span>The remote head isn’t the sha PwrGit last fetched or pushed for it, and isn’t contained in the local head. A restack’s own rewrite never counts. PwrGit never pushes over it, not even with a lease. Pull it first.</span></div>
             </div>
           </div>
         </div>
@@ -395,41 +395,40 @@
           <div class="dv-opt" id="2b" data-screen-label="2b Lineage">
             <div class="dv-olabel"><a class="dv-oid" href="#2b">2b</a>The lane train, before and after Restack</div>
             <div class="stage" style="width: 560px">
-              <svg class="gsvg" width="524" height="330" viewBox="0 0 524 330" role="img" aria-label="Lineage graph. Before: windows/model has a new commit beside the old tip that windows/scheduler, windows/api and windows/ui still sit on. After: the three branches are replayed onto the new tip in one straight train.">
+              <svg class="gsvg" width="524" height="330" viewBox="0 0 524 330" role="img" aria-label="Lineage graph. Before: windows/model has a new commit on top of its old tip, while windows/scheduler, windows/api and windows/ui still sit on that old tip. After: the three branches are replayed onto the new tip in one straight train.">
                 <text x="0" y="12" fill="#8c857a" font-family="Geist, sans-serif" font-size="10" font-weight="700" letter-spacing=".8">BEFORE</text>
                 <text x="276" y="12" fill="#8c857a" font-family="Geist, sans-serif" font-size="10" font-weight="700" letter-spacing=".8">AFTER RESTACK</text>
                 <!-- before -->
                 <line x1="20" y1="40" x2="20" y2="312" stroke="#ff8a1f" stroke-width="2" stroke-opacity=".8" />
                 <line x1="20" y1="296" x2="20" y2="320" stroke="#8c857a" stroke-width="2" />
-                <path d="M20 248 C 20 236, 44 236, 44 222 L 44 200" stroke="#62c882" stroke-width="2" fill="none" />
+                <path d="M20 232 C 20 220, 44 220, 44 206 L 44 184" stroke="#62c882" stroke-width="2" fill="none" />
                 <circle cx="20" cy="40" r="5" fill="#0a0a0a" stroke="#ff8a1f" stroke-width="2" />
                 <circle cx="20" cy="88" r="5" fill="#0a0a0a" stroke="#ff8a1f" stroke-width="2" />
                 <circle cx="20" cy="136" r="5" fill="#0a0a0a" stroke="#ff8a1f" stroke-width="2" />
-                <circle cx="20" cy="184" r="5" fill="#0a0a0a" stroke="#d99a3d" stroke-width="2" stroke-dasharray="3 2" />
-                <circle cx="44" cy="200" r="5" fill="#62c882" />
-                <circle cx="20" cy="248" r="5" fill="#0a0a0a" stroke="#ff8a1f" stroke-width="2" />
+                <circle cx="44" cy="184" r="5" fill="#62c882" />
+                <circle cx="20" cy="232" r="5" fill="#0a0a0a" stroke="#d99a3d" stroke-width="2" stroke-dasharray="3 2" />
                 <rect x="14" y="304" width="12" height="12" rx="2" fill="#8c857a" />
                 <text x="34" y="44" fill="#f7f3eb" font-family="Geist Mono, monospace" font-size="10.5">windows/ui</text><text x="108" y="44" fill="#d99a3d" font-family="Geist Mono, monospace" font-size="9.5">4/4 ⟳</text>
                 <text x="34" y="92" fill="#f7f3eb" font-family="Geist Mono, monospace" font-size="10.5">windows/api</text><text x="114" y="92" fill="#d99a3d" font-family="Geist Mono, monospace" font-size="9.5">3/4 ⟳</text>
                 <text x="34" y="140" fill="#f7f3eb" font-family="Geist Mono, monospace" font-size="10.5">windows/scheduler</text><text x="152" y="140" fill="#d99a3d" font-family="Geist Mono, monospace" font-size="9.5">2/4 ⟳</text>
-                <text x="34" y="188" fill="#8c857a" font-family="Geist Mono, monospace" font-size="10">4e1a9c2  old windows/model tip</text>
-                <text x="58" y="204" fill="#f7f3eb" font-family="Geist Mono, monospace" font-size="10.5">windows/model</text><text x="152" y="204" fill="#9fc8ff" font-family="Geist Mono, monospace" font-size="9.5">1/4 ↑1</text>
-                <text x="58" y="218" fill="#8c857a" font-family="Geist, sans-serif" font-size="9.5">fix: reject windows longer than 24h</text>
-                <text x="34" y="252" fill="#8c857a" font-family="Geist Mono, monospace" font-size="10">first commit of windows/model</text>
+                <text x="58" y="188" fill="#f7f3eb" font-family="Geist Mono, monospace" font-size="10.5">windows/model</text><text x="152" y="188" fill="#9fc8ff" font-family="Geist Mono, monospace" font-size="9.5">1/4 ↑1</text>
+                <text x="58" y="202" fill="#8c857a" font-family="Geist, sans-serif" font-size="9.5">fix: reject windows longer than 24h</text>
+                <text x="34" y="236" fill="#8c857a" font-family="Geist Mono, monospace" font-size="10">4e1a9c2  old windows/model tip</text>
+                <text x="34" y="250" fill="#8c857a" font-family="Geist, sans-serif" font-size="9.5">windows/scheduler still sits here</text>
                 <text x="34" y="314" fill="#b8b0a5" font-family="Geist Mono, monospace" font-size="10.5">main</text>
                 <!-- after -->
                 <line x1="296" y1="40" x2="296" y2="312" stroke="#ff8a1f" stroke-width="2" stroke-opacity=".8" />
                 <circle cx="296" cy="40" r="5" fill="#0a0a0a" stroke="#ff8a1f" stroke-width="2" />
                 <circle cx="296" cy="88" r="5" fill="#0a0a0a" stroke="#ff8a1f" stroke-width="2" />
                 <circle cx="296" cy="136" r="5" fill="#0a0a0a" stroke="#ff8a1f" stroke-width="2" />
-                <circle cx="296" cy="200" r="5" fill="#0a0a0a" stroke="#ff8a1f" stroke-width="2" />
-                <circle cx="296" cy="248" r="5" fill="#0a0a0a" stroke="#ff8a1f" stroke-width="2" />
+                <circle cx="296" cy="184" r="5" fill="#0a0a0a" stroke="#ff8a1f" stroke-width="2" />
+                <circle cx="296" cy="232" r="5" fill="#0a0a0a" stroke="#ff8a1f" stroke-width="2" />
                 <rect x="290" y="304" width="12" height="12" rx="2" fill="#8c857a" />
                 <text x="310" y="44" fill="#f7f3eb" font-family="Geist Mono, monospace" font-size="10.5">windows/ui</text><text x="384" y="44" fill="#9ce5b3" font-family="Geist Mono, monospace" font-size="9.5">4/4</text>
                 <text x="310" y="92" fill="#f7f3eb" font-family="Geist Mono, monospace" font-size="10.5">windows/api</text><text x="390" y="92" fill="#9ce5b3" font-family="Geist Mono, monospace" font-size="9.5">3/4</text>
                 <text x="310" y="140" fill="#f7f3eb" font-family="Geist Mono, monospace" font-size="10.5">windows/scheduler</text><text x="428" y="140" fill="#9ce5b3" font-family="Geist Mono, monospace" font-size="9.5">2/4</text>
-                <text x="310" y="204" fill="#f7f3eb" font-family="Geist Mono, monospace" font-size="10.5">windows/model</text><text x="404" y="204" fill="#9fc8ff" font-family="Geist Mono, monospace" font-size="9.5">1/4 ↑1</text>
-                <text x="310" y="252" fill="#8c857a" font-family="Geist Mono, monospace" font-size="10">first commit of windows/model</text>
+                <text x="310" y="188" fill="#f7f3eb" font-family="Geist Mono, monospace" font-size="10.5">windows/model</text><text x="404" y="188" fill="#9fc8ff" font-family="Geist Mono, monospace" font-size="9.5">1/4 ↑1</text>
+                <text x="310" y="236" fill="#8c857a" font-family="Geist Mono, monospace" font-size="10">4e1a9c2</text>
                 <text x="310" y="314" fill="#b8b0a5" font-family="Geist Mono, monospace" font-size="10.5">main</text>
                 <rect x="470" y="34" width="5" height="176" rx="2.5" fill="#ff8a1f" fill-opacity=".22" />
                 <text x="482" y="126" fill="#ffb35c" font-family="Geist Mono, monospace" font-size="9.5" transform="rotate(90 482 126)">stack · windows</text>
@@ -558,7 +557,7 @@
             <div class="dv-olabel"><a class="dv-oid" href="#4c">4c</a>Branches checked out elsewhere</div>
             <div class="find" style="width: 470px">
               <div class="fitem"><span class="pin acc">1</span><div><h4><code>--update-refs</code> skips them, so we don’t use it</h4><p>Git won’t update a ref that’s checked out in another worktree. It warns and moves on, and the stack comes out half-restacked. PwrGit moves refs itself, in one <code>update-ref</code> transaction with each planned old tip as the expected value.</p></div></div>
-              <div class="fitem"><span class="pin acc">2</span><div><h4>Then each checked-out worktree follows with <code>reset --keep</code></h4><p>Before Run, the plan intersects each worktree’s dirty files with the files the restack changes. An empty intersection means its changes ride along. A non-empty one blocks the whole plan before any ref moves and names the files. Stash them, or finish them, then restack.</p></div></div>
+              <div class="fitem"><span class="pin acc">2</span><div><h4>Then each checked-out worktree follows with <code>read-tree -m -u &lt;old&gt; &lt;new&gt;</code></h4><p>Once the ref has moved, <code>reset --keep</code> would see HEAD already at the target and leave the old files behind. A two-tree <code>read-tree -m -u</code> moves the index and files from the old tip to the new one, as a checkout does. Before Run, the plan intersects each worktree’s dirty files with the files the restack changes. An empty intersection means its changes ride along. A non-empty one blocks the whole plan before any ref moves and names the files. Stash them, or finish them, then restack.</p></div></div>
               <div class="fitem"><span class="pin acc">3</span><div><h4>An agent mid-turn is a dirty worktree with a pulse</h4><p>PwrAgent will gate this harder. It won’t restack under a running turn without the thread’s consent. That’s its design to do, and it’s handed off with this board.</p></div></div>
             </div>
           </div>
@@ -602,7 +601,7 @@
                 <div class="bd">
                   <div class="ln"><em>Replay</em><span>windows/scheduler, windows/api, windows/ui onto 7b3d0f5 · <span style="color: #9ce5b3">all clean</span></span></div>
                   <div class="ln"><em>Refs</em><span>3 move in one transaction · undo kept</span></div>
-                  <div class="ln"><em>Worktrees</em><span>⌂ orbit-deploy.windows-api · clean, follows with reset --keep</span></div>
+                  <div class="ln"><em>Worktrees</em><span>⌂ orbit-deploy.windows-api · clean, follows with read-tree -m -u</span></div>
                   <div class="ln"><em>Push</em><span class="w">4 branches, atomic, each leased to its last-fetched sha</span></div>
                   <div class="ln"><em>GitHub</em><span>open #654 (draft) into windows/api · link 4 PRs into a stack</span></div>
                 </div>
@@ -642,7 +641,7 @@
                 <div class="fitem"><span class="pin acc">1</span><div><h4>Replay in memory</h4><p><code>git replay --onto &lt;parent&gt; &lt;base&gt;..&lt;branch&gt;</code> (bundled Git 2.56). No checkout, no index, no hooks, no half-states.</p></div></div>
                 <div class="fitem"><span class="pin acc">2</span><div><h4>Locate conflicts exactly</h4><p>When a replay stops, <code>git merge-tree --write-tree --name-only</code> walks commit by commit to name the commit and files.</p></div></div>
                 <div class="fitem"><span class="pin acc">3</span><div><h4>Move all or nothing</h4><p>One <code>git update-ref --stdin</code> transaction (<code>start / update new old / prepare / commit</code>). The expected old values make stale plans fail.</p></div></div>
-                <div class="fitem"><span class="pin acc">4</span><div><h4>Worktrees follow</h4><p><code>reset --keep</code> in each checked-out worktree, after a dirty-files ∩ changed-files preflight.</p></div></div>
+                <div class="fitem"><span class="pin acc">4</span><div><h4>Worktrees follow</h4><p><code>read-tree -m -u &lt;old&gt; &lt;new&gt;</code> in each checked-out worktree, after a dirty-files ∩ changed-files preflight.</p></div></div>
                 <div class="fitem"><span class="pin acc">5</span><div><h4>Prove it</h4><p>Each branch’s patch-id multiset is equal before and after. Commits that went empty because trunk already has them are listed, never dropped silently.</p></div></div>
                 <div class="fitem"><span class="pin acc">6</span><div><h4>Push atomically, with leases</h4><p><code>--atomic</code> plus an explicit <code>--force-with-lease=ref:sha</code> per branch. Retarget PRs before deleting a merged base.</p></div></div>
                 <div class="fitem"><span class="pin acc">7</span><div><h4>Share the catalog</h4><p>Read and write gh stack’s schema v1 under <code>gh-stack.lock</code>. Refuse while <code>gh-stack-operation.lock</code> or a gh stack journal is active.</p></div></div>
@@ -695,6 +694,7 @@
         u: ["0d8c6b3", "a7f21e9", "6e4b2d7", "d19a5c3", "4f0c8b1", "c2a7e95"]
       };
       const STEP_MS = 640;
+      const TRUNKS = ["8c1d2e0", "3fa9b61", "d70e2a4", "5b8c1f3"];
       function clone(o) { return JSON.parse(JSON.stringify(o)); }
       const INITIAL = {
         order: ["m", "s", "a", "u"],
@@ -702,7 +702,7 @@
         prBase: { m: "main", s: "windows/model", a: "windows/scheduler", u: "" },
         rev: { m: 0, s: 0, a: 0, u: 0 },
         stale: {}, unpushed: {}, merged: {}, gone: {}, fresh: {},
-        trunk: "8c1d2e0", trunkMoved: false,
+        trunk: "8c1d2e0", trunkBefore: "8c1d2e0", trunkMoved: false, squash: {}, pushed: { m: 0, s: 0, a: 0, u: -1 }, syncFrom: "", syncChild: "",
         phase: "idle", kind: "", steps: [], at: -1, nextOrder: null,
         conflict: false, undo: null, undoable: false, toast: "", ledger: [], op: 412
       };
@@ -744,9 +744,9 @@
           if (s0.unpushed[b]) { this.setState({ toast: "#" + s0.pr[b] + " can’t merge what GitHub hasn’t seen. Submit pushes " + N[b].name + " first." }); return; }
           if (this.anyStale(s0)) { this.setState({ toast: "Restack first: GitHub would merge #" + s0.pr[b] + " while its children sit on an old tip." }); return; }
           const s = clone(s0); this.settle(s);
-          s.merged[b] = true; s.trunk = "3fa9b61"; s.trunkMoved = true;
+          s.merged[b] = true; s.trunkBefore = s.trunk; s.trunk = TRUNKS[TRUNKS.indexOf(s.trunk) + 1] || s.trunk; s.trunkMoved = true; s.squash[b] = s.trunk;
           this.markUpper(s, 1, "parent merged");
-          s.toast = "#" + s.pr[b] + " squash-merged on GitHub as 3fa9b61. Sync to follow it.";
+          s.toast = "#" + s.pr[b] + " squash-merged on GitHub as " + s.trunk + ". Sync to follow it.";
           this.setState(s);
         }
         toggleConflict() { if (this.busy()) return; this.setState({ conflict: !this.state.conflict }); }
@@ -754,8 +754,8 @@
 
         /* ---------- planning ---------- */
         replayStep(s, id, ontoName, extraSub) {
-          const conflict = this.state.conflict && id === "a";
-          const wt = id === "a" ? " Checked out in ⌂ orbit-deploy.windows-api: clean, follows with reset --keep." : "";
+          const conflict = s.conflict && id === "a";
+          const wt = id === "a" ? " Checked out in ⌂ orbit-deploy.windows-api: clean, follows with read-tree -m -u." : "";
           return {
             t: "replay " + N[id].name + " onto " + ontoName,
             sub: COUNTS[id] + " commits since its catalog base. " + (extraSub || "") + wt,
@@ -787,7 +787,7 @@
           const child = s.order[1];
           const ids = s.order.filter((id) => id !== b);
           const steps = [
-            { t: "fetch origin · main 8c1d2e0 → 3fa9b61", sub: "#" + s.pr[b] + " is merged by the forge’s word, not by ancestry. It was squashed.", fc: "", fcKind: "", eff: { kind: "none" } },
+            { t: "fetch origin · main " + s.trunkBefore + " → " + s.trunk, sub: "#" + s.pr[b] + " is merged by the forge’s word, not by ancestry. It was squashed.", fc: "", fcKind: "", eff: { kind: "none" } },
             { t: "snapshot " + (ids.length + 1) + " tips → refs/pwrgit/undo/op-0" + s.op, sub: "", fc: "", fcKind: "", eff: { kind: "none" } }
           ];
           ids.forEach((id, i) => {
@@ -797,7 +797,7 @@
           steps.push({ t: "retarget #" + s.pr[child] + " base " + N[b].name + " → main", sub: "After every replay is clean, and before the branch is deleted. Deleting an open PR’s base closes it.", fc: "", fcKind: "", eff: { kind: "retarget", id: child, base: "main" } });
           steps.push({ t: "update-ref transaction · " + ids.length + " refs, delete " + N[b].name, sub: "Its worktree is clean, and the branch is in main by PR.", fc: "", fcKind: "", eff: { kind: "txn", ids: ids, collapse: b } });
           steps.push({ t: "update the stack on GitHub · " + ids.filter((id) => s.pr[id]).length + " PRs", sub: "GitHub draws the stack on each PR from this.", fc: "", fcKind: "", eff: { kind: "none" } });
-          this.stage("sync", steps, "Sync · #" + s.pr[b] + " merged", "Follow a squash merge without replaying it.");
+          this.stage("sync", steps, "Sync · #" + s.pr[b] + " merged", "Follow a squash merge without replaying it.", { syncFrom: b, syncChild: child });
         }
         submit() {
           const s = this.state; if (this.busy()) return;
@@ -807,7 +807,7 @@
           const create = s.order.filter((id) => !s.pr[id]);
           if (!push.length && !drift.length) { this.setState({ toast: "Nothing to submit. GitHub already matches the stack." }); return; }
           const steps = [];
-          if (push.length) steps.push({ t: "push " + push.length + " · --atomic", sub: push.map((id) => N[id].name + " leased to " + (s.pr[id] ? SHAS[id][Math.max(0, s.rev[id] - 1)] : "(new)")).join(" · "), fc: "", fcKind: "", eff: { kind: "push", ids: push } });
+          if (push.length) steps.push({ t: "push " + push.length + " · --atomic", sub: push.map((id) => N[id].name + " leased to " + (s.pushed[id] >= 0 ? SHAS[id][Math.min(s.pushed[id], SHAS[id].length - 1)] : "nothing (must not exist)")).join(" · "), fc: "", fcKind: "", eff: { kind: "push", ids: push } });
           drift.forEach((id) => steps.push({ t: "retarget #" + s.pr[id] + " base " + s.prBase[id] + " → " + this.parentOf(s, id), sub: "GitHub follows the stack’s order.", fc: "", fcKind: "", eff: { kind: "retarget", id: id, base: this.parentOf(s, id) } }));
           create.forEach((id) => steps.push({ t: "open #654 " + N[id].name + " → " + this.parentOf(s, id) + " (draft)", sub: "Title from the first commit. Body left to you.", fc: "", fcKind: "", eff: { kind: "create", id: id } }));
           steps.push({ t: "link " + s.order.length + " PRs into the stack on GitHub", sub: "The same stack object gh stack submit writes.", fc: "", fcKind: "", eff: { kind: "none" } });
@@ -831,7 +831,7 @@
         /* ---------- running ---------- */
         run() {
           const s = this.state; if (s.phase !== "plan") return;
-          const snap = { order: s.order, rev: s.rev, stale: s.stale, unpushed: s.unpushed, merged: s.merged, gone: s.gone, pr: s.pr, prBase: s.prBase, trunk: s.trunk };
+          const snap = { order: s.order, rev: s.rev, stale: s.stale, unpushed: s.unpushed, merged: s.merged, gone: s.gone, pr: s.pr, prBase: s.prBase, trunk: s.trunk, pushed: s.pushed };
           this.setState({ phase: "running", at: 0, undo: clone(snap), toast: "" });
           this.stop(); this.timer = setTimeout(() => this.tick(), STEP_MS);
         }
@@ -845,7 +845,7 @@
           } else if (eff.kind === "retarget") {
             s.prBase[eff.id] = eff.base;
           } else if (eff.kind === "push") {
-            s.fresh = {}; eff.ids.forEach((id) => { delete s.unpushed[id]; s.fresh[id] = true; });
+            s.fresh = {}; eff.ids.forEach((id) => { delete s.unpushed[id]; s.pushed[id] = s.rev[id]; s.fresh[id] = true; });
           } else if (eff.kind === "create") {
             s.pr[eff.id] = 654; s.prBase[eff.id] = this.parentOf(s, eff.id); s.fresh[eff.id] = true;
           }
@@ -864,15 +864,17 @@
         finish(s) {
           s.phase = "done"; s.at = s.steps.length;
           const k = s.kind;
+          const replayed = s.steps.filter((x) => x.eff.kind === "replay").reduce((n, x) => n + COUNTS[x.eff.id], 0);
+          const gone = s.syncFrom ? N[s.syncFrom].name : "";
           const L = {
-            restack: ["✓ replayed in memory · no worktree touched until the end", "✓ every commit once · patch-ids match, " + s.steps.filter((x) => x.eff.kind === "replay").reduce((n, x) => n + COUNTS[x.eff.id], 0) + " of " + s.steps.filter((x) => x.eff.kind === "replay").reduce((n, x) => n + COUNTS[x.eff.id], 0), "✓ refs moved in one transaction against the planned tips", "✓ undo kept at refs/pwrgit/undo/op-0" + s.op, "· nothing pushed · Submit pushes with a lease"],
-            sync: ["✓ #651’s commits skipped, 0 replayed over the squash", "✓ #652 retargeted to main before windows/model was deleted", "✓ refs moved in one transaction · local windows/model removed", "· pushes wait for Submit · GitHub stack updated"],
+            restack: ["✓ replayed in memory · no worktree touched until the end", "✓ every commit once · patch-ids match, " + replayed + " of " + replayed, "✓ refs moved in one transaction against the planned tips", "✓ undo kept at refs/pwrgit/undo/op-0" + s.op, "· nothing pushed · Submit pushes with a lease"],
+            sync: s.syncFrom ? ["✓ #" + s.pr[s.syncFrom] + "’s commits skipped, 0 replayed over the squash", "✓ #" + s.pr[s.syncChild] + " retargeted to main before " + gone + " was deleted", "✓ refs moved in one transaction · local " + gone + " removed", "· pushes wait for Submit · GitHub stack updated"] : [],
             submit: ["✓ pushed atomically · each lease named its expected sha", "✓ PR bases follow the stack", "✓ stack linked on GitHub"],
             reorder: ["✓ both replays clean on their new parents", "✓ patch-ids match · nothing dropped", "✓ one transaction · undo kept", "· GitHub base differs until Submit"]
           }[k] || [];
           s.ledger = L.map((t, i) => ({ t: t, cls: t.charAt(0) === "·" ? "n" : "", delay: i * 90 }));
           s.undoable = k === "restack" || k === "reorder";
-          const toast = { restack: "Restacked " + s.steps.filter((x) => x.eff.kind === "replay").length + " branches.", sync: "Synced: windows/model is in main, and the stack is one shorter.", submit: "Submitted. GitHub shows the stack.", reorder: "Reordered: windows/ui now sits under windows/api." }[k] || "";
+          const toast = { restack: "Restacked " + s.steps.filter((x) => x.eff.kind === "replay").length + " branches.", sync: "Synced: " + gone + " is in main, and the stack is one shorter.", submit: "Submitted. GitHub shows the stack.", reorder: "Reordered: windows/ui now sits under windows/api." }[k] || "";
           s.toast = toast; s.op = s.op + 1;
           this.setState(s);
         }
@@ -921,7 +923,7 @@
             const gone = idx < 0;
             const parent = gone ? "main" : this.parentOf(s, id);
             const badges = [];
-            if (s.merged[id]) badges.push({ t: "merged · squash 3fa9b61", cls: "bdg merged" });
+            if (s.merged[id]) badges.push({ t: "merged · squash " + s.squash[id], cls: "bdg merged" });
             if (s.stale[id]) badges.push({ t: s.stale[id], cls: "bdg warn" });
             if (s.unpushed[id] && s.pr[id]) badges.push({ t: "needs push", cls: "bdg push" });
             if (s.pr[id] && !s.merged[id] && s.prBase[id] !== parent) badges.push({ t: "GitHub base: " + s.prBase[id], cls: "bdg drift" });
