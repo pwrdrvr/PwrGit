@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { createRoot } from "react-dom/client";
-import { ok, type ChangeRequestList, type Repo, type RepositoryStack, type StackAction, type StackPlanPreview, type StackPosition } from "@pwrgit/shared";
+import { err, ok, type ChangeRequestList, type Repo, type RepositoryStack, type StackAction, type StackPlanPreview, type StackPosition } from "@pwrgit/shared";
 import "@fontsource/geist-sans/400.css";
 import "@fontsource/geist-sans/600.css";
 import "@fontsource/geist-mono/500.css";
@@ -85,8 +85,10 @@ Object.assign(window, { pwrgit: {
     if (name === "stack:undo") {
       currentStack = stack;
       announceChanged();
+      return ok(null);
     }
-    return ok(null);
+    if (name === "stack:conflict" || name === "diagnostics:readStartupCpuProfile") return ok(null);
+    return err({ kind: "unknown", code: "fixture_call", message: `No fixture for ${name}` });
   },
 } });
 document.documentElement.dataset["platform"] = "darwin";

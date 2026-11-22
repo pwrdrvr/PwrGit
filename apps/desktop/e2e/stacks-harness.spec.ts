@@ -18,6 +18,8 @@ test("shows stack positions and navigates between the stack and lineage", async 
     });
     try {
       const page = await app.firstWindow();
+      const errors: string[] = [];
+      page.on("pageerror", error => errors.push(error.message));
       await expect(page.getByText("Register Windows workers").first()).toBeVisible();
       if (shots) {
         mkdirSync(shots, { recursive: true });
@@ -50,6 +52,7 @@ test("shows stack positions and navigates between the stack and lineage", async 
       await undo.click();
       await expect(page.getByText("2 to restack")).toBeVisible();
       await expect(page.getByRole("complementary", { name: "Proof ledger" })).toHaveCount(0);
+      expect(errors).toEqual([]);
     } finally {
       await app.close();
     }
