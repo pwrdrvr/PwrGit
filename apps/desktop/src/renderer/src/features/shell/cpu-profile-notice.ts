@@ -12,7 +12,7 @@ export function cpuProfileNotice(event: HotCpuProfileCapturedEvent): Omit<Toast,
   return {
     key: `hot-cpu-profile:${event.profilePath}`,
     title: `${event.target === "main" ? "Main" : "Renderer"} CPU profile captured`,
-    message: `${formatHotCpuProfileTrigger(event)} saved ${event.profileFilename}.`,
+    message: `Saved ${event.profileFilename}. Matched ${formatHotCpuProfileTrigger(event)}.`,
     facts: [
       { label: "Source", value: `Local app${event.sourceHostname ? ` on ${event.sourceHostname}` : ""}` },
       { label: "Captured", value: new Date(event.capturedAt).toLocaleString(undefined, {

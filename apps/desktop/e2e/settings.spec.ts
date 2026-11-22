@@ -334,6 +334,60 @@ test("menu opens the Settings window; panes render and settings persist", async 
   expect(app.windows().length).toBe(2);
 });
 
+test("Hot CPU capture rules edit independently and survive closing Settings", async () => {
+  handle = await launchApp();
+  const { app } = handle;
+  const nextWindow = app.waitForEvent("window");
+  await openSettingsFromMenu(app);
+  const settings = await nextWindow;
+  await settings.locator(".settings-nav__button", { hasText: "Troubleshooting" }).click();
+  const rules = settings.getByRole("group", { name: "Capture rules" });
+  const high = rules.getByRole("checkbox", { name: "High CPU" });
+  const slowburn = rules.getByRole("checkbox", { name: "Slow burn" });
+  const sustained = rules.getByRole("radio", { name: "Sustained" });
+  const spike = rules.getByRole("radio", { name: "Spike" });
+
+  await expect(high).toBeChecked();
+  await expect(high).toHaveAttribute("aria-disabled", "true");
+  await high.press("Space");
+  await expect(high).toBeChecked();
+  await expect(rules.getByRole("status")).toContainText("At least one rule stays on");
+  await expect(sustained).toHaveAttribute("tabindex", "0");
+  await expect(spike).toHaveAttribute("tabindex", "-1");
+  await sustained.press("ArrowLeft");
+  await expect(spike).toBeChecked();
+
+  const threshold = rules.getByRole("spinbutton", { name: "Spike threshold percent" });
+  await threshold.fill("401");
+  await threshold.press("Enter");
+  await expect(threshold).toHaveAttribute("aria-invalid", "true");
+  await threshold.press("Escape");
+  await expect(threshold).toHaveValue("50");
+  await threshold.fill("120");
+  await threshold.press("Enter");
+  await rules.getByRole("combobox", { name: "Spike duration" }).selectOption("1000");
+  await expect(settings.getByText("Monitoring samples CPU every 1 s.")).toBeVisible();
+  await slowburn.check();
+  await expect(rules.getByRole("combobox", { name: "Slow burn duration" })).toContainText("4 s · 4 samples");
+  await high.uncheck();
+  await expect(rules.getByRole("status")).toBeEmpty();
+  await expect(slowburn).toHaveAttribute("aria-disabled", "true");
+  await expect(settings.getByText("Monitoring samples CPU every 2 s.")).toBeVisible();
+
+  await settings.close();
+  const reopenedWindow = app.waitForEvent("window");
+  await openSettingsFromMenu(app);
+  const reopened = await reopenedWindow;
+  await reopened.locator(".settings-nav__button", { hasText: "Troubleshooting" }).click();
+  const reopenedRules = reopened.getByRole("group", { name: "Capture rules" });
+  await expect(reopenedRules.getByRole("checkbox", { name: "High CPU" })).not.toBeChecked();
+  await expect(reopenedRules.getByRole("checkbox", { name: "Slow burn" })).toBeChecked();
+  await reopenedRules.getByRole("checkbox", { name: "High CPU" }).check();
+  await expect(reopenedRules.getByRole("radio", { name: "Spike" })).toBeChecked();
+  await expect(reopenedRules.getByRole("spinbutton", { name: "Spike threshold percent" })).toHaveValue("120");
+  await expect(reopenedRules.getByRole("combobox", { name: "Spike duration" })).toHaveValue("1000");
+});
+
 test("Agents columns fit the settings pane at narrow widths and increased zoom", async ({}, testInfo) => {
   handle = await launchApp();
   const { app } = handle;

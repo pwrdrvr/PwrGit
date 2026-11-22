@@ -1,3 +1,4 @@
+import { readAppMetrics } from "./app-metrics";
 import { appendFile, mkdir, readdir, unlink } from "node:fs/promises";
 import { join } from "node:path";
 import { app, BrowserWindow, powerMonitor } from "electron";
@@ -26,7 +27,7 @@ export async function appendResourceSample(directory: string, at: Date, sample: 
  * counters and fixed labels only, so a day's work can be compared offline. */
 export function watchResourceUsage(directory: string): () => Promise<void> {
   const processes = new ProcessResourceUsage();
-  processes.sample(app.getAppMetrics());
+  processes.sample(readAppMetrics().metrics);
   let previous = Date.now();
   const sessionStartedAt = new Date(previous).toISOString();
   const stopRecording = startGitResourceRecording();
@@ -48,7 +49,7 @@ export function watchResourceUsage(directory: string): () => Promise<void> {
         focused: BrowserWindow.getFocusedWindow() !== null,
         visibleWindows: BrowserWindow.getAllWindows().filter((w) => w.isVisible() && !w.isMinimized()).length,
         onBattery: powerMonitor.isOnBatteryPower(),
-        processes: processes.sample(app.getAppMetrics()),
+        processes: processes.sample(readAppMetrics().metrics),
         git: gitResourceUsage.sample()
       };
       previous = at.getTime();

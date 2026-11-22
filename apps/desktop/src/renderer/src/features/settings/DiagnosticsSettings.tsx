@@ -1,9 +1,9 @@
 import type {
   AppSettingsSnapshot,
   HotCpuStartDelayMs,
-  HotCpuTriggerMode
+  HotCpuCaptureRules
 } from "@pwrgit/shared";
-import { HEAP_MONITOR_TUNING, HOT_CPU_TUNING } from "@pwrgit/shared";
+import { HEAP_MONITOR_TUNING, HOT_CPU_TUNING, hotCpuRuleIntervalMs } from "@pwrgit/shared";
 import { dispatch } from "../../lib/pwrgit";
 import {
   SettingsField,
@@ -12,6 +12,7 @@ import {
   SettingsSection,
   SettingsSegmented
 } from "./SettingsLayout";
+import { HotCpuRulesField } from "./HotCpuRulesField";
 import { SettingsSwitch } from "./SettingsSwitch";
 import { DeveloperToolsSection } from "./DeveloperToolsSection";
 import { ResourceUsageSection } from "./ResourceUsageSection";
@@ -28,16 +29,6 @@ const START_DELAY_OPTIONS: Array<{
   { value: 0, label: "Immediate", meta: "sample right away" },
   { value: 5_000, label: "5s", meta: "time to stage a repro" },
   { value: 10_000, label: "10s", meta: "longer setup window" }
-];
-
-const TRIGGER_MODE_OPTIONS: Array<{
-  value: HotCpuTriggerMode;
-  label: string;
-  meta: string;
-}> = [
-  { value: "spike", label: "Spike", meta: "one hot sample" },
-  { value: "sustained", label: "Sustained", meta: "consecutive hot samples" },
-  { value: "slowburn", label: "Slow burn", meta: "low threshold, long tail" }
 ];
 
 const HEAP_SNAPSHOT_LIMIT_OPTIONS: Array<{
@@ -66,7 +57,7 @@ export function DiagnosticsSettings(props: {
   onHeapMonitorEnabledChange: (enabled: boolean) => void;
   onHotCpuEnabledChange: (enabled: boolean) => void;
   onHotCpuStartDelayChange: (delayMs: HotCpuStartDelayMs) => void;
-  onHotCpuTriggerModeChange: (mode: HotCpuTriggerMode) => void;
+  onHotCpuRulesChange: (rules: HotCpuCaptureRules) => void;
   onHotCpuCaptureChromiumTraceChange: (enabled: boolean) => void;
   onHotCpuCaptureHeapSnapshotChange: (enabled: boolean) => void;
   onHotCpuHeapSnapshotLimitChange: (limit: number) => void;
@@ -85,8 +76,9 @@ export function DiagnosticsSettings(props: {
 
   const heapIntervalSeconds = HEAP_MONITOR_TUNING.intervalMs / 1_000;
   const heapDeltaMb = HEAP_MONITOR_TUNING.deltaThresholdBytes / (1024 * 1024);
-  const hotIntervalSeconds = HOT_CPU_TUNING.intervalMs / 1_000;
-  const hotDurationSeconds = HOT_CPU_TUNING.profileDurationMs / 1_000;
+  const override = env.hotCpuRuleOverride;
+  const hotIntervalSeconds = (override?.intervalMs ?? hotCpuRuleIntervalMs(diag.hotCpuProfilingRules)) / 1_000;
+  const hotDurationSeconds = (override?.profileDurationMs ?? HOT_CPU_TUNING.profileDurationMs) / 1_000;
 
   return (
     <SettingsSectionStack aria-label="Troubleshooting settings" paneId="diagnostics">
@@ -182,7 +174,7 @@ export function DiagnosticsSettings(props: {
         <div className="settings-fields">
           <SettingsField
             label="Arm hot CPU capture"
-            sub={`Monitoring samples CPU every ${hotIntervalSeconds}s; profiles trigger at ${HOT_CPU_TUNING.thresholdPercent}% (${HOT_CPU_TUNING.slowburnThresholdPercent}% for slow burn).`}
+            sub={`Monitoring samples CPU every ${hotIntervalSeconds} s.`}
             help={
               env.hotCpuProfilingForcedOn
                 ? "Forced on by PWRGIT_HOT_CPU_PROFILING in this app's environment — the switch only controls the setting, not the running profiler."
@@ -210,19 +202,11 @@ export function DiagnosticsSettings(props: {
               />
             }
           />
-          <SettingsField
-            label="Trigger mode"
-            sub="How aggressively a hot reading starts a profile."
-            help="Spike fires on a single hot sample. Sustained needs consecutive hot samples. Slow burn lowers the threshold to catch steady background churn."
-            control={
-              <SettingsSegmented
-                aria-label="Trigger mode"
-                disabled={props.saving}
-                options={TRIGGER_MODE_OPTIONS}
-                value={diag.hotCpuProfilingTriggerMode}
-                onChange={props.onHotCpuTriggerModeChange}
-              />
-            }
+          <HotCpuRulesField
+            rules={diag.hotCpuProfilingRules}
+            saving={props.saving}
+            override={override}
+            onChange={props.onHotCpuRulesChange}
           />
           <SettingsField
             label="Chromium performance trace"

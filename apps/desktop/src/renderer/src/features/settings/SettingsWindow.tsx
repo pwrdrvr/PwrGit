@@ -612,8 +612,8 @@ function SettingsSectionBody(props: {
       onHotCpuStartDelayChange={(delayMs) => {
         updateDiagnostics({ hotCpuProfilingStartDelayMs: delayMs });
       }}
-      onHotCpuTriggerModeChange={(mode) => {
-        updateDiagnostics({ hotCpuProfilingTriggerMode: mode });
+      onHotCpuRulesChange={(rules) => {
+        updateDiagnostics({ hotCpuProfilingRules: rules });
       }}
       onHotCpuCaptureChromiumTraceChange={(enabled) => {
         updateDiagnostics({ hotCpuProfilingCaptureChromiumTrace: enabled });

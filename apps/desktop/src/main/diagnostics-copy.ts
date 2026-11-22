@@ -1,3 +1,4 @@
+import { readAppMetrics } from "./diagnostics/app-metrics";
 import {
   app,
   BrowserWindow,
@@ -140,7 +141,7 @@ async function buildReport(
     mainPid: process.pid,
     // 0 until the renderer's frame has loaded.
     rendererPid: rendererPid > 0 ? rendererPid : null,
-    processTable: formatProcessIds(app.getAppMetrics()),
+    processTable: formatProcessIds(readAppMetrics().metrics),
     paths: { ...deps.paths, log: currentLogFilePath() },
     git
   });

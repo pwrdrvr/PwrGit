@@ -1,5 +1,6 @@
 import { mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
+import { legacyHotCpuMode, readHotCpuRules } from "@pwrgit/shared";
 import type {
   DiagnosticsSettings,
   ForgeSettings,
@@ -71,6 +72,18 @@ export class SettingsService {
   }
 
   update(patch: Partial<AppSettings>): AppSettings {
+    const diagnostics = patch.diagnostics;
+    if (diagnostics && (diagnostics.hotCpuProfilingRules !== undefined ||
+      diagnostics.hotCpuProfilingTriggerMode !== undefined || diagnostics.hotCpuProfilingSlowburnThresholdPercent !== undefined)) {
+      const rules = readHotCpuRules(diagnostics.hotCpuProfilingRules,
+        diagnostics.hotCpuProfilingTriggerMode, diagnostics.hotCpuProfilingSlowburnThresholdPercent);
+      patch = { ...patch, diagnostics: {
+        ...diagnostics,
+        hotCpuProfilingRules: rules,
+        hotCpuProfilingTriggerMode: legacyHotCpuMode(rules),
+        hotCpuProfilingSlowburnThresholdPercent: rules.slowburn.thresholdPercent
+      } };
+    }
     this.cache = { ...this.cache, ...patch };
     this.writeAtomic(this.cache);
     for (const listener of this.writeListeners) listener();

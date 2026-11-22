@@ -1,3 +1,4 @@
+import { readAppMetrics } from "./diagnostics/app-metrics";
 import { app } from "electron";
 import type { ProcessMetric } from "electron";
 import { logMain } from "./logs";
@@ -84,7 +85,7 @@ export function watchProcessIds(): void {
   let settleTimer: ReturnType<typeof setTimeout> | null = null;
 
   const logTableIfChanged = (): void => {
-    const line = formatProcessIds(app.getAppMetrics());
+    const line = formatProcessIds(readAppMetrics().metrics);
     if (line === "" || line === lastLine) return;
     lastLine = line;
     logMain("info", "process", line);

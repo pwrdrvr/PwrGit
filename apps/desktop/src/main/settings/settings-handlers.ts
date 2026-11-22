@@ -6,6 +6,10 @@ import {
   isAppearanceTheme,
   isBranchCleanupKeepDays,
   isWorktreeFinishedAfterDays,
+  err,
+  isHotCpuCaptureRules,
+  legacyHotCpuMode,
+  readHotCpuRules,
   isHotCpuStartDelayMs,
   isHotCpuTriggerMode,
   isSidebarDensity,
@@ -30,7 +34,7 @@ import {
 import type { CommandBus } from "../command-bus";
 import type { SettingsService } from "./settings-service";
 import { resolveHeapMonitorConfig } from "../diagnostics/heap-monitor-config";
-import { resolveHotCpuProfileConfig } from "../diagnostics/hot-cpu-profile-config";
+import { resolveHotCpuRules, resolveHotCpuProfileConfig } from "../diagnostics/hot-cpu-profile-config";
 import { resolveStartupCpuProfileConfig } from "../diagnostics/startup-cpu-profile-config";
 import { nextResourceUsageSettings } from "../diagnostics/resource-usage-window";
 
@@ -45,6 +49,9 @@ export function settingsSnapshot(
   // PWRGIT_* env var forces it — surfaced so the UI never shows "Off" while
   // an env-armed monitor is running.
   const off = { enabled: false, outputRoot: diagnosticsOutputRoot };
+  const rules = readHotCpuRules(stored.diagnostics?.hotCpuProfilingRules,
+    stored.diagnostics?.hotCpuProfilingTriggerMode, stored.diagnostics?.hotCpuProfilingSlowburnThresholdPercent);
+  const effective = resolveHotCpuRules(rules, process.env, stored.diagnostics?.hotCpuProfilingRules === undefined);
   return {
     general: {
       ...GENERAL_DEFAULTS,
@@ -54,13 +61,23 @@ export function settingsSnapshot(
         : GENERAL_DEFAULTS.theme
     },
     experimental: { ...EXPERIMENTAL_DEFAULTS, ...stored.experimental },
-    diagnostics: { ...DIAGNOSTICS_DEFAULTS, ...stored.diagnostics },
+    diagnostics: {
+      ...DIAGNOSTICS_DEFAULTS,
+      ...stored.diagnostics,
+      hotCpuProfilingRules: rules,
+      hotCpuProfilingTriggerMode: legacyHotCpuMode(rules),
+      hotCpuProfilingSlowburnThresholdPercent: rules.slowburn.thresholdPercent
+    },
     updates: resolveUpdateSelection(stored.updates, appVersion),
     forges: { hosts: stored.forges?.hosts ?? {} },
     diagnosticsEnv: {
       heapMonitorForcedOn: resolveHeapMonitorConfig(off).enabled,
       hotCpuProfilingForcedOn: resolveHotCpuProfileConfig(off).enabled,
-      startupCpuProfilingForcedOn: resolveStartupCpuProfileConfig(off).enabled
+      startupCpuProfilingForcedOn: resolveStartupCpuProfileConfig(off).enabled,
+      ...(effective.overrides.length ? { hotCpuRuleOverride: {
+        keys: effective.overrides, intervalMs: effective.intervalMs,
+        profileDurationMs: effective.profileDurationMs, rules: effective.rules
+      } } : {})
     },
     diagnosticsOutputRoot
   };
@@ -162,6 +179,9 @@ function sanitizePatch(patch: AppSettingsPatch): {
     ) {
       diagnostics.hotCpuProfilingTriggerMode = diag.hotCpuProfilingTriggerMode;
     }
+    if (diag.hotCpuProfilingRules !== undefined) {
+      diagnostics.hotCpuProfilingRules = readHotCpuRules(diag.hotCpuProfilingRules);
+    }
     if (typeof diag.hotCpuProfilingCaptureChromiumTrace === "boolean") {
       diagnostics.hotCpuProfilingCaptureChromiumTrace =
         diag.hotCpuProfilingCaptureChromiumTrace;
@@ -262,6 +282,10 @@ export function registerSettingsHandlers(
   );
 
   bus.register("settings:update", (req) => {
+    const rulesPatch = req.patch.diagnostics?.hotCpuProfilingRules;
+    if (rulesPatch !== undefined && !isHotCpuCaptureRules(rulesPatch)) {
+      return err({ kind: "validation", code: "INVALID_ARGUMENT", message: "Capture rules must be valid and at least one must be enabled." });
+    }
     const sanitized = sanitizePatch(req.patch);
     const stored = settings.get();
     const next: {

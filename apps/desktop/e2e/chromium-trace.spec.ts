@@ -9,7 +9,7 @@ import { cleanEnv } from "./fixtures/electron-app";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 
-test("rolling Chromium trace retains renderer trigger context under repaint pressure", async ({}, info) => {
+test("one rolling Chromium trace retains both renderer rule matches under repaint pressure", async ({}, info) => {
   test.setTimeout(90_000);
   const html = info.outputPath("index.html");
   const controller = info.outputPath("diagnostics-manager.mjs");
@@ -78,6 +78,7 @@ test("rolling Chromium trace retains renderer trigger context under repaint pres
         memory: { workingSetSize: 1, peakWorkingSetSize: 1 }, creationTime: 1, name: "renderer", serviceName: ""
       }];
       process.env.PWRGIT_HOT_CPU_PROFILING_INTERVAL_MS = "50";
+      process.env.PWRGIT_HOT_CPU_PROFILING_CONSECUTIVE_SAMPLES = "2";
       process.env.PWRGIT_HOT_CPU_PROFILING_DURATION_MS = String(args.profileDurationMs);
       process.env.PWRGIT_HOT_CPU_PROFILING_MAX_PROFILES = "1";
       const startRecording = contentTracing.startRecording.bind(contentTracing);
@@ -96,9 +97,10 @@ test("rolling Chromium trace retains renderer trigger context under repaint pres
       const profileWritten = new Promise<import("@pwrgit/shared").HotCpuProfileCapturedEvent>((resolve) => {
         onHotCpuProfileCaptured = resolve;
       });
+      let settings = args.settings;
       const manager = new DiagnosticsManager({
         outputRoot: args.outputRoot, chromiumTraceWorker: args.worker,
-        getDiagnostics: () => args.settings, onHotCpuProfileCaptured,
+        getDiagnostics: () => settings, onHotCpuProfileCaptured,
         onHotCpuHeapSnapshotLimitReached: () => {}
       });
       const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -162,6 +164,10 @@ test("rolling Chromium trace retains renderer trigger context under repaint pres
           if (!started) await wait(20);
         }
         if (!started) throw new Error("Renderer CPU sampler did not trigger");
+        settings = { ...settings, hotCpuProfilingRules: {
+          ...settings.hotCpuProfilingRules, slowburn: { ...settings.hotCpuProfilingRules.slowburn, enabled: false }
+        } };
+        await manager.sync();
         await repaintBurst("postTrigger");
         await wait(750);
         await execute("performance.mark('late-overflow-marker')");
@@ -177,6 +183,8 @@ test("rolling Chromium trace retains renderer trigger context under repaint pres
         const capture = (await readEvents()).find((event) => event.type === "chromium-trace-written");
         return {
           capture: capture?.detail,
+          matches: profile.matchedRules,
+          triggers: (await readEvents()).filter((event) => event.type === "profile-started").length,
           artifact: join(profile.sessionDirectory, capture?.detail.filename ?? "missing"),
           pid, tid: mainThread?.tid, triggerUs,
           leadInMs: markerMs("lead-in-marker"), triggerMarkerMs: markerMs("trigger-window-marker"),
@@ -191,10 +199,18 @@ test("rolling Chromium trace retains renderer trigger context under repaint pres
       }
     }, { controller, worker, outputRoot, privateValue, lineageMark, url, profileDurationMs, logsPath: info.outputPath("logs"), settings: {
       ...DIAGNOSTICS_DEFAULTS, hotCpuProfilingEnabled: true, hotCpuProfilingStartDelayMs: 0 as const,
-      hotCpuProfilingTriggerMode: "spike" as const, hotCpuProfilingCaptureChromiumTrace: true
+      hotCpuProfilingRules: { ...DIAGNOSTICS_DEFAULTS.hotCpuProfilingRules,
+        slowburn: { ...DIAGNOSTICS_DEFAULTS.hotCpuProfilingRules.slowburn, enabled: true }
+      },
+      hotCpuProfilingCaptureChromiumTrace: true
     } });
 
     expect(result.capture).toMatchObject({ status: "written" });
+    expect(result.triggers).toBe(1);
+    expect(result.matches).toMatchObject([
+      { id: "sustained", sampleCount: 2, durationMs: 100, thresholdPercent: 50, sampleCpuPercent: 90 },
+      { id: "slowburn", sampleCount: 2, durationMs: 100, thresholdPercent: 15, sampleCpuPercent: 90 }
+    ]);
     const saved = await readFile(result.artifact, "utf8");
     expect(saved).toContain(JSON.stringify(lineageMark));
     const triggerEvents: { pid: number; tid: number; ts: number; name: string }[] = JSON.parse(saved).traceEvents.filter(

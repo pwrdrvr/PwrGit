@@ -11,6 +11,7 @@ import {
   type KeyboardEvent,
   type ReactNode
 } from "react";
+import { hoverTooltip, useViewportTooltip } from "../../lib/useViewportTooltip";
 import { prefersReducedMotion } from "../../lib/reducedMotion";
 
 /**
@@ -593,6 +594,8 @@ function ChevronGlyph() {
  */
 export function SettingsField(props: {
   label: string;
+  labelId?: string;
+  className?: string;
   /** Description below the label. Single sentence framing. */
   sub?: ReactNode;
   /** Hint below the control. */
@@ -602,9 +605,9 @@ export function SettingsField(props: {
   error?: ReactNode;
 }) {
   return (
-    <div className="settings-field">
+    <div className={props.className ? `settings-field ${props.className}` : "settings-field"}>
       <div className="settings-field__label">
-        <span>{props.label}</span>
+        <span id={props.labelId}>{props.label}</span>
         {props.sub ? (
           <span className="settings-field__sub">{props.sub}</span>
         ) : null}
@@ -630,16 +633,29 @@ export function SettingsSegmented<TValue extends string | number>(props: {
   /** Keyboard shortcut that changes the choice, in aria-keyshortcuts form. */
   "aria-keyshortcuts"?: string;
   disabled?: boolean;
-  options: Array<{ value: TValue; label: string; meta?: string }>;
+  options: Array<{ value: TValue; label: string; meta?: string; tooltip?: string }>;
   value: TValue;
   onChange: (value: TValue) => void;
 }) {
+  const tip = useViewportTooltip();
   return (
     <div
       className="settings-segmented"
       role="radiogroup"
       aria-label={props["aria-label"]}
       aria-keyshortcuts={props["aria-keyshortcuts"]}
+      onKeyDown={(event) => {
+        if (props.disabled) return;
+        const direction = { ArrowRight: 1, ArrowDown: 1, ArrowLeft: -1, ArrowUp: -1 }[event.key];
+        if (direction === undefined) return;
+        event.preventDefault();
+        const current = props.options.findIndex((option) => option.value === props.value);
+        const next = (current + direction + props.options.length) % props.options.length;
+        const option = props.options[next];
+        if (!option) return;
+        event.currentTarget.querySelectorAll<HTMLButtonElement>('button[role="radio"]')[next]?.focus();
+        props.onChange(option.value);
+      }}
     >
       {props.options.map((option) => (
         <button
@@ -650,7 +666,9 @@ export function SettingsSegmented<TValue extends string | number>(props: {
           }`}
           disabled={props.disabled}
           role="radio"
+          tabIndex={props.value === option.value ? 0 : -1}
           type="button"
+          {...hoverTooltip(tip, option.tooltip)}
           onClick={() => props.onChange(option.value)}
         >
           <span>{option.label}</span>
@@ -659,6 +677,7 @@ export function SettingsSegmented<TValue extends string | number>(props: {
           ) : null}
         </button>
       ))}
+      {tip.tooltipNode}
     </div>
   );
 }

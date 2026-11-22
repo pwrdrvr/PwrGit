@@ -11,6 +11,7 @@
 // graph, and rebase entries.
 
 import type { HotCpuProfileCapturedEvent } from "./hot-cpu-profile";
+import { DEFAULT_HOT_CPU_RULES, type HotCpuCaptureRules, type HotCpuRuleOverride } from "./hot-cpu-rules";
 import type { StartupCpuProfileCapturedEvent } from "./startup-cpu-profile";
 import type { ForgeHostMap } from "./forge-remote";
 import type { ContributionIdentity, ContributionSnapshot } from "./contributions";
@@ -303,6 +304,7 @@ export const HOT_CPU_TUNING = {
 export type DiagnosticsEnvOverrides = {
   heapMonitorForcedOn: boolean;
   hotCpuProfilingForcedOn: boolean;
+  hotCpuRuleOverride?: HotCpuRuleOverride;
   startupCpuProfilingForcedOn: boolean;
 };
 
@@ -843,6 +845,8 @@ export type DiagnosticsSettings = {
   hotCpuProfilingEnabled: boolean;
   hotCpuProfilingStartDelayMs: HotCpuStartDelayMs;
   hotCpuProfilingTriggerMode: HotCpuTriggerMode;
+  hotCpuProfilingRules: HotCpuCaptureRules;
+  hotCpuProfilingSlowburnThresholdPercent?: number;
   /** Keep a rolling Chromium trace while renderer hot CPU capture is armed. */
   hotCpuProfilingCaptureChromiumTrace: boolean;
   /** Also capture renderer heap snapshots around each hot-CPU profile. */
@@ -882,6 +886,7 @@ export const DIAGNOSTICS_DEFAULTS: DiagnosticsSettings = {
   hotCpuProfilingEnabled: false,
   hotCpuProfilingStartDelayMs: 0,
   hotCpuProfilingTriggerMode: "sustained",
+  hotCpuProfilingRules: DEFAULT_HOT_CPU_RULES,
   hotCpuProfilingCaptureChromiumTrace: false,
   hotCpuProfilingCaptureHeapSnapshot: false,
   hotCpuProfilingHeapSnapshotLimit: 2,

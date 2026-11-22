@@ -1,3 +1,4 @@
+import { readAppMetrics } from "./diagnostics/app-metrics";
 import { app } from "electron";
 import {
   inferUpdateSelection,
@@ -102,7 +103,7 @@ export function createAppProcessIds(
 export function registerAppIdentityHandlers(
   bus: CommandBus,
   readIdentity: () => AppIdentity = readAppIdentity,
-  readProcessLine: () => string = () => formatProcessIds(app.getAppMetrics())
+  readProcessLine: () => string = () => formatProcessIds(readAppMetrics().metrics)
 ): void {
   bus.register("app:readIdentity", () => ok(readIdentity()));
   bus.register("app:readProcessIds", () =>
