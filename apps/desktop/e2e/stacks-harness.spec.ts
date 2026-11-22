@@ -43,7 +43,13 @@ test("shows stack positions and navigates between the stack and lineage", async 
       await page.getByRole("button", { name: "Run locally" }).click();
       await expect(page.getByRole("complementary", { name: "Proof ledger" })).toBeVisible();
       await expect(page.getByText("2 patches preserved")).toBeVisible();
+      await expect(page.getByText("2 to restack")).toHaveCount(0);
+      const undo = page.getByRole("button", { name: "Undo", exact: true });
+      await expect(undo).toBeVisible();
       if (shots) await page.screenshot({ path: join(shots, "stack-after-proof.png"), animations: "disabled" });
+      await undo.click();
+      await expect(page.getByText("2 to restack")).toBeVisible();
+      await expect(page.getByRole("complementary", { name: "Proof ledger" })).toHaveCount(0);
     } finally {
       await app.close();
     }

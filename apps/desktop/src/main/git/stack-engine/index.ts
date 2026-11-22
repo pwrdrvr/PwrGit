@@ -1,7 +1,7 @@
 import { parseGhStackCatalog, requireWritableCatalog, type GhStackCatalog } from "./catalog";
 import { isOid, StackGit } from "./git";
 import { planStack } from "./plan";
-import type { ApplyHooks, CatalogStore, GitRunner, ResolvedStackStep, StackOperation, StackPlan, StackReceipt } from "./types";
+import type { ApplyHooks, CatalogStore, GitRunner, ResolvedStackStep, StackJournalEntry, StackOperation, StackPlan, StackReceipt } from "./types";
 
 export * from "./catalog";
 export * from "./types";
@@ -98,6 +98,30 @@ export class StackEngine {
       await this.finish("undo", receipt, sha256, moves, worktrees, hooks);
       return receipt;
     });
+  }
+
+  async recover(journal: StackJournalEntry): Promise<void> {
+    const { receipt, direction, worktrees } = journal;
+    const prefix = undoPrefix(receipt.id);
+    const applying = direction === "apply";
+    const { catalog, sha256 } = await this.store.read(this.commonDir);
+    requireWritableCatalog(catalog);
+    const from = applying ? receipt.before : receipt.after;
+    const to = applying ? receipt.after : receipt.before;
+    if (!sameCatalog(catalog, from) && !sameCatalog(catalog, to)) {
+      throw new Error("The stack catalog changed after the interruption");
+    }
+    const manifest = await this.git.run(["cat-file", "blob", `${prefix}/receipt`]);
+    const recorded = manifest.exitCode === 0 && manifest.stdout === JSON.stringify(receipt);
+    const tips = await Promise.all(receipt.moves.map(move => this.git.tip(move.branch)));
+    const tipsAre = (before: boolean) => receipt.moves.every((move, index) =>
+      tips[index] === (before === applying ? move.old : move.next));
+    if (sameCatalog(catalog, from) && tipsAre(true) && (applying ? !recorded : receipt.moves.length > 0)) {
+      return; // The transaction never committed.
+    }
+    if (!recorded || !tipsAre(false)) throw new Error("Stack refs changed after the interruption");
+    for (const worktree of worktrees) await this.git.follow(worktree);
+    await this.store.writeIfUnchanged(this.commonDir, to, sha256);
   }
 
   private async tipsUnchanged(moves: StackReceipt["moves"]): Promise<boolean> {

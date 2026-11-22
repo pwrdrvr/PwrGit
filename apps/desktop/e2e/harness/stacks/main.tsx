@@ -12,6 +12,7 @@ import { StackToolbar } from "../../../src/renderer/src/features/stacks/StackToo
 import { useStackOperation } from "../../../src/renderer/src/features/stacks/useStackOperation";
 import { StackRail, StackView } from "../../../src/renderer/src/features/stacks/StackViews";
 import { StackNavigationContext, type StackPick } from "../../../src/renderer/src/features/stacks/stack-navigation";
+import { ToastHost } from "../../../src/renderer/src/features/shell/ToastHost";
 import { useHoverIntent } from "../../../src/renderer/src/lib/hoverIntent";
 
 const noop = () => undefined;
@@ -54,8 +55,18 @@ const makePlan = (action: StackAction): StackPlanPreview => ({
   })),
   moves: stack.layers.slice(1).map((layer, index) => ({ branch: layer.branch, old: layer.head!, next: String(6 + index).repeat(40) })),
 });
+const listeners = new Map<string, Set<(data: unknown) => void>>();
+const announceChanged = () => {
+  for (const listener of listeners.get("stack:changed") ?? []) listener({ repoId: repo.id, profileId });
+};
 Object.assign(window, { pwrgit: {
-  profileId, platform: "darwin", on: () => noop,
+  profileId, platform: "darwin",
+  on: (channel: string, listener: (data: unknown) => void) => {
+    const set = listeners.get(channel) ?? new Set();
+    set.add(listener);
+    listeners.set(channel, set);
+    return () => set.delete(listener);
+  },
   dispatch: async (name: string, payload: unknown) => {
     if (name === "pr:openList") return ok(pulls);
     if (name === "stack:list") return ok({ schemaVersion: 1, readOnly: false, stacks: [currentStack] });
@@ -68,7 +79,12 @@ Object.assign(window, { pwrgit: {
         ...layer, head: mockedPlan.moves.find(move => move.branch === layer.branch)?.next ?? layer.head!,
         health: { ...layer.health, inSync: true, needsRestack: false },
       })) };
+      announceChanged();
       return ok({ operationId: "fixture-operation", plan: mockedPlan, stack: currentStack });
+    }
+    if (name === "stack:undo") {
+      currentStack = stack;
+      announceChanged();
     }
     return ok(null);
   },
@@ -94,7 +110,7 @@ function Harness() {
           </div>
         </aside>
         <main className="pane pane--main">
-          {pick ? <StackView stack={pick.stack} repoId={repo.id} onClose={() => select(null)}
+          {pick ? <StackView stack={operations ? currentStack : pick.stack} repoId={repo.id} onClose={() => select(null)}
             {...(operations ? {
               toolbar: <StackToolbar stack={pick.stack} disabled={controls.pending !== null} onPlan={action => void controls.requested(action)} />,
               onPlan: (action: StackAction) => void controls.requested(action),
@@ -118,6 +134,7 @@ function Harness() {
           ? <StackPlanRail controls={controls} onCollapse={() => select(null)} onOpenWorktree={noop} /> :
             <StackRail stack={pick.stack} onCollapse={() => select(null)} />)}
       </div>
+      {operations && <ToastHost profileId={profileId} repos={[repo]} onReveal={noop} />}
     </div>
   </StackNavigationContext.Provider>;
 }

@@ -1113,6 +1113,10 @@ export interface Commands {
     req: { repoId: RepoId; profileId: ProfileId; planId: string };
     res: { applied?: StackApplied; plan?: StackPlanPreview };
   };
+  "stack:recover": {
+    req: { repoId: RepoId; profileId: ProfileId };
+    res: null;
+  };
   "stack:undo": {
     req: { repoId: RepoId; profileId: ProfileId; operationId: string };
     res: null;

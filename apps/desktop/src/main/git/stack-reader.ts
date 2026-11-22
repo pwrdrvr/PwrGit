@@ -77,6 +77,7 @@ export class StackReader {
       schemaVersion: catalog.schemaVersion, readOnly: catalog.schemaVersion !== 1, stacks: [],
       ...(busy ? { busy } : {}),
     };
+    if (busy && !snapshot.readOnly && await store.readApplyJournal(commonDir)) snapshot.recoveryAvailable = true;
     if (!sources.length) return snapshot;
     const git = new StackGit(this.runner, repo.path);
     const refs = new Map((await git.output([
@@ -134,7 +135,7 @@ export class StackReader {
           }
         }
         let parentMerged = parentPr?.state === "merged" || parent.pullRequest?.merged === true;
-        if (index > 0 && !open.forge && !parentMerged && trunkHead && parentHead && isOid(trunkHead)) {
+        if (index > 0 && !open.forge && !forgeProductFor(repo.identity?.host) && !parentMerged && trunkHead && parentHead && isOid(trunkHead)) {
           const cherry = await git.run(["cherry", trunkHead, parentHead]);
           parentMerged = cherry.exitCode === 0 && cherry.stdout.trim() === "";
         }

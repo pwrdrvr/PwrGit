@@ -37,7 +37,7 @@ export function StackToolbar({ stack, disabled, onPlan }: {
 
 export function StackBranchActions({ name, onPlan }: { name: string; onPlan: (action: StackAction) => void }) {
   return <details className="stack-branch-actions">
-    <summary aria-label={`Stack actions for ${name}`}>⋯</summary>
+    <summary aria-label={`Stack actions for ${name}`}>…</summary>
     <div className="stack-branch-actions__items">
       {([
         ["Restack from here", { kind: "restack", from: name }],

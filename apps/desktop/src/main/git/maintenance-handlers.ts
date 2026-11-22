@@ -163,7 +163,8 @@ export function registerMaintenanceHandlers(
   now: () => number = Date.now,
   /** The repository's default branch name, for Clones' main-checkout
    *  update. Null leaves every main checkout as it is. */
-  defaultBranch: (repoId: string, repoPath: string) => Promise<string | null> = async () => null
+  defaultBranch: (repoId: string, repoPath: string) => Promise<string | null> = async () => null,
+  expireUndo?: (repoId: string) => Promise<void>
 ): { releaseWebContents: (id: number) => void } {
   // One sweep across all windows, regardless of operation ids or profiles.
   // Renderer bugs cannot create an unbounded GC process/queue per click.
@@ -521,6 +522,7 @@ export function registerMaintenanceHandlers(
                   });
                 }
                 if (action.kind === "gc") {
+                  await expireUndo?.(repo.id);
                   report("Measuring object storage before collection…");
                   const beforeBytes = await objectStorageBytes(git, repo.path);
                   // Cooperative cancellation never interrupts a local mutation.

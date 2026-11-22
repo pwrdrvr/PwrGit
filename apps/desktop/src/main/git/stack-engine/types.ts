@@ -60,11 +60,17 @@ export interface StackReceipt {
   when: number;
 }
 
+export type StackJournalEntry = {
+  direction: "apply" | "undo";
+  receipt: StackReceipt;
+  worktrees: WorktreeFollow[];
+};
+
 /** App-owned journal lifecycle stays with the host. The portable engine calls
  * these hooks under the catalog's operation lock and never opens a file. */
 export interface ApplyHooks {
   beforeTransaction?: () => Promise<void>;
-  begin?: (entry: { direction: "apply" | "undo"; receipt: StackReceipt; worktrees: WorktreeFollow[] }) => Promise<void>;
+  begin?: (entry: StackJournalEntry) => Promise<void>;
   finish?: () => Promise<void>;
   abort?: () => Promise<void>;
 }

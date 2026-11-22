@@ -122,23 +122,26 @@ export function registerStackWriteHandlers(bus: CommandBus, options: Options) {
         const op = draft.plan.operation;
         const receipt = await engine.apply(draft.plan, draft.preview.id, Date.now(), store.journalHooks(commonDir), request.cleanPrefix);
         drafts.delete(draft.preview.id);
-        const answer: StackApplied = { operationId: receipt.id, plan: draft.preview };
+        const appliedPlan = request.cleanPrefix
+          ? { ...draft.preview, steps: draft.preview.steps.filter(step => !step.conflict) }
+          : draft.preview;
+        const answer: StackApplied = { operationId: receipt.id, plan: appliedPlan };
         if (op.kind === "add_branch" && request.worktreeId) {
           const worktree = repo.worktrees.find(worktree => worktree.id === request.worktreeId && !worktree.missing);
           const top = receipt.before.stacks.find(stack => stack.branches[0]?.branch === op.root)?.branches.at(-1)?.branch;
           if (worktree && top) {
             const git = new StackGit(runnerFor(repo), worktree.path);
             const current = await git.run(["symbolic-ref", "--short", "HEAD"]);
-            if (current.stdout.trim() === top) {
+            const next = receipt.moves[0]?.next;
+            if (current.stdout.trim() === top && next && await git.tip(top) === next && await git.tip(op.branch) === next) {
               const switched = await switchBranchCarryingChanges(options.git, worktree.path, op.branch);
               if (!switched.ok) answer.checkoutWarning = switched.error.message;
-              const oid = receipt.moves[0]?.next;
-              if (switched.ok && oid) {
+              if (switched.ok) {
                 if (carried.size >= 50) {
                   const oldest = carried.keys().next().value;
                   if (oldest) carried.delete(oldest);
                 }
-                carried.set(receipt.id, { repoId: repo.id, path: worktree.path, from: top, to: op.branch, oid });
+                carried.set(receipt.id, { repoId: repo.id, path: worktree.path, from: top, to: op.branch, oid: next });
               }
             }
           }
@@ -253,6 +256,24 @@ export function registerStackWriteHandlers(bus: CommandBus, options: Options) {
       }));
       await options.changed(repo);
       return ok(answer);
+    } catch (error) { return resultError(error); }
+  });
+
+  bus.register("stack:recover", async request => {
+    try {
+      const repo = scopedRepo(request);
+      await options.queue.runRepository(repo.id, () => inWorktreeLocks(scopedRepo(request), async () => {
+        const { commonDir, store } = await options.reader.location(repo);
+        await store.withJournalLock(commonDir, true, async () => {
+          const journal = await store.readApplyJournal(commonDir);
+          if (!journal) throw new Error("There is no interrupted ref transaction to resume");
+          const engine = new StackEngine(runnerFor(repo), store, repo.path, commonDir);
+          await engine.recover(journal);
+          await store.removeJournal(commonDir);
+        });
+      }));
+      await options.changed(repo);
+      return ok(null);
     } catch (error) { return resultError(error); }
   });
 

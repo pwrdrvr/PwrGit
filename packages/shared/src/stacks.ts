@@ -61,6 +61,7 @@ export type StackSnapshot = {
   readOnly: boolean;
   stacks: RepositoryStack[];
   busy?: string;
+  recoveryAvailable?: boolean;
 };
 
 export type StackPosition = { stack: RepositoryStack; layer: StackLayer; index: number };

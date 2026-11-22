@@ -4,7 +4,7 @@ import { once } from "node:events";
 import { open, readFile, rename, lstat, unlink } from "node:fs/promises";
 import { join } from "node:path";
 import { promisify } from "node:util";
-import { parseGhStackCatalog, requireWritableCatalog, type ApplyHooks, type CatalogStore, type GhStackCatalog } from "./stack-engine";
+import { parseGhStackCatalog, requireWritableCatalog, type ApplyHooks, type CatalogStore, type GhStackCatalog, type StackJournalEntry } from "./stack-engine";
 
 const foreignJournals = {
   "gh-stack-rebase-state": "gh stack is mid-rebase in this clone",
@@ -125,6 +125,9 @@ export class GhStackCatalogStore implements CatalogStore {
     return this.locks.withLock(commonDir, "operation", async () => {
       const blocker = await this.journalBlocker(commonDir, allowOwn);
       if (blocker) throw new Error(blocker);
+      // A catalog-only holder must be noticed before any branch can move.
+      // No catalog lock is retained across Git or worktree mutations.
+      await this.locks.withLock(commonDir, "catalog", async () => undefined);
       return fn();
     });
   }
@@ -147,6 +150,14 @@ export class GhStackCatalogStore implements CatalogStore {
       if (!missing(error)) throw error;
       return undefined;
     }
+  }
+
+  async readApplyJournal(commonDir: string): Promise<StackJournalEntry | undefined> {
+    const entry = await this.readJournal(commonDir) as Partial<StackJournalEntry> | undefined;
+    if ((entry?.direction === "apply" || entry?.direction === "undo") && entry.receipt && Array.isArray(entry.worktrees)) {
+      return entry as StackJournalEntry;
+    }
+    return undefined;
   }
 
   writeJournal(commonDir: string, value: unknown): Promise<void> {

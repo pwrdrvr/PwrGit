@@ -1271,7 +1271,11 @@ export function App() {
             />
           )}
           {stack && stackRepo && <StackView stack={stack} repoId={stackRepo.id} onClose={closeStack}
-            toolbar={<StackToolbar key={stack.id} stack={stack} disabled={!stackWritable}
+            toolbar={shownStacks?.busy ? <>
+              <span role="status">{shownStacks.busy}</span>
+              {shownStacks.recoveryAvailable && <button type="button" className="stack-button"
+                disabled={stackOperation.pending !== null} onClick={() => void stackOperation.recover()}>Recover stack</button>}
+            </> : <StackToolbar key={stack.id} stack={stack} disabled={!stackWritable}
               onPlan={action => void stackOperation.requested(action)} />}
             {...(stackWritable ? { onPlan: action => void stackOperation.requested(action) } : {})}
             {...(stackRunningBranch ? { runningBranch: stackRunningBranch } : {})}

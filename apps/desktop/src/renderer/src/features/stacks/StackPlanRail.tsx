@@ -1,3 +1,4 @@
+import { CheckGlyph } from "../../lib/CheckGlyph";
 import { OperationBanner } from "../rail/OperationBanner";
 import type { StackAction, StackPlanPreview } from "@pwrgit/shared";
 import type { StackOperationControls } from "./useStackOperation";
@@ -14,7 +15,7 @@ export function stackActionLabel(action: StackAction): string {
 function PlanSteps({ plan, applied }: { plan: StackPlanPreview; applied: boolean }) {
   return <ol className="stack-plan__steps">
     {plan.steps.map((step, index) => <li key={step.branch} data-conflict={step.conflict !== undefined}>
-      <span className="stack-plan__step-state" aria-hidden="true">{applied ? "✓" : step.conflict ? "!" : index + 1}</span>
+      <span className="stack-plan__step-state" aria-hidden="true">{applied ? <CheckGlyph size={11} /> : step.conflict ? "!" : index + 1}</span>
       <div>
         <strong>{step.branch}</strong>
         <span>onto {step.parent} <code>{step.newBase.slice(0, 8)}</code></span>
