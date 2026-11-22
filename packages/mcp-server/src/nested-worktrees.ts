@@ -71,15 +71,23 @@ function insidePath(root: string, path: string): string | null {
 /** The repository's common git dir: `.git` itself for the primary, or the
  *  `commondir` a linked worktree's admin dir points back at. */
 export async function checkoutCommonGitDir(cwd: string): Promise<string | null> {
+  return (await checkoutGitDirs(cwd))?.commonDir ?? null;
+}
+
+/** The checkout's own HEAD is in gitDir, even when refs live in commonDir. */
+export async function checkoutGitDirs(cwd: string): Promise<{ gitDir: string; commonDir: string } | null> {
   try {
     const dotGit = join(cwd, ".git");
     const info = await stat(dotGit);
-    if (info.isDirectory()) return await realpath(dotGit);
+    if (info.isDirectory()) {
+      const dir = await realpath(dotGit);
+      return { gitDir: dir, commonDir: dir };
+    }
     const link = /^gitdir:\s*(.+?)\s*$/m.exec(await readFile(dotGit, "utf8"));
     if (link === null) return null;
     const admin = resolve(cwd, link[1] as string);
     const pointer = (await readFile(join(admin, "commondir"), "utf8")).trim();
-    return await realpath(resolve(admin, pointer));
+    return { gitDir: admin, commonDir: await realpath(resolve(admin, pointer)) };
   } catch {
     return null;
   }
