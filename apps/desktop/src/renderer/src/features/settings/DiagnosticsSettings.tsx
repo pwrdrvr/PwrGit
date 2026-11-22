@@ -1,7 +1,6 @@
 import type {
   AppSettingsSnapshot,
-  HotCpuStartDelayMs,
-  HotCpuCaptureRules
+  HotCpuStartDelayMs
 } from "@pwrgit/shared";
 import { HEAP_MONITOR_TUNING, HOT_CPU_TUNING, hotCpuRuleIntervalMs } from "@pwrgit/shared";
 import { dispatch } from "../../lib/pwrgit";
@@ -12,7 +11,7 @@ import {
   SettingsSection,
   SettingsSegmented
 } from "./SettingsLayout";
-import { HotCpuRulesField } from "./HotCpuRulesField";
+import { HotCpuRulesField, type HotCpuRulesEdit } from "./HotCpuRulesField";
 import { SettingsSwitch } from "./SettingsSwitch";
 import { DeveloperToolsSection } from "./DeveloperToolsSection";
 import { ResourceUsageSection } from "./ResourceUsageSection";
@@ -57,7 +56,7 @@ export function DiagnosticsSettings(props: {
   onHeapMonitorEnabledChange: (enabled: boolean) => void;
   onHotCpuEnabledChange: (enabled: boolean) => void;
   onHotCpuStartDelayChange: (delayMs: HotCpuStartDelayMs) => void;
-  onHotCpuRulesChange: (rules: HotCpuCaptureRules) => void;
+  onHotCpuRulesEdit: (edit: HotCpuRulesEdit) => Promise<void>;
   onHotCpuCaptureChromiumTraceChange: (enabled: boolean) => void;
   onHotCpuCaptureHeapSnapshotChange: (enabled: boolean) => void;
   onHotCpuHeapSnapshotLimitChange: (limit: number) => void;
@@ -204,9 +203,8 @@ export function DiagnosticsSettings(props: {
           />
           <HotCpuRulesField
             rules={diag.hotCpuProfilingRules}
-            saving={props.saving}
             override={override}
-            onChange={props.onHotCpuRulesChange}
+            onEdit={props.onHotCpuRulesEdit}
           />
           <SettingsField
             label="Chromium performance trace"

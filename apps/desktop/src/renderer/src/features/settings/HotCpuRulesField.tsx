@@ -22,12 +22,14 @@ function windowLabel(durationMs: number, count: number): string {
   return `${durationMs / 1000} s · ${samples(count)}`;
 }
 
-function ThresholdInput(props: { id: HotCpuTriggerMode; value: number; disabled: boolean; onSave: (value: number) => void }) {
-  const [draft, setDraft] = useState(String(props.value));
+function ThresholdInput(props: { id: HotCpuTriggerMode; value: number; disabled: boolean; onSave: (value: number) => Promise<void> }) {
+  const [draft, setDraft] = useState<{ text: string; dirty: boolean } | null>(null);
   const [showError, setShowError] = useState(false);
   const errorId = useId();
   const tip = useViewportTooltip();
-  const invalid = showError && !isHotCpuThreshold(Number(draft));
+  const text = draft?.text ?? String(props.value);
+  const thresholdPercent = Number(text);
+  const invalid = showError && !isHotCpuThreshold(thresholdPercent);
 
   return (
     <span className="settings-cpu-rules__threshold">
@@ -42,30 +44,36 @@ function ThresholdInput(props: { id: HotCpuTriggerMode; value: number; disabled:
         max={400}
         step={1}
         disabled={props.disabled}
-        value={draft}
-        onChange={(event) => setDraft(event.currentTarget.value)}
+        value={text}
+        onChange={(event) => setDraft({ text: event.currentTarget.value, dirty: true })}
         onBlur={(event) => {
           tip.blurFrom(event);
-          if (!isHotCpuThreshold(Number(draft))) {
+          if (!isHotCpuThreshold(thresholdPercent)) {
             setShowError(true);
             return;
           }
           setShowError(false);
-          setDraft(String(Number(draft)));
-          if (Number(draft) !== props.value) props.onSave(Number(draft));
+          if (draft?.dirty) {
+            const submitted = { text: String(thresholdPercent), dirty: false };
+            setDraft(submitted);
+            // A new draft can begin before this write settles.
+            void props.onSave(thresholdPercent).then(() => {
+              setDraft((current) => current === submitted ? null : current);
+            });
+          }
         }}
         onKeyDown={(event) => {
           if (event.key === "Escape") {
-            setDraft(String(props.value));
+            setDraft(null);
             setShowError(false);
           } else if (event.key === "Enter") {
             event.preventDefault();
-            if (isHotCpuThreshold(Number(draft))) event.currentTarget.blur();
+            if (isHotCpuThreshold(thresholdPercent)) event.currentTarget.blur();
             else setShowError(true);
           } else if (event.shiftKey && (event.key === "ArrowUp" || event.key === "ArrowDown")) {
             event.preventDefault();
-            const next = (Number(draft) || props.value) + (event.key === "ArrowUp" ? 10 : -10);
-            setDraft(String(Math.min(400, Math.max(1, next))));
+            const next = (thresholdPercent || props.value) + (event.key === "ArrowUp" ? 10 : -10);
+            setDraft({ text: String(Math.min(400, Math.max(1, next))), dirty: true });
           }
         }}
       />
@@ -82,13 +90,14 @@ function summarize(rule: HotCpuEffectiveRule, intervalMs: number): string {
   return `${HOT_CPU_RULE_LABELS[rule.id]} at ${rule.thresholdPercent}% over ${window}`;
 }
 
+export type HotCpuRulesEdit = (current: HotCpuCaptureRules) => HotCpuCaptureRules;
+
 export function HotCpuRulesField(props: {
   rules: HotCpuCaptureRules;
-  saving: boolean;
   override: HotCpuRuleOverride | undefined;
-  onChange: (rules: HotCpuCaptureRules) => void;
+  onEdit: (edit: HotCpuRulesEdit) => Promise<void>;
 }) {
-  const { rules, saving, override, onChange } = props;
+  const { rules, override, onEdit } = props;
   const labelId = useId();
   const summaryId = useId();
   const [lastRuleStatus, setLastRuleStatus] = useState("");
@@ -113,13 +122,11 @@ export function HotCpuRulesField(props: {
         <input
           type="checkbox"
           checked={rules[group].enabled}
-          disabled={saving}
           aria-disabled={lastRule || undefined}
           {...hoverTooltip(tip, lastRule ? LAST_RULE : group === "slowburn" ? SLOW_HELP : undefined)}
           onChange={() => {
-            const next = toggleHotCpuRule(rules, group);
-            setLastRuleStatus(next === rules ? LAST_RULE : "");
-            if (next !== rules) onChange(next);
+            setLastRuleStatus(lastRule ? LAST_RULE : "");
+            if (!lastRule) void onEdit((current) => toggleHotCpuRule(current, group));
           }}
         />
         {label}
@@ -131,20 +138,24 @@ export function HotCpuRulesField(props: {
     <div className="settings-cpu-rules__values">
       <span>at least</span>
       <ThresholdInput
-        key={`${id}-${rules[id].thresholdPercent}`}
+        key={id}
         id={id}
         value={rules[id].thresholdPercent}
-        disabled={disabled || saving}
-        onSave={(thresholdPercent) => onChange({ ...rules, [id]: { ...rules[id], thresholdPercent } })}
+        disabled={disabled}
+        onSave={(thresholdPercent) => onEdit((current) => current[id].thresholdPercent === thresholdPercent
+          ? current : { ...current, [id]: { ...current[id], thresholdPercent } })}
       />
       <span>% CPU for</span>
       <select
         className="settings-select"
         aria-label={`${HOT_CPU_RULE_LABELS[id]} duration`}
         {...hoverTooltip(tip, "Each sample in the duration must meet the threshold. A short burst is averaged with the rest of its sample.")}
-        disabled={disabled || saving}
+        disabled={disabled}
         value={rules[id].durationMs}
-        onChange={(event) => onChange({ ...rules, [id]: { ...rules[id], durationMs: Number(event.target.value) } })}
+        onChange={(event) => {
+          const durationMs = Number(event.currentTarget.value);
+          void onEdit((current) => ({ ...current, [id]: { ...current[id], durationMs } }));
+        }}
       >
         {HOT_CPU_RULE_DURATIONS[id].map((duration) => (
           <option key={duration} value={duration}>{windowLabel(duration, id === "spike" ? 1 : duration / cadence)}</option>
@@ -170,7 +181,7 @@ export function HotCpuRulesField(props: {
                 options={HIGH_MODES}
                 value={highMode}
                 onChange={(mode) => {
-                  if (!saving && mode !== highMode) onChange({ ...rules, high: { ...rules.high, mode } });
+                  void onEdit((current) => current.high.mode === mode ? current : { ...current, high: { ...current.high, mode } });
                 }}
               />
             </div>

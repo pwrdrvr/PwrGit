@@ -3,7 +3,6 @@ import { mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { Profiler } from "node:inspector";
-import { performance as realPerformance } from "node:perf_hooks";
 import { app, contentTracing, type BrowserWindow, type ProcessMetric } from "electron";
 import fc from "fast-check";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -527,26 +526,33 @@ it("captures real main-thread work that finishes before the CPU trigger runs", a
   if (!result.ok) throw new Error(result.message);
   const capture = { ...result.session, appendEvent: async () => {}, appendSample: async () => {} };
   vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date", "performance"] });
+  let cumulativeCPUUsage = 0;
   const profiler = new HotCpuProfiler({
     config: config(root), session: capture, logger,
     target: createMainProcessHotCpuTarget(),
-    getAppMetrics: () => {
-      const { user, system } = process.cpuUsage();
-      return [{
-        pid: process.pid, creationTime: 1,
-        cpu: { cumulativeCPUUsage: (user + system) / 1e6, percentCPUUsage: 0, idleWakeupsPerSecond: 0 },
-        memory: { workingSetSize: 1, peakWorkingSetSize: 1 }
-      }] as ProcessMetric[];
-    }
+    getAppMetrics: () => [{
+      pid: process.pid, creationTime: 1,
+      cpu: { cumulativeCPUUsage, percentCPUUsage: 0, idleWakeupsPerSecond: 0 },
+      memory: { workingSetSize: 1, peakWorkingSetSize: 1 }
+    }] as ProcessMetric[]
   });
   try {
     await profiler.start();
     await vi.advanceTimersByTimeAsync(0);
     function preTriggerCpuBurst() {
-      const end = realPerformance.now() + 150;
-      while (realPerformance.now() < end) Math.sqrt(Math.random());
+      // Let V8 sample this real stack even when the host deschedules the test.
+      const start = process.threadCpuUsage();
+      let spentMicros: number;
+      do {
+        for (let i = 0; i < 1000; i++) Math.sqrt(Math.random());
+        const { user, system } = process.threadCpuUsage(start);
+        spentMicros = user + system;
+      } while (spentMicros < 25_000);
     }
     preTriggerCpuBurst();
+    // The fake sampler advances 100 ms and observes 75 ms of CPU regardless
+    // of the host's scheduling. The saved stack is still from the real inspector.
+    cumulativeCPUUsage = 0.075;
     await vi.advanceTimersByTimeAsync(100);
     await profiler.stop("app-quit");
     const profile: Profiler.Profile = JSON.parse(await readFile(capture.createProfilePath(1), "utf8"));

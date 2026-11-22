@@ -363,10 +363,9 @@ test("Hot CPU capture rules edit independently and survive closing Settings", as
   await expect(threshold).toHaveAttribute("aria-invalid", "true");
   await threshold.press("Escape");
   await expect(threshold).toHaveValue("50");
-  await threshold.fill("120");
-  await threshold.press("Enter");
   await rules.getByRole("combobox", { name: "Spike duration" }).selectOption("1000");
   await expect(settings.getByText("Monitoring samples CPU every 1 s.")).toBeVisible();
+  await threshold.fill("120");
   await slowburn.click();
   await expect(slowburn).toBeChecked();
   await expect(rules.getByRole("combobox", { name: "Slow burn duration" })).toContainText("4 s · 4 samples");

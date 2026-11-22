@@ -638,6 +638,8 @@ export function SettingsSegmented<TValue extends string | number>(props: {
   onChange: (value: TValue) => void;
 }) {
   const tip = useViewportTooltip();
+  const selected = props.options.findIndex((option) => option.value === props.value);
+  const tabStop = Math.max(0, selected);
   return (
     <div
       className="settings-segmented"
@@ -648,16 +650,16 @@ export function SettingsSegmented<TValue extends string | number>(props: {
         if (props.disabled) return;
         const direction = { ArrowRight: 1, ArrowDown: 1, ArrowLeft: -1, ArrowUp: -1 }[event.key];
         if (direction === undefined) return;
+        const radios = [...event.currentTarget.querySelectorAll<HTMLButtonElement>('button[role="radio"]')];
+        const focused = radios.findIndex((radio) => radio === document.activeElement);
+        if (focused === -1) return;
         event.preventDefault();
-        const current = props.options.findIndex((option) => option.value === props.value);
-        const next = (current + direction + props.options.length) % props.options.length;
-        const option = props.options[next];
-        if (!option) return;
-        event.currentTarget.querySelectorAll<HTMLButtonElement>('button[role="radio"]')[next]?.focus();
-        props.onChange(option.value);
+        const next = (focused + direction + radios.length) % radios.length;
+        radios[next]!.focus();
+        props.onChange(props.options[next]!.value);
       }}
     >
-      {props.options.map((option) => (
+      {props.options.map((option, index) => (
         <button
           key={String(option.value)}
           aria-checked={props.value === option.value}
@@ -666,7 +668,7 @@ export function SettingsSegmented<TValue extends string | number>(props: {
           }`}
           disabled={props.disabled}
           role="radio"
-          tabIndex={props.value === option.value ? 0 : -1}
+          tabIndex={index === tabStop ? 0 : -1}
           type="button"
           {...hoverTooltip(tip, option.tooltip)}
           onClick={() => props.onChange(option.value)}

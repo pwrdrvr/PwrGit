@@ -83,10 +83,11 @@ test("removes a repository and its worktrees to the Trash after an explicit choi
   const remove = dialog.locator(".modal__create--danger");
   await expect(remove).toBeDisabled();
 
-  await dialog
-    .getByRole("radiogroup", { name: "What to do with feat/dirty" })
-    .getByRole("radio", { name: "Discard" })
-    .click();
+  const decisions = dialog.getByRole("radiogroup", { name: "What to do with feat/dirty" });
+  await window.keyboard.press("Shift+Tab");
+  await expect(decisions.getByRole("radio", { name: "Keep" })).toBeFocused();
+  await window.keyboard.press("ArrowRight");
+  await expect(decisions.getByRole("radio", { name: "Discard" })).toBeFocused();
   await expect(remove).toHaveText("Remove harbor-api");
   await expect(remove).toBeDisabled();
   await dialog.locator(".remove-repo__gate input").fill("harbor-api");
