@@ -1,5 +1,6 @@
 import { useState } from "react";
 import type { Repo, RepositoryStack, StackLayer, StackPosition } from "@pwrgit/shared";
+import { RefreshGlyph } from "../../lib/RefreshGlyph";
 import { SectionChevron } from "../sidebar/SectionChevron";
 import { PrChip } from "../sidebar/PrChip";
 import { useStackNavigation } from "./stack-navigation";
@@ -32,8 +33,8 @@ export function StackPositionChip({ position, onSelect }: { position: StackPosit
 
 function StackSignals({ layer }: { layer: StackLayer }) {
   return <span className="stack-signals">
-    {layer.health.needsRestack && <span className="stack-signal--restack" aria-label="Needs restack">⟳</span>}
-    {layer.health.needsPush && <span className="stack-signal--push" aria-label="Needs push">↑</span>}
+    {layer.health.needsRestack && <span className="stack-signal--restack" role="img" aria-label="Needs restack"><RefreshGlyph size={10} /></span>}
+    {layer.health.needsPush && <span className="stack-signal--push" role="img" aria-label="Needs push">↑</span>}
   </span>;
 }
 
