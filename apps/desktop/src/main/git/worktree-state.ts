@@ -10,6 +10,7 @@ import { checkoutExists } from "./worktree-liveness";
 import { checkoutCommonGitDir, nestedWorktreePathspec } from "@pwrgit/mcp-server/nested-worktrees";
 import { WorktreeOperationQueue } from "./worktree-operation-queue";
 import { defaultComparisonApplies, readDefaultComparisons, type DefaultComparisons } from "./worktree-default-comparison";
+import { readColdAuthoredTips, stillColdAuthoredTip } from "./worktree-authored-sweep";
 
 /** A probe found `branch`'s configured upstream deleted. */
 export type UpstreamGoneChange = {
@@ -743,8 +744,7 @@ export class WorktreeStateService {
    * with every pull, so it cannot say whether *you* worked here. The log is
    * bounded by the window, and the identity is read only when it has rows.
    */
-  private async readLastAuthoredAt(path: string): Promise<string | undefined> {
-    const sinceMs = Date.now() - RECENT_MS;
+  private async readLastAuthoredAt(path: string, sinceMs = Date.now() - RECENT_MS): Promise<string | undefined> {
     const since = new Date(sinceMs).toISOString();
     const log = await this.git(
       // %ae, not the mailmapped %aE: it is compared with the raw user.email.
@@ -775,14 +775,15 @@ export class WorktreeStateService {
    * Re-read `lastAuthoredAt` for every indexed worktree, on screen or not.
    * `compute` runs for visible rows, and the Focused list decides what is
    * visible, so without this a repo you committed in from a terminal never
-   * became Focused (nor joined Fetch/Pull recent). Cheap: one bounded log per
-   * worktree, plus `user.email` only when the window has commits. Returns the
-   * repos whose value moved, by profile, for `repo:changed`.
+   * became Focused (nor joined Fetch/Pull recent). Batch the check for old
+   * tips in large checkout families. Returns the repos whose value moved, by
+   * profile, for `repo:changed`.
    */
   async sweepAuthored(concurrency = 4): Promise<Map<string, string[]>> {
     const rows = this.db
       .prepare(
-        `SELECT w.id, w.path, w.repo_id, r.profile_id, s.last_authored_at
+        `SELECT w.id, w.path, w.branch, w.repo_id, r.path AS repo_path,
+                r.profile_id, s.last_authored_at, s.updated_at
          FROM worktrees w
          JOIN repos r ON r.id = w.repo_id
          JOIN worktree_state s ON s.worktree_id = w.id
@@ -791,19 +792,49 @@ export class WorktreeStateService {
       .all() as {
       id: string;
       path: string;
+      branch: string;
       repo_id: string;
+      repo_path: string;
       profile_id: string;
       last_authored_at: string | null;
+      updated_at: string;
     }[];
+    const refsByRepo = new Map<string, Set<string>>();
+    for (const { repo_path, branch } of rows) {
+      if (branch === "" || branch.startsWith("detached@") || /[\r\n]/.test(branch)) continue;
+      const refs = refsByRepo.get(repo_path) ?? new Set<string>();
+      refs.add(`refs/heads/${branch}`);
+      refsByRepo.set(repo_path, refs);
+    }
+    const coldTips = new Map<string, ReturnType<typeof readColdAuthoredTips>>();
+    const sinceMs = Date.now() - RECENT_MS;
     const moved = new Map<string, Set<string>>();
     const update = this.db.prepare(
-      "UPDATE worktree_state SET last_authored_at = ? WHERE worktree_id = ?"
+      `UPDATE worktree_state SET last_authored_at = ?
+       WHERE worktree_id = ? AND updated_at = ? AND last_authored_at IS ?
+         AND EXISTS (SELECT 1 FROM worktrees w
+                     WHERE w.id = worktree_state.worktree_id AND w.path = ? AND w.missing = 0)`
     );
     await mapLimit(rows, concurrency, async (row) => {
       if (!checkoutExists(row.path)) return;
-      const next = (await this.readLastAuthoredAt(row.path)) ?? null;
+      const refs = refsByRepo.get(row.repo_path);
+      let cold = false;
+      // Amortize the batch over linked checkouts. Unknown refs and unusual
+      // repository layouts fall back to the ordinary probe.
+      if (refs !== undefined && refs.size >= 4 && refs.size <= 256) {
+        let pending = coldTips.get(row.repo_path);
+        if (pending === undefined) {
+          pending = readColdAuthoredTips(this.git, row.repo_path, refs, sinceMs);
+          coldTips.set(row.repo_path, pending);
+        }
+        cold = await stillColdAuthoredTip(row.path, await pending);
+      }
+      const next = cold ? null : (await this.readLastAuthoredAt(row.path, sinceMs)) ?? null;
       if (next === row.last_authored_at) return;
-      update.run(next, row.id);
+      // A visible refresh or reindex can publish newer state during Git I/O.
+      // Announce only rows this sweep actually changed.
+      if (!checkoutExists(row.path)) return;
+      if (update.run(next, row.id, row.updated_at, row.last_authored_at, row.path).changes === 0) return;
       const repos = moved.get(row.profile_id) ?? new Set<string>();
       repos.add(row.repo_id);
       moved.set(row.profile_id, repos);
