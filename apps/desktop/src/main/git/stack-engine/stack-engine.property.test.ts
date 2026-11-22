@@ -5,10 +5,11 @@ import { writeFile } from "node:fs/promises";
 import { StackEngine } from ".";
 import { commit, git, memoryStore, repository, runner, withRepo, withStack } from "./fixture.test-support";
 
-test("Git agrees with the stack model through commits, amends, adoption, removal and undo", async () => {
+test.each([1, 2, 3])("Git agrees with the stack model through commits, amends, adoption, removal and undo (batch %i)", async () => {
   await fc.assert(fc.asyncProperty(fc.array(fc.constantFrom("commit", "amend", "restack", "adopt", "remove", "undo"), { minLength: 3, maxLength: 8 }),
     async operations => withStack(async ({ cwd, commonDir, initial, store, engine }) => {
       let tracked = ["bottom", "top"];
+      const anchors = new Map(initial.stacks[0].branches.map(layer => [layer.branch, layer.base]));
       let last: { id: string; tracked: string[]; tips: string } | undefined;
       for (const [index, operation] of operations.entries()) {
         const id = `model-${index}`;
@@ -56,7 +57,10 @@ test("Git agrees with the stack model through commits, amends, adoption, removal
         } else if (operation === "adopt" && tracked.length === 0) {
           const state = await store.read(commonDir);
           // Adopt the current tips with the bases recorded before forgetting.
-          const branches = initial.stacks[0].branches.map(({ branch }) => ({ branch }));
+          const branches = initial.stacks[0].branches.map(({ branch }) => {
+            const base = anchors.get(branch);
+            return base ? { branch, base } : { branch };
+          });
           const plan = await engine.plan({ kind: "adopt", repository, stack: { ...initial.stacks[0], branches } });
           expect(plan.catalogHash).toBe(state.sha256);
           await engine.apply(plan, id, index);
@@ -64,12 +68,13 @@ test("Git agrees with the stack model through commits, amends, adoption, removal
           tracked = branches.map(branch => branch.branch);
         }
         const result = await store.read(commonDir);
+        for (const layer of result.catalog.stacks.flatMap(stack => stack.branches)) anchors.set(layer.branch, layer.base);
         expect(result.catalog.stacks.flatMap(stack => stack.branches.map(layer => layer.branch))).toEqual(tracked);
       }
-    })), { numRuns: 10 });
+    })), { numRuns: 4 });
 });
 
-test("replay forecasts agree with rebase conflict files, and clean forecasts apply", async () => {
+test.each([1, 2, 3])("replay forecasts agree with rebase conflict files, and clean forecasts apply (batch %i)", async () => {
   await fc.assert(fc.asyncProperty(fc.subarray(["one.txt", "two.txt", "three.txt"]), fc.boolean(),
     (overlap, firstPatch) => withRepo(async (cwd, initial) => {
       const filenames = ["one.txt", "two.txt", "three.txt"];
@@ -107,5 +112,5 @@ test("replay forecasts agree with rebase conflict files, and clean forecasts app
         expect(forecast?.files.toSorted()).toEqual(files);
         await git(cwd, "rebase", "--abort");
       }
-    })), { numRuns: 9 });
+    })), { numRuns: 3 });
 });

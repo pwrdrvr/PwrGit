@@ -95,3 +95,21 @@ test("gh-stack #586: the integrated boundary excludes the squash from replay", (
   expect(await git(cwd, "log", "--format=%s", `${trunk}..child`)).toBe("child.txt");
   expect(await git(cwd, "show", "child:parent.txt")).toBe("three");
 }));
+
+test("a patch newly present upstream is accounted for in the proof", () => withRepo(async (cwd, base) => {
+  await git(cwd, "switch", "-qc", "layer");
+  const tip = await commit(cwd, "same.txt", "same\n");
+  await git(cwd, "switch", "-q", "main");
+  await commit(cwd, "trunk.txt", "trunk\n");
+  await git(cwd, "cherry-pick", tip);
+  const upstream = await git(cwd, "rev-parse", "HEAD");
+  const store = memoryStore({
+    schemaVersion: 1, repository,
+    stacks: [{ trunk: { branch: "main", head: base }, branches: [{ branch: "layer", head: tip, base }] }],
+  });
+  const engine = new StackEngine(runner, store, cwd, join(cwd, ".git"));
+  const plan = await engine.plan({ kind: "restack", root: "layer" });
+  expect(plan.steps[0].proof).toEqual({ preserved: 0, dropped: [{ commit: tip, id: expect.any(String) }] });
+  await engine.apply(plan, "upstream-patch", 1);
+  expect(await git(cwd, "diff", upstream, "layer")).toBe("");
+}));

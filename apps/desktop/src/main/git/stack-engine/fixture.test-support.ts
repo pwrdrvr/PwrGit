@@ -1,5 +1,5 @@
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
-import { devNull, tmpdir } from "node:os";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createSystemGit } from "../test-support/system-git";
 import { StackEngine, type CatalogStore, type GhStackCatalog, type GitRunner } from ".";
@@ -8,7 +8,7 @@ export const repository = "github.com:example/orbit-deploy";
 export const gitEnvironment = {
   ...process.env,
   GIT_CONFIG_NOSYSTEM: "1",
-  GIT_CONFIG_GLOBAL: devNull,
+  GIT_CONFIG_GLOBAL: "/dev/null",
   GIT_CONFIG_COUNT: undefined,
   GIT_CONFIG_PARAMETERS: undefined,
   GIT_DIR: undefined,
@@ -16,9 +16,10 @@ export const gitEnvironment = {
   GIT_INDEX_FILE: undefined,
 };
 
+const execute = createSystemGit({ env: gitEnvironment });
+
 export const runner: GitRunner = {
   async run(cwd, args, opts) {
-    const execute = createSystemGit({ env: gitEnvironment });
     const result = await execute(args, cwd, opts?.stdin === undefined ? undefined : { input: opts.stdin });
     if (!result.ok) throw new Error(result.error.message);
     return result.value;
@@ -58,7 +59,7 @@ export async function withRepo<T>(fn: (cwd: string, base: string) => Promise<T>)
     await git(cwd, "init", "-q", "-b", "main");
     for (const [key, value] of [
       ["user.name", "Fixture"], ["user.email", "fixture@example.invalid"],
-      ["commit.gpgSign", "false"], ["core.autocrlf", "false"], ["core.hooksPath", devNull],
+      ["commit.gpgSign", "false"], ["core.autocrlf", "false"], ["core.hooksPath", join(cwd, ".git", "no-hooks")],
     ]) await git(cwd, "config", key, value);
     const base = await commit(cwd, "base.txt", "base\n");
     return await fn(cwd, base);
