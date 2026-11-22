@@ -1,3 +1,5 @@
+import { createHash } from "node:crypto";
+import { createReadStream } from "node:fs";
 import { mkdtemp, open, readdir, readFile, rm, stat, truncate, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -7,15 +9,16 @@ import { ChromiumTrace } from "./chromium-trace";
 
 const emptyTrace = JSON.stringify({ traceEvents: [] });
 
-it("assigns each rolling trace to at most one overlapping capture across clock adjustments", async () => {
+it("reserves one frozen export across overlapping triggers, rearming, disarm and clock adjustments", async () => {
   await fc.assert(fc.asyncProperty(
-    fc.array(fc.tuple(fc.integer({ min: 2, max: 5 }), fc.integer({ min: 1, max: 1000 })), { minLength: 1, maxLength: 12 }),
+    fc.array(fc.tuple(fc.integer({ min: 2, max: 5 }), fc.integer({ min: 1, max: 1000 }), fc.constantFrom("publish", "profile-failed", "disarm")), { minLength: 1, maxLength: 12 }),
     async (rounds) => {
       const directory = await mkdtemp(join(tmpdir(), "pwrgit-trace-model-"));
       try {
         let mono = 0;
         let wall = 100_000;
         let nativeRecording = false;
+        let rawPath: string | undefined;
         const unexpectedErrors: unknown[] = [];
         const trace = new ChromiumTrace(() => ({
           async startRecording() {
@@ -24,6 +27,7 @@ it("assigns each rolling trace to at most one overlapping capture across clock a
           },
           async stopRecording(file = join(directory, "discard.json")) {
             expect(nativeRecording).toBe(true);
+            rawPath = file;
             await writeFile(file, emptyTrace);
             nativeRecording = false;
             return file;
@@ -36,22 +40,39 @@ it("assigns each rolling trace to at most one overlapping capture across clock a
         });
 
         const saved: string[] = [];
-        for (const [index, [count, rollback]] of rounds.entries()) {
+        for (const [index, [count, rollback, settlement]] of rounds.entries()) {
           await Promise.all([trace.setArmed(true), trace.setArmed(true)]);
           expect(nativeRecording).toBe(true);
           const trigger = ++mono;
           wall -= rollback;
           const names = Array.from({ length: count }, (_, i) => `capture-${index}-${i}.json`);
-          // Request a fresh recording behind the first export, before the
-          // other already-triggered windows get their turns to export.
-          const captures = await Promise.all([
-            trace.capture(join(directory, names[0]!), trigger),
+          let completeProfile!: (written: boolean) => void;
+          const profileWritten = new Promise<boolean>((resolve) => { completeProfile = resolve; });
+          const capture = trace.capture(join(directory, names[0]!), trigger, () => profileWritten);
+          const otherCaptures = await Promise.all([
             trace.setArmed(true),
             ...names.slice(1).map((name) => trace.capture(join(directory, name), trigger))
           ]);
-          expect(captures.filter((result) => result?.status === "written")).toHaveLength(1);
-          expect(captures[0]?.status).toBe("written");
-          saved.push(names[0]!);
+          expect(nativeRecording).toBe(false);
+          expect(otherCaptures.slice(1)).toEqual(names.slice(1).map(() => ({ status: "skipped", reason: "not-recording" })));
+          expect(await readFile(rawPath!, "utf8")).toBe(emptyTrace);
+          expect((await readdir(directory)).sort()).toEqual(saved.sort());
+
+          if (settlement === "disarm") await trace.setArmed(false);
+          else completeProfile(settlement === "publish");
+          if (settlement === "publish") {
+            expect(await capture).toMatchObject({ status: "written" });
+            saved.push(names[0]!);
+          } else {
+            expect(await capture).toEqual({ status: "skipped", reason: "canceled" });
+          }
+          if (settlement === "disarm") completeProfile(true);
+          await expect(stat(rawPath!)).rejects.toMatchObject({ code: "ENOENT" });
+          await trace.setArmed(true);
+          expect(nativeRecording).toBe(true);
+          await expect(trace.capture(join(directory, "stale.json"), trigger)).resolves.toEqual({
+            status: "skipped", reason: "trigger-predates-recording"
+          });
         }
         await Promise.all([trace.setArmed(false), trace.setArmed(false)]);
         expect(nativeRecording).toBe(false);
@@ -104,7 +125,7 @@ it("bounds a missing start acknowledgement and an export that never completes", 
 });
 
 
-it("publishes the allowlisted projection of a trace larger than the former 96 MiB limit", async () => {
+it("streams the allowlisted projection at the full 288 MiB export limit", async () => {
   const directory = await mkdtemp(join(tmpdir(), "pwrgit-large-trace-oracle-"));
   const output = join(directory, "trace.json");
   const compound = {
@@ -115,7 +136,7 @@ it("publishes the allowlisted projection of a trace larger than the former 96 Mi
     tid: 141,
     ts: 2_010,
     dur: 830,
-    args: { beginData: { frame: "private-layout-frame" }, endData: { root: Array.from({ length: 128 }, (_, id) => ({
+    args: { beginData: { frame: "private-layout-frame" }, endData: { root: Array.from({ length: 7 }, (_, id) => ({
       nodeId: id, x: id * 5, y: id * 10, width: 852, height: 26
     })) } }
   };
@@ -127,10 +148,15 @@ it("publishes the allowlisted projection of a trace larger than the former 96 Mi
     tid: 141,
     ts: 2_840
   };
+  const compositor = { ...compound, cat: "cc,private-category", name: "Commit" };
   const dropped = { ...compound, cat: "private-category" };
-  const eventsPerBatch = 256;
-  const batch = Array.from({ length: eventsPerBatch }, () => `${JSON.stringify(dropped)},\n`).join("");
-  const batches = Math.ceil((97 * 1024 * 1024) / Buffer.byteLength(batch));
+  const eventPairsPerBatch = 512;
+  const batch = `${JSON.stringify(compositor)},\n${JSON.stringify(dropped)},\n`.repeat(eventPairsPerBatch);
+  const limit = 288 * 1024 * 1024;
+  const header = '{"traceEvents":[\n';
+  const tail = `${JSON.stringify(compound)},${JSON.stringify(privateTiming)}],"metadata":{"private":"private-metadata"}}`;
+  const batches = Math.floor((limit - Buffer.byteLength(header + tail)) / Buffer.byteLength(batch));
+  const padding = limit - Buffer.byteLength(header + tail) - batches * Buffer.byteLength(batch);
   let rawPath: string | undefined;
   let rawBytes = 0;
   let mono = 0;
@@ -141,10 +167,10 @@ it("publishes the allowlisted projection of a trace larger than the former 96 Mi
         rawPath = file;
         const raw = await open(file, "w");
         try {
-          await raw.write('{"traceEvents":[\n');
+          await raw.write(header);
           for (let index = 0; index < batches; index++) await raw.write(batch);
-          await raw.write(`${JSON.stringify(compound)},${JSON.stringify(privateTiming)}],
-            "metadata": {"private": "private-metadata"} }`);
+          await raw.write(tail);
+          await raw.write(" ".repeat(padding));
           rawBytes = (await raw.stat()).size;
         } finally {
           await raw.close();
@@ -155,12 +181,20 @@ it("publishes the allowlisted projection of a trace larger than the former 96 Mi
 
     await trace.setArmed(true);
     const result = await trace.capture(output, ++mono);
-    expect(result).toMatchObject({ status: "written", rawBytes, rawLimitBytes: 256 * 1024 * 1024 });
-    expect(rawBytes).toBeGreaterThan(96 * 1024 * 1024);
-    expect(JSON.parse(await readFile(output, "utf8"))).toEqual({ traceEvents: [
-      { cat: "devtools.timeline", name: "Layout", ph: "X", pid: 120, tid: 141, ts: 2_010, dur: 830 },
-      { cat: "blink.user_timing", name: "User timing", ph: "I", pid: 120, tid: 141, ts: 2_840, s: "t" }
-    ] });
+    expect(result).toMatchObject({ status: "written", rawBytes: limit, rawLimitBytes: limit });
+    expect(rawBytes).toBe(limit);
+    const projectedCommit = { pid: 120, tid: 141, cat: "cc", name: "Commit", ph: "X", ts: 2_010, dur: 830 };
+    const projectedTail = [
+      { pid: 120, tid: 141, cat: "devtools.timeline", name: "Layout", ph: "X", ts: 2_010, dur: 830 },
+      { pid: 120, tid: 141, cat: "blink.user_timing", name: "User timing", ph: "I", ts: 2_840, s: "t" }
+    ].map((event) => JSON.stringify(event)).join(",");
+    const projectedBatch = `${JSON.stringify(projectedCommit)},`.repeat(eventPairsPerBatch);
+    const expectedHash = createHash("sha256").update('{"traceEvents":[');
+    for (let index = 0; index < batches; index++) expectedHash.update(projectedBatch);
+    expectedHash.update(`${projectedTail}]}`);
+    const actualHash = createHash("sha256");
+    for await (const chunk of createReadStream(output)) actualHash.update(chunk);
+    expect(actualHash.digest("hex")).toBe(expectedHash.digest("hex"));
     await expect(stat(rawPath!)).rejects.toMatchObject({ code: "ENOENT" });
     expect(await readdir(directory)).toEqual(["trace.json"]);
   } finally {
@@ -174,7 +208,7 @@ it("reports measured and allowed bytes when a raw export is over budget", async 
   const output = join(directory, "trace.json");
   let mono = 0;
   let rawPath: string | undefined;
-  const limit = 256 * 1024 * 1024;
+  const limit = 288 * 1024 * 1024;
   const trace = new ChromiumTrace(() => ({
     async startRecording() {},
     async stopRecording(file = "") {
@@ -186,7 +220,10 @@ it("reports measured and allowed bytes when a raw export is over budget", async 
   }), () => {}, { monotonicNow: () => ++mono });
   try {
     await trace.setArmed(true);
-    await expect(trace.capture(output, ++mono)).rejects.toThrow(
+    // The size limit applies as soon as the native export finishes, even if
+    // the CPU profile is still recording and hasn't authorized publication.
+    const waitingForProfile = () => new Promise<never>(() => {});
+    await expect(trace.capture(output, ++mono, waitingForProfile)).rejects.toThrow(
       `Chromium trace exceeded the export size limit (${limit + 1} raw bytes, ${limit} byte limit)`
     );
     await expect(stat(rawPath!)).rejects.toMatchObject({ code: "ENOENT" });
@@ -221,9 +258,10 @@ it("discards malformed and timed-out exports and releases the recording queue", 
   try {
     await trace.setArmed(true);
     const capture = trace.capture(output, ++mono);
-    const rearm = trace.setArmed(true);
+    await trace.setArmed(true);
+    expect(nativeStarts).toBe(1);
     await expect(capture).rejects.toThrow(/Filtering Chromium trace timed out.*raw bytes/);
-    await rearm;
+    await trace.setArmed(true);
     expect(nativeStarts).toBe(2);
     await expect(stat(rawPath!)).rejects.toMatchObject({ code: "ENOENT" });
     expect(await readdir(directory)).toEqual([]);

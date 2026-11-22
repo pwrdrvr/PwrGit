@@ -53,6 +53,8 @@ type ActiveProfileTrigger = Pick<
   | "triggerMode"
   | "triggerThresholdPercent"
 >;
+type ProfileCompanion = (profileWritten: boolean) => Promise<void>;
+type ProfileTriggerListener = (profilePath: string, triggerAtMs: number, triggerMonotonicMs: number) => ProfileCompanion | undefined;
 
 function serializeError(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
@@ -85,7 +87,7 @@ export class HotCpuProfiler {
   private readonly now: () => Date;
   private readonly onHeapSnapshotLimitReached: (() => void | Promise<void>) | undefined;
   private readonly onSampleCaptured: (() => void) | undefined;
-  private readonly onProfileArtifactWritten: ((profilePath: string, triggerAtMs: number, triggerMonotonicMs: number) => Promise<void>) | undefined;
+  private readonly onProfileTriggered: ProfileTriggerListener | undefined;
   private readonly onProfileFinished: (() => void) | undefined;
   private readonly onProfileWritten: ((event: HotCpuProfileCapturedEvent) => void | Promise<void>) | undefined;
   private readonly session: HotCpuProfileSession;
@@ -105,7 +107,6 @@ export class HotCpuProfiler {
   private captureSamplePromise: Promise<void> | null = null;
   private intervalTimer: ReturnType<typeof setTimeout> | null = null;
   private lastProfileAtMs: number | null = null;
-  private lastProfileMonotonicMs = 0;
   private previousCumulativeCpuSeconds: number | null = null;
   private previousSampleAtMs: number | null = null;
   private profileDurationTimer: ReturnType<typeof setTimeout> | null = null;
@@ -115,6 +116,7 @@ export class HotCpuProfiler {
   private profiling = false;
   private samplingPausedForProfile = false;
   private activeProfileTrigger: ActiveProfileTrigger | null = null;
+  private profileCompanion: ProfileCompanion | undefined;
   private activeProfileHeapSnapshots: HotCpuProfileHeapSnapshotArtifact[] = [];
   private activeProfileHeapSnapshotCaptures = new Set<Promise<void>>();
   private stopped = false;
@@ -128,7 +130,8 @@ export class HotCpuProfiler {
     now?: () => Date;
     onHeapSnapshotLimitReached?: () => void | Promise<void>;
     onProfileWritten?: (event: HotCpuProfileCapturedEvent) => void | Promise<void>;
-    onProfileArtifactWritten?: (profilePath: string, triggerAtMs: number, triggerMonotonicMs: number) => Promise<void>;
+    /** Begin companion capture at detection. Settle it after the CPU profile is saved or fails. */
+    onProfileTriggered?: ProfileTriggerListener;
     onProfileFinished?: () => void;
     /**
      * Fires once per completed sampling iteration, after the sample has been
@@ -148,7 +151,7 @@ export class HotCpuProfiler {
     this.now = options.now ?? (() => new Date());
     this.onHeapSnapshotLimitReached = options.onHeapSnapshotLimitReached;
     this.onProfileWritten = options.onProfileWritten;
-    this.onProfileArtifactWritten = options.onProfileArtifactWritten;
+    this.onProfileTriggered = options.onProfileTriggered;
     this.onProfileFinished = options.onProfileFinished;
     this.onSampleCaptured = options.onSampleCaptured;
     this.session = options.session;
@@ -560,7 +563,13 @@ export class HotCpuProfiler {
       this.profileCount += 1;
       const index = this.profileCount;
       this.lastProfileAtMs = Date.parse(options.capturedAt);
-      this.lastProfileMonotonicMs = options.capturedMonotonicMs;
+      try {
+        this.profileCompanion = this.onProfileTriggered?.(
+          this.session.createProfilePath(index), this.lastProfileAtMs, options.capturedMonotonicMs
+        );
+      } catch (error) {
+        this.logger.warn("CPU profile companion capture failed to start", error);
+      }
       await this.session.appendEvent({
         capturedAt: options.capturedAt,
         type: "profile-started",
@@ -605,6 +614,7 @@ export class HotCpuProfiler {
     } catch (error) {
       this.activeProfileTrigger = null;
       this.profiling = false;
+      await this.finishProfileCompanion(false);
       this.onProfileFinished?.();
       await this.session.appendEvent({
         capturedAt: this.now().toISOString(),
@@ -670,10 +680,7 @@ export class HotCpuProfiler {
         },
       });
 
-      if (this.lastProfileAtMs !== null) {
-        await this.onProfileArtifactWritten?.(profilePath, this.lastProfileAtMs, this.lastProfileMonotonicMs)
-          .catch((error) => this.logger.warn("CPU profile companion artifact failed", error));
-      }
+      await this.finishProfileCompanion(true);
 
       if (
         !this.stopped &&
@@ -706,6 +713,7 @@ export class HotCpuProfiler {
       });
       this.logger.error("CPU profile failed to stop", error);
     } finally {
+      await this.finishProfileCompanion(false);
       this.activeProfileTrigger = null;
       this.activeProfileHeapSnapshots = [];
       this.activeProfileHeapSnapshotCaptures.clear();
@@ -715,6 +723,16 @@ export class HotCpuProfiler {
       await this.ensureRecording(this.now().getTime());
       this.resumeSamplingAfterProfile();
       this.onProfileFinished?.();
+    }
+  }
+
+  private async finishProfileCompanion(profileWritten: boolean): Promise<void> {
+    const companion = this.profileCompanion;
+    this.profileCompanion = undefined;
+    try {
+      await companion?.(profileWritten);
+    } catch (error) {
+      this.logger.warn("CPU profile companion artifact failed", error);
     }
   }
 

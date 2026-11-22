@@ -108,7 +108,7 @@ describe("Chromium trace follows the renderer capture lifecycle", () => {
     }
   });
 
-  it.each(["disarm", "heap", "exhaust", "close", "timeout"] as const)(
+  it.each(["disarm", "trace-off", "heap", "exhaust", "close", "timeout", "profile-failed"] as const)(
     "preserves triggered captures and releases the trace when renderers %s",
     async (transition) => {
       const directory = await mkdtemp(join(tmpdir(), "pwrgit-trace-lifecycle-"));
@@ -122,13 +122,14 @@ describe("Chromium trace follows the renderer capture lifecycle", () => {
       vi.stubEnv("PWRGIT_HOT_CPU_PROFILING_INTERVAL_MS", "20");
       vi.stubEnv("PWRGIT_HOT_CPU_PROFILING_MAX_PROFILES", transition === "timeout" ? "2" : "1");
       vi.stubEnv("PWRGIT_HOT_CPU_PROFILING_DURATION_MS",
-        transition === "exhaust" || transition === "timeout" ? "50" : "60000");
+        transition === "exhaust" || transition === "timeout" || transition === "profile-failed" ? "50" : "60000");
 
       let cpu = transition === "close" ? 0 : 90;
       let destroyed = false;
       const started = vi.mocked(contentTracing.startRecording);
       let nativeRecording = false;
       let exports = 0;
+      let rawPath: string | undefined;
       const hangs = transition === "timeout";
       started.mockImplementation(async () => {
         expect(nativeRecording).toBe(false);
@@ -138,6 +139,7 @@ describe("Chromium trace follows the renderer capture lifecycle", () => {
         if (!nativeRecording) throw new Error("Failed to stop tracing - no trace in progress");
         nativeRecording = false;
         exports++;
+        rawPath = file;
         if (hangs && exports === 1) await new Promise<never>(() => {});
         if (file) await writeFile(file, JSON.stringify({ traceEvents: [] }));
         return file ?? join(directory, "discarded.json");
@@ -154,11 +156,19 @@ describe("Chromium trace follows the renderer capture lifecycle", () => {
         onHotCpuHeapSnapshotLimitReached: () => {},
         onHotCpuProfileCaptured: notify
       });
+      const target = recorder();
+      if (transition === "profile-failed") {
+        const send = target.debugger.sendCommand;
+        target.debugger.sendCommand = async (method) => {
+          if (method === "Profiler.stop") throw new Error("fixture profiler failure");
+          return send(method);
+        };
+      }
       const window = Object.assign(new EventEmitter(), {
         isDestroyed: () => destroyed,
         webContents: {
           id: 1, getOSProcessId: () => 42, isDestroyed: () => destroyed,
-          debugger: recorder().debugger
+          debugger: target.debugger
         }
       });
       try {
@@ -185,20 +195,34 @@ describe("Chromium trace follows the renderer capture lifecycle", () => {
             const events = await readFile(join(rendererDirectory, "events.ndjson"), "utf8");
             expect(events).toContain('"type":"profile-started"');
           });
-          if (transition === "disarm" || transition === "heap") {
+          if (transition === "disarm" || transition === "heap" || transition === "trace-off") {
             settings = {
               ...settings,
               hotCpuProfilingEnabled: transition !== "disarm",
-              heapMonitorEnabled: transition === "heap"
+              heapMonitorEnabled: transition === "heap",
+              hotCpuProfilingCaptureChromiumTrace: transition !== "trace-off"
             };
             await manager.sync();
           }
+          if (transition === "trace-off") await manager.shutdown();
           if (hangs) cpu = 0;
-          await vi.waitFor(() => expect(notify).toHaveBeenCalledOnce(), { timeout: 6_000 });
+          if (transition === "profile-failed") {
+            await vi.waitFor(async () => {
+              expect(await readFile(join(rendererDirectory, "events.ndjson"), "utf8")).toContain('"type":"profile-stop-failed"');
+            });
+            await manager.shutdown();
+            expect(notify).not.toHaveBeenCalled();
+          } else {
+            await vi.waitFor(() => expect(notify).toHaveBeenCalledOnce(), { timeout: 6_000 });
+          }
           const artifacts = JSON.parse(await readFile(join(rendererDirectory, "session.json"), "utf8")).artifacts;
-          expect(artifacts).toEqual(hangs
+          expect(artifacts).toEqual(transition === "profile-failed" ? [] : hangs || transition === "trace-off"
             ? ["renderer-hot-0001.cpuprofile"]
             : ["renderer-hot-0001.cpuprofile", "renderer-hot-0001.trace.json"]);
+          if (transition === "trace-off" || transition === "profile-failed") {
+            expect(exports).toBe(1);
+            await expect(readFile(rawPath!)).rejects.toMatchObject({ code: "ENOENT" });
+          }
           if (hangs) {
             // CPU sampling continues even though native trace export never acknowledged.
             const readCount = reads.mock.calls.length;

@@ -525,8 +525,8 @@ export class DiagnosticsManager {
         isDestroyed: () => contents.isDestroyed(),
         takeHeapSnapshot: (filePath) => contents.takeHeapSnapshot(filePath)
       },
-      onProfileArtifactWritten: (filePath, triggerAtMs, triggerMonotonicMs) =>
-        this.saveChromiumTrace(session.session, filePath, triggerAtMs, triggerMonotonicMs),
+      onProfileTriggered: (filePath, triggerAtMs, triggerMonotonicMs) =>
+        this.startChromiumTraceCapture(session.session, filePath, triggerAtMs, triggerMonotonicMs),
       onProfileFinished: () => { void this.reconcileChromiumTrace(); },
       onProfileWritten: (event) => this.onHotCpuProfileCaptured?.(event, entry.profileId),
       onHeapSnapshotLimitReached: () => {
@@ -536,25 +536,33 @@ export class DiagnosticsManager {
     await entry.hotCpuProfiler.start();
   }
 
-  private async saveChromiumTrace(
+  private startChromiumTraceCapture(
     session: HotCpuProfileSession, profilePath: string, triggerAtMs: number,
     triggerMonotonicMs: number
-  ): Promise<void> {
+  ): ((profileWritten: boolean) => Promise<void>) | undefined {
     if (!this.getDiagnostics().hotCpuProfilingCaptureChromiumTrace) return;
     const filename = `${path.parse(profilePath).name}.trace.json`;
-    const result = await this.chromiumTrace.capture(
-      path.join(session.directoryPath, filename), triggerMonotonicMs
+    let completeProfile!: (written: boolean) => void;
+    const profileWritten = new Promise<boolean>((resolve) => { completeProfile = resolve; });
+    const capture = this.chromiumTrace.capture(
+      path.join(session.directoryPath, filename), triggerMonotonicMs,
+      async () => await profileWritten && this.getDiagnostics().hotCpuProfilingCaptureChromiumTrace
     ).catch((error: unknown) => ({
       status: "failed" as const,
       error: error instanceof Error ? error.message : String(error)
     }));
-    if (result.status === "failed") log.warn("Could not save Chromium trace", result.error);
-    if (result.status === "written") await session.registerArtifact(filename);
-    await session.appendEvent({
-      capturedAt: new Date().toISOString(),
-      type: `chromium-trace-${result.status}`,
-      detail: { filename, triggerAtMs, ...result }
-    });
+    return async (written) => {
+      completeProfile(written);
+      const result = await capture;
+      if (!written || (result.status === "skipped" && result.reason === "canceled")) return;
+      if (result.status === "failed") log.warn("Could not save Chromium trace", result.error);
+      if (result.status === "written") await session.registerArtifact(filename);
+      await session.appendEvent({
+        capturedAt: new Date().toISOString(),
+        type: `chromium-trace-${result.status}`,
+        detail: { filename, triggerAtMs, ...result }
+      });
+    };
   }
 }
 
