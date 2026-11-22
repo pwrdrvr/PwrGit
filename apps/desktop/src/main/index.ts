@@ -10,6 +10,7 @@ import {
   powerMonitor,
   protocol,
   safeStorage,
+  screen,
   shell,
   webContents
 } from "electron";
@@ -178,6 +179,7 @@ import { createProfileWindows } from "./profile-windows";
 import { createWindowAppearances } from "./window-appearance";
 import { repaintWindowChrome } from "./window-chrome";
 import { openSettingsWindow } from "./settings-window";
+import { createAuxiliaryWindowPlacer } from "./auxiliary-window-placement";
 import { createNativeThemeController } from "./native-theme";
 import { McpPolicyStore } from "@pwrgit/mcp-server/access-policy";
 import { registerLocalAgentHandlers } from "./local-agents/local-agent-handlers";
@@ -1073,9 +1075,12 @@ if (!gotSingleInstanceLock) {
       }
     };
 
+    // `screen` is usable only once the app is ready, which this is.
+    const placeAuxiliaryWindow = createAuxiliaryWindowPlacer(screen);
     openAuxiliaryWindow = (open, from) => {
       const opener = from === undefined ? BrowserWindow.getFocusedWindow() : from;
       const window = open(windowAppearances.appearanceFor(opener));
+      placeAuxiliaryWindow(window, opener);
       const known = windowAppearances.knows(window);
       const previous = windowAppearances.sourceFor(window);
       windowAppearances.inherit(window, opener);
