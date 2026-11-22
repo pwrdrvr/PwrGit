@@ -36,6 +36,7 @@ export class HotCpuRuleMatcher {
       const percents = window.map((sample) => sample.cpuPercent);
       matches.push({
         ...rule,
+        sampleIntervalMs: cadenceMs,
         observedDurationMs,
         sampleCpuPercent: interval.cpuPercent,
         minimumCpuPercent: Math.min(...percents),

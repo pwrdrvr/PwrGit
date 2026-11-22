@@ -73,10 +73,8 @@ export class SettingsService {
 
   update(patch: Partial<AppSettings>): AppSettings {
     const diagnostics = patch.diagnostics;
-    if (diagnostics && (diagnostics.hotCpuProfilingRules !== undefined ||
-      diagnostics.hotCpuProfilingTriggerMode !== undefined || diagnostics.hotCpuProfilingSlowburnThresholdPercent !== undefined)) {
-      const rules = readHotCpuRules(diagnostics.hotCpuProfilingRules,
-        diagnostics.hotCpuProfilingTriggerMode, diagnostics.hotCpuProfilingSlowburnThresholdPercent);
+    if (diagnostics?.hotCpuProfilingRules !== undefined) {
+      const rules = readHotCpuRules(diagnostics.hotCpuProfilingRules);
       patch = { ...patch, diagnostics: {
         ...diagnostics,
         hotCpuProfilingRules: rules,

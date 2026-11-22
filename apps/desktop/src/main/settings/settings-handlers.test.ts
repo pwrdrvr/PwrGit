@@ -1,7 +1,7 @@
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { DEFAULT_HOT_CPU_RULES, type AppSettingsPatch, type AppSettingsSnapshot } from "@pwrgit/shared";
 import { CommandBus } from "../command-bus";
 import { registerSettingsHandlers, settingsSnapshot } from "./settings-handlers";
@@ -56,6 +56,28 @@ describe("settings handlers", () => {
     const invalid = { ...rules, spike: { thresholdPercent: 52.5, durationMs: 4000 } };
     expect((await bus.dispatch("settings:update", { patch: { diagnostics: { hotCpuProfilingRules: invalid } } })).ok).toBe(false);
     expect(settingsSnapshot(service, "/diag").diagnostics.hotCpuProfilingRules).toEqual(rules);
+  });
+
+  it("keeps legacy cadence timing until capture rules themselves are saved", async () => {
+    vi.stubEnv("PWRGIT_HOT_CPU_PROFILING_INTERVAL_MS", "1000");
+    try {
+      const service = freshService();
+      service.update({ diagnostics: { hotCpuProfilingTriggerMode: "sustained" } });
+      const bus = new CommandBus();
+      registerSettingsHandlers(bus, service, { diagnosticsOutputRoot: "/diag", onChanged: () => undefined });
+      await bus.dispatch("settings:update", { patch: { diagnostics: { hotCpuProfilingEnabled: true } } });
+      expect(service.get().diagnostics?.hotCpuProfilingRules).toBeUndefined();
+      expect(settingsSnapshot(service, "/diag").diagnosticsEnv.hotCpuRuleOverride).toMatchObject({
+        intervalMs: 1000, rules: [{ id: "sustained", durationMs: 2000, sampleCount: 2 }]
+      });
+      await bus.dispatch("settings:update", { patch: { diagnostics: { hotCpuProfilingRules: DEFAULT_HOT_CPU_RULES } } });
+      expect(settingsSnapshot(service, "/diag").diagnosticsEnv.hotCpuRuleOverride).toMatchObject({
+        intervalMs: 1000, rules: [{ id: "sustained", durationMs: 4000, sampleCount: 4 }]
+      });
+      expect(service.get().diagnostics?.hotCpuProfilingRules?.sustained.durationMs).toBe(4000);
+    } finally {
+      vi.unstubAllEnvs();
+    }
   });
 
   it("persists explicit resource-recording choices and rejects non-boolean patches", async () => {

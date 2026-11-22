@@ -23467,7 +23467,7 @@ button.agent-auth-node:focus-visible,
   font: 400 11.5px/1.45 var(--font-sans);
 }
 .settings-cpu-rules__status:empty {
-  display: contents;
+  position: absolute;
 }
 .settings-cpu-rules .settings-callout {
   margin: 0;

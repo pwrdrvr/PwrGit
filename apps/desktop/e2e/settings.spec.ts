@@ -367,10 +367,12 @@ test("Hot CPU capture rules edit independently and survive closing Settings", as
   await threshold.press("Enter");
   await rules.getByRole("combobox", { name: "Spike duration" }).selectOption("1000");
   await expect(settings.getByText("Monitoring samples CPU every 1 s.")).toBeVisible();
-  await slowburn.check();
+  await slowburn.click();
+  await expect(slowburn).toBeChecked();
   await expect(rules.getByRole("combobox", { name: "Slow burn duration" })).toContainText("4 s · 4 samples");
-  await high.uncheck();
-  await expect(rules.getByRole("status")).toBeEmpty();
+  await high.click();
+  await expect(high).not.toBeChecked();
+  await expect(rules.getByText("At least one rule stays on.")).not.toBeVisible();
   await expect(slowburn).toHaveAttribute("aria-disabled", "true");
   await expect(settings.getByText("Monitoring samples CPU every 2 s.")).toBeVisible();
 
@@ -382,7 +384,7 @@ test("Hot CPU capture rules edit independently and survive closing Settings", as
   const reopenedRules = reopened.getByRole("group", { name: "Capture rules" });
   await expect(reopenedRules.getByRole("checkbox", { name: "High CPU" })).not.toBeChecked();
   await expect(reopenedRules.getByRole("checkbox", { name: "Slow burn" })).toBeChecked();
-  await reopenedRules.getByRole("checkbox", { name: "High CPU" }).check();
+  await reopenedRules.getByRole("checkbox", { name: "High CPU" }).click();
   await expect(reopenedRules.getByRole("radio", { name: "Spike" })).toBeChecked();
   await expect(reopenedRules.getByRole("spinbutton", { name: "Spike threshold percent" })).toHaveValue("120");
   await expect(reopenedRules.getByRole("combobox", { name: "Spike duration" })).toHaveValue("1000");

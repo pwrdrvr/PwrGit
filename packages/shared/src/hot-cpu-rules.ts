@@ -92,6 +92,8 @@ export function hotCpuRuleIntervalMs(rules: HotCpuCaptureRules): number {
   return rules.high.enabled && rules.high.mode === "spike" && rules.spike.durationMs === 1_000 ? 1_000 : 2_000;
 }
 
+/** durationMs is the minimum measured window. The cadence and sample count
+ * determine the nominal sampling window, which can be longer. */
 export type HotCpuEffectiveRule = RuleSettings & {
   id: HotCpuTriggerMode;
   sampleCount: number;

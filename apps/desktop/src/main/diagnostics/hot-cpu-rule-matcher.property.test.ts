@@ -51,14 +51,46 @@ it("reports every independent window with enough measured CPU time in rule order
   ));
 });
 
-it("preserves explicit legacy env timing and reports configured windows unavailable at an overridden cadence", () => {
+it("uses the real cadence for both canonical rules even when it does not divide the saved windows", () => {
+  const settings = readHotCpuRules(undefined, "spike");
+  settings.spike.durationMs = 1000;
+  settings.slowburn.enabled = true;
+  const { intervalMs, rules } = resolveHotCpuRules(settings, { PWRGIT_HOT_CPU_PROFILING_INTERVAL_MS: "3000" });
+  const matcher = new HotCpuRuleMatcher();
+  expect(rules).toEqual([
+    { id: "spike", thresholdPercent: 50, durationMs: 3000, sampleCount: 1 },
+    { id: "slowburn", thresholdPercent: 15, durationMs: 4000, sampleCount: 2 }
+  ]);
+  expect(matcher.sample({ cpuPercent: 20, durationMs: 3000, source: "cumulative-cpu" }, rules, intervalMs)).toEqual([]);
+  expect(matcher.sample({ cpuPercent: 80, durationMs: 3000, source: "cumulative-cpu" }, rules, intervalMs)).toMatchObject([
+    { id: "spike", sampleCount: 1, sampleIntervalMs: 3000, observedDurationMs: 3000 },
+    { id: "slowburn", sampleCount: 2, sampleIntervalMs: 3000, observedDurationMs: 6000 }
+  ]);
+  expect(settings.spike.durationMs).toBe(1000);
+  expect(settings.slowburn.durationMs).toBe(4000);
+
+  const forcedCount = resolveHotCpuRules(settings, {
+    PWRGIT_HOT_CPU_PROFILING_INTERVAL_MS: "3000", PWRGIT_HOT_CPU_PROFILING_CONSECUTIVE_SAMPLES: "3"
+  });
+  expect(forcedCount.rules.map(({ sampleCount, durationMs }) => [sampleCount, durationMs]))
+    .toEqual([[1, 3000], [3, 9000]]);
+});
+
+it("preserves the legacy cadence-only and explicit mode workflows", () => {
+  const intervalOverride = { PWRGIT_HOT_CPU_PROFILING_INTERVAL_MS: "1000" };
+  const sustained = readHotCpuRules(undefined, "sustained");
+  expect(resolveHotCpuRules(sustained, intervalOverride, true).rules)
+    .toEqual([{ id: "sustained", thresholdPercent: 50, durationMs: 2000, sampleCount: 2 }]);
+  expect(resolveHotCpuRules(sustained, intervalOverride).rules)
+    .toEqual([{ id: "sustained", thresholdPercent: 50, durationMs: 4000, sampleCount: 4 }]);
+  expect(resolveHotCpuRules(readHotCpuRules(undefined, "spike"), intervalOverride, true).rules)
+    .toEqual([{ id: "spike", thresholdPercent: 50, durationMs: 1000, sampleCount: 1 }]);
+
   const settings = readHotCpuRules(undefined, "spike");
   settings.spike.durationMs = 1000;
   settings.spike.thresholdPercent = 120;
   settings.slowburn.enabled = true;
   settings.slowburn.durationMs = 30_000;
-  expect(resolveHotCpuRules(settings, { PWRGIT_HOT_CPU_PROFILING_INTERVAL_MS: "2000" }).rules)
-    .toEqual([{ id: "slowburn", thresholdPercent: 15, durationMs: 30_000, sampleCount: 15 }]);
   const override = resolveHotCpuRules(settings, {
     PWRGIT_HOT_CPU_PROFILING_TRIGGER_MODE: " Slowburn ",
     PWRGIT_HOT_CPU_PROFILING_THRESHOLD_PERCENT: "99",

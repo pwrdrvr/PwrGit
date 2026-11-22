@@ -429,7 +429,10 @@ export class HotCpuProfiler {
   }
 
   private recordingWindowMs(): number {
-    return Math.max(RECORDING_WINDOW_MS, ...this.config.rules.map((rule) => rule.durationMs));
+    return Math.max(
+      RECORDING_WINDOW_MS,
+      ...this.config.rules.map((rule) => rule.sampleCount * this.config.intervalMs),
+    );
   }
 
   private async maintainRecording(startedAtMs: number): Promise<void> {
@@ -533,7 +536,7 @@ export class HotCpuProfiler {
             ? "debugger-already-attached"
             : "recorder-not-armed",
           cpuPercent: options.trigger.triggerCpuPercent,
-        matchedRules: options.trigger.matchedRules,
+          matchedRules: options.trigger.matchedRules,
           pid: options.pid,
         },
       });

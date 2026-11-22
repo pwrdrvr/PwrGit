@@ -78,7 +78,7 @@ function ThresholdInput(props: { id: HotCpuTriggerMode; value: number; disabled:
 function summarize(rule: HotCpuEffectiveRule, intervalMs: number): string {
   const interval = `${intervalMs / 1000} s`;
   const window = rule.sampleCount === 1 ? `one ${interval} sample`
-    : `${rule.sampleCount} consecutive ${interval} samples (${rule.durationMs / 1000} s)`;
+    : `${rule.sampleCount} consecutive ${interval} samples (${rule.sampleCount * intervalMs / 1000} s)`;
   return `${HOT_CPU_RULE_LABELS[rule.id]} at ${rule.thresholdPercent}% over ${window}`;
 }
 
@@ -104,7 +104,7 @@ export function HotCpuRulesField(props: {
   }));
   const [high, slow] = effective;
   const redundant = high && slow && slow.thresholdPercent >= high.thresholdPercent &&
-    slow.durationMs >= high.durationMs;
+    slow.durationMs >= high.durationMs && slow.sampleCount >= high.sampleCount;
 
   const checkbox = (group: "high" | "slowburn", label: string) => {
     const lastRule = rules[group].enabled && enabled.length === 1;
@@ -190,12 +190,8 @@ export function HotCpuRulesField(props: {
           <p className="settings-cpu-rules__summary" id={summaryId} aria-live="polite">
             {effective.length
               ? `Matches ${effective.map((rule) => summarize(rule, override?.intervalMs ?? cadence)).join(" or ")}. CPU is measured per core.`
-              : "The configured rules cannot be sampled at the environment cadence."}
+              : "No capture rules are active."}
           </p>
-          {override && effective.length > 0 && !override.keys.some((key) => key.endsWith("_TRIGGER_MODE")) &&
-            effective.length < enabled.length ? <p className="settings-field__sub">
-              Some saved rules cannot be sampled at the environment cadence.
-            </p> : null}
           {redundant ? <p className="settings-callout settings-callout--warn">
             Slow burn adds no independent trigger with this threshold and window. Set a lower threshold or shorter window to catch different load.
           </p> : null}

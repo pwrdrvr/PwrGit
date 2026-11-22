@@ -2,6 +2,7 @@ import type { AppIdentity, HotCpuTriggerMode } from "./protocol";
 import { HOT_CPU_RULE_LABELS, type HotCpuEffectiveRule } from "./hot-cpu-rules";
 
 export type HotCpuRuleMatch = HotCpuEffectiveRule & {
+  sampleIntervalMs: number;
   observedDurationMs: number;
   sampleCpuPercent: number;
   minimumCpuPercent: number;
@@ -40,9 +41,11 @@ function formatPercent(value: number): string {
 export function formatHotCpuProfileTrigger(event: HotCpuProfileCapturedEvent): string {
   if (event.matchedRules?.length) {
     return event.matchedRules.map((rule) => {
-      const samples = rule.sampleCount === 1 ? "1 sample" : `${rule.sampleCount} consecutive samples`;
+      const interval = `${rule.sampleIntervalMs / 1000} s`;
+      const window = rule.sampleCount === 1 ? `one ${interval} sample`
+        : `${rule.sampleCount} consecutive ${interval} samples`;
       const estimate = rule.measurementSource === "electron-interval-estimate" ? ", Electron estimate" : "";
-      return `${HOT_CPU_RULE_LABELS[rule.id]} (threshold ${formatPercent(rule.thresholdPercent)}% across ${samples} / ${rule.durationMs / 1000} s; measured ${formatPercent(rule.sampleCpuPercent)}% at trigger, ${formatPercent(rule.peakCpuPercent)}% peak${estimate})`;
+      return `${HOT_CPU_RULE_LABELS[rule.id]} (threshold ${formatPercent(rule.thresholdPercent)}% over ${window}; measured ${formatPercent(rule.sampleCpuPercent)}% at trigger, ${formatPercent(rule.peakCpuPercent)}% peak${estimate})`;
     }).join(" and ");
   }
   const mode = HOT_CPU_RULE_LABELS[event.triggerMode];

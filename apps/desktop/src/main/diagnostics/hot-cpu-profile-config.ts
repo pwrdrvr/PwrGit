@@ -116,17 +116,15 @@ export function resolveHotCpuRules(
   const thresholdPercent = highThreshold ?? selected[selected.high.mode].thresholdPercent;
   const slowburnThresholdPercent = slowThreshold === undefined
     ? selected.slowburn.thresholdPercent : clampPercent(slowThreshold);
-  const rules = enabled.flatMap((id): HotCpuEffectiveRule[] => {
+  const legacyTiming = mode !== undefined || (legacySettings && intervalOverride !== undefined);
+  const rules = enabled.map((id): HotCpuEffectiveRule => {
     const threshold = id === "slowburn" ? slowburnThresholdPercent : thresholdPercent;
     const requestedMs = selected[id].durationMs;
-    const legacyTiming = mode !== undefined || (legacySettings && intervalOverride !== undefined);
-    const overrideCount = id === "spike" ? (legacyTiming ? 1 : undefined)
-      : countOverride ?? (legacyTiming ? DEFAULT_CONSECUTIVE_SAMPLES : undefined);
-    const sampleCount = overrideCount ?? requestedMs / intervalMs;
-    if (id === "spike" ? sampleCount !== 1 : !Number.isInteger(sampleCount) || sampleCount < 1 ||
-      (overrideCount === undefined && sampleCount < 2)) return [];
-    const durationMs = overrideCount === undefined ? requestedMs : intervalMs * sampleCount;
-    return [{ id, thresholdPercent: threshold, durationMs, sampleCount }];
+    const sampleCount = id === "spike" ? 1
+      : countOverride ?? (legacyTiming ? DEFAULT_CONSECUTIVE_SAMPLES : Math.max(2, Math.ceil(requestedMs / intervalMs)));
+    const durationMs = id === "spike" || countOverride !== undefined || legacyTiming
+      ? sampleCount * intervalMs : requestedMs;
+    return { id, thresholdPercent: threshold, durationMs, sampleCount };
   });
   return {
     intervalMs, rules, overrides, profileDurationMs, thresholdPercent, slowburnThresholdPercent,
