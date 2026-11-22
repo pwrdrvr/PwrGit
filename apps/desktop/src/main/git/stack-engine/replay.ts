@@ -4,9 +4,11 @@ import type { Patch, StackStep } from "./types";
 const lines = (text: string) => text.trim().split("\n").filter(Boolean);
 
 async function patches(git: StackGit, range: string, leftOnly = false): Promise<Patch[]> {
+  // Nearby upstream edits change context lines, even when Git preserves the
+  // layer's additions and removals. Hash stable patch IDs of the edits alone.
   const diff = await git.output([
     "log", "--format=medium", "--patch", "--binary", "--no-renames", "--no-ext-diff",
-    "--no-textconv", "--no-color", ...(leftOnly ? ["--left-only"] : []), range, "--",
+    "--no-textconv", "--no-color", "--unified=0", "--inter-hunk-context=0", ...(leftOnly ? ["--left-only"] : []), range, "--",
   ]);
   return lines(await git.output(["patch-id", "--stable"], diff)).map(line => {
     const [id, commit] = line.trim().split(" ");
@@ -82,6 +84,7 @@ export async function replayStep(git: StackGit, step: StackStep): Promise<StackS
   const ref = branchRef(branch);
   let newTip = newBase;
   if (oldBase !== oldTip && oldBase !== newBase) {
+    await git.requireReplayWithoutSigning();
     const result = await replay(git, ref, oldBase, oldTip, newBase);
     if (result.exitCode === 1) {
       const commits = lines(await git.output(["rev-list", "--reverse", range]));

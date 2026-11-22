@@ -80,6 +80,9 @@ export async function planStack(git: StackGit, store: CatalogStore, commonDir: s
   if (operation.kind === "add_branch") {
     const { branch } = operation;
     await git.output(["check-ref-format", "--branch", branch]);
+    if (before.stacks.some(({ trunk, branches }) => trunk.branch === branch || branches.some(layer => layer.branch === branch))) {
+      throw new Error(`Branch ${branch} is already tracked in the stack catalog`);
+    }
     if (await git.tip(branch) !== null) throw new Error(`Branch ${branch} already exists`);
     const top = stack.branches.at(-1) ?? stack.trunk;
     const tip = requireTip(expectedTips, top.branch);
@@ -88,8 +91,20 @@ export async function planStack(git: StackGit, store: CatalogStore, commonDir: s
   } else if (operation.kind === "remove") {
     const index = stack.branches.findIndex(layer => layer.branch === operation.branch);
     if (index < 0) throw new Error("The branch is no longer in this stack");
-    const [removed] = stack.branches.splice(index, 1);
-    const child = stack.branches[index];
+    const removed = stack.branches[index];
+    const child = stack.branches[index + 1];
+    if (child && operation.mode === "detach" && !child.base) {
+      const childTip = requireTip(expectedTips, child.branch);
+      const anchors = [removed.head, expectedTips[removed.branch]];
+      for (const anchor of anchors) {
+        if (anchor && isOid(anchor) && await git.ancestor(anchor, childTip) &&
+            (!child.base || await git.ancestor(child.base, anchor))) {
+          child.base = anchor;
+        }
+      }
+      if (!child.base) throw new Error(`Cannot determine the old parent boundary for ${child.branch}`);
+    }
+    stack.branches.splice(index, 1);
     if (!stack.branches.length) after.stacks.splice(after.stacks.indexOf(stack), 1);
     if (child && operation.mode === "detach") await restack(git, plan, stack, index);
     if (child && operation.mode === "forget") {
