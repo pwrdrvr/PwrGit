@@ -22,6 +22,7 @@ const TRACK_NAMES = new Set([
   "ThreadPoolForegroundWorker", "ThreadPoolBackgroundWorker"
 ]);
 const TIMING_PHASES = new Set(["B", "E", "X", "I", "i", "R"]);
+const LINEAGE_MARK = /^PwrGit Lineage (request|publish) (view|branch-pr|repo-change) view=[0-9]{1,9} target=[1-9][0-9]{0,8}$/u;
 
 function record(value: unknown): Record<string, unknown> | null {
   return typeof value === "object" && value !== null ? value as Record<string, unknown> : null;
@@ -42,9 +43,11 @@ function safeTraceEvent(value: unknown, allowedCategories: readonly string[]): R
   const categories = event.cat.split(",");
   const cat = allowedCategories.filter((known) => categories.includes(known)).join(",");
   if (!cat) return null;
-  const name = typeof event.name === "string" && TIMING_NAMES.has(event.name)
+  const userTiming = categories.includes("blink.user_timing");
+  const name = typeof event.name === "string" &&
+    (TIMING_NAMES.has(event.name) || (userTiming && LINEAGE_MARK.test(event.name)))
     ? event.name
-    : categories.includes("blink.user_timing") ? "User timing" : "Other";
+    : userTiming ? "User timing" : "Other";
   const safe: Record<string, unknown> = { ...track, cat, name, ph: event.ph, ts: event.ts };
   for (const key of ["dur", "tts", "tdur"]) {
     if (typeof event[key] === "number") safe[key] = event[key];

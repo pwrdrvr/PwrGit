@@ -37,6 +37,7 @@ test("rolling Chromium trace retains renderer trigger context under repaint pres
   });
 
   const privateValue = "synthetic-private-trace-value";
+  const lineageMark = "PwrGit Lineage publish repo-change view=1 target=2";
   const server = createServer((_req, res) => {
     res.setHeader("Access-Control-Allow-Origin", "*");
     res.end("synthetic fixture");
@@ -137,6 +138,8 @@ test("rolling Chromium trace retains renderer trigger context under repaint pres
         await execute(`
           (async () => {
             performance.mark('trigger-window-marker');
+            performance.mark(${JSON.stringify(args.lineageMark)});
+            performance.clearMarks(${JSON.stringify(args.lineageMark)});
             performance.mark(${JSON.stringify(args.privateValue)});
             await fetch(${JSON.stringify(args.url)}).then((response) => response.text());
             document.body.style.width = '513px';
@@ -186,13 +189,14 @@ test("rolling Chromium trace retains renderer trigger context under repaint pres
       } finally {
         await manager.shutdown();
       }
-    }, { controller, worker, outputRoot, privateValue, url, profileDurationMs, logsPath: info.outputPath("logs"), settings: {
+    }, { controller, worker, outputRoot, privateValue, lineageMark, url, profileDurationMs, logsPath: info.outputPath("logs"), settings: {
       ...DIAGNOSTICS_DEFAULTS, hotCpuProfilingEnabled: true, hotCpuProfilingStartDelayMs: 0 as const,
       hotCpuProfilingTriggerMode: "spike" as const, hotCpuProfilingCaptureChromiumTrace: true
     } });
 
     expect(result.capture).toMatchObject({ status: "written" });
     const saved = await readFile(result.artifact, "utf8");
+    expect(saved).toContain(JSON.stringify(lineageMark));
     const triggerEvents: { pid: number; tid: number; ts: number; name: string }[] = JSON.parse(saved).traceEvents.filter(
       (event: { pid: number; tid: number; ts: number }) =>
         event.pid === result.pid && event.tid === result.tid && Math.abs(event.ts - result.triggerUs) < 500_000

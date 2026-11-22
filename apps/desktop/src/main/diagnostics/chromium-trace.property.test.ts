@@ -404,9 +404,12 @@ it("projects oversized redacted fields like their small equivalents", async () =
   const directory = await mkdtemp(join(tmpdir(), "pwrgit-trace-event-oracle-"));
   // Escaped quotes, controls and Unicode cross read chunks throughout the value.
   const large = 'private "label" \\ {}[] \n 😀 '.repeat(400_000);
+  const lineage = "PwrGit Lineage publish repo-change view=1 target=2";
   const fixture = (privateData: string) => JSON.stringify({
     traceEvents: [
       { pid: 2, tid: 3, ts: 10, ph: "I", cat: `${privateData},blink.user_timing`, name: privateData },
+      { pid: 2, tid: 3, ts: 11, ph: "R", cat: "blink.user_timing", name: lineage, args: { omitted: privateData } },
+      { pid: 2, tid: 3, ts: 12, ph: "R", cat: "blink.user_timing", name: `${lineage} ${privateData}` },
       { pid: 2, tid: 3, ph: "M", name: "thread_name", args: { omitted: { nested: [privateData] }, name: "CrRendererMain" } },
       { pid: 2, tid: 3, ts: 20, ph: "X", cat: "devtools.timeline", name: "Layout", dur: 5 }
     ],
@@ -432,6 +435,8 @@ it("projects oversized redacted fields like their small equivalents", async () =
     const expected = await capture("synthetic", "small.json");
     expect(expected).toEqual({ traceEvents: [
       { pid: 2, tid: 3, ts: 10, ph: "I", cat: "blink.user_timing", name: "User timing", s: "t" },
+      { pid: 2, tid: 3, ts: 11, ph: "R", cat: "blink.user_timing", name: lineage },
+      { pid: 2, tid: 3, ts: 12, ph: "R", cat: "blink.user_timing", name: "User timing" },
       { pid: 2, tid: 3, ph: "M", cat: "__metadata", name: "thread_name", args: { name: "CrRendererMain" } },
       { pid: 2, tid: 3, ts: 20, ph: "X", cat: "devtools.timeline", name: "Layout", dur: 5 }
     ] });

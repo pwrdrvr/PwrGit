@@ -56,6 +56,7 @@ import {
   MAX_GUTTER_LANES
 } from "./GraphRow";
 import { shortWhen } from "./graph-view";
+import { markLineageRefresh, type LineageRefreshSource } from "./lineage-refresh-trace";
 import { layoutLanes } from "./lane-layout";
 import { findPrLandingLinks, layoutPrLandingLinks } from "./pr-landings";
 
@@ -86,6 +87,23 @@ export function consumeBranchPrInvalidation(
     force,
     consumedGeneration: force ? generation : consumedGeneration
   };
+}
+
+// Lane and people replies are structured-cloned IPC data. Preserve array
+// and record order: some graph consumers iterate refs in that order.
+function samePayload(a: unknown, b: unknown): boolean {
+  if (a === b) return true;
+  if (a === null || b === null || typeof a !== "object" || typeof b !== "object") return false;
+  if (Array.isArray(a)) {
+    return Array.isArray(b) && a.length === b.length && a.every((item, i) => samePayload(item, b[i]));
+  }
+  if (Array.isArray(b)) return false;
+  const left = a as Record<string, unknown>;
+  const right = b as Record<string, unknown>;
+  const rightKeys = Object.keys(right);
+  const leftKeys = Object.keys(left);
+  return leftKeys.length === rightKeys.length &&
+    leftKeys.every((key, i) => key === rightKeys[i] && samePayload(left[key], right[key]));
 }
 
 /**
@@ -338,6 +356,7 @@ export function LineageGraph({
   const commitStatsEpochRef = useRef(0);
   const commitPrMonitorIdRef = useRef(crypto.randomUUID());
   const peopleMonitorIdRef = useRef(crypto.randomUUID());
+  const publishedCommitsRef = useRef<Commit[] | null>(null);
   const consumedBranchPrGenerationRef = useRef(0);
 
   const acceptCommitPullRequests = useCallback(
@@ -351,7 +370,10 @@ export function LineageGraph({
   const acceptPeople = useCallback(
     (incoming: Record<string, CommitAuthorPerson>): void => {
       if (Object.keys(incoming).length === 0) return;
-      setPeople((current) => mergeCommitAuthorPeople(current, incoming));
+      setPeople((current) => {
+        const merged = mergeCommitAuthorPeople(current, incoming);
+        return samePayload(current, merged) ? current : merged;
+      });
     },
     []
   );
@@ -388,9 +410,11 @@ export function LineageGraph({
   useEffect(() => {
     let active = true;
     let loadSequence = 0;
-    const load = (force: boolean): void => {
+    const load = (source: LineageRefreshSource): void => {
       const sequence = ++loadSequence;
       setLoadError(null);
+      const force = source !== "view";
+      markLineageRefresh(repoId, source, "request");
       void dispatch("graph:lanes", { worktreeId, scope, force, ...(revealHash === undefined ? {} : { revealHash }) }).then((r) => {
         if (!active || sequence !== loadSequence) return;
         if (!r.ok) {
@@ -409,8 +433,20 @@ export function LineageGraph({
           return;
         }
 
-        const graph = r.value;
-        onCommitsChange(graph.commits);
+        const publishedCommits = publishedCommitsRef.current;
+        const sameCommits = samePayload(publishedCommits, r.value.commits);
+        const graph = sameCommits && publishedCommits !== null
+          ? { ...r.value, commits: publishedCommits }
+          : r.value;
+        const publish = (): void => {
+          markLineageRefresh(repoId, source, "publish");
+          if (!sameCommits) {
+            publishedCommitsRef.current = graph.commits;
+            onCommitsChange(graph.commits);
+          }
+          setData((current) => samePayload(current, graph) ? current : graph);
+          setLoading(false);
+        };
         // Registering who is on screen is all the graph does about people:
         // main answers from its store at once, and decides on its own clock
         // whether to ask a forge about anyone (`people:changed` follows).
@@ -425,18 +461,16 @@ export function LineageGraph({
             if (!active || sequence !== loadSequence) return;
           }
           // Publish graph rows only after every available local avatar is
-          // decoded. Flush both state changes in one commit so a cached face
+          // decoded. Flush people, rows and search together so a cached face
           // is the row's first and final rendered identity even if React's
           // ambient async batching behavior changes.
           flushSync(() => {
             if (known.ok) acceptPeople(known.value);
-            setData(graph);
-            setLoading(false);
+            publish();
           });
         }).catch(() => {
           if (!active || sequence !== loadSequence) return;
-          setData(graph);
-          setLoading(false);
+          publish();
         });
       });
     };
@@ -454,9 +488,9 @@ export function LineageGraph({
       consumedBranchPrGenerationRef.current
     );
     consumedBranchPrGenerationRef.current = prInvalidation.consumedGeneration;
-    load(prInvalidation.force);
+    load(prInvalidation.force ? "branch-pr" : "view");
     const off = subscribe("graph:changed", (p) => {
-      if (p.repoId === repoId) load(true);
+      if (p.repoId === repoId) load("repo-change");
     });
     return () => {
       active = false;
@@ -469,6 +503,7 @@ export function LineageGraph({
   useEffect(() => {
     const monitorId = peopleMonitorIdRef.current;
     return () => {
+      publishedCommitsRef.current = null;
       void dispatch("people:replaceInterest", { worktreeId, monitorId, authors: [] });
     };
   }, [worktreeId]);

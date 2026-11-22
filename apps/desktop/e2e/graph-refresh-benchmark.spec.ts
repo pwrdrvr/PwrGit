@@ -45,7 +45,9 @@ for (const dev of [true, false]) {
         const taskDuration = async () => (await cdp.send("Performance.getMetrics")).metrics.find(m => m.name === "TaskDuration")!.value * 1000;
         const cpu = async () => app.evaluate(({ app, BrowserWindow }) => {
           const pid = BrowserWindow.getAllWindows()[0]!.webContents.getOSProcessId();
-          return app.getAppMetrics().find(metric => metric.pid === pid)!.cpu.cumulativeCPUUsage * 1000;
+          const seconds = app.getAppMetrics().find(metric => metric.pid === pid)?.cpu.cumulativeCPUUsage;
+          if (seconds === undefined) throw new Error("No renderer CPU counter");
+          return seconds * 1000;
         });
         for (const sample of [0, 1, 2, 3, 4, 5]) {
           for (const timing of (dev ? (sample % 2 === 0 ? [true, false] : [false, true]) : [true])) {
