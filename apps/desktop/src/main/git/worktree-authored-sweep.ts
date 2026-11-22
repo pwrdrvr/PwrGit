@@ -1,4 +1,4 @@
-import { readFile, stat } from "node:fs/promises";
+import { lstat, readFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { checkoutCommonGitDir, checkoutGitDirs } from "@pwrgit/mcp-server/nested-worktrees";
 import { NO_OPTIONAL_LOCKS, type GitExec } from "./dugite";
@@ -9,12 +9,22 @@ type ColdTips = {
   tips: ReadonlyMap<string, { ref: string; oid: string; packed: boolean }>;
 };
 
-async function packedRefsVersion(commonDir: string): Promise<string | null> {
+async function packedRefsVersion(commonDir: string): Promise<string | null | undefined> {
   try {
-    const file = await stat(join(commonDir, "packed-refs"), { bigint: true });
-    return file.isFile() ? `${file.dev}:${file.ino}:${file.size}:${file.mtimeNs}:${file.ctimeNs}` : null;
-  } catch {
-    return null;
+    const file = await lstat(join(commonDir, "packed-refs"), { bigint: true });
+    return file.isFile() ? `${file.dev}:${file.ino}:${file.size}:${file.mtimeNs}:${file.ctimeNs}` : undefined;
+  } catch (cause) {
+    return (cause as NodeJS.ErrnoException).code === "ENOENT" ? null : undefined;
+  }
+}
+
+/** Check the entry itself so a dangling Git symref still counts as present. */
+async function looseRefEntry(path: string) {
+  try {
+    return await lstat(path);
+  } catch (cause) {
+    if ((cause as NodeJS.ErrnoException).code === "ENOENT") return null;
+    throw cause;
   }
 }
 
@@ -34,6 +44,7 @@ export async function readColdAuthoredTips(
   const commonDir = await checkoutCommonGitDir(repoPath);
   if (commonDir === null) return null;
   const packedRefs = await packedRefsVersion(commonDir);
+  if (packedRefs === undefined) return null;
   const result = await git([
     "for-each-ref", "--stdin",
     "--format=%(refname)%00%(worktreepath)%00%(committerdate:unix)%00%(symref)%00%(objectname)%00%(flag)%00"
@@ -61,8 +72,7 @@ export async function readColdAuthoredTips(
   return { commonDir, packedRefs, tips };
 }
 
-/** Recheck the checkout and ref before using the batch. A switch, commit,
- * reftable backend or unreadable file sends the row through Git. */
+/** Recheck the checkout, ref and replacement namespace before using the batch. */
 export async function stillColdAuthoredTip(path: string, snapshot: ColdTips | null): Promise<boolean> {
   const tip = snapshot?.tips.get(resolve(path));
   if (snapshot === null || tip === undefined) return false;
@@ -71,12 +81,17 @@ export async function stillColdAuthoredTip(path: string, snapshot: ColdTips | nu
   try {
     const head = await readFile(join(dirs.gitDir, "HEAD"), "utf8");
     if (head.trimEnd() !== `ref: ${tip.ref}`) return false;
-    try {
-      return (await readFile(join(dirs.commonDir, tip.ref), "utf8")).trimEnd() === tip.oid;
-    } catch (cause) {
-      return (cause as NodeJS.ErrnoException).code === "ENOENT" && tip.packed && snapshot.packedRefs !== null &&
-        await packedRefsVersion(dirs.commonDir) === snapshot.packedRefs;
+    const ref = join(dirs.commonDir, tip.ref);
+    const loose = await looseRefEntry(ref);
+    if (loose === null) {
+      if (!tip.packed || snapshot.packedRefs === null) return false;
+    } else if (!loose.isFile() || (await readFile(ref, "utf8")).trimEnd() !== tip.oid) {
+      return false;
     }
+    // A replacement changes the history behind an unchanged OID. Check
+    // loose refs first so a concurrent pack cannot hide one between reads.
+    if (await looseRefEntry(join(dirs.commonDir, "refs", "replace")) !== null) return false;
+    return await packedRefsVersion(dirs.commonDir) === snapshot.packedRefs;
   } catch {
     return false;
   }

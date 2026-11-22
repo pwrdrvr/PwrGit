@@ -1,10 +1,10 @@
 import { execFileSync } from "node:child_process";
-import { mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { lstatSync, mkdtempSync, realpathSync, rmdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import fc from "fast-check";
 import { RECENT_MS, ok, type Repo } from "@pwrgit/shared";
-import { afterAll, beforeAll, expect, it } from "vitest";
+import { afterAll, beforeAll, beforeEach, expect, it } from "vitest";
 import { openDatabase, type DB } from "../persistence/db";
 import { ProfileService } from "../profiles/profile-service";
 import { type GitExec } from "./dugite";
@@ -76,6 +76,9 @@ beforeAll(async () => {
       oldTip = cold;
     } else other = indexed.value;
   }
+});
+beforeEach(() => {
+  db.prepare("UPDATE worktree_state SET last_authored_at = NULL").run();
 });
 afterAll(() => {
   db?.close();
@@ -163,5 +166,65 @@ it("falls back when a cold ref moves before the batch can be consumed", async ()
     expect(moved.get(other.profileId)).toEqual([other.id]);
   } finally {
     git(target.path, ["reset", "-q", "--hard", cold]);
+  }
+});
+
+it.each(["loose", "packed"] as const)("sees a %s replacement installed after the batch", async (storage) => {
+  const target = other.worktrees.find(w => w.branch === "one")!;
+  const cold = git(target.path, ["rev-parse", "HEAD"]);
+  const warm = git(target.path, ["rev-parse", "HEAD^"]);
+  // Keep the branch loose even when the replacement itself is packed.
+  git(target.path, ["reset", "-q", "--hard", warm]);
+  git(target.path, ["reset", "-q", "--hard", cold]);
+
+  const state = new WorktreeStateService(db, async (args, path, options) => {
+    const result = await oracleGit(args, path, options);
+    if (args[0] === "for-each-ref" && path === other.path) {
+      git(path, ["replace", cold, warm]);
+      if (storage === "packed") {
+        git(path, ["pack-refs", "--all", "--no-prune"]);
+        const replacements = join(path, ".git", "refs", "replace");
+        rmSync(join(replacements, cold));
+        rmdirSync(replacements);
+      }
+    }
+    return result;
+  });
+  try {
+    const moved = await state.sweepAuthored();
+    const expected = await checkoutOracle(target.path);
+    expect(expected).toBeDefined();
+    expect(state.getCached(target.id)?.lastAuthoredAt).toBe(expected);
+    expect(moved.get(other.profileId)).toEqual([other.id]);
+  } finally {
+    git(other.path, ["replace", "-d", cold]);
+  }
+});
+
+// Git for Windows can write a regular symref file even with preferSymlinkRefs.
+it.skipIf(process.platform === "win32")("sees a symlink that starts shadowing a packed tip after the batch", async () => {
+  const target = other.worktrees.find(w => w.branch === "one")!;
+  const ref = `refs/heads/${target.branch}`;
+  const loose = join(other.path, ".git", ref);
+  git(other.path, ["branch", "symbolic-target", `${ref}^`]);
+  git(other.path, ["pack-refs", "--all"]);
+
+  const state = new WorktreeStateService(db, async (args, path, options) => {
+    const result = await oracleGit(args, path, options);
+    if (args[0] === "for-each-ref" && path === other.path) {
+      git(path, ["-c", "core.preferSymlinkRefs=true", "symbolic-ref", ref, "refs/heads/symbolic-target"]);
+      expect(lstatSync(loose).isSymbolicLink()).toBe(true);
+    }
+    return result;
+  });
+  try {
+    const moved = await state.sweepAuthored();
+    const expected = await checkoutOracle(target.path);
+    expect(expected).toBeDefined();
+    expect(state.getCached(target.id)?.lastAuthoredAt).toBe(expected);
+    expect(moved.get(other.profileId)).toEqual([other.id]);
+  } finally {
+    rmSync(loose, { force: true });
+    git(other.path, ["branch", "-D", "symbolic-target"]);
   }
 });
