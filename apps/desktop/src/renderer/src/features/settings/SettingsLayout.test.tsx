@@ -1,12 +1,14 @@
 // @vitest-environment jsdom
 
 import { act } from "react";
+import fc from "fast-check";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
   SettingsPanelHead,
   SettingsSection,
   SettingsSectionStack,
+  SettingsSegmented,
   __resetCollapsedPanesForTests,
   type SettingsFocusRequest
 } from "./SettingsLayout";
@@ -386,5 +388,52 @@ describe("SettingsSectionStack — nav reveal", () => {
 
     expect(document.activeElement).toBe(document.body);
     expect(header("First").getAttribute("aria-expanded")).toBe("true");
+  });
+});
+
+
+describe("SettingsSegmented keyboard navigation", () => {
+  it("offers one Tab stop and moves arrows from the focused radio", async () => {
+    await fc.assert(fc.asyncProperty(
+      fc.integer({ min: 2, max: 5 }),
+      fc.option(fc.nat(4), { nil: null }),
+      fc.nat(4),
+      fc.constantFrom("ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown"),
+      async (count, selection, focus, key) => {
+        const value = selection === null ? -1 : selection % count;
+        const options = Array.from({ length: count }, (_, index) => ({ value: index, label: `Option ${index}` }));
+        const changes: number[] = [];
+        await act(async () => root.render(
+          <SettingsSegmented aria-label="Decision" value={value} options={options} onChange={(next) => changes.push(next)} />
+        ));
+        const radios = [...container.querySelectorAll<HTMLButtonElement>('[role="radio"]')];
+        expect(radios.map((radio) => radio.tabIndex)).toEqual(
+          options.map((option) => option.value === Math.max(value, 0) ? 0 : -1)
+        );
+        const focused = focus % count;
+        await act(async () => radios[focused]!.focus());
+        await press(radios[focused]!, key);
+        const direction = key === "ArrowLeft" || key === "ArrowUp" ? -1 : 1;
+        const next = (focused + direction + count) % count;
+        expect(document.activeElement).toBe(radios[next]);
+        expect(changes).toEqual([next]);
+      }
+    ), { numRuns: 25 });
+  });
+
+  it("lets a keyboard user enter an undecided group and choose the next option", async () => {
+    const changes: string[] = [];
+    await act(async () => root.render(<SettingsSegmented
+      aria-label="What to do with this worktree" value=""
+      options={[{ value: "keep", label: "Keep" }, { value: "discard", label: "Discard" }]}
+      onChange={(next) => changes.push(next)}
+    />));
+    const [keep, discard] = [...container.querySelectorAll<HTMLButtonElement>('[role="radio"]')];
+    expect(keep?.tabIndex).toBe(0);
+    expect(discard?.tabIndex).toBe(-1);
+    await act(async () => keep!.focus());
+    await press(keep!, "ArrowRight");
+    expect(document.activeElement).toBe(discard);
+    expect(changes).toEqual(["discard"]);
   });
 });

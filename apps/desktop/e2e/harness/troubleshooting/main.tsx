@@ -5,6 +5,7 @@ import {
   GENERAL_DEFAULTS,
   ok,
   resolveUpdateSelection,
+  type AppSettingsPatch,
   type AppSettingsSnapshot,
   type StartupCpuProfileCapturedEvent
 } from "@pwrgit/shared";
@@ -19,7 +20,7 @@ const ROOT = "/Users/demo/Library/Application Support/PwrGit/diagnostics";
 const SESSION = "startup-cpu-2026-11-20-1043-a1b2c3";
 const DIR = `${ROOT}/${SESSION}`;
 
-export type View = "armed" | "idle" | "notice-completed" | "notice-partial";
+export type View = "armed" | "idle" | "cpu-rules" | "notice-completed" | "notice-partial";
 
 function snapshot(view: View): AppSettingsSnapshot {
   const armed = view === "armed";
@@ -28,6 +29,14 @@ function snapshot(view: View): AppSettingsSnapshot {
     experimental: EXPERIMENTAL_DEFAULTS,
     diagnostics: {
       ...DIAGNOSTICS_DEFAULTS,
+      ...(view === "cpu-rules" ? {
+        hotCpuProfilingEnabled: true,
+        hotCpuProfilingCaptureChromiumTrace: true,
+        hotCpuProfilingRules: {
+          ...DIAGNOSTICS_DEFAULTS.hotCpuProfilingRules,
+          slowburn: { enabled: true, thresholdPercent: 15, durationMs: 30_000 }
+        }
+      } : {}),
       startupCpuProfilingEnabled: armed,
       resourceUsageEnabled: armed,
       resourceUsageExpiresAt: armed ? "2026-11-21T18:43:00.000Z" : null
@@ -62,6 +71,7 @@ function startup(status: "completed" | "partial"): StartupCpuProfileCapturedEven
 }
 
 let view: View = "armed";
+let settings = snapshot(view);
 const bridge = {
   profileId: null,
   platform: "darwin",
@@ -71,8 +81,12 @@ const bridge = {
   runWindowControl: async () => undefined,
   readWindowFrameState: async () => null,
   onWindowFrameState: () => () => undefined,
-  dispatch: async (name: string) => {
-    if (name === "settings:read") return ok(snapshot(view));
+  dispatch: async (name: string, args?: { patch: AppSettingsPatch }) => {
+    if (name === "settings:read") return ok(settings);
+    if (name === "settings:update") {
+      settings = { ...settings, diagnostics: { ...settings.diagnostics, ...args?.patch.diagnostics } };
+      return ok(settings);
+    }
     if (name === "appearance:read") return ok({ theme: "light", resolvedTheme: "light" });
     if (name === "app:readProcessIds") {
       return ok({ line: "main=4101 gpu=4107 renderer=4120", diagnosticsText: "PwrGit 0.61.0 (demo)\nmain=4101 gpu=4107 renderer=4120" });
@@ -111,7 +125,8 @@ const harness = {
     toasts?.unmount();
     root = toasts = null;
     view = next;
-    if (next === "armed" || next === "idle") {
+    settings = snapshot(view);
+    if (next === "armed" || next === "idle" || next === "cpu-rules") {
       window.location.hash = "#settings?page=diagnostics";
       root = createRoot(document.getElementById("root")!);
       root.render(<SettingsWindow />);

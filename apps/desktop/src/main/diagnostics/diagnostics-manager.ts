@@ -1,3 +1,4 @@
+import { readAppMetrics } from "./app-metrics";
 // PwrGit's orchestration layer over the ported PwrAgnt diagnostics: resolves
 // configs from Settings (+ PWRGIT_* env), runs the main-process heap monitor,
 // attaches per-window renderer heap monitors and hot-CPU profilers, restarts
@@ -97,6 +98,7 @@ export class DiagnosticsManager {
   private readonly persistDiagnostics: ((patch: Partial<DiagnosticsSettings>) => void) | undefined;
   private readonly outputRoot: string;
   private readonly getDiagnostics: () => DiagnosticsSettings;
+  private readonly usesLegacyHotCpuSettings: (() => boolean) | undefined;
   private readonly onHotCpuProfileCaptured: ((event: HotCpuProfileCapturedEvent, profileId: string | null) => void | Promise<void>) | undefined;
   /** Persist "captureHeapSnapshot off" after a session hits its snapshot
    *  limit (mirrors PwrAgnt's auto-disable so the next arm doesn't refill). */
@@ -122,6 +124,7 @@ export class DiagnosticsManager {
     outputRoot: string;
     chromiumTraceWorker?: string;
     getDiagnostics: () => DiagnosticsSettings;
+    usesLegacyHotCpuSettings?: () => boolean;
     onHotCpuProfileCaptured?: (event: HotCpuProfileCapturedEvent, profileId: string | null) => void | Promise<void>;
     onHotCpuHeapSnapshotLimitReached: () => void;
     persistDiagnostics?: (patch: Partial<DiagnosticsSettings>) => void;
@@ -133,6 +136,7 @@ export class DiagnosticsManager {
     );
     this.persistDiagnostics = options.persistDiagnostics;
     this.getDiagnostics = options.getDiagnostics;
+    this.usesLegacyHotCpuSettings = options.usesLegacyHotCpuSettings;
     this.onHotCpuProfileCaptured = options.onHotCpuProfileCaptured;
     this.onHotCpuHeapSnapshotLimitReached =
       options.onHotCpuHeapSnapshotLimitReached;
@@ -269,11 +273,18 @@ export class DiagnosticsManager {
     const hotCpuKey = JSON.stringify(hotCpuConfig);
     const heapChanged = heapKey !== this.heapConfigKey;
     const hotCpuChanged = hotCpuKey !== this.hotCpuConfigKey;
+    const previous = this.hotCpuConfig;
+    const reconfigureRules = hotCpuChanged && previous?.enabled && hotCpuConfig.enabled &&
+      previous.outputRoot === hotCpuConfig.outputRoot && previous.startDelayMs === hotCpuConfig.startDelayMs &&
+      previous.profileDurationMs === hotCpuConfig.profileDurationMs && previous.cooldownMs === hotCpuConfig.cooldownMs &&
+      previous.maxProfiles === hotCpuConfig.maxProfiles && previous.captureHeapSnapshot === hotCpuConfig.captureHeapSnapshot &&
+      previous.heapSnapshotLimit === hotCpuConfig.heapSnapshotLimit;
+    const restartHotCpu = hotCpuChanged && !reconfigureRules;
     this.chromiumTraceEnabled = settings.hotCpuProfilingCaptureChromiumTrace &&
       hotCpuConfig.enabled && !heapConfig.enabled;
     // Stop rearming first. The old profilers still own their active triggers
     // and can export before we discard an unclaimed trace below.
-    this.reconfiguringRenderers = heapChanged || hotCpuChanged;
+    this.reconfiguringRenderers = heapChanged || restartHotCpu;
     try {
       if (heapChanged) {
         // Heap monitoring owns the renderer debugger while enabled.
@@ -286,15 +297,20 @@ export class DiagnosticsManager {
         }
       }
 
+      if (restartHotCpu) await this.stopHotCpuProfiling("config-changed");
       if (hotCpuChanged) {
-        await this.stopHotCpuProfiling("config-changed");
         this.hotCpuConfig = hotCpuConfig;
         this.hotCpuConfigKey = hotCpuKey;
         if (hotCpuConfig.enabled) {
-          await this.startMainHotCpuProfiler(hotCpuConfig);
+          if (reconfigureRules) {
+            this.mainHotCpuProfiler?.reconfigureRules(hotCpuConfig);
+            for (const entry of this.windows.values()) entry.hotCpuProfiler?.reconfigureRules(hotCpuConfig);
+          } else {
+            await this.startMainHotCpuProfiler(hotCpuConfig);
+          }
         }
       }
-      if ((heapChanged || hotCpuChanged) && hotCpuConfig.enabled) {
+      if ((heapChanged || restartHotCpu) && hotCpuConfig.enabled) {
         for (const entry of this.windows.values()) {
           await this.startWindowHotCpuProfiler(entry, hotCpuConfig);
         }
@@ -314,7 +330,8 @@ export class DiagnosticsManager {
       enabled: settings.hotCpuProfilingEnabled,
       outputRoot: this.outputRoot,
       startDelayMs: settings.hotCpuProfilingStartDelayMs,
-      triggerMode: settings.hotCpuProfilingTriggerMode,
+      rules: settings.hotCpuProfilingRules,
+      legacySettings: this.usesLegacyHotCpuSettings?.() ?? false,
       captureHeapSnapshot: settings.hotCpuProfilingCaptureHeapSnapshot,
       heapSnapshotLimit: settings.hotCpuProfilingHeapSnapshotLimit
     });
@@ -501,7 +518,7 @@ export class DiagnosticsManager {
     this.mainHotCpuSessionDir = created.session.directoryPath;
     this.mainHotCpuProfiler = new HotCpuProfiler({
       config, session: created.session,
-      getAppMetrics: () => app.getAppMetrics(),
+      getAppMetrics: readAppMetrics,
       target: createMainProcessHotCpuTarget(),
       onProfileWritten: (event) => this.onHotCpuProfileCaptured?.(event, null)
     });
@@ -531,7 +548,7 @@ export class DiagnosticsManager {
     entry.hotCpuSessionDir = session.session.directoryPath;
     entry.hotCpuProfiler = new HotCpuProfiler({
       config,
-      getAppMetrics: () => app.getAppMetrics(),
+      getAppMetrics: readAppMetrics,
       session: session.session,
       target: {
         debugger: contents.debugger,

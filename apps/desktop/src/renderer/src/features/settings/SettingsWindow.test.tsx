@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 
 import { act } from "react";
+import fc from "fast-check";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
@@ -13,6 +14,7 @@ import {
   type AcpAgentDiscovery,
   type AiProviderSettings,
   type AppSettingsSnapshot,
+  type Req,
   type CodexProviderDiscovery,
   type ForgeStatus,
   type MachineGitIdentity,
@@ -333,6 +335,85 @@ it("keeps resource recording off until explicitly toggled in Troubleshooting", a
     expect(mocks.dispatch).toHaveBeenCalledWith("settings:update", { patch: { diagnostics: { resourceUsageEnabled: enabled } } });
     expect(toggle?.getAttribute("aria-checked")).toBe(String(enabled));
   }
+});
+
+async function editRulesWhileThresholdSaves(
+  thresholdPercent: number, nextEdit: "toggle" | "duration" | "mode" | "threshold", finishFirstWriteBeforeEdit: boolean
+) {
+  // The model accepts one complete rules value per IPC write and can delay
+  // its acknowledgement across the next gesture.
+  let stored = SNAPSHOT;
+  const writes: Array<() => void> = [];
+  mocks.dispatch.mockImplementation(async (name, req: Req<"settings:update">) => {
+    if (name !== "settings:update") return answer(name, req);
+    return new Promise((resolve) => writes.push(() => {
+      stored = { ...stored, diagnostics: { ...stored.diagnostics, ...req.patch.diagnostics } };
+      resolve(ok(stored));
+    }));
+  });
+  try {
+    await render();
+    await act(async () => navButton("Troubleshooting").click());
+    const group = container.querySelector('[role="group"].settings-cpu-rules')!;
+    const threshold = group.querySelector<HTMLInputElement>('input[aria-label="Sustained threshold percent"]')!;
+    const typeThreshold = (value: number) => {
+      threshold.focus();
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!.call(threshold, String(value));
+      threshold.dispatchEvent(new Event("input", { bubbles: true }));
+    };
+    await act(async () => typeThreshold(thresholdPercent));
+    const slowburn = [...group.querySelectorAll<HTMLInputElement>('input[type="checkbox"]')]
+      .find((control) => control.parentElement?.textContent === "Slow burn")!;
+    const duration = group.querySelector<HTMLSelectElement>('select[aria-label="Sustained duration"]')!;
+    const spike = [...group.querySelectorAll<HTMLButtonElement>('button[role="radio"]')]
+      .find((control) => control.textContent === "Spike")!;
+    const target = { toggle: slowburn, duration, mode: spike, threshold: slowburn }[nextEdit];
+    // Pointer-down moves focus and causes a blur before pointer-up and click.
+    await act(async () => target.focus());
+    expect(writes).toHaveLength(1);
+    if (finishFirstWriteBeforeEdit) await act(async () => writes.shift()!());
+    if (nextEdit === "threshold") await act(async () => typeThreshold(50));
+    await act(async () => {
+      if (nextEdit === "threshold") {
+        target.focus();
+      } else if (nextEdit === "duration") {
+        duration.value = "6000";
+        duration.dispatchEvent(new Event("change", { bubbles: true }));
+      } else {
+        target.click();
+      }
+    });
+    if (!finishFirstWriteBeforeEdit) {
+      // Only the threshold can be in flight. The next update must apply to
+      // the acknowledged snapshot, or the full-rules write loses a field.
+      expect(writes).toHaveLength(1);
+      await act(async () => writes.shift()!());
+    }
+    expect(writes).toHaveLength(1);
+    await act(async () => writes.shift()!());
+
+    const rules = stored.diagnostics.hotCpuProfilingRules;
+    expect(rules.sustained.thresholdPercent).toBe(nextEdit === "threshold" ? 50 : thresholdPercent);
+    expect(rules.sustained.durationMs).toBe(nextEdit === "duration" ? 6000 : 4000);
+    expect(rules.slowburn.enabled).toBe(nextEdit === "toggle");
+    expect(rules.high.mode).toBe(nextEdit === "mode" ? "spike" : "sustained");
+  } finally {
+    await act(async () => root.unmount());
+    root = createRoot(container);
+  }
+}
+
+it("saves a threshold on blur and keeps a click on Slow burn during the write", async () => {
+  await editRulesWhileThresholdSaves(74, "toggle", false);
+});
+
+it("preserves both rule edits whether the threshold write settles before or after the next gesture", async () => {
+  await fc.assert(fc.asyncProperty(
+    fc.integer({ min: 51, max: 400 }),
+    fc.constantFrom("toggle" as const, "duration" as const, "mode" as const, "threshold" as const),
+    fc.boolean(),
+    editRulesWhileThresholdSaves
+  ), { numRuns: 15 });
 });
 
 it("shows when a resource recording stops, and turns the switch off when main ends it", async () => {

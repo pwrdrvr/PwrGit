@@ -6,7 +6,7 @@ import type { Profiler } from "node:inspector";
 import { app, contentTracing, type BrowserWindow, type ProcessMetric } from "electron";
 import fc from "fast-check";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { DIAGNOSTICS_DEFAULTS } from "@pwrgit/shared";
+import { DIAGNOSTICS_DEFAULTS, readHotCpuRules, type HotCpuProfileCapturedEvent } from "@pwrgit/shared";
 import { DiagnosticsManager } from "./diagnostics-manager";
 import { HotCpuProfiler } from "./hot-cpu-profiler";
 import { createHotCpuProfileSession } from "./hot-cpu-profile-session";
@@ -59,9 +59,9 @@ function recorder() {
 }
 
 function config(root: string) {
-  const config = resolveHotCpuProfileConfig({ enabled: true, outputRoot: root, triggerMode: "spike", env: {} });
+  const config = resolveHotCpuProfileConfig({ enabled: true, outputRoot: root, triggerMode: "spike", env: { PWRGIT_HOT_CPU_PROFILING_INTERVAL_MS: "100" } });
   if (!config.enabled) throw new Error("enabled");
-  return { ...config, intervalMs: 100, profileDurationMs: 500, maxProfiles: 1 };
+  return { ...config, profileDurationMs: 500, maxProfiles: 1 };
 }
 
 async function session(root: string) {
@@ -115,11 +115,12 @@ describe("Chromium trace follows the renderer capture lifecycle", () => {
       let settings = {
         ...DIAGNOSTICS_DEFAULTS,
         hotCpuProfilingEnabled: true,
-        hotCpuProfilingTriggerMode: "spike" as const,
+        hotCpuProfilingRules: readHotCpuRules(undefined, "spike"),
         hotCpuProfilingCaptureChromiumTrace: true
       };
       vi.stubEnv("PWRGIT_HOT_CPU_PROFILING_START_DELAY_MS", "20");
       vi.stubEnv("PWRGIT_HOT_CPU_PROFILING_INTERVAL_MS", "20");
+      vi.stubEnv("PWRGIT_HOT_CPU_PROFILING_TRIGGER_MODE", "spike");
       vi.stubEnv("PWRGIT_HOT_CPU_PROFILING_MAX_PROFILES", transition === "timeout" ? "2" : "1");
       vi.stubEnv("PWRGIT_HOT_CPU_PROFILING_DURATION_MS",
         transition === "exhaust" || transition === "timeout" || transition === "profile-failed" ? "50" : "60000");
@@ -254,6 +255,7 @@ describe("Chromium trace follows the renderer capture lifecycle", () => {
     vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date", "performance"] });
     vi.stubEnv("PWRGIT_HOT_CPU_PROFILING_START_DELAY_MS", "20");
     vi.stubEnv("PWRGIT_HOT_CPU_PROFILING_INTERVAL_MS", "100");
+    vi.stubEnv("PWRGIT_HOT_CPU_PROFILING_TRIGGER_MODE", "spike");
     vi.stubEnv("PWRGIT_HOT_CPU_PROFILING_DURATION_MS", "1000");
     vi.stubEnv("PWRGIT_HOT_CPU_PROFILING_MAX_PROFILES", "1");
     let hotPid = 42;
@@ -283,7 +285,7 @@ describe("Chromium trace follows the renderer capture lifecycle", () => {
       outputRoot: directory,
       getDiagnostics: () => ({
         ...DIAGNOSTICS_DEFAULTS, hotCpuProfilingEnabled: true,
-        hotCpuProfilingTriggerMode: "spike", hotCpuProfilingCaptureChromiumTrace: true
+        hotCpuProfilingRules: readHotCpuRules(undefined, "spike"), hotCpuProfilingCaptureChromiumTrace: true
       }),
       onHotCpuHeapSnapshotLimitReached: () => {},
       onHotCpuProfileCaptured: notify
@@ -322,6 +324,123 @@ describe("Chromium trace follows the renderer capture lifecycle", () => {
       await rm(directory, { recursive: true, force: true });
     }
   });
+});
+
+it.each(["missing metric", "new PID", "reused PID", "counter reset", "long gap", "clock jump"] as const)(
+  "uses only continuous monotonic CPU evidence across %s",
+  async (discontinuity) => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date", "performance"] });
+    const root = await mkdtemp(join(tmpdir(), "pwrgit-cpu-continuity-"));
+    const base = resolveHotCpuProfileConfig({ enabled: true, outputRoot: root, env: {
+      PWRGIT_HOT_CPU_PROFILING_INTERVAL_MS: "100"
+    } });
+    if (!base.enabled) throw new Error("enabled");
+    const created = await createHotCpuProfileSession({ config: base, versions });
+    if (!created.ok) throw new Error(created.message);
+    const events: string[] = [];
+    let pid = 42;
+    let creationTime = 1;
+    let seconds = 1;
+    let missing = false;
+    let monotonicOffset = 0;
+    const target = recorder();
+    const originalNow = performance.now.bind(performance);
+    vi.spyOn(performance, "now").mockImplementation(() => originalNow() + monotonicOffset);
+    const profiler = new HotCpuProfiler({
+      config: base, logger,
+      session: { ...created.session, appendSample: async () => {}, appendEvent: async (event) => { events.push(event.type); } },
+      target: { debugger: target.debugger, getOSProcessId: () => pid },
+      getAppMetrics: () => missing ? [] : [{
+        pid, creationTime, cpu: { cumulativeCPUUsage: seconds, percentCPUUsage: 0, idleWakeupsPerSecond: 0 },
+        memory: { workingSetSize: 1, peakWorkingSetSize: 1 }
+      }] as ProcessMetric[]
+    });
+    const sample = async () => {
+      seconds += 0.1;
+      await vi.advanceTimersByTimeAsync(100);
+    };
+    try {
+      await profiler.start();
+      await vi.advanceTimersByTimeAsync(0);
+      await sample();
+      if (discontinuity === "missing metric") {
+        missing = true;
+        await sample();
+        missing = false;
+      }
+      if (discontinuity === "new PID") pid++;
+      if (discontinuity === "reused PID") creationTime++;
+      if (discontinuity === "counter reset") seconds = 0;
+      if (discontinuity === "long gap") { monotonicOffset += 100; seconds += 0.1; }
+      if (discontinuity === "clock jump") vi.setSystemTime(new Date("2040-01-01"));
+      await sample();
+      if (discontinuity !== "clock jump") {
+        await sample();
+        expect(events).not.toContain("profile-started");
+        await sample();
+      }
+      expect(events.filter((event) => event === "profile-started")).toHaveLength(1);
+    } finally {
+      await profiler.stop();
+      await rm(root, { recursive: true, force: true });
+    }
+  }
+);
+
+it("records both matches in one profile, keeps its duration after reconfiguration and does not rearm an exhausted quota", async () => {
+  vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date", "performance"] });
+  const root = await mkdtemp(join(tmpdir(), "pwrgit-cpu-two-rules-"));
+  const settings = readHotCpuRules(undefined, "sustained");
+  settings.slowburn.enabled = true;
+  const config = resolveHotCpuProfileConfig({ enabled: true, outputRoot: root, rules: settings, env: {
+    PWRGIT_HOT_CPU_PROFILING_INTERVAL_MS: "100", PWRGIT_HOT_CPU_PROFILING_CONSECUTIVE_SAMPLES: "2",
+    PWRGIT_HOT_CPU_PROFILING_DURATION_MS: "500",
+    PWRGIT_HOT_CPU_PROFILING_MAX_PROFILES: "1"
+  } });
+  if (!config.enabled) throw new Error("enabled");
+  const created = await createHotCpuProfileSession({ config, versions });
+  if (!created.ok) throw new Error(created.message);
+  let reads = 0;
+  const target = recorder();
+  const notices: HotCpuProfileCapturedEvent[] = [];
+  const trigger = vi.fn(() => async () => {});
+  const events: string[] = [];
+  const profiler = new HotCpuProfiler({
+    config, logger,
+    session: { ...created.session, appendSample: async () => {}, appendEvent: async (event) => { events.push(event.type); } },
+    target: { debugger: target.debugger, getOSProcessId: () => 42 },
+    getAppMetrics: () => [{
+      pid: 42, creationTime: 1,
+      cpu: { cumulativeCPUUsage: reads++ * 0.0625, percentCPUUsage: 0, idleWakeupsPerSecond: 0 },
+      memory: { workingSetSize: 1, peakWorkingSetSize: 1 }
+    }] as ProcessMetric[],
+    onProfileTriggered: trigger,
+    onProfileWritten: (event) => { notices.push(event); }
+  });
+  try {
+    await profiler.start();
+    await vi.advanceTimersByTimeAsync(200);
+    expect(trigger).toHaveBeenCalledOnce();
+    profiler.reconfigureRules({ ...config, rules: config.rules.slice(0, 1) });
+    await vi.advanceTimersByTimeAsync(499);
+    expect(reads).toBe(3);
+    expect(notices).toHaveLength(0);
+    await vi.advanceTimersByTimeAsync(1);
+    await vi.waitFor(() => expect(notices).toHaveLength(1));
+    const [event] = notices;
+    expect(event).toMatchObject({ triggerMode: "sustained", triggerThresholdPercent: 50, triggerCpuPercent: 62.5, matchedRules: [
+      { id: "sustained", thresholdPercent: 50, durationMs: 200, sampleCount: 2, sampleCpuPercent: 62.5, observedDurationMs: 200 },
+      { id: "slowburn", thresholdPercent: 15, durationMs: 200, sampleCount: 2, sampleCpuPercent: 62.5, observedDurationMs: 200 }
+    ] });
+    const profile = JSON.parse(await readFile(event!.profilePath, "utf8"));
+    expect(profile.endTime - profile.startTime).toBe(700_000);
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(events.filter((event) => event === "profile-started")).toHaveLength(1);
+    expect(trigger).toHaveBeenCalledOnce();
+  } finally {
+    await profiler.stop();
+    await rm(root, { recursive: true, force: true });
+  }
 });
 
 describe("hot CPU recorder invariants", () => {
@@ -406,22 +525,34 @@ it("captures real main-thread work that finishes before the CPU trigger runs", a
   const result = await createHotCpuProfileSession({ config: config(root), target: "main", versions });
   if (!result.ok) throw new Error(result.message);
   const capture = { ...result.session, appendEvent: async () => {}, appendSample: async () => {} };
-  let hot = false;
-  vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] });
+  vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date", "performance"] });
+  let cumulativeCPUUsage = 0;
   const profiler = new HotCpuProfiler({
     config: config(root), session: capture, logger,
     target: createMainProcessHotCpuTarget(),
-    getAppMetrics: () => [{ pid: process.pid, cpu: { percentCPUUsage: hot ? 90 : 0, idleWakeupsPerSecond: 0 }, memory: { workingSetSize: 1, peakWorkingSetSize: 1 } }] as ProcessMetric[]
+    getAppMetrics: () => [{
+      pid: process.pid, creationTime: 1,
+      cpu: { cumulativeCPUUsage, percentCPUUsage: 0, idleWakeupsPerSecond: 0 },
+      memory: { workingSetSize: 1, peakWorkingSetSize: 1 }
+    }] as ProcessMetric[]
   });
   try {
     await profiler.start();
     await vi.advanceTimersByTimeAsync(0);
     function preTriggerCpuBurst() {
-      const end = performance.now() + 150;
-      while (performance.now() < end) Math.sqrt(Math.random());
+      // Let V8 sample this real stack even when the host deschedules the test.
+      const start = process.threadCpuUsage();
+      let spentMicros: number;
+      do {
+        for (let i = 0; i < 1000; i++) Math.sqrt(Math.random());
+        const { user, system } = process.threadCpuUsage(start);
+        spentMicros = user + system;
+      } while (spentMicros < 25_000);
     }
     preTriggerCpuBurst();
-    hot = true;
+    // The fake sampler advances 100 ms and observes 75 ms of CPU regardless
+    // of the host's scheduling. The saved stack is still from the real inspector.
+    cumulativeCPUUsage = 0.075;
     await vi.advanceTimersByTimeAsync(100);
     await profiler.stop("app-quit");
     const profile: Profiler.Profile = JSON.parse(await readFile(capture.createProfilePath(1), "utf8"));

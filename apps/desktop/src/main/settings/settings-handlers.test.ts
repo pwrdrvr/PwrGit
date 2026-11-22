@@ -1,8 +1,8 @@
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { describe, expect, it } from "vitest";
-import type { AppSettingsPatch, AppSettingsSnapshot } from "@pwrgit/shared";
+import { describe, expect, it, vi } from "vitest";
+import { DEFAULT_HOT_CPU_RULES, type AppSettingsPatch, type AppSettingsSnapshot } from "@pwrgit/shared";
 import { CommandBus } from "../command-bus";
 import { registerSettingsHandlers, settingsSnapshot } from "./settings-handlers";
 import { SettingsService } from "./settings-service";
@@ -13,6 +13,73 @@ function freshService(): SettingsService {
 }
 
 describe("settings handlers", () => {
+  it("rejects an all-off capture rules write atomically", async () => {
+    const service = freshService();
+    const bus = new CommandBus();
+    const changes: AppSettingsSnapshot[] = [];
+    registerSettingsHandlers(bus, service, { diagnosticsOutputRoot: "/diag", onChanged: (snapshot) => changes.push(snapshot) });
+    const rules = { ...DEFAULT_HOT_CPU_RULES, high: { ...DEFAULT_HOT_CPU_RULES.high, enabled: false } };
+    const result = await bus.dispatch("settings:update", { patch: {
+      diagnostics: { hotCpuProfilingEnabled: true, hotCpuProfilingRules: rules }
+    } });
+    expect(result.ok).toBe(false);
+    expect(service.get().diagnostics).toBeUndefined();
+    expect(changes).toEqual([]);
+  });
+
+  it("round-trips independent windows and thresholds, and mirrors the active legacy rule", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "pwrgit-cpu-settings-"));
+    const path = join(directory, "settings.json");
+    const service = new SettingsService(path);
+    service.update({ diagnostics: { hotCpuProfilingTriggerMode: "slowburn", hotCpuProfilingSlowburnThresholdPercent: 23 } });
+    const migrated = settingsSnapshot(new SettingsService(path), "/diag").diagnostics;
+    expect(migrated.hotCpuProfilingRules).toEqual({
+      ...DEFAULT_HOT_CPU_RULES, high: { enabled: false, mode: "sustained" },
+      slowburn: { enabled: true, thresholdPercent: 23, durationMs: 4000 }
+    });
+    const rules = {
+      high: { enabled: true, mode: "spike" as const },
+      spike: { thresholdPercent: 400, durationMs: 1000 },
+      sustained: { thresholdPercent: 61, durationMs: 20_000 },
+      slowburn: { enabled: true, thresholdPercent: 23, durationMs: 30_000 }
+    };
+    const bus = new CommandBus();
+    registerSettingsHandlers(bus, service, { diagnosticsOutputRoot: "/diag", onChanged: () => undefined });
+    expect((await bus.dispatch("settings:update", { patch: { diagnostics: {
+      hotCpuProfilingRules: rules, hotCpuProfilingTriggerMode: "slowburn"
+    } } })).ok).toBe(true);
+    const reopened = new SettingsService(path);
+    expect(reopened.get().diagnostics).toMatchObject({
+      hotCpuProfilingRules: rules, hotCpuProfilingTriggerMode: "spike", hotCpuProfilingSlowburnThresholdPercent: 23
+    });
+    expect(settingsSnapshot(reopened, "/diag").diagnostics.hotCpuProfilingRules).toEqual(rules);
+    const invalid = { ...rules, spike: { thresholdPercent: 52.5, durationMs: 4000 } };
+    expect((await bus.dispatch("settings:update", { patch: { diagnostics: { hotCpuProfilingRules: invalid } } })).ok).toBe(false);
+    expect(settingsSnapshot(service, "/diag").diagnostics.hotCpuProfilingRules).toEqual(rules);
+  });
+
+  it("keeps legacy cadence timing until capture rules themselves are saved", async () => {
+    vi.stubEnv("PWRGIT_HOT_CPU_PROFILING_INTERVAL_MS", "1000");
+    try {
+      const service = freshService();
+      service.update({ diagnostics: { hotCpuProfilingTriggerMode: "sustained" } });
+      const bus = new CommandBus();
+      registerSettingsHandlers(bus, service, { diagnosticsOutputRoot: "/diag", onChanged: () => undefined });
+      await bus.dispatch("settings:update", { patch: { diagnostics: { hotCpuProfilingEnabled: true } } });
+      expect(service.get().diagnostics?.hotCpuProfilingRules).toBeUndefined();
+      expect(settingsSnapshot(service, "/diag").diagnosticsEnv.hotCpuRuleOverride).toMatchObject({
+        intervalMs: 1000, rules: [{ id: "sustained", durationMs: 2000, sampleCount: 2 }]
+      });
+      await bus.dispatch("settings:update", { patch: { diagnostics: { hotCpuProfilingRules: DEFAULT_HOT_CPU_RULES } } });
+      expect(settingsSnapshot(service, "/diag").diagnosticsEnv.hotCpuRuleOverride).toMatchObject({
+        intervalMs: 1000, rules: [{ id: "sustained", durationMs: 4000, sampleCount: 4 }]
+      });
+      expect(service.get().diagnostics?.hotCpuProfilingRules?.sustained.durationMs).toBe(4000);
+    } finally {
+      vi.unstubAllEnvs();
+    }
+  });
+
   it("persists explicit resource-recording choices and rejects non-boolean patches", async () => {
     const directory = mkdtempSync(join(tmpdir(), "pwrgit-resource-settings-"));
     const path = join(directory, "settings.json");

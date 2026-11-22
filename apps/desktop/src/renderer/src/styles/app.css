@@ -23402,3 +23402,86 @@ button.agent-auth-node:focus-visible,
   font: 400 11.5px/1.55 var(--font-sans);
   color: var(--text-muted);
 }
+
+.settings-cpu-rules {
+  display: grid;
+  gap: 8px;
+  width: 100%;
+  min-width: 0;
+}
+.settings-cpu-rules__rule {
+  display: grid;
+  gap: 8px;
+  padding: 9px 10px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  background: var(--bg-panel-elevated);
+}
+.settings-cpu-rules__heading,
+.settings-cpu-rules__values,
+.settings-cpu-rules__check {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  column-gap: 8px;
+  row-gap: 6px;
+}
+.settings-cpu-rules__check {
+  color: var(--text-primary);
+  font: 600 12px/1.4 var(--font-sans);
+}
+.settings-cpu-rules__check input {
+  margin: 0;
+  accent-color: var(--accent);
+}
+.settings-cpu-rules__check input:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 2px;
+}
+.settings-cpu-rules__values {
+  font: 400 12px/1.4 var(--font-sans);
+  color: var(--text-muted);
+}
+.settings-cpu-rules__values:has(:disabled) {
+  opacity: 0.55;
+}
+.settings-cpu-rules__threshold {
+  display: contents;
+}
+.settings-cpu-rules__threshold input {
+  width: 7ch;
+  appearance: auto;
+}
+.settings-cpu-rules__threshold input[aria-invalid="true"] {
+  border-color: var(--danger-text);
+}
+.settings-cpu-rules__error {
+  order: 1;
+  width: 100%;
+  color: var(--danger-text);
+}
+.settings-cpu-rules__summary,
+.settings-cpu-rules__status {
+  margin: 0;
+  color: var(--text-muted);
+  font: 400 11.5px/1.45 var(--font-sans);
+}
+.settings-cpu-rules__status:empty {
+  position: absolute;
+}
+.settings-cpu-rules .settings-callout {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+@media (max-width: 760px) {
+  .settings-field--cpu-rules {
+    flex-direction: column;
+    gap: 8px;
+  }
+  .settings-field--cpu-rules .settings-field__label {
+    flex: auto;
+  }
+  .settings-field--cpu-rules .settings-field__control {
+    width: 100%;
+  }
+}

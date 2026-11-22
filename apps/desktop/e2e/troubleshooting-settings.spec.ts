@@ -6,7 +6,7 @@ import { _electron as electron, expect, test, type Page } from "@playwright/test
 import { cleanEnv } from "./fixtures/electron-app";
 import { buildHarness } from "./harness/build";
 
-type View = "armed" | "idle" | "notice-completed" | "notice-partial";
+type View = "armed" | "idle" | "cpu-rules" | "notice-completed" | "notice-partial";
 
 const mount = (page: Page, view: View): Promise<void> =>
   page.evaluate((name) => {
@@ -32,7 +32,7 @@ test("Troubleshooting explains one-launch startup profiling and the 24-hour reco
       join(dirname(fileURLToPath(import.meta.url)), "harness/electron-main.cjs")
     ],
     // A fixed zone, so the stop time reads the same on every machine.
-    env: cleanEnv({ PWRGIT_HARNESS_HTML: html, PWRGIT_HARNESS_WIDTH: "980", PWRGIT_HARNESS_HEIGHT: "1400", TZ: "America/Los_Angeles" })
+    env: cleanEnv({ PWRGIT_HARNESS_HTML: html, PWRGIT_HARNESS_WIDTH: process.env["PWRGIT_HARNESS_WIDTH"] ?? "980", PWRGIT_HARNESS_HEIGHT: "1400", TZ: "America/Los_Angeles" })
   });
   const shots = process.env["PWRGIT_HARNESS_SHOTS"];
   if (shots) mkdirSync(shots, { recursive: true });
@@ -54,11 +54,28 @@ test("Troubleshooting explains one-launch startup profiling and the 24-hour reco
     await expect(resource).toBeVisible();
     await shoot("resource-armed", resource);
     await shoot("startup-armed", startup);
+    await shoot("hot-cpu", page.locator("section[aria-label='Hot CPU Profiling']"));
     await expect(resource).toContainText("Stops automatically Sat, Nov 21, 10:43 AM");
     await expect(resource).toContainText("turns itself off 24 hours after it starts");
     await expect(startup.locator(".settings-panel__header")).toContainText("Next launch");
     await expect(startup).toContainText("the switch turns itself off as that launch starts");
     await expect(startup).not.toContainText("Remember to turn this back off");
+
+    await mount(page, "cpu-rules");
+    const hotCpu = page.locator("section[aria-label='Hot CPU Profiling']");
+    const rules = hotCpu.getByRole("group", { name: "Capture rules" });
+    await expect(rules).toBeVisible();
+    await expect(rules).toContainText("15 consecutive 2 s samples (30 s)");
+    await shoot("hot-cpu-two-rules", hotCpu);
+    await rules.getByRole("radio", { name: "Sustained" }).press("ArrowLeft");
+    await expect(rules.getByRole("radio", { name: "Spike" })).toBeChecked();
+    await rules.getByRole("combobox", { name: "Spike duration" }).selectOption("1000");
+    await expect(rules).toContainText("30 consecutive 1 s samples (30 s)");
+    await rules.getByRole("checkbox", { name: "High CPU" }).uncheck();
+    const last = rules.getByRole("checkbox", { name: "Slow burn" });
+    await last.press("Space");
+    await expect(last).toBeChecked();
+    await expect(rules.getByRole("status")).toContainText("At least one rule stays on");
 
     await mount(page, "idle");
     await expect(resource.getByRole("switch")).toHaveAttribute("aria-checked", "false");

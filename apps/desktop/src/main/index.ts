@@ -574,6 +574,7 @@ if (!gotSingleInstanceLock) {
     };
     const diagnostics = new DiagnosticsManager({
       chromiumTraceWorker,
+      usesLegacyHotCpuSettings: () => settings.get().diagnostics?.hotCpuProfilingRules === undefined,
       outputRoot: diagnosticsOutputRoot,
       getDiagnostics: () =>
         settingsSnapshot(settings, diagnosticsOutputRoot, appVersion)

@@ -4,16 +4,19 @@
 import { randomBytes } from "node:crypto";
 import fs from "node:fs/promises";
 import path from "node:path";
+import type { HotCpuEffectiveRule, HotCpuRuleMatch } from "@pwrgit/shared";
 import type { HotCpuProfileConfig } from "./hot-cpu-profile-config";
 
 export type HotCpuProfileSample = {
   capturedAt: string;
   pid: number;
-  cpuPercent: number;
+  cpuPercent: number | null;
+  matchedRules?: HotCpuRuleMatch[];
+  measurementSource?: HotCpuRuleMatch["measurementSource"] | undefined;
   electronCpuPercent?: number;
-  cumulativeCpuDeltaSeconds?: number;
-  cumulativeCpuSeconds?: number;
-  wallDeltaSeconds?: number;
+  cumulativeCpuDeltaSeconds?: number | undefined;
+  cumulativeCpuSeconds?: number | undefined;
+  wallDeltaSeconds?: number | undefined;
   idleWakeupsPerSecond?: number;
   workingSetSize?: number;
   peakWorkingSetSize?: number;
@@ -59,6 +62,8 @@ type HotCpuProfileSessionManifest = {
     startDelayMs: number;
     triggerMode: string;
     intervalMs: number;
+    rules: HotCpuEffectiveRule[];
+    overrides: string[];
     thresholdPercent: number;
     slowburnThresholdPercent: number;
     consecutiveSamples: number;
@@ -130,6 +135,8 @@ export async function createHotCpuProfileSession(options: {
       startDelayMs: options.config.startDelayMs,
       triggerMode: options.config.triggerMode,
       intervalMs: options.config.intervalMs,
+      rules: options.config.rules,
+      overrides: options.config.overrides,
       thresholdPercent: options.config.thresholdPercent,
       slowburnThresholdPercent: options.config.slowburnThresholdPercent,
       consecutiveSamples: options.config.consecutiveSamples,

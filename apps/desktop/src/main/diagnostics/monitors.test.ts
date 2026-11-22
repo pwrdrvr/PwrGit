@@ -231,6 +231,8 @@ describe("HotCpuProfiler", () => {
     startDelayMs: 0,
     triggerMode: "sustained" as const,
     intervalMs: 100,
+    rules: [{ id: "sustained" as const, thresholdPercent: 50, durationMs: 200, sampleCount: 2 }],
+    overrides: [],
     thresholdPercent: 50,
     slowburnThresholdPercent: 15,
     consecutiveSamples: 2,

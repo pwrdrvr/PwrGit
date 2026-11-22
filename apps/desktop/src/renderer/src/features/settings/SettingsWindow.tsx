@@ -612,9 +612,13 @@ function SettingsSectionBody(props: {
       onHotCpuStartDelayChange={(delayMs) => {
         updateDiagnostics({ hotCpuProfilingStartDelayMs: delayMs });
       }}
-      onHotCpuTriggerModeChange={(mode) => {
-        updateDiagnostics({ hotCpuProfilingTriggerMode: mode });
-      }}
+      onHotCpuRulesEdit={(edit) =>
+        settings.update((current) => {
+          const rules = current.diagnostics.hotCpuProfilingRules;
+          const next = edit(rules);
+          return next === rules ? undefined : { diagnostics: { hotCpuProfilingRules: next } };
+        })
+      }
       onHotCpuCaptureChromiumTraceChange={(enabled) => {
         updateDiagnostics({ hotCpuProfilingCaptureChromiumTrace: enabled });
       }}

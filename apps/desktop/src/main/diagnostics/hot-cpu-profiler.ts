@@ -9,6 +9,8 @@ import type { HotCpuProfileConfig } from "./hot-cpu-profile-config";
 import type { HotCpuProfileSession } from "./hot-cpu-profile-session";
 import { getDiagLogger } from "./diag-log";
 import { joinCpuProfiles } from "./cpu-profile-history";
+import { HotCpuRuleMatcher, type CpuInterval } from "./hot-cpu-rule-matcher";
+import type { AppMetricsSample } from "./app-metrics";
 
 const CHROME_DEBUGGER_PROTOCOL_VERSION = "1.3";
 // Rotate only after evaluating the CPU sample, and retain the last complete
@@ -39,15 +41,16 @@ export type HotCpuTarget = {
   };
 };
 
-type CpuUsageReading = {
-  cpuPercent: number;
-  electronCpuPercent: number;
-  cumulativeCpuDeltaSeconds?: number;
-  wallDeltaSeconds?: number;
+type CpuBaseline = {
+  pid: number;
+  createdAt: number;
+  atMs: number;
+  cumulativeSeconds: number | undefined;
 };
 
 type ActiveProfileTrigger = Pick<
   HotCpuProfileCapturedEvent,
+  | "matchedRules"
   | "triggerConsecutiveSamples"
   | "triggerCpuPercent"
   | "triggerMode"
@@ -81,8 +84,8 @@ export class HotCpuProfiler {
     });
   };
 
-  private readonly config: Extract<HotCpuProfileConfig, { enabled: true }>;
-  private readonly getAppMetrics: () => ProcessMetric[];
+  private config: Extract<HotCpuProfileConfig, { enabled: true }>;
+  private readonly getAppMetrics: (reuseForMs: number) => AppMetricsSample | ProcessMetric[];
   private readonly logger: Logger;
   private readonly now: () => Date;
   private readonly onHeapSnapshotLimitReached: (() => void | Promise<void>) | undefined;
@@ -99,16 +102,18 @@ export class HotCpuProfiler {
   private recordingStartedAtMonotonicMs = 0;
   private previousRecording: Profiler.Profile | null = null;
   private previousRecordingStartedAtMs = 0;
-  private consecutiveHotSamples = 0;
+  private previousRecordingStartedAtMonotonicMs = 0;
+  private readonly matcher = new HotCpuRuleMatcher();
+  private ruleRevision = 0;
+  private waitingForFirstSample = true;
   private debuggerAttached = false;
   private heapSnapshotLimitReached = false;
   private heapSnapshotsCaptured = 0;
   private heapSnapshotMidTimer: ReturnType<typeof setTimeout> | null = null;
   private captureSamplePromise: Promise<void> | null = null;
   private intervalTimer: ReturnType<typeof setTimeout> | null = null;
-  private lastProfileAtMs: number | null = null;
-  private previousCumulativeCpuSeconds: number | null = null;
-  private previousSampleAtMs: number | null = null;
+  private lastProfileAtMonotonicMs: number | null = null;
+  private baseline: CpuBaseline | null = null;
   private profileDurationTimer: ReturnType<typeof setTimeout> | null = null;
   private profileCount = 0;
   private shutdownPromise: Promise<void> | null = null;
@@ -123,7 +128,7 @@ export class HotCpuProfiler {
 
   constructor(options: {
     config: Extract<HotCpuProfileConfig, { enabled: true }>;
-    getAppMetrics: () => ProcessMetric[];
+    getAppMetrics: (reuseForMs: number) => AppMetricsSample | ProcessMetric[];
     session: HotCpuProfileSession;
     target: HotCpuTarget;
     logger?: Logger;
@@ -171,6 +176,8 @@ export class HotCpuProfiler {
       type: "monitor-started",
       detail: {
         intervalMs: this.config.intervalMs,
+        rules: this.config.rules,
+        overrides: this.config.overrides,
         startDelayMs: this.config.startDelayMs,
         triggerMode: this.config.triggerMode,
         thresholdPercent: this.config.thresholdPercent,
@@ -207,7 +214,25 @@ export class HotCpuProfiler {
   }
 
   canCaptureAnotherProfile(): boolean {
-    return !this.stopped && this.profileCount < this.config.maxProfiles && !this.isTargetDestroyed();
+    return !this.stopped && this.config.rules.length > 0 &&
+      this.profileCount < this.config.maxProfiles && !this.isTargetDestroyed();
+  }
+
+  reconfigureRules(config: Extract<HotCpuProfileConfig, { enabled: true }>): void {
+    this.config = config;
+    this.ruleRevision++;
+    this.resetSamples();
+    if (this.intervalTimer && !this.waitingForFirstSample) {
+      clearTimeout(this.intervalTimer);
+      this.scheduleNextSample();
+    }
+    // The current profile owns its original trigger and companion until both
+    // settle. The next sample uses the new rules and a fresh baseline.
+    void this.session.appendEvent({
+      capturedAt: this.now().toISOString(),
+      type: "capture-rules-changed",
+      detail: { intervalMs: config.intervalMs, rules: config.rules, overrides: config.overrides },
+    }).catch((error) => this.logger.error("could not record CPU rule change", error));
   }
 
   hasTriggeredProfile(): boolean {
@@ -273,19 +298,30 @@ export class HotCpuProfiler {
 
   private async captureSample(): Promise<void> {
     this.intervalTimer = null;
+    this.waitingForFirstSample = false;
 
     if (this.stopped || this.isTargetDestroyed()) {
       return;
     }
 
     const capturedAtDate = this.now();
-    const capturedMonotonicMs = performance.now();
     const capturedAt = capturedAtDate.toISOString();
     const capturedAtMs = capturedAtDate.getTime();
+    const revision = this.ruleRevision;
+    let nextTick: number | undefined;
     try {
       const pid = this.target.getOSProcessId();
-      const metric = this.getAppMetrics().find((candidate) => candidate.pid === pid);
+      const cadenceMs = this.config.intervalMs;
+      const read = this.getAppMetrics(Math.min(25, cadenceMs * 0.2));
+      const capturedMonotonicMs = Array.isArray(read) ? performance.now() : read.atMs;
+      if (!Array.isArray(read)) {
+        // Time production metrics readers against one monotonic grid, so
+        // windows opened at different times can use the same Electron poll.
+        nextTick = (Math.floor((capturedMonotonicMs + Math.min(25, cadenceMs * 0.2)) / cadenceMs) + 1) * cadenceMs;
+      }
+      const metric = (Array.isArray(read) ? read : read.metrics).find((candidate) => candidate.pid === pid);
       if (!metric) {
+        this.resetSamples();
         await this.session.appendEvent({
           capturedAt,
           type: "sample-skipped",
@@ -295,51 +331,51 @@ export class HotCpuProfiler {
         return;
       }
 
-      const cumulativeCpuSeconds = metric.cpu.cumulativeCPUUsage;
-      const cpuUsage = this.calculateCpuUsage({
-        capturedAtMs,
-        ...(cumulativeCpuSeconds !== undefined ? { cumulativeCpuSeconds } : {}),
-        electronCpuPercent: metric.cpu.percentCPUUsage,
-      });
-      const cpuPercent = cpuUsage.cpuPercent;
-      const triggerThresholdPercent = this.triggerThresholdPercent();
-      this.consecutiveHotSamples =
-        cpuPercent >= triggerThresholdPercent
-          ? this.consecutiveHotSamples + 1
-          : 0;
-
+      const cpu = metric.cpu;
+      const usableCounter = cpu.cumulativeCPUUsage !== undefined &&
+        Number.isFinite(cpu.cumulativeCPUUsage) && cpu.cumulativeCPUUsage >= 0;
+      const cumulativeSeconds = usableCounter ? cpu.cumulativeCPUUsage : undefined;
+      const interval = this.measureInterval(
+        { pid, createdAt: metric.creationTime, atMs: capturedMonotonicMs, cumulativeSeconds },
+        cpu.percentCPUUsage, Array.isArray(read) ? this.baseline?.atMs : read.previousAtMs
+      );
+      const matches = interval ? this.matcher.sample(interval, this.config.rules, cadenceMs) : [];
       await this.session.appendSample({
         capturedAt,
         pid,
-        cpuPercent,
+        cpuPercent: interval?.cpuPercent ?? null,
         ...this.target.readHeapUsage?.(),
-        electronCpuPercent: cpuUsage.electronCpuPercent,
-        ...(cpuUsage.cumulativeCpuDeltaSeconds !== undefined
-          ? { cumulativeCpuDeltaSeconds: cpuUsage.cumulativeCpuDeltaSeconds }
-          : {}),
-        ...(cumulativeCpuSeconds !== undefined
-          ? { cumulativeCpuSeconds }
-          : {}),
-        ...(cpuUsage.wallDeltaSeconds !== undefined
-          ? { wallDeltaSeconds: cpuUsage.wallDeltaSeconds }
-          : {}),
-        idleWakeupsPerSecond: metric.cpu.idleWakeupsPerSecond,
+        electronCpuPercent: cpu.percentCPUUsage,
+        cumulativeCpuSeconds: cumulativeSeconds,
+        cumulativeCpuDeltaSeconds: interval?.cpuDeltaSeconds,
+        wallDeltaSeconds: interval ? interval.durationMs / 1000 : undefined,
+        measurementSource: interval?.source,
+        idleWakeupsPerSecond: cpu.idleWakeupsPerSecond,
         workingSetSize: metric.memory.workingSetSize,
         peakWorkingSetSize: metric.memory.peakWorkingSetSize,
-        consecutiveHotSamples: this.consecutiveHotSamples,
+        consecutiveHotSamples: this.matcher.count(this.config.triggerMode),
+        ...(matches.length ? { matchedRules: matches } : {}),
       });
 
-      if (this.shouldStartProfile(cpuPercent, capturedAt)) {
+      const primary = matches[0];
+      if (primary && revision === this.ruleRevision && this.shouldStartProfile(capturedMonotonicMs)) {
         await this.startProfile({
           capturedAt,
           capturedMonotonicMs,
-          cpuPercent,
           pid,
+          trigger: {
+            matchedRules: matches,
+            triggerConsecutiveSamples: primary.sampleCount,
+            triggerCpuPercent: primary.sampleCpuPercent,
+            triggerMode: primary.id,
+            triggerThresholdPercent: primary.thresholdPercent,
+          },
         });
-      } else if (!this.stopped && this.profileCount < this.config.maxProfiles) {
+      } else {
         await this.maintainRecording(capturedAtMs);
       }
     } catch (error) {
+      this.resetSamples();
       await this.session.appendEvent({
         capturedAt,
         type: "sample-failed",
@@ -348,102 +384,65 @@ export class HotCpuProfiler {
       this.logger.error("sample failed", error);
     } finally {
       if (!this.profiling) {
-        this.scheduleNextSample();
+        const delay = nextTick === undefined ? 0 : nextTick - performance.now();
+        this.scheduleNextSample(revision === this.ruleRevision && delay > 0 ? delay : undefined);
       } else {
         this.samplingPausedForProfile = true;
       }
-      // After rescheduling, so an observer woken here already sees the next
-      // timer armed and can assert on timer state without a second wait.
       this.onSampleCaptured?.();
     }
   }
 
-  private calculateCpuUsage(options: {
-    capturedAtMs: number;
-    cumulativeCpuSeconds?: number;
-    electronCpuPercent: number;
-  }): CpuUsageReading {
-    if (options.cumulativeCpuSeconds === undefined) {
-      this.previousCumulativeCpuSeconds = null;
-      this.previousSampleAtMs = null;
-      return {
-        cpuPercent: options.electronCpuPercent,
-        electronCpuPercent: options.electronCpuPercent,
-      };
-    }
-
-    const previousCumulativeCpuSeconds = this.previousCumulativeCpuSeconds;
-    const previousSampleAtMs = this.previousSampleAtMs;
-    this.previousCumulativeCpuSeconds = options.cumulativeCpuSeconds;
-    this.previousSampleAtMs = options.capturedAtMs;
-
-    if (previousCumulativeCpuSeconds === null || previousSampleAtMs === null) {
-      return {
-        cpuPercent: options.electronCpuPercent,
-        electronCpuPercent: options.electronCpuPercent,
-      };
-    }
-
-    const cumulativeCpuDeltaSeconds =
-      options.cumulativeCpuSeconds - previousCumulativeCpuSeconds;
-    const wallDeltaSeconds = (options.capturedAtMs - previousSampleAtMs) / 1_000;
-    if (cumulativeCpuDeltaSeconds < 0 || wallDeltaSeconds <= 0) {
-      return {
-        cpuPercent: options.electronCpuPercent,
-        electronCpuPercent: options.electronCpuPercent,
-      };
-    }
-
-    return {
-      cpuPercent: (cumulativeCpuDeltaSeconds / wallDeltaSeconds) * 100,
-      electronCpuPercent: options.electronCpuPercent,
-      cumulativeCpuDeltaSeconds,
-      wallDeltaSeconds,
-    };
+  private resetSamples(): void {
+    this.baseline = null;
+    this.matcher.reset();
   }
 
-  private shouldStartProfile(cpuPercent: number, capturedAt: string): boolean {
-    if (
-      this.stopped
-      || this.profiling
-      || cpuPercent < this.triggerThresholdPercent()
-    ) {
-      return false;
+  private measureInterval(
+    current: CpuBaseline, electronPercent: number, electronPreviousAtMs: number | null | undefined
+  ): (CpuInterval & { cpuDeltaSeconds?: number }) | undefined {
+    const previous = this.baseline;
+    this.baseline = current;
+    if (previous && previous.pid === current.pid && previous.createdAt === current.createdAt) {
+      const durationMs = current.atMs - previous.atMs;
+      if (durationMs > 0 && durationMs <= this.config.intervalMs * 1.5) {
+        if (previous.cumulativeSeconds !== undefined && current.cumulativeSeconds !== undefined) {
+          const cpuDeltaSeconds = current.cumulativeSeconds - previous.cumulativeSeconds;
+          if (cpuDeltaSeconds >= 0) {
+            return { cpuPercent: cpuDeltaSeconds / durationMs * 100_000, durationMs,
+              cpuDeltaSeconds, source: "cumulative-cpu" };
+          }
+        } else if (current.cumulativeSeconds === undefined && previous.cumulativeSeconds === undefined &&
+          electronPreviousAtMs === previous.atMs && Number.isFinite(electronPercent) && electronPercent >= 0) {
+          return { cpuPercent: electronPercent, durationMs, source: "electron-interval-estimate" };
+        }
+      }
     }
-
-    if (this.consecutiveHotSamples < this.triggerConsecutiveSamples()) {
-      return false;
-    }
-
-    if (this.profileCount >= this.config.maxProfiles) {
-      return false;
-    }
-
-    const capturedAtMs = Date.parse(capturedAt);
-    return (
-      this.lastProfileAtMs === null ||
-      capturedAtMs - this.lastProfileAtMs >= this.config.cooldownMs
-    );
+    this.matcher.reset();
+    return undefined;
   }
 
-  private triggerThresholdPercent(): number {
-    return this.config.triggerMode === "slowburn"
-      ? this.config.slowburnThresholdPercent
-      : this.config.thresholdPercent;
-  }
-
-  private triggerConsecutiveSamples(): number {
-    return this.config.triggerMode === "spike" ? 1 : this.config.consecutiveSamples;
+  private shouldStartProfile(capturedAtMonotonicMs: number): boolean {
+    return !this.profiling && this.canCaptureAnotherProfile() &&
+      (this.lastProfileAtMonotonicMs === null ||
+        capturedAtMonotonicMs - this.lastProfileAtMonotonicMs >= this.config.cooldownMs);
   }
 
   private recordingWindowMs(): number {
     return Math.max(
       RECORDING_WINDOW_MS,
-      this.config.intervalMs * this.triggerConsecutiveSamples(),
+      ...this.config.rules.map((rule) => rule.sampleCount * this.config.intervalMs),
     );
   }
 
   private async maintainRecording(startedAtMs: number): Promise<void> {
+    if (!this.canCaptureAnotherProfile()) {
+      if (this.recording && !this.stopped) {
+        await this.discardRecording();
+        this.detachDebugger();
+      }
+      return;
+    }
     await this.ensureRecording(startedAtMs);
     if (
       this.recording
@@ -454,12 +453,7 @@ export class HotCpuProfiler {
   }
 
   private async ensureRecording(startedAtMs: number): Promise<void> {
-    if (
-      this.stopped
-      || this.recording
-      || this.isTargetDestroyed()
-      || this.profileCount >= this.config.maxProfiles
-    ) return;
+    if (!this.canCaptureAnotherProfile() || this.recording) return;
     if (this.target.debugger.isAttached()) return;
     try {
       this.target.debugger.attach(CHROME_DEBUGGER_PROTOCOL_VERSION);
@@ -496,6 +490,7 @@ export class HotCpuProfiler {
     try {
       this.previousRecording = await this.finishRecording();
       this.previousRecordingStartedAtMs = this.recordingStartedAtMs;
+      this.previousRecordingStartedAtMonotonicMs = this.recordingStartedAtMonotonicMs;
       if (this.stopped) return;
       await this.target.debugger.sendCommand("Profiler.start");
       this.recording = true;
@@ -523,8 +518,8 @@ export class HotCpuProfiler {
   private async startProfile(options: {
     capturedAt: string;
     capturedMonotonicMs: number;
-    cpuPercent: number;
     pid: number;
+    trigger: ActiveProfileTrigger;
   }): Promise<void> {
     if (this.stopped) {
       return;
@@ -540,7 +535,8 @@ export class HotCpuProfiler {
           reason: !this.isTargetDestroyed() && this.target.debugger.isAttached()
             ? "debugger-already-attached"
             : "recorder-not-armed",
-          cpuPercent: options.cpuPercent,
+          cpuPercent: options.trigger.triggerCpuPercent,
+          matchedRules: options.trigger.matchedRules,
           pid: options.pid,
         },
       });
@@ -554,18 +550,13 @@ export class HotCpuProfiler {
         return;
       }
       this.activeProfileHeapSnapshots = [];
-      this.activeProfileTrigger = {
-        triggerConsecutiveSamples: this.triggerConsecutiveSamples(),
-        triggerCpuPercent: options.cpuPercent,
-        triggerMode: this.config.triggerMode,
-        triggerThresholdPercent: this.triggerThresholdPercent(),
-      };
+      this.activeProfileTrigger = options.trigger;
       this.profileCount += 1;
       const index = this.profileCount;
-      this.lastProfileAtMs = Date.parse(options.capturedAt);
+      this.lastProfileAtMonotonicMs = options.capturedMonotonicMs;
       try {
         this.profileCompanion = this.onProfileTriggered?.(
-          this.session.createProfilePath(index), this.lastProfileAtMs, options.capturedMonotonicMs
+          this.session.createProfilePath(index), Date.parse(options.capturedAt), options.capturedMonotonicMs
         );
       } catch (error) {
         this.logger.warn("CPU profile companion capture failed to start", error);
@@ -575,22 +566,21 @@ export class HotCpuProfiler {
         type: "profile-started",
         detail: {
           index,
-          cpuPercent: options.cpuPercent,
-          triggerMode: this.config.triggerMode,
-          triggerThresholdPercent: this.triggerThresholdPercent(),
-          triggerConsecutiveSamples: this.triggerConsecutiveSamples(),
+          cpuPercent: options.trigger.triggerCpuPercent,
+          ...options.trigger,
           pid: options.pid,
           durationMs: this.config.profileDurationMs,
           recordingStartedAt: new Date(this.previousRecording
             ? this.previousRecordingStartedAtMs
             : this.recordingStartedAtMs).toISOString(),
-          preTriggerDurationMs: Date.parse(options.capturedAt) - (this.previousRecording
-            ? this.previousRecordingStartedAtMs
-            : this.recordingStartedAtMs),
+          preTriggerDurationMs: options.capturedMonotonicMs - (this.previousRecording
+            ? this.previousRecordingStartedAtMonotonicMs
+            : this.recordingStartedAtMonotonicMs),
         },
       });
       this.logger.warn("CPU profile started", {
-        cpuPercent: options.cpuPercent,
+        cpuPercent: options.trigger.triggerCpuPercent,
+        matchedRules: options.trigger.matchedRules,
         pid: options.pid,
         target: this.session.target ?? "renderer",
         sessionDirectory: this.session.directoryPath,
@@ -652,15 +642,9 @@ export class HotCpuProfiler {
     const index = this.profileCount;
     const profilePath = this.session.createProfilePath(index);
     const profileFilename = artifactFilename(profilePath);
-    const activeProfileTrigger =
-      this.activeProfileTrigger ?? {
-        triggerConsecutiveSamples: this.triggerConsecutiveSamples(),
-        triggerCpuPercent: 0,
-        triggerMode: this.config.triggerMode,
-        triggerThresholdPercent: this.triggerThresholdPercent(),
-      };
-
+    const activeProfileTrigger = this.activeProfileTrigger;
     try {
+      if (!activeProfileTrigger) throw new Error("CPU profile has no trigger");
       const current = await this.finishRecording();
       const profile = joinCpuProfiles(this.previousRecording
         ? [this.previousRecording, current]
@@ -742,8 +726,7 @@ export class HotCpuProfiler {
     }
 
     this.samplingPausedForProfile = false;
-    this.previousCumulativeCpuSeconds = null;
-    this.previousSampleAtMs = null;
+    this.resetSamples();
     if (this.stopped || this.intervalTimer || this.isTargetDestroyed()) {
       return;
     }
