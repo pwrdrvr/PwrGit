@@ -12,21 +12,23 @@ const repo: BulkSyncRepoInput = {
   worktrees: [{ id: "main", branch: "main", path: "/bulk-cancel-fixture" }]
 };
 
-type Probe = "remote" | "remote_config" | "status" | "state" | "branch" | "head" | "upstream_name" | "upstream_head" | "branch_remote" | "ancestry";
-const probes: Probe[] = ["remote", "remote_config", "status", "state", "branch", "head", "upstream_name", "upstream_head", "branch_remote", "ancestry"];
+type Probe = "remote" | "remote_config" | "status" | "state" | "upstream_name" | "upstream_head" | "branch_remote" | "ancestry";
+const probes: Probe[] = ["remote", "remote_config", "status", "state", "upstream_name", "upstream_head", "branch_remote", "ancestry"];
+const localHead = "1".repeat(40);
+const upstreamHead = "2".repeat(40);
 
 /** Script a clean, attached branch behind its fetched upstream. The property
  * tests cancellation classification, independently of Git's state derivation. */
-function scenario(intercept: (probe: Probe | "merge", options?: GitExecOptions) => Promise<boolean>) {
+function scenario(intercept: (probe: Probe | "merge" | "verify_head", options?: GitExecOptions) => Promise<boolean>) {
   let updated = false;
   const git: GitExec = async (args, _cwd, options) => {
     const command = args[0];
-    const probe: Probe | "merge" | undefined = command === "remote" ? "remote" :
+    const probe: Probe | "merge" | "verify_head" | undefined = command === "remote" ? "remote" :
       command === "config" ? (args.at(-1)?.endsWith("skipFetchAll") ? "remote_config" : "branch_remote") :
-      command === "status" ? "status" : command === "branch" ? "branch" :
+      command === "status" ? "status" :
       command === "merge-base" ? "ancestry" : command === "merge" ? "merge" :
       command === "rev-parse" ? (args.includes("--git-path") ? "state" :
-        args.at(-1) === "HEAD" ? "head" : args.includes("--abbrev-ref") ? "upstream_name" : "upstream_head") : undefined;
+        args.at(-1) === "HEAD" ? "verify_head" : args.includes("--abbrev-ref") ? "upstream_name" : "upstream_head") : undefined;
     if (probe !== undefined && await intercept(probe, options)) {
       return err({ kind: "git", code: "aborted", message: "Stopped at a probe." });
     }
@@ -34,12 +36,17 @@ function scenario(intercept: (probe: Probe | "merge", options?: GitExecOptions) 
     let exitCode = 0;
     if (probe === "remote") stdout = "origin\n";
     else if (probe === "remote_config") exitCode = 1;
-    else if (probe === "branch") stdout = "main\n";
-    else if (probe === "head") stdout = updated ? "upstream\n" : "local\n";
+    else if (probe === "verify_head") stdout = updated ? `${upstreamHead}\n` : `${localHead}\n`;
     else if (probe === "upstream_name") stdout = "origin/main\n";
-    else if (probe === "upstream_head") stdout = "upstream\n";
+    else if (probe === "upstream_head") stdout = `${upstreamHead}\n`;
     else if (probe === "branch_remote") stdout = "origin\n";
-    else if (probe === "state") stdout = args.filter((_, i) => args[i - 1] === "--git-path").map((path) => `/nonexistent-bulk-cancel-fixture/${path}\n`).join("");
+    else if (probe === "state") {
+      const paths = args.filter((_, i) => args[i - 1] === "--git-path");
+      stdout = [
+        ...paths.map((path) => `/nonexistent-bulk-cancel-fixture/${path}`),
+        localHead, "refs/heads/main", ""
+      ].join("\n");
+    }
     else if (probe === "merge") updated = true;
     return ok({ stdout, stderr: "", exitCode });
   };
@@ -78,7 +85,7 @@ async function assertMutationFinishes(stage: "merge" | "verification", ending: "
   let lockHeld = false;
   let settled = false;
   const { git } = scenario(async (probe, options) => {
-    const block = stage === "merge" ? probe === "merge" : probe === "head" && mergeStarted;
+    const block = stage === "merge" ? probe === "merge" : probe === "verify_head" && mergeStarted;
     if (probe === "merge") mergeStarted = true;
     if (block) {
       heldOptions = options;
@@ -104,7 +111,7 @@ async function assertMutationFinishes(stage: "merge" | "verification", ending: "
     expect(settled).toBe(false);
     release();
     const summary = await operation;
-    expect(summary.results[0]?.worktrees[0]).toMatchObject({ outcome: "updated", afterHead: "upstream" });
+    expect(summary.results[0]?.worktrees[0]).toMatchObject({ outcome: "updated", afterHead: upstreamHead });
     expect(lockHeld).toBe(false);
   } finally {
     release();

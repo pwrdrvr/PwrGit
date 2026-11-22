@@ -233,6 +233,54 @@ describe("bulk pull remote preflight, with Git as the oracle", () => {
     expect(git(f.path, "rev-parse", "HEAD")).toBe(target);
     expect(f.calls.filter((c) => c.args[0] === "status" && c.args.includes("--untracked-files=all")).map((c) => c.cwd)).toEqual([f.path, f.path]);
     expect(f.calls.filter((c) => c.args[0] === "status" && c.args.includes("--untracked-files=no")).map((c) => c.cwd)).toEqual([path]);
+    // Both live inspections still read status and operation markers. Each
+    // operation-path lookup also resolves branch and HEAD in the same child.
+    // The only separate HEAD read verifies the completed merge.
+    expect(f.calls.filter((c) => c.args[0] === "branch")).toHaveLength(0);
+    expect(f.calls.filter((c) => c.args[0] === "rev-parse" && c.args.at(-1) === "HEAD")).toHaveLength(1);
+  });
+
+  it.each(["head", "upstream", "dirt"])("rechecks %s after the first live inspection", async (change) => {
+    const f = fixture();
+    const before = git(f.path, "rev-parse", "HEAD");
+    f.advance();
+    git(f.path, "branch", "--track", "replacement", "origin/main");
+    git(f.publisher, "push", "origin", "main:other");
+
+    let changed = false;
+    const exec: GitExec = async (args, cwd, options) => {
+      const result = await f.exec(args, cwd, options);
+      if (args[0] === "merge-base" && !changed) {
+        changed = true;
+        if (change === "head") git(f.path, "switch", "replacement");
+        if (change === "upstream") git(f.path, "branch", "--set-upstream-to", "origin/other");
+        if (change === "dirt") writeFileSync(join(f.path, "untracked.txt"), "keep");
+      }
+      return result;
+    };
+    const outcome = await bulkSyncRepositories(exec, [f.input], { operationId: "race", mode: "soft-pull" });
+    expect(changed).toBe(true);
+    expect(outcome.results[0]?.worktrees[0]?.reason).toBe(change === "dirt" ? "dirty" : "unsafe_state");
+    expect(f.calls.some((call) => call.args[0] === "merge")).toBe(false);
+    expect(git(f.path, "rev-parse", "HEAD")).toBe(before);
+  });
+
+  it("handles an ambiguous HEAD ref through the individual checkout probes", async () => {
+    const f = fixture();
+    const target = f.advance();
+    git(f.path, "update-ref", "refs/tags/HEAD", "HEAD");
+    const result = await f.run();
+    expect(result.counts.worktrees.updated).toBe(1);
+    expect(f.calls.filter((c) => c.args[0] === "branch")).toHaveLength(2);
+    expect(git(f.path, "rev-parse", "HEAD")).toBe(target);
+  });
+
+  it("reports an unborn branch without attempting a merge", async () => {
+    const f = fixture();
+    git(f.path, "switch", "--orphan", "unborn");
+    const result = await f.run();
+    expect(result.results[0]?.worktrees[0]).toMatchObject({ branch: "unborn", reason: "no_head" });
+    expect(f.calls.some((call) => call.args[0] === "merge")).toBe(false);
   });
 
   it("notices an external reset even after an unchanged check", async () => {

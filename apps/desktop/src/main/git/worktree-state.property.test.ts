@@ -151,4 +151,27 @@ describe.each(["regressions", 0, 1, 2, 3, 4] as const)("worktree default ancestr
     expect(state).toMatchObject({ head: commits[0], mergedIntoDefault: true, behindDefault: 1 });
     expect(git(linked, "rev-parse", "HEAD")).toBe(commits[6]);
   });
+
+  it("shares concurrent default-ref validation and checks the ref again on the next read", async () => {
+    const countedGit: GitExec = (args, cwd, options) => {
+      calls.push([...args]);
+      return realGit(args, cwd, options);
+    };
+    const isolated = new WorktreeStateService(db, countedGit);
+    await isolated.resolveDefaultBranch("shared", primary);
+    calls = [];
+    const defaults = await Promise.all(
+      Array.from({ length: 4 }, () => isolated.resolveDefaultBranch("shared", primary))
+    );
+    expect(defaults).toEqual(Array.from({ length: 4 }, () => ({ name: "main", ref: "main" })));
+    expect(calls).toEqual([["rev-parse", "--verify", "--quiet", "refs/heads/main^{commit}"]]);
+
+    git(primary, "branch", "-m", "main", "master");
+    try {
+      const live = await isolated.resolveDefaultBranch("shared", primary);
+      expect(live).toEqual({ name: "master", ref: "master" });
+    } finally {
+      git(primary, "branch", "-m", "master", "main");
+    }
+  });
 });

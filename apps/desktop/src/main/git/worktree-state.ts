@@ -215,6 +215,7 @@ export function stateChanged(a: WorktreeState, b: WorktreeState): boolean {
 export class WorktreeStateService {
   /** Per-repo default branch (ref + name), cached while its ref resolves. */
   private readonly defaultBranch = new Map<string, CachedDefaultBranch>();
+  private readonly pendingDefaultBranches = new Map<string, Promise<ResolvedDefaultBranch>>();
 
   /** Probes currently running git for a worktree (removal drains these). */
   private readonly inFlight = new Map<string, Set<Promise<unknown>>>();
@@ -363,6 +364,25 @@ export class WorktreeStateService {
    * Cached per repo while the chosen ref continues to resolve to a commit.
    */
   async resolveDefaultBranch(
+    repoId: string,
+    repoPath: string
+  ): Promise<ResolvedDefaultBranch> {
+    // Siblings in a family refresh ask the same question from the same cwd.
+    // Share only a running read. Later refreshes must still check that the ref
+    // resolves, and other cwd values may have different Git configuration.
+    const key = JSON.stringify([repoId, repoPath]);
+    const pending = this.pendingDefaultBranches.get(key);
+    if (pending !== undefined) return pending;
+    const read = this.readDefaultBranch(repoId, repoPath);
+    this.pendingDefaultBranches.set(key, read);
+    try {
+      return await read;
+    } finally {
+      this.pendingDefaultBranches.delete(key);
+    }
+  }
+
+  private async readDefaultBranch(
     repoId: string,
     repoPath: string
   ): Promise<ResolvedDefaultBranch> {

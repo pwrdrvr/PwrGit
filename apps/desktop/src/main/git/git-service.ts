@@ -3660,7 +3660,8 @@ export function parseBranchRefs(
  */
 export async function listBranches(
   git: GitExec,
-  cwd: string
+  cwd: string,
+  remoteNames?: Promise<Result<string[]>>
 ): Promise<Result<BranchRef[]>> {
   const [raw, remotes] = await Promise.all([
     git(
@@ -3673,7 +3674,7 @@ export async function listBranches(
       ],
       cwd
     ),
-    listRemoteNames(git, cwd)
+    remoteNames ?? listRemoteNames(git, cwd)
   ]);
   if (!raw.ok) return raw;
   const checked = requireExit0(raw.value, ["for-each-ref"]);

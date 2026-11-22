@@ -372,21 +372,38 @@ async function inspectWorktree(
   }
 
   report("Checking for in-progress Git operations…");
-  // One rev-parse names every state file; their presence is what `git
-  // status` reads too. Pseudo-refs read through `rev-parse --verify` were
-  // wrong both ways: AUTO_MERGE and REBASE_HEAD outlive the operation that
-  // wrote them, and BISECT_START holds a branch name, so it never resolved.
-  const statePaths = await git(
-    ["rev-parse", ...BULK_OPERATION_STATE_PATHS.flatMap((path) => ["--git-path", path])],
+  // Resolve the operation paths, HEAD's object id, and then its full ref
+  // name in one invocation. --symbolic-full-name applies to the second
+  // HEAD argument. The trailing -- keeps filenames out of revision parsing.
+  const pathArgs = BULK_OPERATION_STATE_PATHS.flatMap((path) => ["--git-path", path]);
+  const checkout = await git(
+    ["rev-parse", ...pathArgs, "--revs-only", "HEAD", "--symbolic-full-name", "HEAD", "--"],
     worktree.path,
     NO_OPTIONAL_LOCKS
   );
-  if (!statePaths.ok || statePaths.value.exitCode !== 0) {
+  if (!checkout.ok) {
     return unsafeProbe(worktree, "Git could not inspect in-progress operations.");
   }
+  const lines = checkout.value.stdout.trimEnd().split(/\r?\n/);
+  const pathCount = BULK_OPERATION_STATE_PATHS.length;
+  const headOid = lines[pathCount];
+  const headRef = lines[pathCount + 1];
+  const branchPrefix = "refs/heads/";
+  const batched = checkout.value.exitCode === 0 && lines.length === pathCount + 2 &&
+    headOid !== undefined && /^(?:[a-f0-9]{40}|[a-f0-9]{64})$/.test(headOid) &&
+    headRef !== undefined && (headRef === "HEAD" || headRef.startsWith(branchPrefix));
+  let paths = lines.slice(0, pathCount);
+  if (!batched) {
+    // An unborn or ambiguous HEAD may produce a partial answer. Keep the
+    // individual queries for those cases, including operation detection.
+    const statePaths = await checked(git, ["rev-parse", ...pathArgs], worktree.path);
+    if (!statePaths.ok) {
+      return unsafeProbe(worktree, "Git could not inspect in-progress operations.");
+    }
+    paths = statePaths.value.stdout.split("\n");
+  }
   const present = await Promise.all(
-    statePaths.value.stdout
-      .split("\n")
+    paths
       .map((path) => path.trim())
       .filter(Boolean)
       .map((path) =>
@@ -413,11 +430,16 @@ async function inspectWorktree(
   const dirty = statusLines.length > 0;
 
   report("Reading branch and upstream…");
-  const branchRaw = await checked(git, ["branch", "--show-current"], worktree.path);
-  if (!branchRaw.ok) {
-    return unsafeProbe(worktree, "Git could not inspect the checked-out branch.");
+  let branch: string;
+  if (batched) {
+    branch = headRef === "HEAD" ? "" : headRef.slice(branchPrefix.length);
+  } else {
+    const branchRaw = await checked(git, ["branch", "--show-current"], worktree.path);
+    if (!branchRaw.ok) {
+      return unsafeProbe(worktree, "Git could not inspect the checked-out branch.");
+    }
+    branch = branchRaw.value.stdout.trim();
   }
-  const branch = branchRaw.value.stdout.trim();
   if (branch === "") {
     return {
       kind: "result",
@@ -430,8 +452,12 @@ async function inspectWorktree(
     };
   }
 
-  const headRaw = await checked(git, ["rev-parse", "--verify", "HEAD"], worktree.path);
-  if (!headRaw.ok || headRaw.value.stdout.trim() === "") {
+  let head = batched ? headOid : "";
+  if (!batched) {
+    const headRaw = await checked(git, ["rev-parse", "--verify", "HEAD"], worktree.path);
+    if (headRaw.ok) head = headRaw.value.stdout.trim();
+  }
+  if (head === "") {
     return {
       kind: "result",
       value: worktreeResult(worktree, {
@@ -442,8 +468,6 @@ async function inspectWorktree(
       })
     };
   }
-  const head = headRaw.value.stdout.trim();
-
   const upstreamNameRaw = await git(
     ["rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}"],
     worktree.path,

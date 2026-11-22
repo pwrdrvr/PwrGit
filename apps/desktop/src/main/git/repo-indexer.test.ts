@@ -525,10 +525,18 @@ describe("RepoIndexer", () => {
       email: "slash@example.com",
       roots: []
     });
-    const isolatedIndexer = new RepoIndexer(isolatedDb, systemGit);
-    expect(
-      (await isolatedIndexer.indexRepoAt(profile.id, repoPath)).ok
-    ).toBe(true);
+    const calls: string[] = [];
+    const countedGit: GitExec = (args, cwd, options) => {
+      calls.push(args[0]!);
+      return systemGit(args, cwd, options);
+    };
+    const isolatedIndexer = new RepoIndexer(isolatedDb, countedGit);
+    const indexed = await isolatedIndexer.indexRepoAt(profile.id, repoPath);
+    if (!indexed.ok) throw new Error(indexed.error.message);
+    calls.length = 0;
+    expect((await isolatedIndexer.refreshRepoRemoteBranches(indexed.value.id)).ok).toBe(true);
+    // Parsing and indexing must agree on remote boundaries from one listing.
+    expect(calls.sort()).toEqual(["for-each-ref", "remote"]);
 
     expect(isolatedIndexer.searchAll("release")).toContainEqual(
       expect.objectContaining({

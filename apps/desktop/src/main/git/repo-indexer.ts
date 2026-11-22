@@ -239,9 +239,11 @@ async function listIndexedBranches(
   git: GitExec,
   cwd: string
 ): Promise<Result<IndexedBranches>> {
+  // Parse remote-tracking refs and index them against the same list of names.
+  const remotes = listRemoteNames(git, cwd);
   const [branches, remoteNames] = await Promise.all([
-    listBranches(git, cwd),
-    listRemoteNames(git, cwd)
+    listBranches(git, cwd, remotes),
+    remotes
   ]);
   if (!branches.ok) return branches;
   if (!remoteNames.ok) return remoteNames;
