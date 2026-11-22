@@ -30,6 +30,12 @@ export type StackStep = {
   newTip?: string;
   proof?: { preserved: number; dropped: Patch[] };
   conflict?: { commit: string; files: string[] };
+  resolved?: boolean;
+};
+
+export type ResolvedStackStep = {
+  branch: string; oldTip: string; newBase: string; newTip: string;
+  previousProof?: StackStep["proof"];
 };
 
 export interface StackPlan {
@@ -60,4 +66,5 @@ export interface ApplyHooks {
   beforeTransaction?: () => Promise<void>;
   begin?: (entry: { direction: "apply" | "undo"; receipt: StackReceipt; worktrees: WorktreeFollow[] }) => Promise<void>;
   finish?: () => Promise<void>;
+  abort?: () => Promise<void>;
 }

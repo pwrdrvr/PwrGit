@@ -109,17 +109,21 @@ export class GhStackCatalogStore implements CatalogStore {
     }
   }
 
-  async journalBlocker(commonDir: string): Promise<string | undefined> {
+  async journalBlocker(commonDir: string, allowOwn = false): Promise<string | undefined> {
     for (const [file, message] of Object.entries(foreignJournals)) {
       if (await exists(join(commonDir, file))) return message;
     }
-    if (await exists(join(commonDir, journal))) return "PwrGit has an unfinished stack operation in this clone";
+    if (!allowOwn && await exists(join(commonDir, journal))) return "PwrGit has an unfinished stack operation in this clone";
     return undefined;
   }
 
   withOperationLock<T>(commonDir: string, fn: () => Promise<T>): Promise<T> {
+    return this.withJournalLock(commonDir, false, fn);
+  }
+
+  withJournalLock<T>(commonDir: string, allowOwn: boolean, fn: () => Promise<T>): Promise<T> {
     return this.locks.withLock(commonDir, "operation", async () => {
-      const blocker = await this.journalBlocker(commonDir);
+      const blocker = await this.journalBlocker(commonDir, allowOwn);
       if (blocker) throw new Error(blocker);
       return fn();
     });
@@ -137,13 +141,27 @@ export class GhStackCatalogStore implements CatalogStore {
     });
   }
 
+  async readJournal(commonDir: string): Promise<unknown> {
+    try { return JSON.parse(await readFile(join(commonDir, journal), "utf8")); }
+    catch (error) {
+      if (!missing(error)) throw error;
+      return undefined;
+    }
+  }
+
+  writeJournal(commonDir: string, value: unknown): Promise<void> {
+    return this.atomicWrite(commonDir, journal, value);
+  }
+
+  async removeJournal(commonDir: string): Promise<void> {
+    await unlink(join(commonDir, journal));
+    await syncDirectory(commonDir);
+  }
+
   journalHooks(commonDir: string): ApplyHooks {
     return {
-      begin: async entry => this.atomicWrite(commonDir, journal, entry),
-      finish: async () => {
-        await unlink(join(commonDir, journal));
-        await syncDirectory(commonDir);
-      },
+      begin: entry => this.writeJournal(commonDir, entry),
+      finish: () => this.removeJournal(commonDir),
     };
   }
 

@@ -1,9 +1,11 @@
-import { useState } from "react";
-import type { Repo, RepositoryStack, StackLayer, StackPosition } from "@pwrgit/shared";
+import { useLayoutEffect, useRef, useState } from "react";
+import type { Repo, RepositoryStack, StackAction, StackLayer, StackPosition } from "@pwrgit/shared";
 import { RefreshGlyph } from "../../lib/RefreshGlyph";
 import { useViewportTooltip } from "../../lib/useViewportTooltip";
 import { SectionGlyph, steppedTooltip } from "../sidebar/section-fit";
 import { SectionChevron } from "../sidebar/SectionChevron";
+import { prefersReducedMotion } from "../../lib/reducedMotion";
+import { StackBranchActions } from "./StackToolbar";
 import { PrChip } from "../sidebar/PrChip";
 import { useStackNavigation } from "./stack-navigation";
 import "./stacks.css";
@@ -40,7 +42,9 @@ function StackSignals({ layer }: { layer: StackLayer }) {
   </span>;
 }
 
-export function StacksSidebar({ repo, stacks }: { repo: Repo; stacks: RepositoryStack[] }) {
+export function StacksSidebar({ repo, stacks, writable = false }: {
+  repo: Repo; stacks: RepositoryStack[]; writable?: boolean;
+}) {
   const navigation = useStackNavigation();
   const [expanded, setExpanded] = useState(true);
   const tip = useViewportTooltip();
@@ -76,6 +80,8 @@ export function StacksSidebar({ repo, stacks }: { repo: Repo; stacks: Repository
             <span className="stack-sidebar__branch">{layer.branch}</span>
             <span className="stack-sidebar__ordinal">{index + 1}/{stack.layers.length}</span>
             <StackSignals layer={layer} />
+            {writable && stack.source === "tracked" && <StackBranchActions name={layer.branch}
+              onPlan={action => navigation.select({ repoId: repo.id, stack, action })} />}
           </li>)}
           <li className="stack-sidebar__trunk"><span className="stack-sidebar__branch">{stack.trunk.branch}</span><small>Trunk</small></li>
         </ol>
@@ -85,9 +91,30 @@ export function StacksSidebar({ repo, stacks }: { repo: Repo; stacks: Repository
   </div>;
 }
 
-export function StackView({ stack, repoId, onClose, onShowRail }: {
+export function StackView({ stack, repoId, onClose, onShowRail, toolbar, onPlan, runningBranch, fresh }: {
   stack: RepositoryStack; repoId: string; onClose: () => void; onShowRail?: () => void;
+  toolbar?: React.ReactNode;
+  onPlan?: (action: StackAction) => void;
+  runningBranch?: string;
+  fresh?: ReadonlySet<string>;
 }) {
+  const cards = useRef<HTMLOListElement>(null);
+  const positions = useRef(new Map<string, number>());
+  useLayoutEffect(() => {
+    const next = new Map<string, number>();
+    for (const card of cards.current?.querySelectorAll<HTMLElement>("[data-stack-branch]") ?? []) {
+      const branch = card.dataset["stackBranch"]!;
+      const top = card.offsetTop;
+      const previous = positions.current.get(branch);
+      if (previous !== undefined && previous !== top && !prefersReducedMotion()) {
+        card.animate([{ transform: `translateY(${previous - top}px)` }, { transform: "none" }], {
+          duration: 360, easing: "cubic-bezier(.2, .8, .2, 1)",
+        });
+      }
+      next.set(branch, top);
+    }
+    positions.current = next;
+  }, [stack]);
   return <section className="stack-view" aria-label="Stack" onKeyDown={event => {
     if (event.key === "Escape") { event.stopPropagation(); onClose(); }
   }}>
@@ -97,14 +124,18 @@ export function StackView({ stack, repoId, onClose, onShowRail }: {
       <small>{stack.layers.length} {stack.layers.length === 1 ? "branch" : "branches"}</small>
       {stack.source === "inferred" && <span className="stack-health-badge">Inferred</span>}
       {onShowRail && <button type="button" className="stack-button" onClick={onShowRail}>Show panel</button>}
+      {toolbar}
     </header>
-    <ol className="stack-view__cards">
-      {stack.layers.map((layer, index) => <li key={layer.branch} className={`stack-card${layer.health.needsRestack ? " is-stale" : ""}`}>
+    <ol ref={cards} className="stack-view__cards">
+      {stack.layers.map((layer, index) => <li key={layer.branch} data-stack-branch={layer.branch}
+        className={`stack-card${layer.health.needsRestack ? " is-stale" : ""}${fresh?.has(layer.branch) ? " is-fresh" : ""}`}>
+        {runningBranch === layer.branch && <span className="stack-card__scanner" aria-hidden="true" />}
         <div className="stack-card__line">
           <span className="stack-card__ordinal">{index + 1}/{stack.layers.length}</span>
           <strong>{layer.branch}</strong>
           {layer.pr && <PrChip pr={layer.pr} repoId={repoId} />}
           {layer.pr && <span className="stack-card__pr-title">{layer.pr.title}</span>}
+          {onPlan && stack.source === "tracked" && <StackBranchActions name={layer.branch} onPlan={onPlan} />}
         </div>
         <div className="stack-card__line stack-card__detail">
           <span>on {layer.parent}</span>

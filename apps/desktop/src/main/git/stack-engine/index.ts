@@ -1,7 +1,7 @@
 import { parseGhStackCatalog, requireWritableCatalog, type GhStackCatalog } from "./catalog";
 import { isOid, StackGit } from "./git";
 import { planStack } from "./plan";
-import type { ApplyHooks, CatalogStore, GitRunner, StackOperation, StackPlan, StackReceipt } from "./types";
+import type { ApplyHooks, CatalogStore, GitRunner, ResolvedStackStep, StackOperation, StackPlan, StackReceipt } from "./types";
 
 export * from "./catalog";
 export * from "./types";
@@ -23,8 +23,8 @@ export class StackEngine {
     this.git = new StackGit(runner, cwd);
   }
 
-  plan(operation: StackOperation): Promise<StackPlan> {
-    return planStack(this.git, this.store, this.commonDir, operation);
+  plan(operation: StackOperation, resolved: ResolvedStackStep[] = []): Promise<StackPlan> {
+    return planStack(this.git, this.store, this.commonDir, operation, resolved);
   }
 
   async apply(plan: StackPlan, id: string, when: number, hooks: ApplyHooks = {}, cleanPrefix = false): Promise<StackReceipt> {
@@ -61,7 +61,7 @@ export class StackEngine {
         const absent = await this.git.run(["show-ref", "--exists", `${prefix}/receipt`]).then(
           result => result.exitCode === 2, () => false,
         );
-        if (absent) await hooks.finish?.();
+        if (absent) await (hooks.abort ?? hooks.finish)?.();
         throw error;
       }
       await this.finish("apply", receipt, sha256, receipt.moves, worktrees, hooks);
@@ -92,7 +92,7 @@ export class StackEngine {
         await this.git.transaction(moves, {});
       } catch (error) {
         const unchanged = await this.tipsUnchanged(moves).catch(() => false);
-        if (unchanged) await hooks.finish?.();
+        if (unchanged) await (hooks.abort ?? hooks.finish)?.();
         throw error;
       }
       await this.finish("undo", receipt, sha256, moves, worktrees, hooks);

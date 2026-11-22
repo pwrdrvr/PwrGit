@@ -1,12 +1,15 @@
 import { useState } from "react";
 import { createRoot } from "react-dom/client";
-import { ok, type ChangeRequestList, type Repo, type RepositoryStack, type StackPosition } from "@pwrgit/shared";
+import { ok, type ChangeRequestList, type Repo, type RepositoryStack, type StackAction, type StackPlanPreview, type StackPosition } from "@pwrgit/shared";
 import "@fontsource/geist-sans/400.css";
 import "@fontsource/geist-sans/600.css";
 import "@fontsource/geist-mono/500.css";
 import "../../../src/renderer/src/styles/app.css";
 import { RepoChangeRequestSection } from "../../../src/renderer/src/features/sidebar/RepoChangeRequestSection";
 import { GraphRow } from "../../../src/renderer/src/features/graph/GraphRow";
+import { StackPlanRail } from "../../../src/renderer/src/features/stacks/StackPlanRail";
+import { StackToolbar } from "../../../src/renderer/src/features/stacks/StackToolbar";
+import { useStackOperation } from "../../../src/renderer/src/features/stacks/useStackOperation";
 import { StackRail, StackView } from "../../../src/renderer/src/features/stacks/StackViews";
 import { StackNavigationContext, type StackPick } from "../../../src/renderer/src/features/stacks/stack-navigation";
 import { useHoverIntent } from "../../../src/renderer/src/lib/hoverIntent";
@@ -41,11 +44,32 @@ const pulls: ChangeRequestList = {
 };
 const positions = new Map<string, StackPosition>(stack.layers.map((layer, index) => [layer.branch, { stack, layer, index: index + 1 }]));
 
+let currentStack = stack;
+let mockedPlan: StackPlanPreview;
+const makePlan = (action: StackAction): StackPlanPreview => ({
+  id: "fixture-operation", action, cleanPrefix: false, blocked: [],
+  steps: stack.layers.slice(1).map((layer, index) => ({
+    branch: layer.branch, parent: layer.parent, oldBase: layer.base!, newBase: String(5 + index).repeat(40),
+    oldTip: layer.head!, newTip: String(6 + index).repeat(40), proof: { preserved: index + 1, dropped: [] },
+  })),
+  moves: stack.layers.slice(1).map((layer, index) => ({ branch: layer.branch, old: layer.head!, next: String(6 + index).repeat(40) })),
+});
 Object.assign(window, { pwrgit: {
   profileId, platform: "darwin", on: () => noop,
-  dispatch: async (name: string) => {
+  dispatch: async (name: string, payload: unknown) => {
     if (name === "pr:openList") return ok(pulls);
-    if (name === "stack:list") return ok({ schemaVersion: 1, readOnly: false, stacks: [stack] });
+    if (name === "stack:list") return ok({ schemaVersion: 1, readOnly: false, stacks: [currentStack] });
+    if (name === "stack:plan") {
+      mockedPlan = makePlan((payload as { action: StackAction }).action);
+      return ok(mockedPlan);
+    }
+    if (name === "stack:apply") {
+      currentStack = { ...stack, layers: stack.layers.map(layer => ({
+        ...layer, head: mockedPlan.moves.find(move => move.branch === layer.branch)?.next ?? layer.head!,
+        health: { ...layer.health, inSync: true, needsRestack: false },
+      })) };
+      return ok({ operationId: "fixture-operation", plan: mockedPlan, stack: currentStack });
+    }
     return ok(null);
   },
 } });
@@ -54,9 +78,11 @@ window.localStorage.setItem("pwrgit.changeRequestsOpen.orbit", "1");
 
 function Harness() {
   const [enabled, setEnabled] = useState(false);
+  const [operations, setOperations] = useState(false);
   const [pick, select] = useState<StackPick | null>(null);
   const hoverIntent = useHoverIntent();
-  Object.assign(window, { showStacks: () => setEnabled(true) });
+  const controls = useStackOperation(operations ? repo : undefined, pick?.stack.id, (repoId, updated) => select({ repoId, stack: updated }), noop);
+  Object.assign(window, { showStacks: () => setEnabled(true), showOperations: () => setOperations(true) });
   return <StackNavigationContext.Provider value={enabled ? { pick, select } : null}>
     <div className="app" style={{ height: "100vh" }}>
       <div className="app-body" style={{ gridTemplateColumns: "300px minmax(0, 1fr) 252px" }}>
@@ -68,7 +94,11 @@ function Harness() {
           </div>
         </aside>
         <main className="pane pane--main">
-          {pick ? <StackView stack={pick.stack} repoId={repo.id} onClose={() => select(null)} /> :
+          {pick ? <StackView stack={pick.stack} repoId={repo.id} onClose={() => select(null)}
+            {...(operations ? {
+              toolbar: <StackToolbar stack={pick.stack} disabled={controls.pending !== null} onPlan={action => void controls.requested(action)} />,
+              onPlan: (action: StackAction) => void controls.requested(action),
+            } : {})} /> :
             <div className="graph-card" style={{ margin: 14 }}>
               {[...stack.layers].reverse().map((layer, index) => <GraphRow key={layer.branch}
                 vm={{
@@ -84,7 +114,9 @@ function Harness() {
               />)}
             </div>}
         </main>
-        {pick && <StackRail stack={pick.stack} onCollapse={() => select(null)} />}
+        {pick && (operations && (controls.stage.phase !== "idle" || controls.pending)
+          ? <StackPlanRail controls={controls} onCollapse={() => select(null)} onOpenWorktree={noop} /> :
+            <StackRail stack={pick.stack} onCollapse={() => select(null)} />)}
       </div>
     </div>
   </StackNavigationContext.Provider>;

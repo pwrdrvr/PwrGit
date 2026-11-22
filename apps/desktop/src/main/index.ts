@@ -196,6 +196,7 @@ import { mcpExecutablePath } from "./agent-access/mcp-executable";
 import { NativeStackLocks } from "./git/stack-catalog-store";
 import { StackReader, stackRunner } from "./git/stack-reader";
 import { registerStackReadHandlers } from "./git/stack-read-handlers";
+import { registerStackWriteHandlers } from "./git/stack-write-handlers";
 import { AgentAccessService } from "./agent-access/agent-access-service";
 import { registerAgentAccessHandlers } from "./agent-access/agent-access-handlers";
 import { initLogConsole } from "./log-console";
@@ -905,6 +906,19 @@ if (!gotSingleInstanceLock) {
       (repoId, branch) => prService.cachedBranchPrObservation(repoId, branch)
     );
     registerStackReadHandlers(bus, id => indexer.getRepo(id), stackReader);
+    registerStackWriteHandlers(bus, {
+      findRepo: id => indexer.getRepo(id),
+      findProfile: id => profiles.get(id),
+      reader: stackReader,
+      git: execGit,
+      queue: worktreeOperations,
+      changed: async repo => {
+        await indexer.refreshRepoWorktrees(repo.id);
+        emitEvent("stack:changed", { repoId: repo.id, profileId: repo.profileId });
+        for (const worktree of repo.worktrees) emitEvent("changes:changed", { worktreeId: worktree.id });
+        await refresher.refreshRepoWorktrees(repo.id);
+      },
+    });
     const avatarThumbnails = new GitHubAvatarThumbnailCache(db, {
       cacheDir: join(app.getPath("userData"), "cache", "github-avatar-thumbnails")
     });

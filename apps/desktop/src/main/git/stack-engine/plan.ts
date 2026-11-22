@@ -1,7 +1,7 @@
 import { requireWritableCatalog, type GhStack, type GhStackBranch, type GhStackCatalog } from "./catalog";
 import { isOid, StackGit } from "./git";
 import { replayStep } from "./replay";
-import type { CatalogStore, StackOperation, StackPlan } from "./types";
+import type { CatalogStore, ResolvedStackStep, StackOperation, StackPlan, StackStep } from "./types";
 
 export function stackRoot(stack: GhStack): string | undefined {
   return stack.branches[0]?.branch;
@@ -18,7 +18,7 @@ function requireTip(tips: StackPlan["expectedTips"], branch: string): string {
   return tip;
 }
 
-async function restack(git: StackGit, plan: StackPlan, stack: GhStack, first: number) {
+async function restack(git: StackGit, plan: StackPlan, stack: GhStack, first: number, resolved: ResolvedStackStep[]) {
   const tips = plan.expectedTips;
   const parentAt = (index: number) => stack.branches[index - 1] ?? stack.trunk;
   for (let index = first; index < stack.branches.length; index += 1) {
@@ -33,11 +33,19 @@ async function restack(git: StackGit, plan: StackPlan, stack: GhStack, first: nu
       layer.base = newBase;
       continue;
     }
-    const prefix = structuredClone(plan.after);
-    const step = await replayStep(git, { branch: layer.branch, parent: parent.branch, oldBase, newBase, oldTip });
+    const stepInput = { branch: layer.branch, parent: parent.branch, oldBase, newBase, oldTip };
+    const resolution = resolved.find(item => item.branch === layer.branch);
+    if (resolution && (resolution.oldTip !== oldTip || resolution.newBase !== newBase ||
+        !isOid(resolution.newTip) || !await git.ancestor(newBase, resolution.newTip))) {
+      throw new Error(`The base or tip of ${layer.branch} changed after the conflict was resolved`);
+    }
+    const step: StackStep = resolution
+      ? { ...stepInput, newTip: resolution.newTip,
+        ...(resolution.previousProof ? { proof: resolution.previousProof } : { resolved: true }) }
+      : await replayStep(git, stepInput);
     plan.steps.push(step);
     if (step.conflict) {
-      if (plan.operation.kind === "restack" && plan.moves.length) plan.cleanPrefix = prefix;
+      if (plan.operation.kind === "restack" && plan.moves.length) plan.cleanPrefix = structuredClone(plan.after);
       return;
     }
     if (!step.newTip) throw new Error(`Missing replay output for ${layer.branch}`);
@@ -58,7 +66,7 @@ function assertAdoptable(catalog: GhStackCatalog, stack: GhStack, repository: st
   }
 }
 
-export async function planStack(git: StackGit, store: CatalogStore, commonDir: string, operation: StackOperation): Promise<StackPlan> {
+export async function planStack(git: StackGit, store: CatalogStore, commonDir: string, operation: StackOperation, resolved: ResolvedStackStep[]): Promise<StackPlan> {
   const { catalog: before, sha256 } = await store.read(commonDir);
   requireWritableCatalog(before);
   const after = structuredClone(before);
@@ -106,7 +114,7 @@ export async function planStack(git: StackGit, store: CatalogStore, commonDir: s
     }
     stack.branches.splice(index, 1);
     if (!stack.branches.length) after.stacks.splice(after.stacks.indexOf(stack), 1);
-    if (child && operation.mode === "detach") await restack(git, plan, stack, index);
+    if (child && operation.mode === "detach") await restack(git, plan, stack, index, resolved);
     if (child && operation.mode === "forget") {
       // Preserve the forgotten patches in the child's range on a future restack.
       if (removed.base) child.base = removed.base;
@@ -117,7 +125,7 @@ export async function planStack(git: StackGit, store: CatalogStore, commonDir: s
     const first = from === undefined ? 0 : stack.branches.findIndex(layer => layer.branch === from);
     if (first < 0) throw new Error("The starting branch is no longer in this stack");
     if (first === 0) stack.trunk.head = requireTip(expectedTips, stack.trunk.branch);
-    await restack(git, plan, stack, first);
+    await restack(git, plan, stack, first, resolved);
   }
   plan.worktrees = await git.worktrees(plan.moves);
   plan.blocked = await git.dirtyOverlap(plan.worktrees);

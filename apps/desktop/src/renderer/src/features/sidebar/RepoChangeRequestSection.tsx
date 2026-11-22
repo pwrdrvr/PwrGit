@@ -135,7 +135,7 @@ export function RepoChangeRequestSection({
   const stackNavigation = useStackNavigation();
   const { snapshot } = useStackSnapshot(stackNavigation ? repo.id : undefined, repo.profileId);
   const stacks = snapshot?.stacks ?? [];
-  const stackSection = <StacksSidebar repo={repo} stacks={stacks} />;
+  const stackSection = <StacksSidebar repo={repo} stacks={stacks} writable={snapshot?.readOnly === false && !snapshot.busy} />;
   const tip = useViewportTooltip();
   const [open, setOpen] = usePersistedOpen(
     `pwrgit.changeRequestsOpen.${repo.id}`
