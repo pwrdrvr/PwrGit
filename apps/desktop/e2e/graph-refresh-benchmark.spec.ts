@@ -62,6 +62,10 @@ for (const dev of [true, false]) {
               const cpuMs = await cpu() - beforeCpu;
               expect(data.rows).toBe(kind === "new-commit" ? 1001 : 1000);
               expect(data.timingEnabled).toBe(timing);
+              if (kind === "refs") {
+                const movedTip = await page.evaluate(() => window.graphBench.movedOriginMainHash);
+                expect(data.originMainChips).toEqual([{ name: "origin/main", hash: movedTip }]);
+              }
               console.log(JSON.stringify({ dev, timing, sample, kind, cpuMs, taskMs, ...data }));
             }
           }

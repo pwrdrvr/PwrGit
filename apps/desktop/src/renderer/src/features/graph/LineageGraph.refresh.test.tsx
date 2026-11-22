@@ -93,21 +93,29 @@ describe("LineageGraph refresh publication", () => {
     });
 
     const row = () => container.querySelector(".graph-row");
-    await act(async () => {
+    const render = (selectedWorktreeId: string) => {
       root.render(
-        <LineageGraph repoId={repoId} repoName="Widgets" worktreeId={worktreeId}
+        <LineageGraph repoId={repoId} repoName="Widgets" worktreeId={selectedWorktreeId}
           worktreePath="/synthetic/widget" viewingBranch="main" activeEmail=""
           selectedCommits={selected} focusedCommit={hash} revealCommit={null}
           tidyOffered={false} onEditHistory={noop} onCommitsChange={search}
           onOpenCommit={navigate} onRevealWorktree={noop} onRevealCreatedWorktree={noop} />
       );
-    });
+    };
+    await act(async () => render(worktreeId));
     return {
       row, search, navigate, requests,
       async refresh(next: LaneGraph | Promise<LaneGraph>, people = initialPeople, repo = repoId) {
         nextGraph = async () => next;
         nextPeople = people;
         await act(async () => subscriptions.get("graph:changed")?.({ repoId: repo }));
+      },
+      async switchWorktree(next: LaneGraph, people: Record<string, CommitAuthorPerson>) {
+        // App clears search when the selected worktree changes.
+        search.mockClear();
+        nextGraph = async () => next;
+        nextPeople = people;
+        await act(async () => render("second-worktree"));
       },
       unmount: async () => act(async () => root.unmount())
     };
@@ -159,32 +167,37 @@ describe("LineageGraph refresh publication", () => {
     }
   });
 
-  it("preserves the first-render avatar and ignores a superseded graph response", async () => {
-    const initial = graph("Initial widget");
-    const view = await mount(initial);
-    try {
-      const stale = deferred<LaneGraph>();
-      const decoding = deferred<void>();
-      const decode = vi.fn(() => decoding.promise);
-      vi.stubGlobal("Image", class { decode = decode; });
-      const avatar = "pwrgit-avatar://thumbnail/synthetic-refresh";
-      const old = graph("Superseded widget");
-      const updated = graph("Latest widget", "widget-v3");
-      await view.refresh(stale.promise);
-      await view.refresh(updated, { [email]: { state: "linked", identity: { login: "author", avatarUrl: avatar } } });
-      expect(decode).toHaveBeenCalledOnce();
-      expect(view.row()?.textContent).toContain("Initial widget");
-      await act(async () => decoding.resolve());
-      await act(async () => stale.resolve(old));
-      expect(rowCommits.mock.calls.find(([subject]) => subject === "Latest widget")).toEqual(["Latest widget", avatar]);
-      expect(view.row()?.querySelector("img")?.getAttribute("src")).toBe(avatar);
-      expect(view.search.mock.lastCall?.[0]).toEqual(updated.commits);
-      expect(view.row()?.textContent).toContain("Latest widget");
-      expect(rowCommits.mock.calls.some(([subject]) => subject === "Superseded widget")).toBe(false);
-    } finally {
-      await view.unmount();
+  it.each(["before", "after"] as const)(
+    "keeps search ready while decoding a switched worktree's avatars with the stale reply %s decode",
+    async (staleOrder) => {
+      const initial = graph("Initial widget");
+      const view = await mount(initial);
+      try {
+        const stale = deferred<LaneGraph>();
+        const decoding = deferred<void>();
+        const decode = vi.fn(() => decoding.promise);
+        vi.stubGlobal("Image", class { decode = decode; });
+        const avatar = `pwrgit-avatar://thumbnail/synthetic-refresh-${staleOrder}`;
+        const old = graph("Superseded widget");
+        const updated = graph("Latest widget", "widget-v3");
+        await view.refresh(stale.promise);
+        await view.switchWorktree(updated, { [email]: { state: "linked", identity: { login: "author", avatarUrl: avatar } } });
+        expect(decode).toHaveBeenCalledOnce();
+        expect(view.search).toHaveBeenCalledExactlyOnceWith(updated.commits);
+        expect(view.row()?.textContent).toContain("Initial widget");
+        if (staleOrder === "before") await act(async () => stale.resolve(old));
+        await act(async () => decoding.resolve());
+        if (staleOrder === "after") await act(async () => stale.resolve(old));
+        expect(rowCommits.mock.calls.find(([subject]) => subject === "Latest widget")).toEqual(["Latest widget", avatar]);
+        expect(view.row()?.querySelector("img")?.getAttribute("src")).toBe(avatar);
+        expect(view.search).toHaveBeenCalledExactlyOnceWith(updated.commits);
+        expect(view.row()?.textContent).toContain("Latest widget");
+        expect(rowCommits.mock.calls.some(([subject]) => subject === "Superseded widget")).toBe(false);
+      } finally {
+        await view.unmount();
+      }
     }
-  });
+  );
 
   it("publishes people changes even when the graph and search results are identical", async () => {
     const initial = graph("Initial widget");

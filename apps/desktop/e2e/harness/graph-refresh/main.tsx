@@ -51,10 +51,11 @@ const additions: LaneGraph = {
   remoteTips: { ...remoteTips, [base.head]: [], [nextHash]: ["origin/main"] },
   defaultRefTips: [nextHash]
 };
+const movedOriginMainHash = trunk[1]!.hash;
 const movedRefs: LaneGraph = {
   ...base,
-  remoteTips: { ...remoteTips, [base.head]: [], [trunk[1]!.hash]: ["origin/main"] },
-  defaultRefTips: [trunk[1]!.hash]
+  remoteTips: { ...remoteTips, [base.head]: [], [movedOriginMainHash]: ["origin/main"] },
+  defaultRefTips: [movedOriginMainHash]
 };
 const people: Record<string, CommitAuthorPerson> = Object.fromEntries(
   Array.from({ length: 64 }, (_, i) => [`author${i}@example.test`, { state: "none", checkedAt: 100 }])
@@ -115,6 +116,7 @@ function App() {
 }
 const metrics = () => ({ graphRequests, peopleAnswers, searchChanges, commits: window.graphCommits });
 export const graphBench = {
+  movedOriginMainHash,
   async ready() {
     while (document.querySelectorAll(".graph-row").length < 1000) await wait(10);
     await document.fonts.ready;
@@ -131,11 +133,22 @@ export const graphBench = {
     const end = performance.now();
     const after = metrics();
     const tasks = longTasks.filter(task => task.startTime >= start && task.startTime <= end);
+    // The aligned default branch chip is compact ("origin"). Include both
+    // forms so a stale chip at the old tip also fails the ref move check.
+    const originMainChips = kind === "refs"
+      ? [...document.querySelectorAll(".ref-chip--remote .ref-chip__name")].flatMap((chip) => {
+        const name = chip.textContent;
+        return name === "origin/main" || name === "origin"
+          ? [{ name, hash: chip.closest<HTMLElement>(".graph-row")?.dataset.hash }]
+          : [];
+      })
+      : [];
     return {
       wallMs: end - start, longTasks: tasks.length, longest: Math.max(0, ...tasks.map(task => task.duration)),
       commits: after.commits - before.commits, graphRequests: after.graphRequests - before.graphRequests,
       peopleAnswers: after.peopleAnswers - before.peopleAnswers, searchChanges: after.searchChanges - before.searchChanges,
       rows: document.querySelectorAll(".graph-row").length,
+      originMainChips,
       timingEnabled: typeof console.timeStamp === "function"
     };
   }

@@ -438,12 +438,13 @@ export function LineageGraph({
         const graph = sameCommits && publishedCommits !== null
           ? { ...r.value, commits: publishedCommits }
           : r.value;
+        // Search can use the lane reply while the rows wait for avatar decode.
+        if (!sameCommits) {
+          publishedCommitsRef.current = graph.commits;
+          onCommitsChange(graph.commits);
+        }
         const publish = (): void => {
           markLineageRefresh(repoId, source, "publish");
-          if (!sameCommits) {
-            publishedCommitsRef.current = graph.commits;
-            onCommitsChange(graph.commits);
-          }
           setData((current) => samePayload(current, graph) ? current : graph);
           setLoading(false);
         };
@@ -461,7 +462,7 @@ export function LineageGraph({
             if (!active || sequence !== loadSequence) return;
           }
           // Publish graph rows only after every available local avatar is
-          // decoded. Flush people, rows and search together so a cached face
+          // decoded. Flush people and rows together so a cached face
           // is the row's first and final rendered identity even if React's
           // ambient async batching behavior changes.
           flushSync(() => {
