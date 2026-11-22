@@ -69,10 +69,12 @@ recomputation are necessary. For an ordinary wildcard remote explicitly set to
 Custom mappings and explicit tag-pruning configuration retain ordinary fetch.
 An explicit bulk Fetch always fetches.
 
-Current, ahead-only and untracked checkouts get one lightweight
+Current, ahead-only, detached and untracked checkouts get one lightweight
 `status --porcelain=v2 --branch --untracked-files=no` under their checkout lock.
 This revalidates HEAD and its live upstream relationship after networking and
 queue waits, and detects unmerged index entries even without operation markers.
+A pruned upstream can also use this path when both the ref batch and live
+status show it missing.
 Changed, pending, diverged or uncertain checkouts retain the full safety checks
 and the second inspection immediately before mutation. Cleaning a blocked
 checkout or resetting a local branch does not require another remote change.
@@ -84,7 +86,11 @@ fetch mappings retain the ordinary fetch path. Unchanged refs skip branch-index
 and full worktree-state recomputation, including after a no-change fetch.
 Changed refs (including newly followed tags), unavailable comparisons and
 checkout updates retain the family refresh, since default-branch movement can
-affect siblings' badges too. A current single-remote repository uses four Git
+affect siblings' badges too. Larger families share a Git ancestry comparison
+against a verified default commit. Each sibling still checks its own live
+status and uses checkout-local ancestry if its tip is outside the batch,
+the default moved, or the repository has special history settings. A current
+single-remote repository uses four Git
 processes plus one lightweight status per checkout; the explicit no-tags route
 uses three plus one per checkout. Published-tag checks retain their own hourly cadence and
 setting. The process-count oracle is

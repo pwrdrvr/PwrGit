@@ -136,57 +136,80 @@ export function remoteTipsUnchanged(snapshot: BulkSyncSnapshot, remote: string, 
   return local.size === heads.size && [...heads].every(([name, oid]) => local.get(name) === oid);
 }
 
-/** A shortcut only reports a read; it never authorizes a mutation. Pending,
- * diverged and uncertain checkouts always retain both pull-safety inspections. */
-export async function unchangedWorktree(
+/** A live read can settle checkouts with nothing to pull. Every possible
+ * fast-forward still needs the full inspection and its pre-merge recheck. */
+export async function inspectReadOnlyWorktree(
   git: GitExec,
-  snapshot: BulkSyncSnapshot,
+  snapshot: BulkSyncSnapshot | null,
   path: string,
   remotes: ReadonlyMap<string, BulkSyncRemoteResult>
 ): Promise<Pick<BulkSyncWorktreeResult, "branch" | "outcome" | "reason" | "message" | "beforeHead" | "afterHead"> | null> {
-  const ref = snapshot.checkouts.get(resolve(path));
-  if (ref === undefined) return null;
-  const remote = remotes.get(ref.remote);
-  if (ref.upstream !== "" && remote?.outcome !== "fetched" && remote?.reason !== "unchanged") return null;
-  const upstream = snapshot.refs.get(ref.upstream);
-  const current = upstream?.oid === ref.oid;
-  const ahead = ref.track === ">";
-  if (ref.upstream !== "" && !current && !ahead) return null;
-  if (snapshot.checkoutDependent && resolve(path) !== snapshot.path) {
-    const config = await readConfiguration(git, path);
-    if (config === null || trackingConfiguration(config) !== snapshot.configuration) return null;
-  }
+  const resolvedPath = resolve(path);
+  const ref = snapshot?.checkouts.get(resolvedPath);
+  if (ref?.track === "<" || ref?.track === "<>") return null;
+  // The filesystem path is only authoritative for normal Git discovery.
+  if (["GIT_DIR", "GIT_COMMON_DIR", "GIT_WORK_TREE"].some((key) => process.env[key] !== undefined)) return null;
+
+  let admin: string;
   try {
     const dotGit = join(path, ".git");
     const info = await stat(dotGit);
     const pointer = info.isDirectory() ? null : /^gitdir:\s*(.+?)\s*$/m.exec(await readFile(dotGit, "utf8"));
     if (!info.isDirectory() && pointer === null) return null;
-    const admin = info.isDirectory() ? dotGit : resolve(path, pointer![1]!);
-    // A branch switch after the batch snapshot must not use its predecessor's
-    // answer. Active operations keep their existing detailed refusal reasons.
-    if ((await readFile(join(admin, "HEAD"), "utf8")).trim() !== `ref: ${ref.name}`) return null;
-    const operating = await Promise.all(BULK_OPERATION_STATE_PATHS.map((name) =>
-      access(join(admin, name)).then(() => true, () => false)));
-    if (operating.some(Boolean)) return null;
+    admin = info.isDirectory() ? dotGit : resolve(path, pointer![1]!);
   } catch { return null; }
-  const branch = ref.name.slice("refs/heads/".length);
+
   // This runs under the checkout lock, after networking and queue waits.
   // Git resolves the live HEAD/upstream relationship and reads unmerged index
-  // stages, including stash-pop conflicts that have no operation marker.
-  // Omitting untracked enumeration avoids the expensive full safety scan;
-  // any uncertain or changed answer goes through that scan before mutation.
-  const raw = await git(["status", "--porcelain=v2", "--branch", "--untracked-files=no"], path, NO_OPTIONAL_LOCKS);
+  // stages. Dirt only matters when a fast-forward could change the checkout.
+  const raw = await git(["status", "--porcelain=v2", "--branch", "--ahead-behind", "--untracked-files=no"], path, NO_OPTIONAL_LOCKS);
   if (!raw.ok || raw.value.exitCode !== 0) return null;
   const lines = raw.value.stdout.split("\n");
+  const live = parseStatus(raw.value.stdout);
+  let detached: boolean;
+  try {
+    const head = (await readFile(join(admin, "HEAD"), "utf8")).trim();
+    detached = live.branch === "(detached)" && head === live.head && /^[a-f0-9]{40}(?:[a-f0-9]{24})?$/.test(head);
+    if (!detached && (live.branch === "" || head !== `ref: refs/heads/${live.branch}`)) return null;
+    const operating = await Promise.all(BULK_OPERATION_STATE_PATHS.map((name) =>
+      access(join(admin, name)).then(() => true, (cause: NodeJS.ErrnoException) => cause.code !== "ENOENT")));
+    if (operating.some(Boolean)) return null;
+  } catch { return null; }
+  const branch = live.branch;
   if (lines.some((line) => line.startsWith("u "))) return {
     branch, outcome: "skipped", reason: "conflicts", message: "The worktree has unresolved conflicts."
   };
-  const live = parseStatus(raw.value.stdout);
+  if (detached) return {
+    branch, outcome: "skipped", reason: "detached_head", message: "Detached HEADs are never moved by bulk pull."
+  };
+  if (live.head === "(initial)") return {
+    branch, outcome: "skipped", reason: "no_head", message: "The checked-out branch has no commit to fast-forward."
+  };
+  if (live.head === "") return null;
+  if (!live.hasUpstream) return {
+    branch, outcome: "skipped", reason: "no_upstream", message: "The branch has no usable upstream."
+  };
+
+  if (snapshot === null || ref === undefined || live.branch !== ref.name.slice("refs/heads/".length) || live.head !== ref.oid) return null;
   const upstreamName = lines.find((line) => line.startsWith("# branch.upstream "))?.slice(18).trim() ?? "";
   const expectedUpstream = ref.upstream.replace(/^refs\/(?:remotes|heads)\//, "");
-  if (live.branch !== branch || live.head !== ref.oid || live.upstreamGone || upstreamName !== expectedUpstream) return null;
-  if (current && (live.ahead !== 0 || live.behind !== 0)) return null;
-  if (ahead && (live.ahead <= 0 || live.behind !== 0)) return null;
-  if (current) return { branch, outcome: "up_to_date", beforeHead: ref.oid, afterHead: ref.oid };
-  return { branch, outcome: "skipped", reason: ahead ? "ahead" : "no_upstream" };
+  if (upstreamName !== expectedUpstream) return null;
+  const upstream = snapshot.refs.get(ref.upstream);
+  if (live.upstreamGone && upstream === undefined && ref.upstream.startsWith("refs/remotes/")) return {
+    branch, outcome: "skipped", reason: "no_upstream", message: "The branch has no usable upstream."
+  };
+  if (live.upstreamGone || live.behind !== 0) return null;
+  const remote = remotes.get(ref.remote);
+  if (remote?.outcome !== "fetched" && remote?.reason !== "unchanged") return null;
+  if (snapshot.checkoutDependent && resolvedPath !== snapshot.path) {
+    const config = await readConfiguration(git, path);
+    if (config === null || trackingConfiguration(config) !== snapshot.configuration) return null;
+  }
+  if (upstream?.oid === ref.oid && live.ahead === 0) return {
+    branch, outcome: "up_to_date", beforeHead: ref.oid, afterHead: ref.oid
+  };
+  if (ref.track === ">" && live.ahead > 0) return {
+    branch, outcome: "skipped", reason: "ahead", message: "The local branch is ahead; there is nothing to fast-forward."
+  };
+  return null;
 }

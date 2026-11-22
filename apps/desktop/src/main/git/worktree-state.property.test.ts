@@ -3,13 +3,16 @@ import { mkdtempSync, realpathSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import fc from "fast-check";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { openDatabase, type DB } from "../persistence/db";
 import { ProfileService } from "../profiles/profile-service";
 import { RepoIndexer } from "./repo-indexer";
 import { WorktreeStateService } from "./worktree-state";
 import { createSystemGit } from "./test-support/system-git";
 import type { GitExec } from "./dugite";
+import { createWorktreeRefresher } from "./worktree-handlers";
+
+vi.mock("../ipc", () => ({ emitEvent: vi.fn() }));
 
 const realGit = createSystemGit();
 function git(path: string, ...args: string[]): string {
@@ -172,6 +175,65 @@ describe.each(["regressions", 0, 1, 2, 3, 4] as const)("worktree default ancestr
       expect(live).toEqual({ name: "master", ref: "master" });
     } finally {
       git(primary, "branch", "-m", "master", "main");
+    }
+  });
+
+  it("batches family comparisons by live commit and falls back if the default moves", async () => {
+    const repoId = (db.prepare("SELECT repo_id FROM worktrees WHERE id = ?")
+      .get(worktreeId) as { repo_id: string }).repo_id;
+    const family = Array.from({ length: 8 }, (_, i) => ({
+      branch: `family-${i}`,
+      path: join(root, `family-${i}`),
+      head: commits[i % commits.length]!
+    }));
+    for (const row of family) git(primary, "worktree", "add", "-b", row.branch, row.path, row.head);
+    const indexed = await new RepoIndexer(db, realGit).refreshRepoWorktrees(repoId);
+    if (!indexed.ok) throw new Error(indexed.error.message);
+    const ids = db.prepare("SELECT id, branch FROM worktrees WHERE repo_id = ?").all(repoId) as
+      Array<{ id: string; branch: string }>;
+    const other = new ProfileService(db).create({ name: "Other profile", email: "other@example.test" });
+    db.prepare("INSERT INTO repos (id, profile_id, path, name) VALUES (?, ?, ?, ?)").run(
+      "other", other.id, join(root, "other"), "Other"
+    );
+    db.prepare("INSERT INTO worktrees (id, repo_id, path, branch) VALUES (?, ?, ?, ?)").run(
+      "other-worktree", "other", join(root, "other"), "main"
+    );
+
+    let externalMove = false;
+    const countedGit: GitExec = async (args, cwd, options) => {
+      calls.push([...args]);
+      const result = await realGit(args, cwd, options);
+      if (externalMove && args[0] === "for-each-ref" && args.includes("--stdin")) {
+        git(primary, "reset", "--hard", commits[4]!);
+      }
+      return result;
+    };
+    const isolated = new WorktreeStateService(db, countedGit);
+    const refresher = createWorktreeRefresher(isolated, db);
+    for (const move of [false, true]) {
+      git(primary, "reset", "--hard", commits[6]!);
+      externalMove = move;
+      calls = [];
+      await refresher.refreshRepoWorktrees(repoId);
+      const fullComparisonChildren = calls.filter((a) => a[0] === "merge-base");
+      expect(calls.filter((a) => a[0] === "for-each-ref" && a.includes("--stdin"))).toHaveLength(1);
+      expect(fullComparisonChildren.length).toBeLessThan(move ? ids.length : 2);
+      if (move) expect(fullComparisonChildren.length).toBeGreaterThanOrEqual(family.length);
+      expect(isolated.getCached("other-worktree")).toBeNull();
+      const target = git(primary, "rev-parse", "main");
+      for (const row of family) {
+        const state = isolated.getCached(ids.find(({ branch }) => branch === row.branch)!.id);
+        const base = await realGit(["merge-base", row.head, target], primary);
+        if (!base.ok) throw new Error(base.error.message);
+        const related = base.value.exitCode === 0;
+        expect(state).toMatchObject({
+          head: row.head,
+          behindDefault: related ? Number(git(primary, "rev-list", "--count", `${row.head}..${target}`)) : 0,
+          mergedIntoDefault: base.value.stdout.trim() === row.head,
+          divergedFromDefault: !related,
+          lastActivityAt: git(primary, "log", "-1", "--format=%cI", row.head)
+        });
+      }
     }
   });
 });

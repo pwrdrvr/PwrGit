@@ -27,7 +27,7 @@ import {
 import { formatPullDuration, PullWatchdog } from "./pull-watchdog";
 import {
   BULK_OPERATION_STATE_PATHS, readBulkSyncSnapshot, readBulkSyncRefs,
-  bulkSyncRefsChanged, remoteTipsUnchanged, unchangedWorktree, type BulkSyncSnapshot
+  bulkSyncRefsChanged, remoteTipsUnchanged, inspectReadOnlyWorktree, type BulkSyncSnapshot
 } from "./bulk-sync-preflight";
 
 export const BULK_SYNC_CONCURRENCY = 3;
@@ -835,8 +835,8 @@ async function syncRepo(
         if (isAborted(options.signal)) return worktreeResult(worktree, {
           outcome: "cancelled", reason: "cancelled", message: "Cancelled before this worktree was checked."
         });
-        const unchanged = snapshot === null ? null : await unchangedWorktree(git, snapshot, worktree.path, fetchedByName);
-        if (unchanged !== null && !isAborted(options.signal)) return worktreeResult(worktree, unchanged);
+        const readOnly = await inspectReadOnlyWorktree(git, snapshot, worktree.path, fetchedByName);
+        if (readOnly !== null && !isAborted(options.signal)) return worktreeResult(worktree, readOnly);
         return softPullWorktree(git, exec, worktree, fetchedByName, options.signal, reportWorktree);
       });
       report({ worktreeResult: result });

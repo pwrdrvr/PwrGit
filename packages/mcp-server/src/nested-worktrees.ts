@@ -24,7 +24,7 @@ import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 export async function nestedWorktreeExcludes(cwd: string): Promise<string[]> {
   try {
     const root = await realpath(cwd);
-    const common = await commonDir(cwd);
+    const common = await checkoutCommonGitDir(cwd);
     if (common === null) return [];
     const roots = await worktreeRoots(common);
     const excludes: string[] = [];
@@ -70,15 +70,19 @@ function insidePath(root: string, path: string): string | null {
 
 /** The repository's common git dir: `.git` itself for the primary, or the
  *  `commondir` a linked worktree's admin dir points back at. */
-async function commonDir(cwd: string): Promise<string | null> {
-  const dotGit = join(cwd, ".git");
-  const info = await stat(dotGit);
-  if (info.isDirectory()) return realpath(dotGit);
-  const link = /^gitdir:\s*(.+?)\s*$/m.exec(await readFile(dotGit, "utf8"));
-  if (link === null) return null;
-  const admin = resolve(cwd, link[1] as string);
-  const pointer = (await readFile(join(admin, "commondir"), "utf8")).trim();
-  return realpath(resolve(admin, pointer));
+export async function checkoutCommonGitDir(cwd: string): Promise<string | null> {
+  try {
+    const dotGit = join(cwd, ".git");
+    const info = await stat(dotGit);
+    if (info.isDirectory()) return await realpath(dotGit);
+    const link = /^gitdir:\s*(.+?)\s*$/m.exec(await readFile(dotGit, "utf8"));
+    if (link === null) return null;
+    const admin = resolve(cwd, link[1] as string);
+    const pointer = (await readFile(join(admin, "commondir"), "utf8")).trim();
+    return await realpath(resolve(admin, pointer));
+  } catch {
+    return null;
+  }
 }
 
 /**

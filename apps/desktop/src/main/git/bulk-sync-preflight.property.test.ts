@@ -206,6 +206,30 @@ describe("bulk pull remote preflight, with Git as the oracle", () => {
     expect(f.calls.map((call) => call.args[0])).toEqual(["config", "for-each-ref", "fetch", "for-each-ref", "status"]);
   });
 
+  it("checks detached and pruned-upstream siblings once each without a full pull inspection", async () => {
+    const f = fixture();
+    const detached = join(f.root, "detached");
+    const gone = join(f.root, "gone");
+    git(f.publisher, "push", "origin", "main:gone");
+    git(f.path, "fetch", "origin");
+    git(f.path, "worktree", "add", "--detach", detached);
+    git(f.path, "worktree", "add", "--track", "-b", "gone", gone, "origin/gone");
+    git(f.publisher, "push", "origin", "--delete", "gone");
+    f.input.worktrees.push(
+      { path: detached, id: detached, branch: "" },
+      { path: gone, id: gone, branch: "gone" }
+    );
+    const result = await f.run();
+    expect(result.results[0]?.worktrees.map((w) => w.reason)).toEqual([
+      undefined, "detached_head", "no_upstream"
+    ]);
+    expect(result.counts.worktrees.updated).toBe(0);
+    for (const path of [detached, gone]) {
+      expect(f.calls.filter((c) => c.cwd === path).map((c) => c.args.slice(0, 1))).toEqual([["status"]]);
+      expect(git(path, "rev-parse", "HEAD")).toBe(git(f.path, "rev-parse", "HEAD"));
+    }
+  });
+
   it("skips fetching only when ordinary tag following is explicitly disabled", async () => {
     const f = fixture();
     git(f.path, "config", "remote.origin.tagOpt", "--no-tags");
