@@ -9,7 +9,7 @@ import { NO_OPTIONAL_LOCKS, requireExit0, type GitExec } from "./dugite";
 import { checkoutExists } from "./worktree-liveness";
 import { checkoutCommonGitDir, nestedWorktreePathspec } from "@pwrgit/mcp-server/nested-worktrees";
 import { WorktreeOperationQueue } from "./worktree-operation-queue";
-import { readDefaultComparisons, type DefaultComparisons } from "./worktree-default-comparison";
+import { readDefaultComparisons, readShallowBoundary, type DefaultComparisons } from "./worktree-default-comparison";
 
 /** A probe found `branch`'s configured upstream deleted. */
 export type UpstreamGoneChange = {
@@ -622,7 +622,8 @@ export class WorktreeStateService {
       // A moved tip, missing row or replaced checkout uses the ordinary probe.
       const entry = batch?.byHead.get(parsed.head);
       if (entry === undefined || batch?.base !== oid ||
-        await checkoutCommonGitDir(wt.path) !== batch.commonDir) return null;
+        await checkoutCommonGitDir(wt.path) !== batch.commonDir ||
+        await readShallowBoundary(batch.commonDir) !== batch.shallowBoundary) return null;
       return entry;
     });
     const [lastActivityAt, lastAuthoredAt, { value: def }, defaultComparison] = await Promise.all([

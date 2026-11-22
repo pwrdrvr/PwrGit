@@ -1,4 +1,4 @@
-import { access } from "node:fs/promises";
+import { access, readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { checkoutCommonGitDir } from "@pwrgit/mcp-server/nested-worktrees";
 import { NO_OPTIONAL_LOCKS, type GitExec } from "./dugite";
@@ -13,6 +13,7 @@ export type DefaultComparison = {
 export type DefaultComparisons = {
   commonDir: string;
   base: string;
+  shallowBoundary: string | undefined;
   byHead: Map<string, DefaultComparison>;
 };
 
@@ -21,9 +22,16 @@ const existsOrUnreadable = (path: string): Promise<boolean> =>
 
 const localOnly = { env: { ...NO_OPTIONAL_LOCKS.env, GIT_NO_LAZY_FETCH: "1" } };
 
+/** The common shallow boundary determines the parent edges Git can walk. */
+export function readShallowBoundary(commonDir: string): Promise<string | undefined | null> {
+  return readFile(join(commonDir, "shallow"), "utf8").catch(
+    (cause: NodeJS.ErrnoException) => cause.code === "ENOENT" ? undefined : null
+  );
+}
+
 /** Batch comparisons against one pinned default commit. Git does the graph
- * walk. Shallow history, grafts, replacements and unusual Git discovery keep
- * the checkout-local queries since they can change reachability. */
+ * walk, including the checkout family's shared shallow boundary. Grafts,
+ * replacements and unusual Git discovery keep the checkout-local queries. */
 export async function readDefaultComparisons(
   git: GitExec, path: string, defaultRef: string, base: string, branches: string[]
 ): Promise<DefaultComparisons | null> {
@@ -34,11 +42,11 @@ export async function readDefaultComparisons(
   ].some((key) => process.env[key] !== undefined)) return null;
   const commonDir = await checkoutCommonGitDir(path);
   if (commonDir === null) return null;
-  const [shallow, grafts] = await Promise.all([
-    existsOrUnreadable(join(commonDir, "shallow")),
+  const [shallowBoundary, grafts] = await Promise.all([
+    readShallowBoundary(commonDir),
     existsOrUnreadable(join(commonDir, "info", "grafts"))
   ]);
-  if (shallow || grafts) return null;
+  if (shallowBoundary === null || grafts) return null;
 
   const [refs, count] = await Promise.all([
     git([
@@ -76,11 +84,11 @@ export async function readDefaultComparisons(
   const [shorthand, replacements, nowShallow, nowGrafts] = await Promise.all([
     git(["rev-parse", "--verify", "--quiet", `${defaultRef}^{commit}`], path, localOnly),
     git(["for-each-ref", "--format=%(refname)", "refs/replace"], path, localOnly),
-    existsOrUnreadable(join(commonDir, "shallow")),
+    readShallowBoundary(commonDir),
     existsOrUnreadable(join(commonDir, "info", "grafts"))
   ]);
   if (!shorthand.ok || shorthand.value.exitCode !== 0 || shorthand.value.stdout.trim() !== base ||
     !replacements.ok || replacements.value.exitCode !== 0 || replacements.value.stdout.trim() !== "" ||
-    nowShallow || nowGrafts) return null;
-  return { commonDir, base, byHead };
+    nowShallow !== shallowBoundary || nowGrafts) return null;
+  return { commonDir, base, shallowBoundary, byHead };
 }

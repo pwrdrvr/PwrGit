@@ -2,6 +2,7 @@ import { execFileSync } from "node:child_process";
 import { mkdtempSync, realpathSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { pathToFileURL } from "node:url";
 import fc from "fast-check";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { openDatabase, type DB } from "../persistence/db";
@@ -11,6 +12,7 @@ import { WorktreeStateService } from "./worktree-state";
 import { createSystemGit } from "./test-support/system-git";
 import type { GitExec } from "./dugite";
 import { createWorktreeRefresher } from "./worktree-handlers";
+import { readDefaultComparisons } from "./worktree-default-comparison";
 
 vi.mock("../ipc", () => ({ emitEvent: vi.fn() }));
 
@@ -235,5 +237,50 @@ describe.each(["regressions", 0, 1, 2, 3, 4] as const)("worktree default ancestr
         });
       }
     }
+  });
+
+  it.each([1, 2])("matches Git through a depth-%s shallow boundary", async (depth) => {
+    const source = join(root, `shallow-source-${depth}`);
+    const shallow = join(root, `shallow-${depth}`);
+    git(root, "init", "-b", "main", source);
+    const commit = (path: string, message: string): string =>
+      git(path, "-c", "user.name=Oracle", "-c", "user.email=oracle@example.test",
+        "commit", "--allow-empty", "-m", message);
+    for (const message of ["root", "fork point", "main tip"]) commit(source, message);
+    git(source, "switch", "-c", "side", "HEAD~1");
+    commit(source, "side tip");
+    git(source, "switch", "main");
+    git(root, "clone", `--depth=${depth}`, "--no-single-branch", pathToFileURL(source).href, shallow);
+    expect(git(shallow, "rev-parse", "--is-shallow-repository")).toBe("true");
+    git(shallow, "branch", "other-tip", "origin/side");
+    git(shallow, "switch", "-c", "ahead");
+    commit(shallow, "shallow local advance");
+    const base = git(shallow, "rev-parse", "main");
+    const branches = ["main", "ahead", "other-tip"].map((name) => `refs/heads/${name}`);
+    const batch = await readDefaultComparisons(realGit, shallow, "main", base, branches);
+    expect(batch).not.toBeNull();
+    for (const ref of branches) {
+      const head = git(shallow, "rev-parse", ref);
+      const merge = await realGit(["merge-base", head, base], shallow);
+      if (!merge.ok) throw new Error(merge.error.message);
+      const related = merge.value.exitCode === 0;
+      expect(batch?.byHead.get(head)).toMatchObject({
+        behindDefault: related ? Number(git(shallow, "rev-list", "--count", `${head}..${base}`)) : 0,
+        mergedIntoDefault: merge.value.stdout.trim() === head,
+        divergedFromDefault: !related
+      });
+    }
+
+    let deepened = false;
+    const changingGit: GitExec = async (args, cwd, options) => {
+      const result = await realGit(args, cwd, options);
+      if (args[0] === "for-each-ref" && args.includes("--stdin")) {
+        git(shallow, "fetch", "--unshallow", "origin");
+        deepened = true;
+      }
+      return result;
+    };
+    expect(await readDefaultComparisons(changingGit, shallow, "main", base, branches)).toBeNull();
+    expect(deepened).toBe(true);
   });
 });
