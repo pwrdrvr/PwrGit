@@ -1,5 +1,11 @@
 # Changelog
 
+## v0.61.3 - 2026-11-22
+
+- Window placement - Fixed Settings, Logs and document viewers opening on the primary display instead of the display of the window that opened them. Auxiliary windows fit within that display's work area, while existing windows on the same display retain their placement.
+- Sidebar performance - Improved sync progress rendering by keeping the sidebar's striped progress bar still instead of repainting its stripes every animation frame. The busy indicator and live count remain available.
+- CPU diagnostics - Fixed renderer hot-CPU traces losing context while waiting for the CPU profile to finish. Chromium tracing now stops at trigger detection to retain the available lead-in and activity at detection, while the CPU profile continues its follow-up. Trace filtering supports up to 288 MiB of decoded JSON, with bounded pending exports and cancellation when tracing is disabled or shutdown reaches its deadline.
+
 ## v0.61.2 - 2026-11-21
 
 - Pull - Improved profile-wide pulls to start repositories whose saved state shows a clean checkout behind its upstream first, bringing known pending updates forward in the queue. Each checkout is still rechecked before pulling.
