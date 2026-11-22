@@ -45,8 +45,11 @@ export async function readColdAuthoredTips(
 
   const cutoff = Math.floor(sinceMs / 1000);
   const tips = new Map<string, { ref: string; oid: string; packed: boolean }>();
-  for (const line of result.value.stdout.split("\0\n")) {
-    const [ref, path, date, symbolic, oid, flags] = line.split("\0");
+  for (const line of result.value.stdout.split(/\0\r?\n/)) {
+    if (line === "") continue;
+    const fields = line.split("\0");
+    if (fields.length !== 6) return null;
+    const [ref, path, date, symbolic, oid, flags] = fields;
     // Worktree-specific config can choose whether to honor replacement refs.
     if (ref?.startsWith("refs/replace/")) return null;
     if (ref === undefined || !branches.has(ref) || !path || !oid || symbolic !== "" ||

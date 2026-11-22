@@ -3,7 +3,7 @@ import { mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import fc from "fast-check";
-import { RECENT_MS, type Repo } from "@pwrgit/shared";
+import { RECENT_MS, ok, type Repo } from "@pwrgit/shared";
 import { afterAll, beforeAll, expect, it } from "vitest";
 import { openDatabase, type DB } from "../persistence/db";
 import { ProfileService } from "../profiles/profile-service";
@@ -95,9 +95,14 @@ async function checkoutOracle(path: string): Promise<string | undefined> {
 
 it("agrees with checkout-local Git and omits old-tip logs across both profiles", async () => {
   const counted: string[] = [];
-  const state = new WorktreeStateService(db, (args, path, options) => {
+  const state = new WorktreeStateService(db, async (args, path, options) => {
     if (args[0] === "log") counted.push(path);
-    return oracleGit(args, path, options);
+    const result = await oracleGit(args, path, options);
+    // Exercise both line endings while using Git's actual ref output.
+    if (args[0] === "for-each-ref" && path === other.path && result.ok) {
+      return ok({ ...result.value, stdout: result.value.stdout.replace(/\0\r?\n/g, "\0\r\n") });
+    }
+    return result;
   });
   const changed = mine.worktrees.find(w => w.branch === "one")!;
   const conditional = join(root, "identity");
@@ -134,7 +139,7 @@ it("agrees with checkout-local Git and omits old-tip logs across both profiles",
       // All of the second profile's tips are old, including packed tips.
       expect(counted.filter(path => other.worktrees.some(w => w.path === path))).toEqual([]);
       expect(counted).toContain(detached.path);
-      if (replacement) expect(counted).toContain(replaced.path);
+      if (replacement) expect(counted).toContain(mine.path);
     }
   ), { numRuns: 8 });
 });
