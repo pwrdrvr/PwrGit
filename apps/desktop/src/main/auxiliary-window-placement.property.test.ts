@@ -38,14 +38,20 @@ function fakeScreen(displays: Display[], cursor: { x: number; y: number }): Plac
   };
 }
 
-function fakeWindow(bounds: Rectangle): PlaceableWindow & { bounds: Rectangle } {
+function fakeWindow(
+  bounds: Rectangle
+): PlaceableWindow & { bounds: Rectangle; zoomed: boolean } {
   const w = {
     bounds,
+    zoomed: false,
     getBounds: () => ({ ...w.bounds }),
     setBounds: (next: Rectangle) => {
       w.bounds = { ...next };
     },
+    getMinimumSize: () => [760, 520],
     isMinimized: () => false,
+    isMaximized: () => w.zoomed,
+    isFullScreen: () => false,
     isDestroyed: () => false
   };
   return w;
@@ -100,39 +106,52 @@ test("an auxiliary window lands inside the work area, centered on the opener whe
       fc.integer({ min: 300, max: 2000 }),
       fc.integer({ min: 400, max: 1400 }),
       fc.integer({ min: 300, max: 1000 }),
-      (displays, pick, fx, fy, ow, oh, width, height) => {
+      fc.integer({ min: 0, max: 1400 }),
+      fc.integer({ min: 0, max: 1000 }),
+      (displays, pick, fx, fy, ow, oh, width, height, minWidth, minHeight) => {
         const display = displays[pick % displays.length]!;
+        const wa = display.workArea;
         const opener = openerOn(display, fx, fy, ow, oh);
-        const placed = auxiliaryWindowBounds({ width, height }, display.workArea, opener);
-        expect(within(placed, display.workArea)).toBe(true);
-        expect(placed.width).toBe(Math.min(width, display.workArea.width));
-        expect(placed.height).toBe(Math.min(height, display.workArea.height));
+        const minimum = { width: Math.min(minWidth, width), height: Math.min(minHeight, height) };
+        const placed = auxiliaryWindowBounds({ width, height }, wa, opener, minimum);
+        expect(placed.width).toBe(Math.max(Math.min(width, wa.width), minimum.width));
+        expect(placed.height).toBe(Math.max(Math.min(height, wa.height), minimum.height));
+        // Whatever cannot fit hangs off the right/bottom: the top-left corner,
+        // and with it the title bar, is always on the display.
+        expect(placed.x).toBeGreaterThanOrEqual(wa.x);
+        expect(placed.y).toBeGreaterThanOrEqual(wa.y);
+        if (placed.width <= wa.width) expect(placed.x + placed.width).toBeLessThanOrEqual(wa.x + wa.width);
+        if (placed.height <= wa.height) expect(placed.y + placed.height).toBeLessThanOrEqual(wa.y + wa.height);
         const centered = {
           x: Math.round(opener.x + opener.width / 2 - placed.width / 2),
           y: Math.round(opener.y + opener.height / 2 - placed.height / 2),
           width: placed.width,
           height: placed.height
         };
-        if (within(centered, display.workArea)) expect(placed).toEqual(centered);
+        if (within(centered, wa)) expect(placed).toEqual(centered);
       }
     )
   );
 });
 
-// Model: every summon names an opener (a profile window on some display) or
-// nothing. After it, the auxiliary window is on the opener's display (the
-// cursor's when there is none); and a window already on that display has not
-// moved, so a spot the user chose survives being summoned again.
+// Model: every summon names an opener (a profile window on some display), the
+// auxiliary window itself (its own menu item while it has focus), or nothing.
+// After a first open, the window is on the opener's display (the cursor's when
+// there is none). After a later one it is on the opener's display too, unless
+// it was summoned from itself or nowhere, or the user maximized it: those
+// leave it exactly where it was, as does already being on that display.
 test("a summoned auxiliary window is on the opener's display, and only moves to get there", () => {
   fc.assert(
     fc.property(
       displaysArb,
       fc.array(
         fc.record({
-          opener: fc.option(
+          opener: fc.oneof(
             fc.record({ pick: fc.nat(), fx: frac, fy: frac }),
-            { nil: null }
+            fc.constant(null),
+            fc.constant("self" as const)
           ),
+          zoomed: fc.boolean(),
           cursor: fc.record({ pick: fc.nat(), fx: frac, fy: frac })
         }),
         { minLength: 1, maxLength: 8 }
@@ -158,10 +177,13 @@ test("a summoned auxiliary window is on the opener's display, and only moves to 
             y: Math.round(c.y + summon.cursor.fy * (c.height - 1))
           };
           screen = fakeScreen(displays, cursor);
+          aux.zoomed = summon.zoomed;
           const opener =
             summon.opener === null
               ? null
-              : fakeWindow(
+              : summon.opener === "self"
+                ? aux
+                : fakeWindow(
                   openerOn(
                     displays[summon.opener.pick % displays.length]!,
                     summon.opener.fx,
@@ -171,14 +193,15 @@ test("a summoned auxiliary window is on the opener's display, and only moves to 
                   )
                 );
           const target =
-            opener === null
+            opener === null || opener === aux
               ? screen.getDisplayNearestPoint(cursor)
               : screen.getDisplayMatching(opener.getBounds());
           const before = aux.getBounds();
           const wasOnTarget = screen.getDisplayMatching(before).id === target.id;
           place(aux, opener);
           const after = aux.getBounds();
-          if (opener === null && !first) {
+          const stays = opener === null || opener === aux || aux.zoomed;
+          if (!first && stays) {
             expect(after).toEqual(before);
           } else {
             expect(screen.getDisplayMatching(after).id).toBe(target.id);
