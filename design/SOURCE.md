@@ -108,6 +108,7 @@ first.
 | `Branch Row Actions - UX Review.dc.html` | Why one branch row in the refs browser sits out of line with its neighbours (each row resolves its own `auto` actions column), how many verbs should stay on the row (one, two, or an icon toolbar, with a `⋮` menu for the rest), and how a branch is pinned from a branch row and from &#8984;K. Interactive. |
 | `Git Runtime Settings - UX Review.dc.html` | Settings &rsaquo; General &rsaquo; Git runtime &mdash; the read-only card that names which Git and Git LFS PwrGit runs. The card reproduced at shipped size at both the 760&nbsp;px column and the Settings window's own 760&nbsp;px minimum, five findings against it, the redraw, and the state table it should answer. |
 | `Agent History Editing - UX Review.dc.html` | A review of open PR #149's agent-assisted rebase &mdash; six findings against its review-only agent panel &mdash; and a counter-proposal: the agent proposes a history, PwrGit proves it (every commit once, a clean isolated replay, an identical tree), you apply it. Squash messages, &#10022;&nbsp;Tidy, the failure paths, and where the agent is chosen. A proposal; nothing in it is built. Interactive. |
+| `Stacked PRs - UX Review.dc.html` | Stacked pull requests, which PwrGit never had: what exists to build on, and why state lives in gh stack's own catalog (`$GIT_COMMON_DIR/gh-stack`) rather than a fourth format; per-branch health; a Stacks sidebar section and `n/N` position chips on PR rows and lineage chips; a live stack view where Restack, Sync, Submit and reorder each stage a plan (`git replay` + `merge-tree` forecast) and move every ref in one `update-ref` transaction; conflicts, squash-merge sync, other worktrees, undo and leased atomic pushes; the first writing MCP tools (plan/apply with a consent sheet); engine, tests and phasing. Engineering detail in `docs/plans/2026-11-22-003-design-stacked-prs.md`. A proposal; nothing in it is built. Interactive. |
 | `Multi-Stash Rail - UX Review.dc.html` | The right rail's Stashes tab at its real widths &mdash; the third tab that pushed the collapse button off the rail, the pull-recovery chip that was always ellipsized away, the clipped stat column, the options for fitting the tab strip into 280&nbsp;px, and the behaviour fixes behind them. Interactive. |
 | `Fork From Here - UX Review.dc.html` | Why the sidebar's Fork&hellip; opened on an empty search for a checkout you cannot push to, and why nothing else offered to fork it &mdash; a forge lookup never made for a repository added mid-session, and fork verbs that waited on its answer. Then the entry points that no longer wait: the repo row's kebab and right-click menu, the origin row's fork button, the worktree header's &#8942; item, and a seeded Fork&hellip; dialog with a Fork in place bridge. Interactive. |
 | `Fork While Cloning - UX Review.dc.html` | Why Clone marked a repository read-only and cloned it anyway, never asking whether your fork already existed, and why Fork&hellip; on a checkout already on disk still defaulted to cloning a second copy. Then a &ldquo;Clone from&rdquo; pair (the original, or your fork) in every state the forge can answer, and Fork&hellip;'s in-place mode, whose primary button becomes Fork in place. Interactive. |
@@ -659,6 +660,18 @@ recommended, turn **4** its variants, and turn **5** the shared component and
 build list. Its icons are exact Lucide SVGs drawn as fully percent-encoded CSS
 masks, as in `Fork Sync`. It is drawn in the dark theme the report came from.
 It carries no `assets/`.
+
+`Stacked PRs - UX Review.dc.html` was written here on 2026-11-22 and published
+up to the claude.ai canvas the same day with the Artifact tool, so the repo and
+the canvas hold the same bytes. It answers the question "did we ever build
+stacked PRs?" (no) and goes with
+[docs/plans/2026-11-22-003-design-stacked-prs.md](../docs/plans/2026-11-22-003-design-stacked-prs.md).
+The gh stack catalog shape it quotes was read from a real v0.3.0 catalog. Its
+repository (`orbit-deploy`), branches (`windows/*`), PR numbers and shas are
+invented. Turn **3** is a live `DCLogic` prototype of every operation,
+including the paused-conflict path. Its motion is CSS transitions driven by
+state, and `prefers-reduced-motion` turns them off. It is drawn in the dark
+theme. It carries no `assets/`.
 
 ## Deliberately NOT copied in
 

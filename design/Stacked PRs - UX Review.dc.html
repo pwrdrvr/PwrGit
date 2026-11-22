@@ -1,0 +1,1011 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Stacked PRs - UX Review</title>
+    <script src="./support.js"></script>
+  </head>
+  <body>
+    <x-dc>
+      <helmet data-dc-atomics>
+        <meta name="design_doc_mode" content="canvas" />
+        <link href="https://fonts.googleapis.com/css2?family=Geist:wght@400..700&amp;family=Geist+Mono:wght@400..700&amp;display=swap" rel="stylesheet" />
+        <style>
+          :root {
+            --rv-bg: #050505; --rv-line: rgba(247, 243, 235, 0.1);
+            --rv-t1: #f7f3eb; --rv-t2: #b8b0a5; --rv-t3: #8c857a; --rv-tsub: rgba(247, 243, 235, 0.54);
+            --rv-acc: #ff8a1f; --rv-accb: #ffb35c; --rv-accon: #160a00;
+            --rv-bad: #b94232; --rv-ok: #5fa969;
+            --font-sans: "Geist", "SF Pro Text", "Inter", system-ui, sans-serif;
+            --font-mono: "Geist Mono", "SF Mono", "JetBrains Mono", Consolas, monospace;
+
+            /* The app's own dark tokens (styles/tokens.css). */
+            --bg-stage: #000000; --bg-sidebar: #050505; --bg-panel: #0a0a0a; --bg-panel-elevated: #101010; --bg-input: #080808;
+            --bg-panel-hover: #14110d; --bg-hover-strong: #1f1a12; --bg-row-active: #120800; --bg-active-strong: #241000;
+            --border-faint: rgba(247, 243, 235, 0.06); --border-subtle: rgba(247, 243, 235, 0.1); --border-default: rgba(247, 243, 235, 0.14); --border-strong: rgba(247, 243, 235, 0.2);
+            --text-primary: #f7f3eb; --text-secondary: #b8b0a5; --text-muted: #8c857a; --text-subtle: rgba(247, 243, 235, 0.54);
+            --accent: #ff8a1f; --accent-bright: #ffb35c; --accent-on: #160a00;
+            --accent-soft: rgba(255, 138, 31, 0.12); --accent-tint: rgba(255, 138, 31, 0.08); --accent-border: rgba(255, 138, 31, 0.42);
+            --status-ok: #5fa969; --status-warning: #d99a3d; --status-error: #c45a3a; --status-suspended: #6b6660;
+            --success-text: #9ce5b3; --danger-text: #ffb0a1; --danger-base: #b94232; --info-text: #9fc8ff; --warn-text: #e8c890;
+            --brand-purple: #8a6dc4;
+            --lane-1: #ff8a1f; --lane-2: #62c882; --lane-3: #7aa2f7; --lane-4: #e5b566; --lane-5: #bd8ff0;
+            --shadow-popover: 0 14px 36px rgba(0, 0, 0, 0.55);
+          }
+          *, *::before, *::after { box-sizing: border-box; }
+          html { background: var(--rv-bg); }
+          body { margin: 0; background: var(--rv-bg); font-family: var(--font-sans); color: var(--rv-t1); }
+          a { color: var(--rv-accb); text-decoration: none; } a:hover { color: var(--rv-acc); }
+          button { font-family: inherit; }
+
+          /* ---- review chrome (house convention) ---- */
+          .dv-turn { padding: 40px 44px 36px; background: var(--rv-bg); border-bottom: 1px solid var(--rv-line); }
+          .dv-thd { display: flex; align-items: baseline; gap: 10px; margin: 0 0 6px; }
+          .dv-tid { font: 600 10px var(--font-mono); padding: 3px 7px; background: var(--rv-t1); color: var(--rv-bg); border-radius: 4px; }
+          .dv-tname { font: 600 13px/1.2 var(--font-sans); color: var(--rv-t1); }
+          .dv-sub { margin: 0 0 22px; font: 400 11.5px/1.55 var(--font-sans); color: var(--rv-t3); max-width: 900px; text-wrap: pretty; }
+          .dv-sub b { color: var(--rv-t2); font-weight: 600; }
+          .dv-sub code, .note code, .fitem code, .tr code { font: 500 10px/1.4 var(--font-mono); color: var(--rv-t2); }
+          .dv-opts { display: flex; flex-wrap: wrap; gap: 28px; align-items: flex-start; }
+          .dv-opt { flex: 0 1 auto; min-width: 0; display: flex; flex-direction: column; gap: 9px; }
+          .dv-oid { font: 600 10.5px var(--font-mono); padding: 3px 7px; background: rgba(247, 243, 235, 0.08); color: var(--rv-t1); border-radius: 5px; }
+          .dv-olabel { display: flex; align-items: baseline; gap: 8px; font: 400 11px/1.35 var(--font-sans); color: var(--rv-tsub); max-width: 900px; }
+          .dv-olabel b { color: var(--rv-accb); font-weight: 600; }
+          .dv-olabel .rec { color: var(--rv-ok); font-weight: 600; }
+          .dv-olabel .rej { color: var(--rv-bad); font-weight: 600; }
+          .dv-next { margin: 26px 0 0; font: 400 11px/1.6 var(--font-sans); color: var(--rv-t3); max-width: 900px; }
+          .dv-next b { color: var(--rv-t2); }
+          .note { margin: 0; font: 400 10.5px/1.5 var(--font-sans); color: var(--rv-t3); text-wrap: pretty; max-width: 470px; }
+          .note b { color: var(--rv-t2); font-weight: 600; }
+          .pin { display: inline-flex; align-items: center; justify-content: center; flex: none; width: 15px; height: 15px; border-radius: 999px; background: var(--rv-bad); color: #fff; font: 700 9px/1 var(--font-mono); }
+          .pin.ok { background: var(--rv-ok); color: #06130a; }
+          .pin.acc { background: var(--rv-acc); color: var(--rv-accon); }
+          .find { width: 560px; max-width: 100%; display: flex; flex-direction: column; gap: 14px; padding: 16px; border: 1px solid var(--rv-line); border-radius: 9px; background: #0a0a0a; }
+          .find.wide { width: 860px; }
+          .fitem { display: grid; grid-template-columns: 15px minmax(0, 1fr); gap: 9px; align-items: start; }
+          .fitem h4 { margin: 0 0 3px; font: 650 11.5px/1.3 var(--font-sans); color: var(--rv-t1); }
+          .fitem p { margin: 0; font: 400 10.5px/1.55 var(--font-sans); color: var(--rv-t3); text-wrap: pretty; }
+          .fitem b { color: var(--rv-t2); font-weight: 600; }
+          .grid2 { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px 22px; }
+
+          .tbl { width: 100%; max-width: 1180px; border: 1px solid var(--rv-line); border-radius: 9px; background: #0a0a0a; overflow: hidden; }
+          .tr { display: grid; grid-template-columns: 190px 120px 210px minmax(0, 1fr); gap: 12px; align-items: start; padding: 8px 12px; border-bottom: 1px solid var(--rv-line); font: 500 10.5px/1.5 var(--font-sans); color: var(--rv-t2); }
+          .tr:last-child { border-bottom: 0; }
+          .tr.head { font: 600 9.5px/1.3 var(--font-sans); letter-spacing: 0.04em; text-transform: uppercase; color: var(--rv-t3); background: rgba(247, 243, 235, 0.03); }
+          .tr b { color: var(--rv-t1); font-weight: 600; }
+          .tr .mn { font: 600 10.5px/1.5 var(--font-mono); color: var(--rv-t1); }
+          .tr.h3 { grid-template-columns: 170px 210px minmax(0, 1fr); }
+          .verdict { display: inline-flex; justify-self: start; padding: 2px 6px; border-radius: 999px; font: 700 8.5px/1.35 var(--font-sans); letter-spacing: 0.05em; text-transform: uppercase; white-space: nowrap; }
+          .verdict.keep { background: rgba(95, 169, 105, 0.16); color: #9ce5b3; }
+          .verdict.chg { background: rgba(255, 138, 31, 0.12); color: var(--rv-accb); }
+          .verdict.bug { background: rgba(185, 66, 50, 0.22); color: #ffb0a1; }
+          .verdict.info { background: rgba(86, 137, 196, 0.18); color: #9fc8ff; }
+
+          .stage { position: relative; padding: 18px; border-radius: 10px; background: var(--bg-stage); border: 1px solid var(--rv-line); }
+
+          /* ---- glyph-ish bits ---- */
+          .mono { font-family: var(--font-mono); }
+          .prc { position: relative; flex: none; display: inline-flex; align-items: center; gap: 5px; height: 18px; padding: 0 7px; border-radius: 999px; border: 1px solid var(--border-subtle); background: var(--bg-panel-elevated); color: var(--text-secondary); font: 600 10px/1 var(--font-mono); white-space: nowrap; }
+          .prc .d { width: 7px; height: 7px; flex: none; border-radius: 50%; background: var(--status-suspended); }
+          .prc.passing .d { background: var(--status-ok); } .prc.failing .d { background: var(--status-error); }
+          .prc.pending .d { background: var(--status-warning); } .prc.merged .d { background: var(--brand-purple); }
+          .prc.merged { border-color: rgba(138, 109, 196, 0.5); color: #c9b6f0; }
+          .prc.none { border-style: dashed; color: var(--text-muted); }
+          .prc.none .d { background: transparent; border: 1px solid var(--text-muted); }
+          .prc.mini { height: 16px; padding: 0 5px; gap: 4px; font-size: 9px; }
+          .prc.mini .d { width: 6px; height: 6px; }
+          .bdg { display: inline-flex; align-items: center; gap: 4px; height: 18px; padding: 0 6px; border-radius: 5px; font: 600 9.5px/1 var(--font-mono); white-space: nowrap; border: 1px solid transparent; }
+          .bdg.warn { color: var(--status-warning); background: rgba(217, 154, 61, 0.1); border-color: rgba(217, 154, 61, 0.3); }
+          .bdg.push { color: var(--info-text); background: rgba(86, 137, 196, 0.14); border-color: rgba(86, 137, 196, 0.32); }
+          .bdg.ok { color: var(--success-text); background: rgba(74, 148, 92, 0.16); border-color: rgba(95, 169, 105, 0.32); }
+          .bdg.drift { color: var(--danger-text); background: rgba(185, 66, 50, 0.16); border-color: rgba(185, 66, 50, 0.4); }
+          .bdg.merged { color: #c9b6f0; background: rgba(138, 109, 196, 0.16); border-color: rgba(138, 109, 196, 0.4); }
+          .bdg.mute { color: var(--text-muted); border-color: var(--border-subtle); }
+          .base { font: 500 10.5px/1 var(--font-mono); color: var(--text-muted); white-space: nowrap; }
+          .base b { color: var(--text-secondary); font-weight: 500; }
+
+          /* ============ 3a: sidebar Stacks section ============ */
+          .sb { position: relative; width: 340px; padding: 6px 6px 8px; border: 1px solid var(--border-subtle); border-radius: 9px; background: var(--bg-sidebar); }
+          .repo { display: flex; align-items: center; gap: 8px; min-height: 26px; padding: 4px 8px 4px 12px; }
+          .chev { flex: none; width: 0; height: 0; border-top: 4px solid transparent; border-bottom: 4px solid transparent; border-left: 5px solid var(--text-muted); transform: rotate(90deg); margin-left: -4px; }
+          .rname { font: 650 13px/1.2 var(--font-sans); color: var(--accent); white-space: nowrap; }
+          .sp { flex: 1; min-width: 0; }
+          .sec { border-top: 1px solid var(--border-subtle); }
+          .sh { display: flex; align-items: center; gap: 7px; height: 31px; padding: 0 6px 0 4px; color: var(--text-muted); }
+          .sh .c { flex: none; width: 0; height: 0; border-top: 3px solid transparent; border-bottom: 3px solid transparent; border-left: 4px solid currentColor; opacity: .82; }
+          .sh .c.open { transform: rotate(90deg); }
+          .slabel { font: 600 10px/1 var(--font-sans); letter-spacing: 0.08em; text-transform: uppercase; color: var(--text-subtle); white-space: nowrap; }
+          .scount { font: 600 10px/1 var(--font-mono); color: var(--text-subtle); }
+          .schip { display: inline-flex; align-items: center; gap: 4px; height: 20px; padding: 0 6px; border: 1px solid rgba(217, 154, 61, 0.35); border-radius: 5px; font: 600 10px/1 var(--font-mono); white-space: nowrap; color: var(--status-warning); background: transparent; }
+          .sthead { display: flex; align-items: center; gap: 6px; height: 26px; padding: 0 6px 0 8px; border-radius: 6px; }
+          .sthead .nm { font: 600 11px/1 var(--font-sans); color: var(--text-secondary); }
+          .sthead .mt { font: 500 10px/1 var(--font-mono); color: var(--text-subtle); }
+          .strow { position: relative; display: flex; align-items: center; gap: 7px; height: 26px; padding: 0 6px 0 26px; border: 1px solid transparent; border-radius: 6px; }
+          .strow::before { content: ""; position: absolute; left: 13px; top: -1px; bottom: -1px; border-left: 1.5px solid var(--lane-1); opacity: .7; }
+          .strow.top::before { top: 50%; }
+          .strow.stale::before { border-left-style: dashed; border-left-color: var(--status-warning); }
+          .strow .nd { position: absolute; left: 9px; top: 50%; width: 9px; height: 9px; margin-top: -4.5px; border-radius: 50%; background: var(--bg-sidebar); border: 1.5px solid var(--lane-1); }
+          .strow.stale .nd { border-color: var(--status-warning); }
+          .strow.sel { border-color: var(--accent); background: var(--bg-row-active); }
+          .strow .bn { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: 500 11px/1.25 var(--font-mono); color: var(--text-secondary); }
+          .strow.sel .bn { color: var(--accent-bright); }
+          .strow .hico { flex: none; color: var(--accent); font: 600 12px/1 var(--font-sans); }
+          .strow .st { flex: none; font: 700 10px/1 var(--font-mono); }
+          .strow .st.w { color: var(--status-warning); }
+          .strow .st.p { color: var(--info-text); }
+          .strunk { position: relative; display: flex; align-items: center; gap: 7px; height: 24px; padding: 0 6px 0 26px; }
+          .strunk::before { content: ""; position: absolute; left: 13px; top: -1px; height: 50%; border-left: 1.5px solid var(--lane-1); opacity: .7; }
+          .strunk .sq { position: absolute; left: 9px; top: 50%; width: 9px; height: 9px; margin-top: -4.5px; border-radius: 2px; background: var(--text-muted); }
+          .strunk .bn { font: 500 11px/1 var(--font-mono); color: var(--text-muted); }
+          .ctx { position: absolute; z-index: 4; width: 236px; padding: 4px; border: 1px solid var(--border-strong); border-radius: 8px; background: var(--bg-panel-elevated); box-shadow: var(--shadow-popover); display: flex; flex-direction: column; }
+          .ctx > span { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 6px 9px; border-radius: 5px; color: var(--text-primary); font: 500 11.5px/1.15 var(--font-sans); }
+          .ctx > span kbd { font: 500 10px/1 var(--font-mono); color: var(--text-subtle); }
+          .ctx > span.on { background: var(--accent); color: var(--accent-on); }
+          .ctx > span.on kbd { color: var(--accent-on); }
+          .ctx > em { padding: 7px 9px 3px; color: var(--text-subtle); font: 700 9px/1 var(--font-sans); font-style: normal; letter-spacing: .07em; text-transform: uppercase; }
+          .ctx > hr { width: 100%; margin: 4px 0; border: 0; border-top: 1px solid var(--border-subtle); }
+          .prrow { display: flex; align-items: center; gap: 6px; height: 24px; padding: 0 6px 0 8px; }
+          .prrow .pt { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: 500 11.5px/1.2 var(--font-sans); color: var(--text-primary); }
+          .stk { flex: none; display: inline-flex; align-items: center; gap: 3px; height: 16px; padding: 0 5px; border-radius: 4px; border: 1px solid var(--accent-border); color: var(--accent-bright); background: var(--accent-tint); font: 600 9.5px/1 var(--font-mono); }
+
+          /* ============ 4: live Stack view ============ */
+          .live { display: grid; grid-template-columns: minmax(0, 700px) 400px; gap: 18px; align-items: start; }
+          .scen { grid-column: 1 / -1; display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 10px 12px; border: 1px dashed rgba(247, 243, 235, 0.18); border-radius: 9px; }
+          .scen .lb { font: 700 9px/1 var(--font-sans); letter-spacing: .08em; text-transform: uppercase; color: var(--rv-t3); margin-right: 4px; }
+          .sbtn { height: 28px; padding: 0 11px; border: 1px solid var(--border-default); border-radius: 7px; background: var(--bg-input); color: var(--text-secondary); font: 600 11px/1 var(--font-sans); cursor: pointer; transition: background 140ms ease, border-color 140ms ease, color 140ms ease; }
+          .sbtn:hover { background: var(--bg-panel-hover); border-color: var(--accent-border); color: var(--text-primary); }
+          .sbtn:disabled { opacity: .4; cursor: default; }
+          .sbtn:disabled:hover { background: var(--bg-input); border-color: var(--border-default); color: var(--text-secondary); }
+          .sbtn.on { border-color: var(--status-warning); color: var(--warn-text); background: rgba(217, 154, 61, 0.1); }
+          .sbtn.pri { border-color: var(--accent); background: var(--accent); color: var(--accent-on); }
+          .sbtn.pri:hover { background: var(--accent-bright); color: var(--accent-on); }
+          .sbtn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+          .sv { border: 1px solid var(--border-subtle); border-radius: 10px; background: var(--bg-panel); overflow: hidden; }
+          .svh { display: flex; align-items: center; gap: 10px; padding: 12px 14px; border-bottom: 1px solid var(--border-subtle); }
+          .svh .ttl { font: 650 13px/1.2 var(--font-sans); color: var(--text-primary); }
+          .svh .ttl small { margin-left: 6px; font: 500 11px/1 var(--font-mono); color: var(--text-muted); }
+          .svh .tools { margin-left: auto; display: flex; gap: 6px; }
+          .health { display: inline-flex; align-items: center; height: 20px; padding: 0 7px; border-radius: 999px; font: 600 10px/1 var(--font-mono); border: 1px solid var(--border-subtle); color: var(--text-muted); transition: color 160ms ease, border-color 160ms ease; }
+          .health.warn { color: var(--status-warning); border-color: rgba(217, 154, 61, 0.4); }
+          .health.ok { color: var(--success-text); border-color: rgba(95, 169, 105, 0.4); }
+          .health.push { color: var(--info-text); border-color: rgba(86, 137, 196, 0.4); }
+          .board { position: relative; height: 410px; margin: 14px 16px 8px 34px; }
+          .card { position: absolute; left: 0; right: 0; top: 0; height: 64px; padding: 9px 12px 0 12px; border: 1px solid var(--border-subtle); border-radius: 8px; background: var(--bg-panel-elevated);
+            transition: transform 360ms cubic-bezier(.2, .8, .2, 1), opacity 300ms ease, border-color 160ms ease, background 160ms ease; }
+          .card.here { border-color: var(--accent-border); }
+          .card.stale { border-color: rgba(217, 154, 61, 0.45); }
+          .card.run { border-color: var(--accent); background: var(--bg-row-active); }
+          .card.merged { border-color: rgba(138, 109, 196, 0.55); }
+          .card.gone { pointer-events: none; }
+          .card.fresh { animation: settle 900ms ease-out; }
+          @keyframes settle { from { box-shadow: 0 0 0 1px var(--accent-border), 0 8px 32px rgba(255, 138, 31, 0.28); } to { box-shadow: 0 0 0 0 rgba(255, 138, 31, 0); } }
+          .card .beam { position: absolute; left: 0; bottom: -1px; width: 30%; height: 2px; border-radius: 2px; background: var(--accent); animation: scan 820ms ease-in-out infinite alternate; }
+          @keyframes scan { from { transform: translateX(0); } to { transform: translateX(233%); } }
+          .card .wire { position: absolute; left: -24px; top: 32px; height: 78px; width: 0; border-left: 2px dashed var(--status-warning); }
+          .card .wire::after { content: ""; position: absolute; left: -2px; top: 0; bottom: 0; border-left: 2px solid var(--lane-1); transform-origin: top; transform: scaleY(1); transition: transform 420ms cubic-bezier(.2, .8, .2, 1); }
+          .card.stale .wire::after { transform: scaleY(0); }
+          .card.merged .wire::after { border-left-color: var(--brand-purple); }
+          .card .node { position: absolute; left: -30px; top: 26px; width: 14px; height: 14px; border-radius: 50%; background: var(--bg-panel); border: 2px solid var(--lane-1); transition: border-color 160ms ease, background 160ms ease; }
+          .card.stale .node { border-color: var(--status-warning); }
+          .card.merged .node { border-color: var(--brand-purple); background: var(--brand-purple); }
+          .card.run .node { background: var(--accent); }
+          .l1 { display: flex; align-items: center; gap: 8px; min-width: 0; height: 20px; }
+          .pos { flex: none; font: 600 9.5px/1 var(--font-mono); color: var(--text-subtle); width: 26px; }
+          .bname { flex: none; font: 600 12px/1 var(--font-mono); color: var(--text-primary); }
+          .card.here .bname { color: var(--accent-bright); }
+          .ptitle { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: 500 11.5px/1.2 var(--font-sans); color: var(--text-secondary); }
+          .stat { flex: none; font: 500 10px/1 var(--font-mono); color: var(--text-muted); white-space: nowrap; }
+          .stat .a { color: var(--success-text); } .stat .d { color: var(--danger-text); }
+          .l2 { display: flex; align-items: center; gap: 6px; height: 26px; padding-left: 34px; min-width: 0; overflow: hidden; }
+          .sha { font: 500 10px/1 var(--font-mono); color: var(--text-subtle); transition: color 200ms ease; }
+          .card.fresh .sha { color: var(--accent-bright); }
+          .trunk { position: absolute; left: 0; right: 0; top: 0; height: 40px; display: flex; align-items: center; gap: 8px; padding: 0 12px; border: 1px dashed var(--border-default); border-radius: 8px; color: var(--text-muted);
+            transition: transform 360ms cubic-bezier(.2, .8, .2, 1); }
+          .trunk .node { position: absolute; left: -30px; top: 13px; width: 14px; height: 14px; border-radius: 3px; background: var(--text-muted); }
+          .trunk b { font: 600 12px/1 var(--font-mono); color: var(--text-secondary); }
+          .trunk .sha { transition: color 300ms ease; }
+          .trunk.moved .sha { color: var(--brand-purple); }
+          .svf { display: flex; align-items: center; gap: 8px; min-height: 40px; padding: 8px 14px; border-top: 1px solid var(--border-subtle); background: var(--bg-panel-elevated); font: 500 11px/1.4 var(--font-sans); color: var(--text-secondary); }
+          .svf b { color: var(--text-primary); font-weight: 600; }
+          .svf .undo { margin-left: auto; }
+          .toastin { animation: rise 260ms ease both; }
+
+          .plan { border: 1px solid var(--border-subtle); border-radius: 10px; background: var(--bg-panel); overflow: hidden; }
+          .plh { padding: 12px 14px 10px; border-bottom: 1px solid var(--border-subtle); }
+          .plh .k { font: 700 9px/1 var(--font-sans); letter-spacing: .08em; text-transform: uppercase; color: var(--text-subtle); }
+          .plh .t { margin-top: 6px; font: 650 13px/1.25 var(--font-sans); color: var(--text-primary); }
+          .plh .s { margin-top: 4px; font: 400 10.5px/1.45 var(--font-sans); color: var(--text-muted); }
+          .steps { display: flex; flex-direction: column; padding: 6px 0; min-height: 120px; }
+          .step { display: grid; grid-template-columns: 18px minmax(0, 1fr); gap: 8px; padding: 6px 14px; animation: rise 260ms ease both; }
+          @keyframes rise { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
+          .step .ic { position: relative; width: 14px; height: 14px; margin-top: 1px; border-radius: 50%; border: 1.5px solid var(--border-strong); }
+          .step.done .ic { border-color: var(--status-ok); background: var(--status-ok); }
+          .step.done .ic::after { content: ""; position: absolute; left: 3.5px; top: 1.5px; width: 3px; height: 6px; border: solid #06130a; border-width: 0 1.5px 1.5px 0; transform: rotate(45deg); }
+          .step.now .ic { border-color: var(--accent); border-top-color: transparent; animation: spin 700ms linear infinite; }
+          @keyframes spin { to { transform: rotate(360deg); } }
+          .step.stop .ic { border-color: var(--status-warning); background: var(--status-warning); }
+          .step.stop .ic::after { content: "!"; position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; font: 800 9px/1 var(--font-sans); color: #1c1200; }
+          .step .tx { font: 500 11px/1.4 var(--font-mono); color: var(--text-primary); overflow-wrap: anywhere; }
+          .step.done .tx { color: var(--text-secondary); }
+          .step .sx { margin-top: 2px; font: 400 10px/1.45 var(--font-sans); color: var(--text-muted); text-wrap: pretty; }
+          .step .fc { display: inline-block; margin-top: 3px; font: 600 9.5px/1 var(--font-mono); }
+          .step .fc.clean { color: var(--success-text); }
+          .step .fc.conflict { color: var(--status-warning); }
+          .step .fc.resolved { color: var(--info-text); }
+          .idle { padding: 18px 14px; font: 400 11px/1.55 var(--font-sans); color: var(--text-muted); }
+          .idle b { color: var(--text-secondary); }
+          .plf { display: flex; flex-wrap: wrap; gap: 6px; padding: 10px 14px; border-top: 1px solid var(--border-subtle); background: var(--bg-panel-elevated); }
+          .banner { margin: 0 14px 8px; padding: 9px 10px; border: 1px solid rgba(217, 154, 61, 0.4); border-radius: 7px; background: rgba(217, 154, 61, 0.08); font: 500 10.5px/1.5 var(--font-sans); color: var(--warn-text); animation: rise 240ms ease both; }
+          .banner b { color: var(--text-primary); }
+          .ledger { display: flex; flex-direction: column; gap: 4px; padding: 4px 14px 12px; }
+          .ledger div { font: 500 10.5px/1.45 var(--font-mono); color: var(--success-text); animation: rise 260ms ease both; }
+          .ledger div.n { color: var(--text-muted); }
+
+          /* ============ 5/6 static mocks ============ */
+          .sheet { width: 470px; border: 1px solid var(--border-strong); border-radius: 12px; background: var(--bg-panel-elevated); box-shadow: var(--shadow-popover); overflow: hidden; }
+          .sheet .hd { display: flex; align-items: center; gap: 8px; padding: 12px 14px; border-bottom: 1px solid var(--border-subtle); }
+          .sheet .hd .who { display: inline-flex; align-items: center; height: 20px; padding: 0 7px; border-radius: 999px; background: rgba(86, 137, 196, 0.18); color: var(--info-text); font: 600 10px/1 var(--font-mono); }
+          .sheet .hd .t { font: 650 12.5px/1.25 var(--font-sans); color: var(--text-primary); }
+          .sheet .bd { padding: 10px 14px; display: flex; flex-direction: column; gap: 6px; }
+          .sheet .ln { display: grid; grid-template-columns: 70px minmax(0, 1fr); gap: 8px; font: 500 10.5px/1.45 var(--font-mono); color: var(--text-secondary); }
+          .sheet .ln em { font-style: normal; color: var(--text-subtle); font-family: var(--font-sans); font-weight: 600; font-size: 9.5px; letter-spacing: .05em; text-transform: uppercase; padding-top: 1px; }
+          .sheet .ln .w { color: var(--warn-text); }
+          .sheet .ft { display: flex; align-items: center; gap: 6px; padding: 10px 14px; border-top: 1px solid var(--border-subtle); }
+          .sheet .ft .sp { flex: 1; }
+          .chkbx { display: inline-flex; align-items: center; gap: 6px; font: 500 10.5px/1 var(--font-sans); color: var(--text-muted); }
+          .chkbx i { width: 12px; height: 12px; border: 1.5px solid var(--border-strong); border-radius: 3px; }
+          .code { margin: 0; padding: 12px 14px; border: 1px solid var(--rv-line); border-radius: 9px; background: #0a0a0a; font: 500 10.5px/1.6 var(--font-mono); color: var(--rv-t2); white-space: pre; overflow-x: auto; max-width: 100%; }
+          .code .c { color: var(--rv-t3); } .code .k { color: var(--rv-accb); } .code .s { color: #9ce5b3; } .code .w { color: var(--warn-text); }
+          .gsvg { display: block; }
+          .toastm { display: flex; align-items: center; gap: 10px; width: 470px; padding: 9px 12px; border: 1px solid var(--border-strong); border-radius: 8px; background: var(--bg-panel-elevated); box-shadow: var(--shadow-popover); font: 500 11px/1.35 var(--font-sans); color: var(--text-secondary); }
+          .toastm b { color: var(--text-primary); }
+          .toastm .sp { flex: 1; }
+          .opb { display: flex; align-items: center; gap: 10px; width: 700px; padding: 10px 12px; border: 1px solid rgba(217, 154, 61, 0.45); border-radius: 8px; background: rgba(217, 154, 61, 0.07); font: 500 11px/1.45 var(--font-sans); color: var(--warn-text); }
+          .opb b { color: var(--text-primary); } .opb code { font: 500 10px/1 var(--font-mono); color: var(--text-secondary); }
+          .opb .sp { flex: 1; }
+
+          @media (prefers-reduced-motion: reduce) {
+            *, *::before, *::after { animation: none !important; transition: none !important; }
+          }
+        </style>
+      </helmet>
+
+      <!-- ================================================================ TURN 0 -->
+      <section class="dv-turn" id="t0" data-screen-label="Turn 0 Brief">
+        <div class="dv-thd"><a class="dv-tid" href="#t0">0</a><span class="dv-tname">Brief: we never built stacked PRs, and the team already stacks with gh stack</span></div>
+        <p class="dv-sub">Harold, 2026-11-22: “Did we build Stacked PR GUI support and operation support in PwrGit? I feel like we didn’t.” <b>We didn’t.</b> PwrGit draws a stack’s branches as one lane train and prints <code>→ base</code> on a pull-request row whose base isn’t the default branch. That’s all. Nothing stores a branch’s parent. Nothing rebases with <code>--onto</code> or <code>--update-refs</code>. Nothing opens a PR or changes its base. There’s no undo. Meanwhile PwrAgent’s contributors stack with GitHub’s own <code>gh stack</code> (v0.3.0). It keeps a catalog at <code>$GIT_COMMON_DIR/gh-stack</code> and a stack object on GitHub. <b>Goal:</b> make stacks something you can see and operate in PwrGit and through its MCP server, without inventing a fourth stack format. <b>Open decisions for review:</b> where stack state lives (2a is recommended), where stacks show (3a), and how agents get write access (6b). Everything here is a proposal. Nothing is built. All data is invented.</p>
+        <div class="dv-opts">
+          <div class="dv-opt" id="0a" data-screen-label="0a What exists">
+            <div class="dv-olabel"><a class="dv-oid" href="#0a">0a</a>What PwrGit has to build on</div>
+            <div class="find">
+              <div class="fitem"><span class="pin ok">1</span><div><h4>PR data already carries the chain</h4><p><code>PrSummary.baseRefName</code> and <code>headRefName</code> arrive with every GraphQL fetch (<code>pr-query.ts</code>). Chaining base to head gives a stack’s order for free. PwrAgent’s <code>pullRequestStackOrder()</code> does exactly that for combined reviews.</p></div></div>
+              <div class="fitem"><span class="pin ok">2</span><div><h4>The lane layout already draws a stack as a train</h4><p><code>lane-layout.ts</code> hands lane ownership over at a linear boundary, so stacked branches share one straight lane. We add meaning to that train. It doesn’t need new geometry.</p></div></div>
+              <div class="fitem"><span class="pin ok">3</span><div><h4>Draft → check → apply already exists</h4><p>History editing replays a plan in a disposable clone, proves the final tree, and returns an <code>approvalToken</code> before <code>rebase:apply</code>. Stack operations reuse that contract and its proof ledger.</p></div></div>
+              <div class="fitem"><span class="pin ok">4</span><div><h4>Leased push and the operation banner</h4><p><code>remote:pushBranchWithLease</code> pushes with <code>--force-with-lease=&lt;ref&gt;:&lt;expected&gt;</code>. <code>OperationBanner</code> already shows an in-progress rebase with Continue and Abort.</p></div></div>
+            </div>
+          </div>
+          <div class="dv-opt" id="0b" data-screen-label="0b What is missing">
+            <div class="dv-olabel"><a class="dv-oid" href="#0b">0b</a>What is missing</div>
+            <div class="find">
+              <div class="fitem"><span class="pin">1</span><div><h4>No parent, so no “needs restack”</h4><p>When <code>windows/model</code> takes a review fix, nothing knows that <code>windows/scheduler</code> sits on the old tip. Its PR silently shows the parent’s old commits as its own.</p></div></div>
+              <div class="fitem"><span class="pin">2</span><div><h4>Rebase covers the current branch only</h4><p><code>rebaseOntoUpstream</code> runs a plain <code>git rebase &lt;upstream&gt;</code>. Rebasing a child onto a squash-merged parent replays the parent’s commits on top of their own squash. That’s the classic stacked-PR conflict.</p></div></div>
+              <div class="fitem"><span class="pin">3</span><div><h4>No forge writes but enqueue</h4><p>PwrGit can add a PR to a merge queue, and that’s the only thing it can do on the forge. It can’t open a PR, retarget a base, or link a stack.</p></div></div>
+              <div class="fitem"><span class="pin">4</span><div><h4>MCP is read-only, with no per-operation consent</h4><p>All <code>pwrgit_*</code> tools read. Capabilities stop at <code>app.navigate</code>. An agent can see a repository but can’t restack it, and the app has no way to approve one operation.</p></div></div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ================================================================ TURN 1 -->
+      <section class="dv-turn" id="t1" data-screen-label="Turn 1 Model">
+        <div class="dv-thd"><a class="dv-tid" href="#t1">1</a><span class="dv-tname">The model: whose stack is it?</span></div>
+        <p class="dv-sub">A stack is a chain of branches. Each one’s parent is the branch below it, and the bottom one’s parent is trunk. What matters is <b>where that chain is written down</b>. Three tools already disagree. gh stack keeps a JSON catalog in the common Git dir and a stack object on GitHub. git-town keeps <code>git-town-branch.&lt;b&gt;.parent</code> in config. The forge only knows each PR’s base. Whatever PwrGit picks has to survive a teammate running <code>gh stack sync</code> in the next worktree over.</p>
+        <div class="dv-opts">
+          <div class="dv-opt" id="1a" data-screen-label="1a gh-stack catalog">
+            <div class="dv-olabel"><a class="dv-oid" href="#1a">1a</a><span class="rec">Recommended.</span> Read and write gh stack’s catalog, under its locks</div>
+            <pre class="code"><span class="c"># $GIT_COMMON_DIR/gh-stack  (schemaVersion 1, shared by every worktree)</span>
+{
+  <span class="k">"schemaVersion"</span>: 1,
+  <span class="k">"repository"</span>: <span class="s">"github.com:acme/orbit-deploy"</span>,
+  <span class="k">"stacks"</span>: [{
+    <span class="k">"trunk"</span>: { <span class="k">"branch"</span>: <span class="s">"main"</span>, <span class="k">"head"</span>: <span class="s">"8c1d2e0…"</span> },
+    <span class="k">"branches"</span>: [
+      { <span class="k">"branch"</span>: <span class="s">"windows/model"</span>,     <span class="k">"head"</span>: <span class="s">"4e1a9c2…"</span>, <span class="k">"base"</span>: <span class="s">"8c1d2e0…"</span>,
+        <span class="k">"pullRequest"</span>: { <span class="k">"number"</span>: 651, <span class="k">"id"</span>: <span class="s">"PR_kw…"</span>, <span class="k">"url"</span>: <span class="s">"…/pull/651"</span> } },
+      { <span class="k">"branch"</span>: <span class="s">"windows/scheduler"</span>, <span class="k">"head"</span>: <span class="s">"9f3c2e1…"</span>, <span class="k">"base"</span>: <span class="s">"4e1a9c2…"</span>, … },
+      { <span class="k">"branch"</span>: <span class="s">"windows/api"</span>,       <span class="k">"head"</span>: <span class="s">"51ad0e7…"</span>, <span class="k">"base"</span>: <span class="s">"9f3c2e1…"</span>, … },
+      { <span class="k">"branch"</span>: <span class="s">"windows/ui"</span>,        <span class="k">"head"</span>: <span class="s">"0d8c6b3…"</span>, <span class="k">"base"</span>: <span class="s">"51ad0e7…"</span> }
+    ]
+  }]
+}
+<span class="c"># base = the parent tip this branch was last built on: the --onto anchor</span>
+<span class="c"># gh-stack.lock / gh-stack-operation.lock: taken by PwrGit before any write</span></pre>
+            <p class="note"><b>Why:</b> it already exists in this team’s clones, and it already records the hard part. <code>base</code> is the parent tip each branch was built on, which is the exact anchor a restack needs. It lives in the common dir, so every worktree sees the same stacks. That matters most for PwrAgent, where every thread is a worktree. A <code>gh stack view</code> after a PwrGit restack shows the same thing PwrGit does. An unknown <code>schemaVersion</code> drops PwrGit to read-only. It never guesses at a newer format.</p>
+          </div>
+          <div class="dv-opt" id="1b" data-screen-label="1b Options weighed">
+            <div class="dv-olabel"><a class="dv-oid" href="#1b">1b</a>The alternatives, and what each loses</div>
+            <div class="tbl" style="width: 560px">
+              <div class="tr h3 head"><span>Option</span><span>Verdict</span><span>Why</span></div>
+              <div class="tr h3"><span><b>Own keys in git config</b><br /><code>branch.&lt;b&gt;.pwrgitParent</code></span><span><span class="verdict bug">Rejected</span></span><span>Git renames and deletes the section with the branch, which is nice. But it’s a fourth format that gh stack never reads. The first <code>gh stack rebase</code> after a PwrGit restack would use stale anchors.</span></div>
+              <div class="tr h3"><span><b>PR bases only</b></span><span><span class="verdict chg">Fallback</span></span><span>Needs no local state, and it finds stacks made on the web. But it can’t hold a branch with no PR yet, like the stack’s top while you’re still writing it. Stacks found this way show as <b>inferred</b> and offer Adopt.</span></div>
+              <div class="tr h3"><span><b>Topology only</b><br />merge-base guessing</span><span><span class="verdict bug">Rejected</span></span><span>An ancestor relation can’t tell “stacked on” from “happened to branch from”. It goes wrong after every squash merge.</span></div>
+              <div class="tr h3"><span><b>GitLab</b> (no stack object)</span><span><span class="verdict info">Same schema</span></span><span>Same catalog shape in <code>$GIT_COMMON_DIR/pwrgit-stack</code>, plus MR target branches. Only the GitHub-only stack link step is skipped.</span></div>
+            </div>
+            <p class="note"><b>Precedence when sources disagree:</b> catalog first, then the forge’s PR base. The disagreement itself is shown as <b>drift</b> on the branch (“GitHub base ≠ stack”) with one fix offered: <b>Retarget PR</b> or <b>Update stack</b>. PwrGit never resolves drift silently.</p>
+          </div>
+          <div class="dv-opt" id="1c" data-screen-label="1c Health">
+            <div class="dv-olabel"><a class="dv-oid" href="#1c">1c</a>What PwrGit derives per branch. Every chip below means one of these.</div>
+            <div class="tbl" style="width: 860px">
+              <div class="tr head" style="grid-template-columns: 160px 150px minmax(0, 1fr)"><span>State</span><span>Chip</span><span>Computed from</span></div>
+              <div class="tr" style="grid-template-columns: 160px 150px minmax(0, 1fr)"><span><b>In sync</b></span><span><span class="bdg ok">restacked</span></span><span>The parent’s tip is the recorded <code>base</code>, and it’s an ancestor of the branch.</span></div>
+              <div class="tr" style="grid-template-columns: 160px 150px minmax(0, 1fr)"><span><b>Needs restack</b></span><span><span class="bdg warn">needs restack</span></span><span>The parent’s tip ≠ <code>base</code>. The dashed wire in the stack view is the commits between them.</span></div>
+              <div class="tr" style="grid-template-columns: 160px 150px minmax(0, 1fr)"><span><b>Parent merged</b></span><span><span class="bdg merged">parent merged</span></span><span>The forge reports the parent’s PR merged. For a forge-less repo, <code>git cherry trunk parent</code> is empty. Ancestry alone misses squash merges, so it’s never the only test.</span></div>
+              <div class="tr" style="grid-template-columns: 160px 150px minmax(0, 1fr)"><span><b>Needs push</b></span><span><span class="bdg push">needs push</span></span><span>The local head ≠ the head last fetched for its PR (<code>headOid</code>).</span></div>
+              <div class="tr" style="grid-template-columns: 160px 150px minmax(0, 1fr)"><span><b>Drift</b></span><span><span class="bdg drift">GitHub base ≠ stack</span></span><span>The PR’s <code>baseRefName</code> ≠ the catalog parent.</span></div>
+              <div class="tr" style="grid-template-columns: 160px 150px minmax(0, 1fr)"><span><b>Someone else pushed</b></span><span><span class="bdg drift">remote ahead</span></span><span>The remote head isn’t an ancestor of the local head. PwrGit never pushes over it, not even with a lease. Pull it first.</span></div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ================================================================ TURN 2 -->
+      <section class="dv-turn" id="t2" data-screen-label="Turn 2 Where stacks show">
+        <div class="dv-thd"><a class="dv-tid" href="#t2">2</a><span class="dv-tname">Where stacks show: a Stacks section, a stack chip on PRs, and meaning on the lane train</span></div>
+        <p class="dv-sub">The stack is the unit you restack, submit and sync, so it gets a place of its own. That’s where the verbs live. The branches inside it still appear everywhere they do today. Each picks up a position chip (<code>2/4</code>) that leads back to its stack. <b>Rejected:</b> grouping stacked PRs inside Pull requests › Local. The top of a stack usually has no PR yet, so a stack would be split across two sections.</p>
+        <div class="dv-opts">
+          <div class="dv-opt" id="2a" data-screen-label="2a Sidebar">
+            <div class="dv-olabel"><a class="dv-oid" href="#2a">2a</a><span class="rec">Recommended.</span> A Stacks section above Pull requests, at 340px, after a review fix lands on the bottom</div>
+            <div class="stage" style="width: 620px; height: 470px">
+              <div class="sb" style="position: absolute; left: 18px; top: 18px">
+                <div class="repo"><span class="chev"></span><span class="rname">orbit-deploy</span><span class="sp"></span><span class="scount">4 wt</span></div>
+                <div class="sec">
+                  <div class="sh"><span class="c open"></span><span class="slabel">Stacks</span><span class="scount">1</span><span class="sp"></span><span class="schip">⟳ 3 need restack</span></div>
+                  <div class="sthead"><span class="nm">windows</span><span class="mt">4 branches · into main</span></div>
+                  <div class="strow top stale"><span class="nd"></span><span class="bn">windows/ui</span><span class="prc mini none"><span class="d"></span>no PR</span><span class="st w">⟳</span></div>
+                  <div class="strow stale sel"><span class="nd"></span><span class="hico">⌂</span><span class="bn">windows/api</span><span class="prc mini passing"><span class="d"></span>#653</span><span class="st w">⟳</span></div>
+                  <div class="strow stale"><span class="nd"></span><span class="bn">windows/scheduler</span><span class="prc mini pending"><span class="d"></span>#652</span><span class="st w">⟳</span></div>
+                  <div class="strow"><span class="nd"></span><span class="bn">windows/model</span><span class="prc mini passing"><span class="d"></span>#651</span><span class="st p">↑1</span></div>
+                  <div class="strunk"><span class="sq"></span><span class="bn">main</span></div>
+                </div>
+                <div class="sec">
+                  <div class="sh"><span class="c open"></span><span class="slabel">Pull requests</span><span class="scount">5</span></div>
+                  <div class="prrow"><span class="prc mini passing"><span class="d"></span>#653</span><span class="pt">feat: windows in the tenant API</span><span class="stk">3/4</span></div>
+                  <div class="prrow"><span class="prc mini pending"><span class="d"></span>#652</span><span class="pt">feat: scheduler waits for the window</span><span class="stk">2/4</span></div>
+                  <div class="prrow"><span class="prc mini passing"><span class="d"></span>#651</span><span class="pt">feat: DeployWindow model and parser</span><span class="stk">1/4</span></div>
+                  <div class="prrow"><span class="prc mini failing"><span class="d"></span>#647</span><span class="pt">fix: drain the queue before shutdown</span></div>
+                </div>
+              </div>
+              <div class="ctx" style="left: 372px; top: 104px">
+                <em>windows/api</em>
+                <span>New branch on top<kbd>⌘⇧N</kbd></span>
+                <span class="on">Restack from here<kbd>⌘⇧R</kbd></span>
+                <span>Move onto…</span>
+                <span>Fold into windows/scheduler</span>
+                <hr />
+                <span>Submit stack<kbd>⌘⇧P</kbd></span>
+                <span>Sync stack</span>
+                <hr />
+                <span>Remove from stack</span>
+              </div>
+            </div>
+            <p class="note">The spine is the lane colour. A <b>dashed</b> segment means “this branch isn’t on its parent’s tip”: the gap is real commits. The ⟳ glyph and the header chip count the same thing. Rows read top to bottom as the stack reads in GitHub’s UI, with trunk last. A branch that’s also a PR shows its <code>n/4</code> chip in Pull requests. Clicking the chip selects the stack.</p>
+          </div>
+          <div class="dv-opt" id="2b" data-screen-label="2b Lineage">
+            <div class="dv-olabel"><a class="dv-oid" href="#2b">2b</a>The lane train, before and after Restack</div>
+            <div class="stage" style="width: 560px">
+              <svg class="gsvg" width="524" height="330" viewBox="0 0 524 330" role="img" aria-label="Lineage graph. Before: windows/model has a new commit beside the old tip that windows/scheduler, windows/api and windows/ui still sit on. After: the three branches are replayed onto the new tip in one straight train.">
+                <text x="0" y="12" fill="#8c857a" font-family="Geist, sans-serif" font-size="10" font-weight="700" letter-spacing=".8">BEFORE</text>
+                <text x="276" y="12" fill="#8c857a" font-family="Geist, sans-serif" font-size="10" font-weight="700" letter-spacing=".8">AFTER RESTACK</text>
+                <!-- before -->
+                <line x1="20" y1="40" x2="20" y2="312" stroke="#ff8a1f" stroke-width="2" stroke-opacity=".8" />
+                <line x1="20" y1="296" x2="20" y2="320" stroke="#8c857a" stroke-width="2" />
+                <path d="M20 248 C 20 236, 44 236, 44 222 L 44 200" stroke="#62c882" stroke-width="2" fill="none" />
+                <circle cx="20" cy="40" r="5" fill="#0a0a0a" stroke="#ff8a1f" stroke-width="2" />
+                <circle cx="20" cy="88" r="5" fill="#0a0a0a" stroke="#ff8a1f" stroke-width="2" />
+                <circle cx="20" cy="136" r="5" fill="#0a0a0a" stroke="#ff8a1f" stroke-width="2" />
+                <circle cx="20" cy="184" r="5" fill="#0a0a0a" stroke="#d99a3d" stroke-width="2" stroke-dasharray="3 2" />
+                <circle cx="44" cy="200" r="5" fill="#62c882" />
+                <circle cx="20" cy="248" r="5" fill="#0a0a0a" stroke="#ff8a1f" stroke-width="2" />
+                <rect x="14" y="304" width="12" height="12" rx="2" fill="#8c857a" />
+                <text x="34" y="44" fill="#f7f3eb" font-family="Geist Mono, monospace" font-size="10.5">windows/ui</text><text x="108" y="44" fill="#d99a3d" font-family="Geist Mono, monospace" font-size="9.5">4/4 ⟳</text>
+                <text x="34" y="92" fill="#f7f3eb" font-family="Geist Mono, monospace" font-size="10.5">windows/api</text><text x="114" y="92" fill="#d99a3d" font-family="Geist Mono, monospace" font-size="9.5">3/4 ⟳</text>
+                <text x="34" y="140" fill="#f7f3eb" font-family="Geist Mono, monospace" font-size="10.5">windows/scheduler</text><text x="152" y="140" fill="#d99a3d" font-family="Geist Mono, monospace" font-size="9.5">2/4 ⟳</text>
+                <text x="34" y="188" fill="#8c857a" font-family="Geist Mono, monospace" font-size="10">4e1a9c2  old windows/model tip</text>
+                <text x="58" y="204" fill="#f7f3eb" font-family="Geist Mono, monospace" font-size="10.5">windows/model</text><text x="152" y="204" fill="#9fc8ff" font-family="Geist Mono, monospace" font-size="9.5">1/4 ↑1</text>
+                <text x="58" y="218" fill="#8c857a" font-family="Geist, sans-serif" font-size="9.5">fix: reject windows longer than 24h</text>
+                <text x="34" y="252" fill="#8c857a" font-family="Geist Mono, monospace" font-size="10">first commit of windows/model</text>
+                <text x="34" y="314" fill="#b8b0a5" font-family="Geist Mono, monospace" font-size="10.5">main</text>
+                <!-- after -->
+                <line x1="296" y1="40" x2="296" y2="312" stroke="#ff8a1f" stroke-width="2" stroke-opacity=".8" />
+                <circle cx="296" cy="40" r="5" fill="#0a0a0a" stroke="#ff8a1f" stroke-width="2" />
+                <circle cx="296" cy="88" r="5" fill="#0a0a0a" stroke="#ff8a1f" stroke-width="2" />
+                <circle cx="296" cy="136" r="5" fill="#0a0a0a" stroke="#ff8a1f" stroke-width="2" />
+                <circle cx="296" cy="200" r="5" fill="#0a0a0a" stroke="#ff8a1f" stroke-width="2" />
+                <circle cx="296" cy="248" r="5" fill="#0a0a0a" stroke="#ff8a1f" stroke-width="2" />
+                <rect x="290" y="304" width="12" height="12" rx="2" fill="#8c857a" />
+                <text x="310" y="44" fill="#f7f3eb" font-family="Geist Mono, monospace" font-size="10.5">windows/ui</text><text x="384" y="44" fill="#9ce5b3" font-family="Geist Mono, monospace" font-size="9.5">4/4</text>
+                <text x="310" y="92" fill="#f7f3eb" font-family="Geist Mono, monospace" font-size="10.5">windows/api</text><text x="390" y="92" fill="#9ce5b3" font-family="Geist Mono, monospace" font-size="9.5">3/4</text>
+                <text x="310" y="140" fill="#f7f3eb" font-family="Geist Mono, monospace" font-size="10.5">windows/scheduler</text><text x="428" y="140" fill="#9ce5b3" font-family="Geist Mono, monospace" font-size="9.5">2/4</text>
+                <text x="310" y="204" fill="#f7f3eb" font-family="Geist Mono, monospace" font-size="10.5">windows/model</text><text x="404" y="204" fill="#9fc8ff" font-family="Geist Mono, monospace" font-size="9.5">1/4 ↑1</text>
+                <text x="310" y="252" fill="#8c857a" font-family="Geist Mono, monospace" font-size="10">first commit of windows/model</text>
+                <text x="310" y="314" fill="#b8b0a5" font-family="Geist Mono, monospace" font-size="10.5">main</text>
+                <rect x="470" y="34" width="5" height="176" rx="2.5" fill="#ff8a1f" fill-opacity=".22" />
+                <text x="482" y="126" fill="#ffb35c" font-family="Geist Mono, monospace" font-size="9.5" transform="rotate(90 482 126)">stack · windows</text>
+              </svg>
+            </div>
+            <p class="note">One position chip per branch chip, in the same <code>.ref-chip</code> budget (it takes one of the two chip slots before <code>+N</code>). The bracket in the right gutter marks the stack’s rows and selects the stack on click. The old tip isn’t drawn as a branch. It’s labelled for what it is, the commit the children still sit on. That’s the whole explanation of “needs restack”.</p>
+          </div>
+        </div>
+      </section>
+
+      <!-- ================================================================ TURN 3: LIVE -->
+      <section class="dv-turn" id="t3" data-screen-label="Turn 3 Live stack view">
+        <div class="dv-thd"><a class="dv-tid" href="#t3">3</a><span class="dv-tname">Live: the stack view, the plan, and every operation through it</span></div>
+        <p class="dv-sub">Selecting a stack opens it in the main pane, the way selecting a PR opens the PR view. Each operation stages a <b>plan</b> first: Restack, Sync, Submit, a drag to reorder, an MCP call from an agent. The plan is computed with <code>git replay</code> and <code>git merge-tree</code> and touches no worktree and no ref, so its conflict forecast is real. Then <b>Run</b> moves every ref in one transaction. Try it. Push a review fix to the bottom, Restack, Submit, then merge the bottom PR and Sync. Turn on the conflict forecast to see the paused path. <b>Motion budget:</b> cards re-seat in 360ms on the app’s ease-out. The running branch carries the amber scanner line. A restacked wire draws itself solid. Nothing bounces, and <code>prefers-reduced-motion</code> turns all of it off.</p>
+        <div class="live">
+          <div class="scen">
+            <span class="lb">Scenario</span>
+            <button class="sbtn" type="button" onClick="{{act.amend}}" disabled="{{dis.amend}}">Push a review fix to the bottom branch</button>
+            <button class="sbtn" type="button" onClick="{{act.merge}}" disabled="{{dis.merge}}">Merge the bottom PR on GitHub</button>
+            <button class="sbtn" type="button" onClick="{{act.reorder}}" disabled="{{dis.reorder}}">Drag windows/ui under windows/api</button>
+            <button class="{{conflictCls}}" type="button" onClick="{{act.conflict}}" aria-pressed="{{conflictPressed}}">Forecast a conflict in windows/api</button>
+            <span style="flex: 1"></span>
+            <button class="sbtn" type="button" onClick="{{act.reset}}">Reset</button>
+          </div>
+
+          <div class="sv">
+            <div class="svh">
+              <span class="ttl">windows<small>{{countLabel}}</small></span>
+              <span class="{{healthCls}}">{{healthLabel}}</span>
+              <span class="tools">
+                <button class="sbtn" type="button" onClick="{{act.sync}}" disabled="{{dis.sync}}">Sync</button>
+                <button class="{{restackCls}}" type="button" onClick="{{act.restack}}" disabled="{{dis.restack}}">Restack</button>
+                <button class="{{submitCls}}" type="button" onClick="{{act.submit}}" disabled="{{dis.submit}}">Submit</button>
+              </span>
+            </div>
+            <div class="board">
+              <sc-for list="{{cards}}" as="c" hint-placeholder-count="4">
+                <div class="{{c.cls}}" style="transform: translateY({{c.y}}px); opacity: {{c.op}};">
+                  <span class="wire"></span><span class="node"></span>
+                  <div class="l1">
+                    <span class="pos">{{c.pos}}</span>
+                    <span class="bname">{{c.name}}</span>
+                    <span class="{{c.prCls}}"><span class="d"></span>{{c.prLabel}}</span>
+                    <span class="ptitle">{{c.title}}</span>
+                    <span class="stat"><span class="a">{{c.add}}</span> <span class="d">{{c.del}}</span> · {{c.commits}}</span>
+                  </div>
+                  <div class="l2">
+                    <span class="base">on <b>{{c.parent}}</b></span>
+                    <span class="sha">{{c.sha}}</span>
+                    <sc-for list="{{c.badges}}" as="b" hint-placeholder-count="1"><span class="{{b.cls}}">{{b.t}}</span></sc-for>
+                  </div>
+                  <sc-if value="{{c.running}}" hint-placeholder-val="{{false}}"><span class="beam"></span></sc-if>
+                </div>
+              </sc-for>
+              <div class="{{trunk.cls}}" style="transform: translateY({{trunk.y}}px);">
+                <span class="node"></span><b>main</b><span class="sha">{{trunk.sha}}</span><span style="flex: 1"></span><span class="base">origin/main · trunk</span>
+              </div>
+            </div>
+            <div class="svf">
+              <sc-if value="{{hasToast}}" hint-placeholder-val="{{true}}"><span class="toastin">{{toast}}</span></sc-if>
+              <sc-if value="{{noToast}}" hint-placeholder-val="{{false}}"><span>Checked out: <b>⌂ windows/api</b> in worktree <span class="mono">orbit-deploy.windows-api</span></span></sc-if>
+              <sc-if value="{{canUndo}}" hint-placeholder-val="{{false}}"><button class="sbtn undo" type="button" onClick="{{act.undo}}">Undo</button></sc-if>
+            </div>
+          </div>
+
+          <div class="plan">
+            <div class="plh">
+              <div class="k">{{plan.kicker}}</div>
+              <div class="t">{{plan.title}}</div>
+              <div class="s">{{plan.sub}}</div>
+            </div>
+            <sc-if value="{{plan.empty}}" hint-placeholder-val="{{true}}">
+              <div class="idle">A plan appears here before anything moves. It lists every replay, the forecast for each, the refs that will move together, and what goes to GitHub. An agent’s <b>pwrgit_stack_plan</b> call lands in this same panel.</div>
+            </sc-if>
+            <div class="steps">
+              <sc-for list="{{steps}}" as="st" hint-placeholder-count="0">
+                <div class="{{st.cls}}" style="animation-delay: {{st.delay}}ms;">
+                  <span class="ic"></span>
+                  <div><div class="tx">{{st.t}}</div><div class="sx">{{st.sub}}</div><span class="{{st.fcCls}}">{{st.fc}}</span></div>
+                </div>
+              </sc-for>
+            </div>
+            <sc-if value="{{paused}}" hint-placeholder-val="{{false}}">
+              <div class="banner"><b>Paused at windows/api</b>, commit 2 of 2. <span class="mono">src/api/tenants.ts</span> and <span class="mono">src/api/schema.ts</span> conflict. <b>Nothing has moved yet.</b> The replays below this one exist only as objects. Resolve it in its worktree, apply the clean part, or walk away.</div>
+            </sc-if>
+            <sc-if value="{{hasLedger}}" hint-placeholder-val="{{false}}">
+              <div class="ledger"><sc-for list="{{ledger}}" as="l" hint-placeholder-count="3"><div class="{{l.cls}}" style="animation-delay: {{l.delay}}ms;">{{l.t}}</div></sc-for></div>
+            </sc-if>
+            <sc-if value="{{showFooter}}" hint-placeholder-val="{{false}}">
+              <div class="plf">
+                <sc-if value="{{btn.run}}" hint-placeholder-val="{{false}}"><button class="sbtn pri" type="button" onClick="{{act.run}}">{{runLabel}}</button></sc-if>
+                <sc-if value="{{btn.cancel}}" hint-placeholder-val="{{false}}"><button class="sbtn" type="button" onClick="{{act.cancel}}">Cancel</button></sc-if>
+                <sc-if value="{{btn.resolve}}" hint-placeholder-val="{{false}}"><button class="sbtn pri" type="button" onClick="{{act.resolve}}">Resolved in worktree, continue</button></sc-if>
+                <sc-if value="{{btn.partial}}" hint-placeholder-val="{{false}}"><button class="sbtn" type="button" onClick="{{act.partial}}">Apply windows/scheduler only</button></sc-if>
+                <sc-if value="{{btn.abort}}" hint-placeholder-val="{{false}}"><button class="sbtn" type="button" onClick="{{act.abort}}">Abort</button></sc-if>
+                <sc-if value="{{btn.close}}" hint-placeholder-val="{{false}}"><button class="sbtn" type="button" onClick="{{act.close}}">Close</button></sc-if>
+              </div>
+            </sc-if>
+          </div>
+        </div>
+        <p class="dv-next"><b>Read the plan, not the animation:</b> in a restack, the replay rows tick one by one while all the cards hold still. Then every card re-seats together on the transaction row, because <code>git update-ref --stdin</code> moves all of them or none. That’s the property to keep when this gets built.</p>
+      </section>
+
+      <!-- ================================================================ TURN 4 -->
+      <section class="dv-turn" id="t4" data-screen-label="Turn 4 When it goes wrong">
+        <div class="dv-thd"><a class="dv-tid" href="#t4">4</a><span class="dv-tname">When it goes wrong: conflicts, squash merges, other worktrees, undo</span></div>
+        <p class="dv-sub">Stacked-PR tools fail at four predictable points. A replay conflicts. A squash merge leaves a child carrying commits main now has under another hash. A branch is checked out in someone else’s worktree. A push lands on a branch someone else just pushed. Each gets a rule, and the rule is what the plan shows.</p>
+        <div class="dv-opts">
+          <div class="dv-opt" id="4a" data-screen-label="4a Paused banner">
+            <div class="dv-olabel"><a class="dv-oid" href="#4a">4a</a>A conflict the forecast missed: the existing operation banner, stack-aware</div>
+            <div class="opb"><span><b>Restack paused</b> at <code>windows/api</code>, 2 of 3. Resolve in <code>⌂ orbit-deploy.windows-api</code>. <code>windows/ui</code> waits.</span><span class="sp"></span><button class="sbtn pri" type="button">Continue</button><button class="sbtn" type="button">Abort, restore 3</button></div>
+            <p class="note">A forecast is <code>merge-tree</code>, so it can’t miss a textual conflict. A hook or a dirty worktree can still stop the run. Then the in-flight branch runs a real <code>git rebase --onto</code> in its own worktree, or in a disposable one if it isn’t checked out. Resolution goes through the shipped <code>OperationBanner</code>. The rest of the plan resumes from the resolved tip. The plan’s journal sits in <code>$GIT_COMMON_DIR/pwrgit-stack-op.json</code>, so a quit mid-conflict comes back to the same banner.</p>
+          </div>
+          <div class="dv-opt" id="4b" data-screen-label="4b Squash merge">
+            <div class="dv-olabel"><a class="dv-oid" href="#4b">4b</a>Sync after a squash merge: exclude the parent, retarget before delete</div>
+            <pre class="code"><span class="c"># #651 squash-merged as 3fa9b61. windows/scheduler still contains 4e1a9c2..7b3d0f5.</span>
+<span class="w">git rebase origin/main windows/scheduler</span>      <span class="c"># replays #651 over its own squash → conflicts</span>
+<span class="k">git replay --onto origin/main 7b3d0f5..windows/scheduler</span>
+                                          <span class="c"># 7b3d0f5 = catalog base: only #652's commits move</span>
+<span class="c"># forge order matters:</span>
+<span class="k">PATCH #652 base → main</span>                   <span class="c"># 1. retarget the child first</span>
+<span class="k">git push origin :windows/model</span>            <span class="c"># 2. only then delete; deleting an open PR's base closes it</span></pre>
+            <p class="note">The catalog’s <code>base</code> is what makes this safe without a heuristic. gh-stack v0.1.1 got the boundary wrong after a squash (upstream <code>#586</code>, recorded in PwrAgent’s <code>docs/gh-stack-workflow.md</code>). PwrGit takes the newest of the catalog base, the parent’s last-known tip, and the fork point. It then proves that the commit list it replays equals the child’s own commits by patch-id. If they differ, the plan stops before Run.</p>
+          </div>
+          <div class="dv-opt" id="4c" data-screen-label="4c Worktrees">
+            <div class="dv-olabel"><a class="dv-oid" href="#4c">4c</a>Branches checked out elsewhere</div>
+            <div class="find" style="width: 470px">
+              <div class="fitem"><span class="pin acc">1</span><div><h4><code>--update-refs</code> skips them, so we don’t use it</h4><p>Git won’t update a ref that’s checked out in another worktree. It warns and moves on, and the stack comes out half-restacked. PwrGit moves refs itself, in one <code>update-ref</code> transaction with each planned old tip as the expected value.</p></div></div>
+              <div class="fitem"><span class="pin acc">2</span><div><h4>Then each checked-out worktree follows with <code>reset --keep</code></h4><p>Before Run, the plan intersects each worktree’s dirty files with the files the restack changes. An empty intersection means its changes ride along. A non-empty one blocks the whole plan before any ref moves and names the files. Stash them, or finish them, then restack.</p></div></div>
+              <div class="fitem"><span class="pin acc">3</span><div><h4>An agent mid-turn is a dirty worktree with a pulse</h4><p>PwrAgent will gate this harder. It won’t restack under a running turn without the thread’s consent. That’s its design to do, and it’s handed off with this board.</p></div></div>
+            </div>
+          </div>
+          <div class="dv-opt" id="4d" data-screen-label="4d Undo and leases">
+            <div class="dv-olabel"><a class="dv-oid" href="#4d">4d</a>Undo, and pushing without clobbering</div>
+            <div class="toastm"><b>Restacked 3 branches</b><span>windows/scheduler, windows/api, windows/ui</span><span class="sp"></span><button class="sbtn" type="button">Undo</button></div>
+            <pre class="code" style="width: 470px"><span class="c"># before Run: one ref per branch, kept 14 days</span>
+<span class="k">refs/pwrgit/undo/op-0412/windows/scheduler</span> → 9f3c2e1
+<span class="c"># Undo = one transaction back, expecting the tips Run wrote</span>
+<span class="c"># Submit: all-or-nothing, each leased to the sha PwrGit last fetched</span>
+<span class="k">git push --atomic origin \</span>
+<span class="k">  --force-with-lease=windows/scheduler:9f3c2e1 c04b7aa:windows/scheduler …</span></pre>
+            <p class="note">This is PwrGit’s first real undo. Local operations undo exactly. Once a stack is pushed, Undo offers the leased push back as a separate, named step. It never pushes as a side effect. The lease always names its expected sha. A bare <code>--force-with-lease</code> trusts a remote-tracking ref that a background fetch may already have advanced.</p>
+          </div>
+        </div>
+      </section>
+
+      <!-- ================================================================ TURN 5 -->
+      <section class="dv-turn" id="t5" data-screen-label="Turn 5 MCP">
+        <div class="dv-thd"><a class="dv-tid" href="#t5">5</a><span class="dv-tname">MCP: agents plan, PwrGit proves, a person (or a standing grant) applies</span></div>
+        <p class="dv-sub">Every <code>pwrgit_*</code> tool today reads. Stacks bring the first tools that write, so the surface is small and two-phase. <b>Plan</b> is safe to call freely: it writes only unreachable objects. It returns the same plan the panel in turn 3 shows, with a forecast and the exact tips it expects. <b>Apply</b> takes the plan id and fails if any tip moved since. That one check covers stale plans, a racing human, and a racing second agent. Write capabilities are new, sensitive, and separate. Local ref moves are one grant. Pushing and forge writes are another.</p>
+        <div class="dv-opts">
+          <div class="dv-opt" id="5a" data-screen-label="5a Tools">
+            <div class="dv-olabel"><a class="dv-oid" href="#5a">5a</a>Six tools and one resource</div>
+            <div class="tbl" style="width: 1180px">
+              <div class="tr head"><span>Tool</span><span>Hints</span><span>Capability</span><span>Does</span></div>
+              <div class="tr"><span class="mn">pwrgit_stack_list</span><span>read-only</span><span><code>repository.stack.read</code></span><span>Stacks in a repository, from the catalog plus inferred chains from PR bases. Each stack has its branches, PRs, health chips (turn 1c), and the worktree each branch is checked out in.</span></div>
+              <div class="tr"><span class="mn">pwrgit_stack_get</span><span>read-only</span><span><code>repository.stack.read</code></span><span>One stack, found by any branch or PR number in it. Includes each branch’s commits since its base, so an agent can split, fold or reorder knowing what moves.</span></div>
+              <div class="tr"><span class="mn">pwrgit_stack_plan</span><span>read-only*</span><span><code>repository.stack.read</code></span><span><code>{op: create_branch | adopt | restack | sync | submit | reorder | move | fold | remove | merge}</code>. Returns <code>planId</code>, steps, per-step forecast with conflicted files, <code>expectedTips</code>, pushes, and forge changes. <i>*Writes objects only. No ref, index or worktree changes.</i></span></div>
+              <div class="tr"><span class="mn">pwrgit_stack_apply</span><span>destructive</span><span><code>repository.stack.write</code><br /><code>repository.stack.publish</code></span><span>Runs a plan by id. Local ref moves need <code>.write</code>. Any push or PR change also needs <code>.publish</code>. With no standing grant, the app shows the approval sheet (5b) and the call waits. Returns <code>operationId</code>.</span></div>
+              <div class="tr"><span class="mn">pwrgit_stack_operation</span><span>destructive</span><span><code>repository.stack.write</code></span><span><code>{operationId, action: status | continue | abort | undo}</code>. Reports a paused conflict with its worktree and files. An agent can resolve the files there and continue.</span></div>
+              <div class="tr"><span class="mn">pwrgit_stack_metadata</span><span>idempotent</span><span><code>repository.stack.write</code></span><span>Catalog-only edits that move no ref: adopt an existing chain, forget a stack locally, rename it. Same locks as gh stack.</span></div>
+              <div class="tr"><span class="mn">pwrgit://…/stacks</span><span>subscribable</span><span><code>status.subscribe</code></span><span>A versioned resource beside today’s status resource. It updates on catalog writes, ref moves and PR polls, so an agent can wait for a parent to merge without polling.</span></div>
+            </div>
+          </div>
+          <div class="dv-opt" id="5b" data-screen-label="5b Approval sheet">
+            <div class="dv-olabel"><a class="dv-oid" href="#5b">5b</a>An agent’s apply, as the person at the app sees it</div>
+            <div class="stage" style="width: 520px">
+              <div class="sheet">
+                <div class="hd"><span class="who">Codex · PwrAgent</span><span class="t">wants to restack and submit <span class="mono">windows</span></span></div>
+                <div class="bd">
+                  <div class="ln"><em>Replay</em><span>windows/scheduler, windows/api, windows/ui onto 7b3d0f5 · <span style="color: #9ce5b3">all clean</span></span></div>
+                  <div class="ln"><em>Refs</em><span>3 move in one transaction · undo kept</span></div>
+                  <div class="ln"><em>Worktrees</em><span>⌂ orbit-deploy.windows-api · clean, follows with reset --keep</span></div>
+                  <div class="ln"><em>Push</em><span class="w">4 branches, atomic, each leased to its last-fetched sha</span></div>
+                  <div class="ln"><em>GitHub</em><span>open #654 (draft) into windows/api · link 4 PRs into a stack</span></div>
+                </div>
+                <div class="ft"><span class="chkbx"><i></i>Allow local restacks for this session</span><span class="sp"></span><button class="sbtn" type="button">Deny</button><button class="sbtn" type="button">Local only</button><button class="sbtn pri" type="button">Approve</button></div>
+              </div>
+            </div>
+            <p class="note"><b>Local only</b> applies the ref moves and drops the push and GitHub rows. The agent gets that back as a partial result, not an error. A session grant never covers <code>.publish</code>. Each push is shown. The sheet is the same plan the panel renders, so an agent can never ask for something the UI can’t show.</p>
+          </div>
+          <div class="dv-opt" id="5c" data-screen-label="5c Exchange">
+            <div class="dv-olabel"><a class="dv-oid" href="#5c">5c</a>The exchange, abbreviated</div>
+            <pre class="code" style="width: 600px"><span class="c">→ pwrgit_stack_plan</span>
+{ <span class="k">"repository"</span>: <span class="s">"/src/orbit-deploy"</span>, <span class="k">"op"</span>: { <span class="k">"kind"</span>: <span class="s">"restack"</span>, <span class="k">"from"</span>: <span class="s">"windows/model"</span> } }
+<span class="c">← plan</span>
+{ <span class="k">"planId"</span>: <span class="s">"pl_7Qx"</span>, <span class="k">"stack"</span>: <span class="s">"windows"</span>,
+  <span class="k">"expectedTips"</span>: { <span class="s">"windows/scheduler"</span>: <span class="s">"9f3c2e1"</span>, <span class="s">"windows/api"</span>: <span class="s">"51ad0e7"</span>, … },
+  <span class="k">"steps"</span>: [
+    { <span class="k">"replay"</span>: <span class="s">"windows/scheduler"</span>, <span class="k">"onto"</span>: <span class="s">"7b3d0f5"</span>, <span class="k">"commits"</span>: 4, <span class="k">"forecast"</span>: <span class="s">"clean"</span> },
+    { <span class="k">"replay"</span>: <span class="s">"windows/api"</span>, <span class="k">"commits"</span>: 2,
+      <span class="k">"forecast"</span>: { <span class="k">"conflict"</span>: { <span class="k">"commit"</span>: <span class="s">"e2190d4"</span>, <span class="k">"files"</span>: [<span class="s">"src/api/tenants.ts"</span>] } } },
+    … ],
+  <span class="k">"proof"</span>: { <span class="k">"patchIdsPreserved"</span>: true, <span class="k">"dropped"</span>: [] } }
+<span class="c">→ pwrgit_stack_apply { "planId": "pl_7Qx", "until": "windows/scheduler" }</span>
+<span class="c">← { "operationId": "op-0412", "moved": ["windows/scheduler"], "remaining": ["windows/api", "windows/ui"] }</span></pre>
+          </div>
+        </div>
+      </section>
+
+      <!-- ================================================================ TURN 6 -->
+      <section class="dv-turn" id="t6" data-screen-label="Turn 6 Engine and phasing">
+        <div class="dv-thd"><a class="dv-tid" href="#t6">6</a><span class="dv-tname">Engine, proofs, tests and phasing</span></div>
+        <p class="dv-sub">The design’s claims reduce to properties a test can hold PwrGit to. The engineering detail is in <code>docs/plans/2026-11-22-003-design-stacked-prs.md</code>, which goes with this board.</p>
+        <div class="dv-opts">
+          <div class="dv-opt" id="6a" data-screen-label="6a Engine">
+            <div class="dv-olabel"><a class="dv-oid" href="#6a">6a</a>The engine, in eight lines</div>
+            <div class="find wide">
+              <div class="grid2">
+                <div class="fitem"><span class="pin acc">1</span><div><h4>Replay in memory</h4><p><code>git replay --onto &lt;parent&gt; &lt;base&gt;..&lt;branch&gt;</code> (bundled Git 2.56). No checkout, no index, no hooks, no half-states.</p></div></div>
+                <div class="fitem"><span class="pin acc">2</span><div><h4>Locate conflicts exactly</h4><p>When a replay stops, <code>git merge-tree --write-tree --name-only</code> walks commit by commit to name the commit and files.</p></div></div>
+                <div class="fitem"><span class="pin acc">3</span><div><h4>Move all or nothing</h4><p>One <code>git update-ref --stdin</code> transaction (<code>start / update new old / prepare / commit</code>). The expected old values make stale plans fail.</p></div></div>
+                <div class="fitem"><span class="pin acc">4</span><div><h4>Worktrees follow</h4><p><code>reset --keep</code> in each checked-out worktree, after a dirty-files ∩ changed-files preflight.</p></div></div>
+                <div class="fitem"><span class="pin acc">5</span><div><h4>Prove it</h4><p>Each branch’s patch-id multiset is equal before and after. Commits that went empty because trunk already has them are listed, never dropped silently.</p></div></div>
+                <div class="fitem"><span class="pin acc">6</span><div><h4>Push atomically, with leases</h4><p><code>--atomic</code> plus an explicit <code>--force-with-lease=ref:sha</code> per branch. Retarget PRs before deleting a merged base.</p></div></div>
+                <div class="fitem"><span class="pin acc">7</span><div><h4>Share the catalog</h4><p>Read and write gh stack’s schema v1 under <code>gh-stack.lock</code>. Refuse while <code>gh-stack-operation.lock</code> or a gh stack journal is active.</p></div></div>
+                <div class="fitem"><span class="pin acc">8</span><div><h4>Serialize locally</h4><p>Stack operations take the repository lock in <code>WorktreeOperationQueue</code>, then each affected worktree’s lock, in that order.</p></div></div>
+              </div>
+            </div>
+          </div>
+          <div class="dv-opt" id="6b" data-screen-label="6b Tests">
+            <div class="dv-olabel"><a class="dv-oid" href="#6b">6b</a>Tests that state the rules (AGENTS.md rule 7)</div>
+            <div class="find">
+              <div class="fitem"><span class="pin ok">M</span><div><h4>Model test against real Git</h4><p>Random sequences of commit, amend, restack, reorder, squash-merge-then-sync and undo on a temp repo, checked against a pure model of the chain. Invariants: every parent tip is an ancestor of its child. Patch-ids are preserved. Undo restores exact tips. No commit becomes unreachable from <code>refs/pwrgit/undo</code>.</p></div></div>
+              <div class="fitem"><span class="pin ok">O</span><div><h4>gh stack as an oracle</h4><p>On identical fixtures, <code>gh stack rebase</code> and PwrGit’s restack produce the same trees. A catalog PwrGit wrote reads back unchanged through <code>gh stack view --json</code>.</p></div></div>
+              <div class="fitem"><span class="pin ok">P</span><div><h4>Forecast soundness</h4><p>Property test: if the forecast says clean, apply doesn’t conflict. If it names files, those are the files <code>rebase --onto</code> stops on.</p></div></div>
+              <div class="fitem"><span class="pin ok">S</span><div><h4>The squash-merge regression</h4><p>The gh-stack #586 shape, rebuilt from PwrAgent’s recorded incident, must sync with zero conflicts. It must fail on a naive <code>rebase origin/main</code>.</p></div></div>
+            </div>
+          </div>
+          <div class="dv-opt" id="6c" data-screen-label="6c Phasing">
+            <div class="dv-olabel"><a class="dv-oid" href="#6c">6c</a>Phasing, each phase shippable</div>
+            <div class="tbl" style="width: 860px">
+              <div class="tr head" style="grid-template-columns: 60px 260px minmax(0, 1fr)"><span>Phase</span><span>Ships</span><span>Why this order</span></div>
+              <div class="tr" style="grid-template-columns: 60px 260px minmax(0, 1fr)"><span class="mn">P0</span><span><b>See stacks.</b> Catalog reader, PR-base inference, Stacks section, health chips, position chips, read MCP tools and the stacks resource.</span><span>Read-only and safe. It’s also the answer to “why is my PR showing the parent’s commits”.</span></div>
+              <div class="tr" style="grid-template-columns: 60px 260px minmax(0, 1fr)"><span class="mn">P1</span><span><b>Restack.</b> Replay, transaction, worktree follow, proofs, undo, new branch on top, adopt and remove.</span><span>Local-only, and undo covers all of it.</span></div>
+              <div class="tr" style="grid-template-columns: 60px 260px minmax(0, 1fr)"><span class="mn">P2</span><span><b>Publish.</b> Submit (atomic leased push, open PRs, retarget, link stack) and Sync after merge.</span><span>PwrGit’s first forge writes. It needs P1’s plan and undo to be trustworthy first.</span></div>
+              <div class="tr" style="grid-template-columns: 60px 260px minmax(0, 1fr)"><span class="mn">P3</span><span><b>Shape and delegate.</b> Drag to reorder with live forecast, fold, move onto, plan/apply over MCP with the approval sheet, merge stack bottom-up.</span><span>The parts that need everything above. This is also what PwrAgent builds its stack-managing agents on.</span></div>
+            </div>
+          </div>
+        </div>
+        <p class="dv-next"><b>Next:</b> review 1a, 2a and 5b · pin the GitHub stack-object endpoint from gh-stack v0.3.0’s source before P2 · PwrAgent’s board (agents creating and restacking stacks, stacks across threads) builds on this one.</p>
+      </section>
+    </x-dc>
+
+    <script
+      type="text/x-dc"
+      data-dc-script
+      data-props='{}'
+    >
+      const N = {
+        m: { name: "windows/model", title: "feat: DeployWindow model and parser", commits: "3 commits", add: "+212", del: "−18", chk: "passing" },
+        s: { name: "windows/scheduler", title: "feat: scheduler waits for the window", commits: "4 commits", add: "+318", del: "−64", chk: "pending" },
+        a: { name: "windows/api", title: "feat: windows in the tenant API", commits: "2 commits", add: "+146", del: "−22", chk: "passing" },
+        u: { name: "windows/ui", title: "ui: show the next deploy window", commits: "2 commits", add: "+97", del: "−11", chk: "pending" }
+      };
+      const IDS = ["m", "s", "a", "u"];
+      const COUNTS = { m: 3, s: 4, a: 2, u: 2 };
+      const ROW = 78;
+      const SHAS = {
+        m: ["4e1a9c2", "7b3d0f5", "b81c4e0", "2c94e7a"],
+        s: ["9f3c2e1", "c04b7aa", "5d2e81f", "f0a3c19", "8a1e0b4", "e6d27c1"],
+        a: ["51ad0e7", "e2190d4", "92b6d1c", "3c7f0a8", "0b5e9d2", "7d13fa6"],
+        u: ["0d8c6b3", "a7f21e9", "6e4b2d7", "d19a5c3", "4f0c8b1", "c2a7e95"]
+      };
+      const STEP_MS = 640;
+      function clone(o) { return JSON.parse(JSON.stringify(o)); }
+      const INITIAL = {
+        order: ["m", "s", "a", "u"],
+        pr: { m: 651, s: 652, a: 653, u: 0 },
+        prBase: { m: "main", s: "windows/model", a: "windows/scheduler", u: "" },
+        rev: { m: 0, s: 0, a: 0, u: 0 },
+        stale: {}, unpushed: {}, merged: {}, gone: {}, fresh: {},
+        trunk: "8c1d2e0", trunkMoved: false,
+        phase: "idle", kind: "", steps: [], at: -1, nextOrder: null,
+        conflict: false, undo: null, undoable: false, toast: "", ledger: [], op: 412
+      };
+
+      class Component extends DCLogic {
+        constructor(props) {
+          super(props);
+          this.state = clone(INITIAL);
+          this.timer = null;
+        }
+        componentWillUnmount() { this.stop(); }
+        stop() { if (this.timer !== null) { clearTimeout(this.timer); this.timer = null; } }
+        busy() { const p = this.state.phase; return p === "plan" || p === "running" || p === "paused"; }
+        head(s, id) { const list = SHAS[id]; return list[Math.min(s.rev[id], list.length - 1)]; }
+        parentOf(s, id) { const i = s.order.indexOf(id); return i <= 0 ? "main" : N[s.order[i - 1]].name; }
+        anyStale(s) { return s.order.some((id) => s.stale[id]); }
+        anyMerged(s) { return s.order.some((id) => s.merged[id]); }
+        markUpper(s, fromIndex, first) {
+          s.order.forEach((id, i) => {
+            if (i < fromIndex) return;
+            s.stale[id] = i === fromIndex ? first : "follows " + N[s.order[i - 1]].name;
+          });
+        }
+        settle(s) { s.phase = "idle"; s.kind = ""; s.steps = []; s.at = -1; s.ledger = []; s.fresh = {}; s.undo = null; s.undoable = false; s.nextOrder = null; }
+
+        /* ---------- scenario: things that happen to you ---------- */
+        amend() {
+          if (this.busy()) return;
+          const s = clone(this.state); this.settle(s);
+          const b = s.order[0];
+          s.rev[b] = s.rev[b] + 1; s.unpushed[b] = true;
+          this.markUpper(s, 1, "needs restack · parent +1");
+          s.toast = "Committed “fix: reject windows longer than 24h” on " + N[b].name + " (" + this.head(s, b) + ")";
+          this.setState(s);
+        }
+        merge() {
+          if (this.busy()) return;
+          const s0 = this.state; const b = s0.order[0];
+          if (s0.unpushed[b]) { this.setState({ toast: "#" + s0.pr[b] + " can’t merge what GitHub hasn’t seen. Submit pushes " + N[b].name + " first." }); return; }
+          if (this.anyStale(s0)) { this.setState({ toast: "Restack first: GitHub would merge #" + s0.pr[b] + " while its children sit on an old tip." }); return; }
+          const s = clone(s0); this.settle(s);
+          s.merged[b] = true; s.trunk = "3fa9b61"; s.trunkMoved = true;
+          this.markUpper(s, 1, "parent merged");
+          s.toast = "#" + s.pr[b] + " squash-merged on GitHub as 3fa9b61. Sync to follow it.";
+          this.setState(s);
+        }
+        toggleConflict() { if (this.busy()) return; this.setState({ conflict: !this.state.conflict }); }
+        reset() { this.stop(); this.setState(clone(INITIAL)); }
+
+        /* ---------- planning ---------- */
+        replayStep(s, id, ontoName, extraSub) {
+          const conflict = this.state.conflict && id === "a";
+          const wt = id === "a" ? " Checked out in ⌂ orbit-deploy.windows-api: clean, follows with reset --keep." : "";
+          return {
+            t: "replay " + N[id].name + " onto " + ontoName,
+            sub: COUNTS[id] + " commits since its catalog base. " + (extraSub || "") + wt,
+            fc: conflict ? "conflict · e2190d4 · src/api/tenants.ts, src/api/schema.ts" : "clean · merge-tree",
+            fcKind: conflict ? "conflict" : "clean",
+            eff: { kind: "replay", id: id }
+          };
+        }
+        stage(kind, steps, title, sub, extra) {
+          const s = clone(this.state);
+          s.phase = "plan"; s.kind = kind; s.steps = steps; s.at = -1; s.ledger = []; s.fresh = {};
+          s.planTitle = title; s.planSub = sub; s.toast = "";
+          if (extra) Object.assign(s, extra);
+          this.setState(s);
+        }
+        restack() {
+          const s = this.state; if (this.busy() || !this.anyStale(s)) return;
+          if (this.anyMerged(s)) { this.sync(); return; }
+          const ids = s.order.filter((id) => s.stale[id]);
+          const steps = [{ t: "snapshot " + ids.length + " tips → refs/pwrgit/undo/op-0" + s.op, sub: "Written before anything moves.", fc: "", fcKind: "", eff: { kind: "none" } }];
+          ids.forEach((id) => steps.push(this.replayStep(s, id, this.parentOf(s, id) + "@new")));
+          steps.push({ t: "update-ref transaction · " + ids.length + " refs", sub: "All or none, each expecting its planned old tip.", fc: "", fcKind: "", eff: { kind: "txn", ids: ids } });
+          this.stage("restack", steps, "Restack · " + ids.length + " branches", this.state.conflict ? "Forecast: windows/api conflicts. Run stops there, before anything moves." : "Forecast: all clean. Nothing has moved yet.");
+        }
+        sync() {
+          const s = this.state; if (this.busy()) return;
+          const b = s.order.find((id) => s.merged[id]);
+          if (!b) { this.setState({ toast: "Fetched origin. main is current and no PR in this stack has merged." }); return; }
+          const child = s.order[1];
+          const ids = s.order.filter((id) => id !== b);
+          const steps = [
+            { t: "fetch origin · main 8c1d2e0 → 3fa9b61", sub: "#" + s.pr[b] + " is merged by the forge’s word, not by ancestry. It was squashed.", fc: "", fcKind: "", eff: { kind: "none" } },
+            { t: "snapshot " + (ids.length + 1) + " tips → refs/pwrgit/undo/op-0" + s.op, sub: "", fc: "", fcKind: "", eff: { kind: "none" } }
+          ];
+          ids.forEach((id, i) => {
+            if (i === 0) steps.push(this.replayStep(s, id, "main", "excluding " + N[b].name + " (--onto main " + this.head(s, b) + "), so #" + s.pr[b] + "’s commits aren’t replayed over their own squash."));
+            else steps.push(this.replayStep(s, id, N[ids[i - 1]].name + "@new"));
+          });
+          steps.push({ t: "retarget #" + s.pr[child] + " base " + N[b].name + " → main", sub: "After every replay is clean, and before the branch is deleted. Deleting an open PR’s base closes it.", fc: "", fcKind: "", eff: { kind: "retarget", id: child, base: "main" } });
+          steps.push({ t: "update-ref transaction · " + ids.length + " refs, delete " + N[b].name, sub: "Its worktree is clean, and the branch is in main by PR.", fc: "", fcKind: "", eff: { kind: "txn", ids: ids, collapse: b } });
+          steps.push({ t: "update the stack on GitHub · " + ids.filter((id) => s.pr[id]).length + " PRs", sub: "GitHub draws the stack on each PR from this.", fc: "", fcKind: "", eff: { kind: "none" } });
+          this.stage("sync", steps, "Sync · #" + s.pr[b] + " merged", "Follow a squash merge without replaying it.");
+        }
+        submit() {
+          const s = this.state; if (this.busy()) return;
+          if (this.anyStale(s)) { this.setState({ toast: "Restack first: Submit would push branches that don’t contain their parent’s tip." }); return; }
+          const push = s.order.filter((id) => s.unpushed[id] || !s.pr[id]);
+          const drift = s.order.filter((id) => s.pr[id] && s.prBase[id] !== this.parentOf(s, id));
+          const create = s.order.filter((id) => !s.pr[id]);
+          if (!push.length && !drift.length) { this.setState({ toast: "Nothing to submit. GitHub already matches the stack." }); return; }
+          const steps = [];
+          if (push.length) steps.push({ t: "push " + push.length + " · --atomic", sub: push.map((id) => N[id].name + " leased to " + (s.pr[id] ? SHAS[id][Math.max(0, s.rev[id] - 1)] : "(new)")).join(" · "), fc: "", fcKind: "", eff: { kind: "push", ids: push } });
+          drift.forEach((id) => steps.push({ t: "retarget #" + s.pr[id] + " base " + s.prBase[id] + " → " + this.parentOf(s, id), sub: "GitHub follows the stack’s order.", fc: "", fcKind: "", eff: { kind: "retarget", id: id, base: this.parentOf(s, id) } }));
+          create.forEach((id) => steps.push({ t: "open #654 " + N[id].name + " → " + this.parentOf(s, id) + " (draft)", sub: "Title from the first commit. Body left to you.", fc: "", fcKind: "", eff: { kind: "create", id: id } }));
+          steps.push({ t: "link " + s.order.length + " PRs into the stack on GitHub", sub: "The same stack object gh stack submit writes.", fc: "", fcKind: "", eff: { kind: "none" } });
+          this.stage("submit", steps, "Submit · " + s.order.length + " branches", "Atomic: GitHub sees all of these pushes or none of them.");
+        }
+        reorder() {
+          const s = this.state; if (this.busy()) return;
+          if (this.anyStale(s) || this.anyMerged(s)) { this.setState({ toast: "Finish the restack or sync first. A reorder plans from settled tips." }); return; }
+          const n = s.order.length; if (n < 3) return;
+          const next = s.order.slice(); const top = next[n - 1]; next[n - 1] = next[n - 2]; next[n - 2] = top;
+          const lower = next[n - 2]; const upper = next[n - 1];
+          const steps = [
+            { t: "snapshot 2 tips → refs/pwrgit/undo/op-0" + s.op, sub: "", fc: "", fcKind: "", eff: { kind: "none" } },
+            this.replayStep(s, lower, N[next[n - 3]].name, "Moves below " + N[upper].name + ". "),
+            this.replayStep(s, upper, N[lower].name + "@new", "Now sits on " + N[lower].name + ". "),
+            { t: "update-ref transaction · 2 refs", sub: "#" + s.pr[upper] + "’s GitHub base will differ until Submit.", fc: "", fcKind: "", eff: { kind: "txn", ids: [lower, upper], order: next } }
+          ];
+          this.stage("reorder", steps, "Reorder · " + N[lower].name + " under " + N[upper].name, this.state.conflict ? "Forecast: windows/api conflicts on its new parent." : "Forecast from replaying both in the new order: clean.");
+        }
+
+        /* ---------- running ---------- */
+        run() {
+          const s = this.state; if (s.phase !== "plan") return;
+          const snap = { order: s.order, rev: s.rev, stale: s.stale, unpushed: s.unpushed, merged: s.merged, gone: s.gone, pr: s.pr, prBase: s.prBase, trunk: s.trunk };
+          this.setState({ phase: "running", at: 0, undo: clone(snap), toast: "" });
+          this.stop(); this.timer = setTimeout(() => this.tick(), STEP_MS);
+        }
+        applyEff(s, eff, onlyIds) {
+          if (eff.kind === "txn") {
+            const ids = onlyIds || eff.ids;
+            s.fresh = {};
+            ids.forEach((id) => { delete s.stale[id]; s.rev[id] = s.rev[id] + 1; s.unpushed[id] = true; s.fresh[id] = true; });
+            if (eff.order && !onlyIds) s.order = eff.order;
+            if (eff.collapse && !onlyIds) { s.gone[eff.collapse] = true; s.order = s.order.filter((id) => id !== eff.collapse); }
+          } else if (eff.kind === "retarget") {
+            s.prBase[eff.id] = eff.base;
+          } else if (eff.kind === "push") {
+            s.fresh = {}; eff.ids.forEach((id) => { delete s.unpushed[id]; s.fresh[id] = true; });
+          } else if (eff.kind === "create") {
+            s.pr[eff.id] = 654; s.prBase[eff.id] = this.parentOf(s, eff.id); s.fresh[eff.id] = true;
+          }
+        }
+        tick() {
+          this.timer = null;
+          const s = clone(this.state); if (s.phase !== "running") return;
+          const st = s.steps[s.at];
+          if (st.fcKind === "conflict") { s.phase = "paused"; this.setState(s); return; }
+          this.applyEff(s, st.eff, null);
+          s.at = s.at + 1;
+          if (s.at >= s.steps.length) { this.finish(s); return; }
+          this.setState(s);
+          this.timer = setTimeout(() => this.tick(), STEP_MS);
+        }
+        finish(s) {
+          s.phase = "done"; s.at = s.steps.length;
+          const k = s.kind;
+          const L = {
+            restack: ["✓ replayed in memory · no worktree touched until the end", "✓ every commit once · patch-ids match, " + s.steps.filter((x) => x.eff.kind === "replay").reduce((n, x) => n + COUNTS[x.eff.id], 0) + " of " + s.steps.filter((x) => x.eff.kind === "replay").reduce((n, x) => n + COUNTS[x.eff.id], 0), "✓ refs moved in one transaction against the planned tips", "✓ undo kept at refs/pwrgit/undo/op-0" + s.op, "· nothing pushed · Submit pushes with a lease"],
+            sync: ["✓ #651’s commits skipped, 0 replayed over the squash", "✓ #652 retargeted to main before windows/model was deleted", "✓ refs moved in one transaction · local windows/model removed", "· pushes wait for Submit · GitHub stack updated"],
+            submit: ["✓ pushed atomically · each lease named its expected sha", "✓ PR bases follow the stack", "✓ stack linked on GitHub"],
+            reorder: ["✓ both replays clean on their new parents", "✓ patch-ids match · nothing dropped", "✓ one transaction · undo kept", "· GitHub base differs until Submit"]
+          }[k] || [];
+          s.ledger = L.map((t, i) => ({ t: t, cls: t.charAt(0) === "·" ? "n" : "", delay: i * 90 }));
+          s.undoable = k === "restack" || k === "reorder";
+          const toast = { restack: "Restacked " + s.steps.filter((x) => x.eff.kind === "replay").length + " branches.", sync: "Synced: windows/model is in main, and the stack is one shorter.", submit: "Submitted. GitHub shows the stack.", reorder: "Reordered: windows/ui now sits under windows/api." }[k] || "";
+          s.toast = toast; s.op = s.op + 1;
+          this.setState(s);
+        }
+        resolve() {
+          const s = clone(this.state); if (s.phase !== "paused") return;
+          const st = s.steps[s.at]; st.fcKind = "resolved"; st.fc = "resolved in ⌂ orbit-deploy.windows-api · continued with rebase --onto";
+          s.phase = "running"; this.setState(s);
+          this.stop(); this.timer = setTimeout(() => this.tick(), STEP_MS);
+        }
+        partial() {
+          const s = clone(this.state); if (s.phase !== "paused") return;
+          const before = s.steps.slice(0, s.at).filter((x) => x.eff.kind === "replay").map((x) => x.eff.id);
+          const txn = s.steps.find((x) => x.eff.kind === "txn");
+          if (!before.length || !txn) return;
+          this.applyEff(s, txn.eff, before);
+          s.steps = s.steps.slice(0, s.at);
+          s.steps.push({ t: "update-ref transaction · " + before.length + " ref", sub: "The clean part only. windows/api and above still need a restack.", fc: "", fcKind: "", eff: { kind: "none" } });
+          this.finish(s);
+          this.setState({ ledger: [{ t: "✓ " + before.map((id) => N[id].name).join(", ") + " restacked", cls: "", delay: 0 }, { t: "· windows/api and windows/ui unchanged · still marked", cls: "n", delay: 90 }], toast: "Applied the clean part. windows/api waits for you.", undoable: true });
+        }
+        abort() {
+          this.stop();
+          const s = clone(this.state);
+          if (s.undo) Object.assign(s, s.undo);
+          this.settle(s);
+          s.toast = "Aborted. Nothing moved: the replays were objects, never refs.";
+          this.setState(s);
+        }
+        cancel() { this.stop(); const s = clone(this.state); this.settle(s); s.toast = ""; this.setState(s); }
+        close() { const s = clone(this.state); const keep = { undo: s.undo, undoable: s.undoable, toast: s.toast }; this.settle(s); Object.assign(s, keep); this.setState(s); }
+        undo() {
+          const s0 = this.state; if (!s0.undo || !s0.undoable || this.busy()) return;
+          const s = clone(s0); Object.assign(s, s.undo); this.settle(s);
+          s.toast = "Restored from refs/pwrgit/undo/op-0" + (s0.op - 1) + " in one transaction.";
+          this.setState(s);
+        }
+
+        /* ---------- view ---------- */
+        renderVals() {
+          const s = this.state;
+          const n = s.order.length;
+          const runningId = s.phase === "running" && s.steps[s.at] && s.steps[s.at].eff.kind === "replay" ? s.steps[s.at].eff.id : null;
+          const pausedId = s.phase === "paused" && s.steps[s.at] ? s.steps[s.at].eff.id : null;
+          const cards = IDS.map((id) => {
+            const idx = s.order.indexOf(id);
+            const gone = idx < 0;
+            const parent = gone ? "main" : this.parentOf(s, id);
+            const badges = [];
+            if (s.merged[id]) badges.push({ t: "merged · squash 3fa9b61", cls: "bdg merged" });
+            if (s.stale[id]) badges.push({ t: s.stale[id], cls: "bdg warn" });
+            if (s.unpushed[id] && s.pr[id]) badges.push({ t: "needs push", cls: "bdg push" });
+            if (s.pr[id] && !s.merged[id] && s.prBase[id] !== parent) badges.push({ t: "GitHub base: " + s.prBase[id], cls: "bdg drift" });
+            if (!s.pr[id]) badges.push({ t: "not submitted", cls: "bdg mute" });
+            if (s.fresh[id] && !s.stale[id] && !badges.length) badges.push({ t: s.kind === "submit" ? "pushed" : "restacked", cls: "bdg ok" });
+            let cls = "card";
+            if (id === "a") cls += " here";
+            if (s.stale[id]) cls += " stale";
+            if (s.merged[id]) cls += " merged";
+            if (runningId === id || pausedId === id) cls += " run";
+            if (s.fresh[id]) cls += " fresh";
+            if (gone) cls += " gone";
+            const prCls = "prc " + (s.merged[id] ? "merged" : s.pr[id] ? N[id].chk : "none");
+            return {
+              id: id, cls: cls,
+              y: gone ? n * ROW - 12 : (n - 1 - idx) * ROW,
+              op: gone ? 0 : 1,
+              pos: gone ? "" : (idx + 1) + "/" + n,
+              name: N[id].name, title: N[id].title, add: N[id].add, del: N[id].del, commits: N[id].commits,
+              prLabel: s.pr[id] ? "#" + s.pr[id] : "no PR", prCls: prCls,
+              parent: parent, sha: this.head(s, id), badges: badges,
+              running: runningId === id
+            };
+          });
+          const steps = s.steps.map((st, i) => {
+            let cls = "step";
+            if (s.phase === "done" || i < s.at) cls += " done";
+            else if (i === s.at && s.phase === "running") cls += " now";
+            else if (i === s.at && s.phase === "paused") cls += " stop";
+            return { t: st.t, sub: st.sub, fc: st.fc, fcCls: "fc " + st.fcKind, cls: cls, delay: s.phase === "plan" ? i * 70 : 0 };
+          });
+          const staleN = s.order.filter((id) => s.stale[id]).length;
+          const pushN = s.order.filter((id) => s.unpushed[id] || !s.pr[id] || (s.pr[id] && s.prBase[id] !== this.parentOf(s, id))).length;
+          let healthLabel = "in sync"; let healthCls = "health ok";
+          if (this.anyMerged(s)) { healthLabel = "parent merged · sync"; healthCls = "health warn"; }
+          else if (staleN) { healthLabel = staleN + " need restack"; healthCls = "health warn"; }
+          else if (pushN) { healthLabel = pushN + " to submit"; healthCls = "health push"; }
+          const busy = this.busy();
+          const kicker = { plan: "Plan · nothing has moved", running: "Running", paused: "Paused", done: "Done" }[s.phase] || "No operation";
+          const conflictAhead = s.steps.some((x) => x.fcKind === "conflict");
+          return {
+            cards: cards,
+            trunk: { y: n * ROW, sha: s.trunk, cls: "trunk" + (s.trunkMoved ? " moved" : "") },
+            countLabel: n + " branches · into main",
+            healthLabel: healthLabel, healthCls: healthCls,
+            steps: steps,
+            plan: {
+              kicker: kicker,
+              title: s.phase === "idle" ? "Nothing staged" : (s.planTitle || ""),
+              sub: s.phase === "idle" ? "Restack, Sync, Submit and reorder each stage a plan here first." : (s.phase === "done" ? "Proof ledger" : (s.planSub || "")),
+              empty: s.phase === "idle"
+            },
+            paused: s.phase === "paused",
+            ledger: s.ledger, hasLedger: s.phase === "done" && s.ledger.length > 0,
+            showFooter: s.phase !== "idle",
+            btn: {
+              run: s.phase === "plan", cancel: s.phase === "plan",
+              resolve: s.phase === "paused", partial: s.phase === "paused" && s.kind === "restack" && s.at > 1, abort: s.phase === "paused",
+              close: s.phase === "done"
+            },
+            runLabel: conflictAhead ? "Run (stops at windows/api)" : "Run",
+            toast: s.toast, hasToast: Boolean(s.toast), noToast: !s.toast,
+            canUndo: Boolean(s.undo && s.undoable && !busy),
+            conflictCls: "sbtn" + (s.conflict ? " on" : ""), conflictPressed: s.conflict ? "true" : "false",
+            restackCls: staleN && !this.anyMerged(s) ? "sbtn pri" : "sbtn",
+            submitCls: !staleN && pushN && !this.anyMerged(s) ? "sbtn pri" : "sbtn",
+            dis: {
+              amend: busy || this.anyMerged(s),
+              merge: busy || this.anyMerged(s) || !s.pr[s.order[0]],
+              reorder: busy || s.order.length < 3,
+              restack: busy || !staleN,
+              submit: busy || this.anyMerged(s),
+              sync: busy
+            },
+            act: {
+              amend: () => this.amend(), merge: () => this.merge(), reorder: () => this.reorder(),
+              conflict: () => this.toggleConflict(), reset: () => this.reset(),
+              restack: () => this.restack(), sync: () => this.sync(), submit: () => this.submit(),
+              run: () => this.run(), cancel: () => this.cancel(), resolve: () => this.resolve(),
+              partial: () => this.partial(), abort: () => this.abort(), close: () => this.close(), undo: () => this.undo()
+            }
+          };
+        }
+      }
+    </script>
+  </body>
+</html>
