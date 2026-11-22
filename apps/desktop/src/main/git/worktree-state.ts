@@ -7,8 +7,9 @@ import type { DB } from "../persistence/db";
 import { limitConcurrency, mapLimit } from "../util/map-limit";
 import { NO_OPTIONAL_LOCKS, requireExit0, type GitExec } from "./dugite";
 import { checkoutExists } from "./worktree-liveness";
-import { nestedWorktreePathspec } from "@pwrgit/mcp-server/nested-worktrees";
+import { checkoutCommonGitDir, nestedWorktreePathspec } from "@pwrgit/mcp-server/nested-worktrees";
 import { WorktreeOperationQueue } from "./worktree-operation-queue";
+import { defaultComparisonApplies, readDefaultComparisons, type DefaultComparisons } from "./worktree-default-comparison";
 
 /** A probe found `branch`'s configured upstream deleted. */
 export type UpstreamGoneChange = {
@@ -115,6 +116,14 @@ type CachedDefaultBranch = {
   /** Exact ref used to avoid Git's shorthand revision DWIM during validation. */
   verifyRef: string;
 };
+type DefaultObservation = {
+  value: ResolvedDefaultBranch;
+  oid: string | null;
+};
+type DefaultBatchRequest = {
+  branches: string[];
+  pending?: Promise<DefaultComparisons | null>;
+};
 
 function rowToState(r: StateRow): WorktreeState {
   // A gone checkout has nothing dirty, ahead, behind or merged: the stored
@@ -215,6 +224,7 @@ export function stateChanged(a: WorktreeState, b: WorktreeState): boolean {
 export class WorktreeStateService {
   /** Per-repo default branch (ref + name), cached while its ref resolves. */
   private readonly defaultBranch = new Map<string, CachedDefaultBranch>();
+  private readonly pendingDefaultBranches = new Map<string, Promise<DefaultObservation>>();
 
   /** Probes currently running git for a worktree (removal drains these). */
   private readonly inFlight = new Map<string, Set<Promise<unknown>>>();
@@ -366,6 +376,32 @@ export class WorktreeStateService {
     repoId: string,
     repoPath: string
   ): Promise<ResolvedDefaultBranch> {
+    return (await this.observeDefaultBranch(repoId, repoPath)).value;
+  }
+
+  private async observeDefaultBranch(
+    repoId: string,
+    repoPath: string
+  ): Promise<DefaultObservation> {
+    // Siblings in a family refresh ask the same question from the same cwd.
+    // Share only a running read. Later refreshes must still check that the ref
+    // resolves, and other cwd values may have different Git configuration.
+    const key = JSON.stringify([repoId, repoPath]);
+    const pending = this.pendingDefaultBranches.get(key);
+    if (pending !== undefined) return pending;
+    const read = this.readDefaultBranch(repoId, repoPath);
+    this.pendingDefaultBranches.set(key, read);
+    try {
+      return await read;
+    } finally {
+      this.pendingDefaultBranches.delete(key);
+    }
+  }
+
+  private async readDefaultBranch(
+    repoId: string,
+    repoPath: string
+  ): Promise<DefaultObservation> {
     const cached = this.defaultBranch.get(repoId);
     if (cached !== undefined) {
       const stillExists = await this.git(
@@ -376,13 +412,17 @@ export class WorktreeStateService {
       // known answer for operational failures such as an inaccessible cwd,
       // which start Git successfully but exit 128.
       if (!stillExists.ok || stillExists.value.exitCode !== 1) {
-        return cached.value;
+        return {
+          value: cached.value,
+          oid: stillExists.ok && stillExists.value.exitCode === 0 ? stillExists.value.stdout.trim() : null
+        };
       }
       this.defaultBranch.delete(repoId);
     }
 
     let resolved: ResolvedDefaultBranch | null = null;
     let verifyRef = "";
+    let oid: string | null = null;
     const sym = await this.git(
       ["symbolic-ref", "--quiet", "refs/remotes/origin/HEAD"],
       repoPath
@@ -407,6 +447,7 @@ export class WorktreeStateService {
       if (target?.ok === true && target.value.exitCode === 0) {
         resolved = { ref, name };
         verifyRef = fullRef;
+        oid = target.value.stdout.trim();
       }
     }
     if (resolved === null) {
@@ -419,6 +460,7 @@ export class WorktreeStateService {
         if (v.ok && v.value.exitCode === 0) {
           resolved = { ref: cand, name: cand };
           verifyRef = fullRef;
+          oid = v.value.stdout.trim();
           break;
         }
       }
@@ -445,7 +487,7 @@ export class WorktreeStateService {
       verifyRef = "HEAD";
     }
     this.defaultBranch.set(repoId, { value: resolved, verifyRef });
-    return resolved;
+    return { value: resolved, oid };
   }
 
   /**
@@ -454,14 +496,14 @@ export class WorktreeStateService {
    * spawns): on Windows a directory that is any process's cwd cannot be
    * deleted, so a probe racing the removal would make the delete fail.
    */
-  async compute(worktreeId: string): Promise<WorktreeState | null> {
+  async compute(worktreeId: string, defaultBatch?: DefaultBatchRequest): Promise<WorktreeState | null> {
     if (this.removalLocks.has(worktreeId)) return this.getCached(worktreeId);
 
     const pending = this.pendingComputes.get(worktreeId);
     if (pending !== undefined) return pending;
 
     const run = this.operations.run(worktreeId, () =>
-      this.computeFresh(worktreeId)
+      this.computeFresh(worktreeId, defaultBatch)
     );
     this.pendingComputes.set(worktreeId, run);
     let running = this.inFlight.get(worktreeId);
@@ -505,7 +547,8 @@ export class WorktreeStateService {
   }
 
   private async computeFresh(
-    worktreeId: string
+    worktreeId: string,
+    defaultBatch: DefaultBatchRequest | undefined
   ): Promise<WorktreeState | null> {
     const wt = this.worktreeRow(worktreeId);
     if (wt === null) return null;
@@ -567,16 +610,32 @@ export class WorktreeStateService {
       ahead = count;
     }
 
-    let lastActivityAt: string | undefined;
-    const [logRaw, lastAuthoredAt, def] = await Promise.all([
-      this.git(["log", "-1", "--format=%cI"], wt.path),
+    const observation = this.observeDefaultBranch(wt.repo_id, wt.repo_path);
+    const comparison = observation.then(async ({ value, oid }) => {
+      if (defaultBatch === undefined || value.ref === "HEAD" || oid === null ||
+        !/^[a-f0-9]{40}(?:[a-f0-9]{24})?$/.test(oid)) return null;
+      const pending = defaultBatch.pending ??= readDefaultComparisons(
+        this.git, wt.repo_path, value.ref, oid, defaultBatch.branches
+      );
+      const batch = await pending;
+      // Verify the short name and graph in this checkout after its live status.
+      // A moved tip, changed graph or replaced checkout uses the ordinary probe.
+      const entry = batch?.byHead.get(parsed.head);
+      if (entry === undefined || batch?.base !== oid ||
+        await checkoutCommonGitDir(wt.path) !== batch.commonDir ||
+        !await defaultComparisonApplies(this.git, wt.path, value.ref, batch)) return null;
+      return entry;
+    });
+    const [lastActivityAt, lastAuthoredAt, { value: def }, defaultComparison] = await Promise.all([
+      comparison.then(async (entry) => {
+        if (entry?.lastActivityAt) return entry.lastActivityAt;
+        const raw = await this.git(["log", "-1", "--format=%cI"], wt.path);
+        return raw.ok && raw.value.exitCode === 0 ? raw.value.stdout.trim() || undefined : undefined;
+      }),
       this.readLastAuthoredAt(wt.path),
-      this.resolveDefaultBranch(wt.repo_id, wt.repo_path)
+      observation,
+      comparison
     ]);
-    if (logRaw.ok && logRaw.value.exitCode === 0) {
-      const iso = logRaw.value.stdout.trim();
-      if (iso !== "") lastActivityAt = iso;
-    }
 
     // Agents and terminal git switch branches without going through PwrGit,
     // and only a full rescan rewrites the worktrees.branch column the sidebar
@@ -599,7 +658,9 @@ export class WorktreeStateService {
     let behindDefault = 0;
     let mergedIntoDefault = false;
     let divergedFromDefault = false;
-    if (!isDefaultBranch) {
+    if (!isDefaultBranch && defaultComparison !== null) {
+      ({ behindDefault, mergedIntoDefault, divergedFromDefault } = defaultComparison);
+    } else if (!isDefaultBranch) {
       // With no common ancestor (rewritten/orphaned history), `HEAD..default`
       // counts the *entire* default branch — a misleading "behind" number. Flag
       // it as diverged instead of reporting the inflated count.
@@ -751,9 +812,16 @@ export class WorktreeStateService {
   }
 
   /** Background refresh for many worktrees, concurrency-bounded. */
-  async refreshMany(worktreeIds: string[], concurrency = 8): Promise<void> {
-    await mapLimit(worktreeIds, concurrency, async (id) => {
-      await this.compute(id);
+  async refreshMany(worktrees: Array<{ id: string; branch: string }>, concurrency = 8): Promise<void> {
+    const branches = worktrees.filter(({ branch }) =>
+      branch !== "" && !branch.startsWith("detached@") && !/[\r\n]/.test(branch)
+    ).map(({ branch }) => `refs/heads/${branch}`);
+    // Batch families large enough to amortize setup. Git's comparison memory
+    // grows with the number of tips.
+    const defaultBatch: DefaultBatchRequest | undefined =
+      branches.length >= 8 && branches.length <= 256 ? { branches } : undefined;
+    await mapLimit(worktrees, concurrency, async ({ id }) => {
+      await this.compute(id, defaultBatch);
     });
   }
 

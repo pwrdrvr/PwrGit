@@ -49,14 +49,13 @@ export function createWorktreeRefresher(
   };
 
   const refreshRepoWorktrees = async (repoId: string): Promise<void> => {
-    const ids = (
-      db
-        .prepare("SELECT id FROM worktrees WHERE repo_id = ?")
-        .all(repoId) as { id: string }[]
-    ).map((r) => r.id);
+    const rows = db
+      .prepare("SELECT id, branch FROM worktrees WHERE repo_id = ?")
+      .all(repoId) as { id: string; branch: string }[];
+    const ids = rows.map((r) => r.id);
     if (ids.length === 0) return;
     const before = new Map(ids.map((id) => [id, state.getCached(id)]));
-    await state.refreshMany(ids);
+    await state.refreshMany(rows);
     // A repo refresh is also the user's explicit escape hatch when a watcher
     // misses an external filesystem change. The repo event repaints sidebar
     // badges, but the header, graph, and Changes rail subscribe to the focused

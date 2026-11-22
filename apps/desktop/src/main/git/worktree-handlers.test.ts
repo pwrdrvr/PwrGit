@@ -107,7 +107,10 @@ describe("repo worktree refresh events", () => {
     } as unknown as WorktreeStateService;
     const db = {
       prepare: (_sql: string) => ({
-        all: () => [{ id: "wt-changed" }, { id: "wt-same" }],
+        all: () => [
+          { id: "wt-changed", branch: "main" },
+          { id: "wt-same", branch: "topic" }
+        ],
         get: () => ({ profile_id: "profile-1" })
       })
     } as unknown as DB;
@@ -115,8 +118,8 @@ describe("repo worktree refresh events", () => {
     await createWorktreeRefresher(state, db).refreshRepoWorktrees("repo-1");
 
     expect(state.refreshMany).toHaveBeenCalledExactlyOnceWith([
-      "wt-changed",
-      "wt-same"
+      { id: "wt-changed", branch: "main" },
+      { id: "wt-same", branch: "topic" }
     ]);
     expect(emitEvent).toHaveBeenNthCalledWith(1, "worktree:changed", {
       worktreeId: "wt-changed"

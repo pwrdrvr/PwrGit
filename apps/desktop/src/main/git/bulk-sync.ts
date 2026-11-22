@@ -27,12 +27,14 @@ import {
 import { formatPullDuration, PullWatchdog } from "./pull-watchdog";
 import {
   BULK_OPERATION_STATE_PATHS, readBulkSyncSnapshot, readBulkSyncRefs,
-  bulkSyncRefsChanged, remoteTipsUnchanged, unchangedWorktree, type BulkSyncSnapshot
+  bulkSyncRefsChanged, remoteTipsUnchanged, inspectReadOnlyWorktree, type BulkSyncSnapshot
 } from "./bulk-sync-preflight";
 
 export const BULK_SYNC_CONCURRENCY = 3;
 /** Each repository worker runs at most four independent checkout operations. */
 export const BULK_WORKTREE_CONCURRENCY = 4;
+
+const HEAD_REVISIONS = ["--revs-only", "HEAD", "--symbolic-full-name", "HEAD", "--"];
 
 export type BulkSyncRepoInput = {
   id: string;
@@ -372,21 +374,38 @@ async function inspectWorktree(
   }
 
   report("Checking for in-progress Git operations…");
-  // One rev-parse names every state file; their presence is what `git
-  // status` reads too. Pseudo-refs read through `rev-parse --verify` were
-  // wrong both ways: AUTO_MERGE and REBASE_HEAD outlive the operation that
-  // wrote them, and BISECT_START holds a branch name, so it never resolved.
-  const statePaths = await git(
-    ["rev-parse", ...BULK_OPERATION_STATE_PATHS.flatMap((path) => ["--git-path", path])],
+  // Resolve the operation paths, HEAD's object id, and then its full ref
+  // name in one invocation. --symbolic-full-name applies to the second
+  // HEAD argument. The trailing -- keeps filenames out of revision parsing.
+  const pathArgs = BULK_OPERATION_STATE_PATHS.flatMap((path) => ["--git-path", path]);
+  const checkout = await git(
+    ["rev-parse", ...pathArgs, ...HEAD_REVISIONS],
     worktree.path,
     NO_OPTIONAL_LOCKS
   );
-  if (!statePaths.ok || statePaths.value.exitCode !== 0) {
+  if (!checkout.ok) {
     return unsafeProbe(worktree, "Git could not inspect in-progress operations.");
   }
+  const lines = checkout.value.stdout.trimEnd().split(/\r?\n/);
+  const pathCount = BULK_OPERATION_STATE_PATHS.length;
+  const headOid = lines[pathCount];
+  const headRef = lines[pathCount + 1];
+  const branchPrefix = "refs/heads/";
+  const batched = checkout.value.exitCode === 0 && lines.length === pathCount + 2 &&
+    headOid !== undefined && /^(?:[a-f0-9]{40}|[a-f0-9]{64})$/.test(headOid) &&
+    headRef !== undefined && (headRef === "HEAD" || headRef.startsWith(branchPrefix));
+  let paths = lines.slice(0, pathCount);
+  if (!batched) {
+    // An unborn or ambiguous HEAD may produce a partial answer. Keep the
+    // individual queries for those cases, including operation detection.
+    const statePaths = await checked(git, ["rev-parse", ...pathArgs], worktree.path);
+    if (!statePaths.ok) {
+      return unsafeProbe(worktree, "Git could not inspect in-progress operations.");
+    }
+    paths = statePaths.value.stdout.split("\n");
+  }
   const present = await Promise.all(
-    statePaths.value.stdout
-      .split("\n")
+    paths
       .map((path) => path.trim())
       .filter(Boolean)
       .map((path) =>
@@ -413,11 +432,16 @@ async function inspectWorktree(
   const dirty = statusLines.length > 0;
 
   report("Reading branch and upstream…");
-  const branchRaw = await checked(git, ["branch", "--show-current"], worktree.path);
-  if (!branchRaw.ok) {
-    return unsafeProbe(worktree, "Git could not inspect the checked-out branch.");
+  let branch: string;
+  if (batched) {
+    branch = headRef === "HEAD" ? "" : headRef.slice(branchPrefix.length);
+  } else {
+    const branchRaw = await checked(git, ["branch", "--show-current"], worktree.path);
+    if (!branchRaw.ok) {
+      return unsafeProbe(worktree, "Git could not inspect the checked-out branch.");
+    }
+    branch = branchRaw.value.stdout.trim();
   }
-  const branch = branchRaw.value.stdout.trim();
   if (branch === "") {
     return {
       kind: "result",
@@ -430,8 +454,12 @@ async function inspectWorktree(
     };
   }
 
-  const headRaw = await checked(git, ["rev-parse", "--verify", "HEAD"], worktree.path);
-  if (!headRaw.ok || headRaw.value.stdout.trim() === "") {
+  let head = batched ? headOid : "";
+  if (!batched) {
+    const headRaw = await checked(git, ["rev-parse", "--verify", "HEAD"], worktree.path);
+    if (headRaw.ok) head = headRaw.value.stdout.trim();
+  }
+  if (head === "") {
     return {
       kind: "result",
       value: worktreeResult(worktree, {
@@ -442,8 +470,6 @@ async function inspectWorktree(
       })
     };
   }
-  const head = headRaw.value.stdout.trim();
-
   const upstreamNameRaw = await git(
     ["rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}"],
     worktree.path,
@@ -648,6 +674,28 @@ async function softPullWorktree(
   if (second.kind === "result") return second.value;
   report("Fast-forwarding…");
   if (isAborted(signal)) return cancelled();
+  // A switch to a sibling tracking the same upstream can pass every upstream
+  // check. Read HEAD again after inspecting operation paths and ancestry.
+  const checkout = await checked(git, ["rev-parse", ...HEAD_REVISIONS], worktree.path);
+  if (isAborted(signal)) return cancelled();
+  const [head, ref] = checkout.ok ? checkout.value.stdout.trimEnd().split(/\r?\n/) : [];
+  const expectedRef = `refs/heads/${second.value.branch}`;
+  let sameBranch = ref === expectedRef;
+  // A tag named HEAD can suppress the symbolic name without suppressing the
+  // OID. Ask Git for the exact symbolic ref in that case.
+  if (ref === undefined && head === second.value.head) {
+    const symbolic = await checked(git, ["symbolic-ref", "--quiet", "HEAD"], worktree.path);
+    if (isAborted(signal)) return cancelled();
+    sameBranch = symbolic.ok && symbolic.value.stdout.trim() === expectedRef;
+  }
+  if (head !== second.value.head || !sameBranch) {
+    return worktreeResult(worktree, {
+      branch: second.value.branch,
+      outcome: "skipped",
+      reason: "unsafe_state",
+      message: "The checked-out branch or commit could not be verified before the fast-forward."
+    });
+  }
   // Checkout can partially write files before it moves HEAD. Preserve bulk
   // pull's non-interruptible mutation semantics: keep this merge and its final
   // verification under the worktree lock, outside cancellation and watchdogs.
@@ -811,8 +859,8 @@ async function syncRepo(
         if (isAborted(options.signal)) return worktreeResult(worktree, {
           outcome: "cancelled", reason: "cancelled", message: "Cancelled before this worktree was checked."
         });
-        const unchanged = snapshot === null ? null : await unchangedWorktree(git, snapshot, worktree.path, fetchedByName);
-        if (unchanged !== null && !isAborted(options.signal)) return worktreeResult(worktree, unchanged);
+        const readOnly = await inspectReadOnlyWorktree(git, snapshot, worktree.path, fetchedByName);
+        if (readOnly !== null && !isAborted(options.signal)) return worktreeResult(worktree, readOnly);
         return softPullWorktree(git, exec, worktree, fetchedByName, options.signal, reportWorktree);
       });
       report({ worktreeResult: result });

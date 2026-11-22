@@ -206,6 +206,30 @@ describe("bulk pull remote preflight, with Git as the oracle", () => {
     expect(f.calls.map((call) => call.args[0])).toEqual(["config", "for-each-ref", "fetch", "for-each-ref", "status"]);
   });
 
+  it("checks detached and pruned-upstream siblings once each without a full pull inspection", async () => {
+    const f = fixture();
+    const detached = join(f.root, "detached");
+    const gone = join(f.root, "gone");
+    git(f.publisher, "push", "origin", "main:gone");
+    git(f.path, "fetch", "origin");
+    git(f.path, "worktree", "add", "--detach", detached);
+    git(f.path, "worktree", "add", "--track", "-b", "gone", gone, "origin/gone");
+    git(f.publisher, "push", "origin", "--delete", "gone");
+    f.input.worktrees.push(
+      { path: detached, id: detached, branch: "" },
+      { path: gone, id: gone, branch: "gone" }
+    );
+    const result = await f.run();
+    expect(result.results[0]?.worktrees.map((w) => w.reason)).toEqual([
+      undefined, "detached_head", "no_upstream"
+    ]);
+    expect(result.counts.worktrees.updated).toBe(0);
+    for (const path of [detached, gone]) {
+      expect(f.calls.filter((c) => c.cwd === path).map((c) => c.args.slice(0, 1))).toEqual([["status"]]);
+      expect(git(path, "rev-parse", "HEAD")).toBe(git(f.path, "rev-parse", "HEAD"));
+    }
+  });
+
   it("skips fetching only when ordinary tag following is explicitly disabled", async () => {
     const f = fixture();
     git(f.path, "config", "remote.origin.tagOpt", "--no-tags");
@@ -233,6 +257,77 @@ describe("bulk pull remote preflight, with Git as the oracle", () => {
     expect(git(f.path, "rev-parse", "HEAD")).toBe(target);
     expect(f.calls.filter((c) => c.args[0] === "status" && c.args.includes("--untracked-files=all")).map((c) => c.cwd)).toEqual([f.path, f.path]);
     expect(f.calls.filter((c) => c.args[0] === "status" && c.args.includes("--untracked-files=no")).map((c) => c.cwd)).toEqual([path]);
+    // Both live inspections still read status and operation markers. Each
+    // operation-path lookup also resolves branch and HEAD in the same child.
+    // One final ref and OID read guards the mutation. The standalone HEAD
+    // read verifies the completed merge.
+    expect(f.calls.filter((c) => c.args[0] === "branch")).toHaveLength(0);
+    expect(f.calls.filter((c) => c.args[0] === "rev-parse" && c.args.includes("--revs-only") && !c.args.includes("--git-path"))).toHaveLength(1);
+    expect(f.calls.filter((c) => c.args[0] === "rev-parse" && c.args.at(-1) === "HEAD")).toHaveLength(1);
+  });
+
+  it.each(["head", "upstream", "dirt"])("rechecks %s after the first live inspection", async (change) => {
+    const f = fixture();
+    const before = git(f.path, "rev-parse", "HEAD");
+    f.advance();
+    git(f.path, "branch", "--track", "replacement", "origin/main");
+    git(f.publisher, "push", "origin", "main:other");
+
+    let changed = false;
+    const exec: GitExec = async (args, cwd, options) => {
+      const result = await f.exec(args, cwd, options);
+      if (args[0] === "merge-base" && !changed) {
+        changed = true;
+        if (change === "head") git(f.path, "switch", "replacement");
+        if (change === "upstream") git(f.path, "branch", "--set-upstream-to", "origin/other");
+        if (change === "dirt") writeFileSync(join(f.path, "untracked.txt"), "keep");
+      }
+      return result;
+    };
+    const outcome = await bulkSyncRepositories(exec, [f.input], { operationId: "race", mode: "soft-pull" });
+    expect(changed).toBe(true);
+    expect(outcome.results[0]?.worktrees[0]?.reason).toBe(change === "dirt" ? "dirty" : "unsafe_state");
+    expect(f.calls.some((call) => call.args[0] === "merge")).toBe(false);
+    expect(git(f.path, "rev-parse", "HEAD")).toBe(before);
+  });
+
+  it("refuses a different checkout of the same commit after the final operation-path probe", async () => {
+    const f = fixture();
+    const before = git(f.path, "rev-parse", "HEAD");
+    git(f.path, "branch", "--track", "replacement", "origin/main");
+    f.advance();
+    let pathProbes = 0;
+    const exec: GitExec = async (args, cwd, options) => {
+      const result = await f.exec(args, cwd, options);
+      if (args.includes("--git-path") && ++pathProbes === 2) {
+        git(f.path, "switch", "replacement");
+      }
+      return result;
+    };
+    const result = await bulkSyncRepositories(exec, [f.input], { operationId: "late-switch", mode: "soft-pull" });
+    expect(pathProbes).toBe(2);
+    expect(git(f.path, "symbolic-ref", "HEAD")).toBe("refs/heads/replacement");
+    expect(git(f.path, "rev-parse", "refs/heads/main")).toBe(before);
+    expect(git(f.path, "rev-parse", "refs/heads/replacement")).toBe(before);
+    expect(result.results[0]?.worktrees[0]).toMatchObject({ outcome: "skipped", reason: "unsafe_state" });
+  });
+
+  it("handles an ambiguous HEAD ref through the individual checkout probes", async () => {
+    const f = fixture();
+    const target = f.advance();
+    git(f.path, "update-ref", "refs/tags/HEAD", "HEAD");
+    const result = await f.run();
+    expect(result.counts.worktrees.updated).toBe(1);
+    expect(f.calls.filter((c) => c.args[0] === "branch")).toHaveLength(2);
+    expect(git(f.path, "rev-parse", "HEAD")).toBe(target);
+  });
+
+  it("reports an unborn branch without attempting a merge", async () => {
+    const f = fixture();
+    git(f.path, "switch", "--orphan", "unborn");
+    const result = await f.run();
+    expect(result.results[0]?.worktrees[0]).toMatchObject({ branch: "unborn", reason: "no_head" });
+    expect(f.calls.some((call) => call.args[0] === "merge")).toBe(false);
   });
 
   it("notices an external reset even after an unchanged check", async () => {

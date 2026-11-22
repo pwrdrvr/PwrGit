@@ -720,6 +720,8 @@ describe("bulk repository synchronization", () => {
 
   it("rechecks cancellation after the final safety inspection and before merge", async () => {
     const controller = new AbortController();
+    const head = "1".repeat(40);
+    const upstream = "2".repeat(40);
     let ancestryChecks = 0;
     let mergeCalls = 0;
     const fakeGit: GitExec = async (args) => {
@@ -731,9 +733,6 @@ describe("bulk repository synchronization", () => {
       }
       if (args[0] === "status") {
         return ok({ stdout: "", stderr: "", exitCode: 0 });
-      }
-      if (args[0] === "branch") {
-        return ok({ stdout: "main\n", stderr: "", exitCode: 0 });
       }
       if (args[0] === "config") {
         const isBranchRemote = args.includes("branch.main.remote");
@@ -748,17 +747,14 @@ describe("bulk repository synchronization", () => {
           // No operation state file exists.
           const paths = args.filter((_, i) => args[i - 1] === "--git-path");
           return ok({
-            stdout: paths.map((path) => `/nonexistent/${path}\n`).join(""),
+            stdout: [...paths.map((path) => `/nonexistent/${path}`), head, "refs/heads/main", ""].join("\n"),
             stderr: "",
             exitCode: 0
           });
         }
         const target = args.at(-1);
-        if (target === "HEAD") {
-          return ok({ stdout: "local\n", stderr: "", exitCode: 0 });
-        }
         if (target === "@{u}") {
-          return ok({ stdout: "upstream\n", stderr: "", exitCode: 0 });
+          return ok({ stdout: `${upstream}\n`, stderr: "", exitCode: 0 });
         }
         if (args.includes("--abbrev-ref")) {
           return ok({ stdout: "origin/main\n", stderr: "", exitCode: 0 });
