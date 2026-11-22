@@ -67,9 +67,10 @@ describe("quit diagnostics barrier", () => {
     const stop = vi.fn(() => stopping);
     const resumeQuit = vi.fn();
     const warn = vi.fn();
-    const drain = createQuitDrain({ stop, resumeQuit, warn });
+    const onDeadline = vi.fn();
+    const drain = createQuitDrain({ stop, onDeadline, resumeQuit, warn });
     const event = { preventDefault: vi.fn() };
-    return { drain, stop, resumeQuit, warn, event, resolve, reject };
+    return { drain, stop, onDeadline, resumeQuit, warn, event, resolve, reject };
   }
 
   it("waits for completion, clears the deadline, and passes reentrant quit", async () => {
@@ -111,6 +112,7 @@ describe("quit diagnostics barrier", () => {
     s.drain.beforeQuit(s.event);
     await vi.advanceTimersByTimeAsync(4_000);
     s.drain.hurry(2_000);
+    expect(s.onDeadline.mock.calls).toEqual([[10_000], [2_000]]);
     expect(vi.getTimerCount()).toBe(1);
     await vi.advanceTimersByTimeAsync(1_999);
     expect(s.resumeQuit).not.toHaveBeenCalled();
@@ -127,6 +129,7 @@ describe("quit diagnostics barrier", () => {
     const s = setup();
     s.drain.hurry(2_000);
     s.drain.beforeQuit(s.event);
+    expect(s.onDeadline.mock.calls).toEqual([[2_000]]);
     await vi.advanceTimersByTimeAsync(2_000);
     await afterResumeHop();
     expect(s.resumeQuit).toHaveBeenCalledOnce();
@@ -137,6 +140,7 @@ describe("quit diagnostics barrier", () => {
     s.drain.beforeQuit(s.event);
     await vi.advanceTimersByTimeAsync(9_000);
     s.drain.hurry(2_000);
+    expect(s.onDeadline.mock.calls).toEqual([[10_000]]);
     await vi.advanceTimersByTimeAsync(1_000);
     await afterResumeHop();
     expect(s.resumeQuit).toHaveBeenCalledOnce();
