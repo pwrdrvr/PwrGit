@@ -1,0 +1,15 @@
+<!doctype html>
+<html lang="en" data-platform="darwin">
+<meta charset="utf-8">
+<title>Lineage refresh benchmark</title>
+<script>
+  window.graphCommits = 0;
+  window.__REACT_DEVTOOLS_GLOBAL_HOOK__ = {
+    supportsFiber: true, inject: () => 1,
+    onCommitFiberRoot: () => window.graphCommits++,
+  };
+  if (new URLSearchParams(location.search).has("no-timing")) console.timeStamp = undefined;
+</script>
+<div id="root"></div>
+<script type="module" src="./main.tsx"></script>
+</html>

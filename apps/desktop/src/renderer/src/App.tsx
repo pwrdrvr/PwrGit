@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type {
   ChangeRequestEntry,
   CloneRepository,
@@ -36,6 +36,7 @@ import {
   type FileInsightTab
 } from "./features/diff/FileInsightsPane";
 import { LineageGraph } from "./features/graph/LineageGraph";
+import { setVisibleLineageRepo } from "./features/graph/lineage-refresh-trace";
 import { SelectionBar } from "./features/graph/SelectionBar";
 import { TitleBar } from "./features/chrome/TitleBar";
 import { ContributionScreen } from "./features/contributions/ContributionScreen";
@@ -784,6 +785,12 @@ export function App() {
     changeRequestRepo?.worktrees.find((w) => !w.missing)?.id ??
     null;
   const shownChangeRequest = changeRequestRepo === null ? null : changeRequest;
+  const lineageVisible = shownChangeRequest === null && diffTarget === null && fileInsightTarget === null;
+  const visibleLineageRepoId = lineageVisible && selectedWorktree !== null ? selectedWorktree.repoId : null;
+  useLayoutEffect(() => {
+    setVisibleLineageRepo(visibleLineageRepoId);
+    return () => setVisibleLineageRepo(null);
+  }, [visibleLineageRepoId]);
   const changeRequestState = useChangeRequestView(shownChangeRequest, changeRequestWorktreeId);
   const changeRequestBodyRef = useRef<HTMLDivElement>(null);
   const focusChangeRequestFile = useCallback((path: string) => {

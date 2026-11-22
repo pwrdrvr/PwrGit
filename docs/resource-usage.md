@@ -172,6 +172,12 @@ fails to finish within the configured follow-up plus 15 seconds, or the trace
 reaches its shutdown deadline. If Chromium tracing fails to start or export,
 hot CPU profiling can still run and publish CPU profiles.
 
+Lineage request and publish marks identify the reload source, the repository
+whose lineage was visible, and the repository being loaded. The view and
+target numbers are assigned within each renderer. A view of zero means the
+lineage was covered or absent. Trace marks contain no repository names, paths,
+refs, or persistent IDs.
+
 Completed captures produce a standing CPU notice using PwrAgnt's compact
 header, copy/close icons, and arrow navigation. Copy includes the source host,
 app identity, capture time and trigger, session/profile names and full paths,
