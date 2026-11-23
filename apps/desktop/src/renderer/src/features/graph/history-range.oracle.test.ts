@@ -14,8 +14,8 @@ import { createSystemGit } from "../../../../main/git/test-support/system-git";
  * Rule: the lineage's "Edit history from here" offers exactly the runs the
  * rebase assistant accepts. Compare every candidate with the assistant's
  * Git-backed `validateSelection`, which checks contiguity and excludes merge
- * and root commits. Replay the longest accepted range in each repository
- * through the full isolated squash to check that it can actually rewrite.
+ * and root commits. Every accepted range must pass the full isolated squash,
+ * including shorter ranges that fetch less history and start at a different base.
  *
  * - Sound: every run the menu offers passes the check.
  * - Complete: every top-N run of `git log` that passes it is offered when its
@@ -160,6 +160,10 @@ it("offers exactly the runs the rebase assistant accepts", async () => {
         const hashes = order.slice(0, count);
         const selection = hashes.map((hash) => ({ hash, subject: hash }));
         if ((await validateSelection(systemGit, repo, selection)).ok) {
+          const replay = await dryRunRebase(
+            systemGit, repo, selection, "squash", { email: "test@example.test", name: "Test" }
+          );
+          expect(replay.ok, replay.ok ? undefined : `range of ${count}: ${replay.error.message}`).toBe(true);
           accepted.set(hashes.at(-1)!, hashes);
           longest = hashes;
         }
@@ -179,20 +183,10 @@ it("offers exactly the runs the rebase assistant accepts", async () => {
           );
         }
       }
-
-      if (longest.length > 0) {
-        const replay = await dryRunRebase(
-          systemGit,
-          repo,
-          longest.map((hash) => ({ hash, subject: hash })),
-          "squash",
-          { email: "test@example.test", name: "Test" }
-        );
-        expect(replay.ok, replay.ok ? undefined : replay.error.message).toBe(true);
-      }
     }),
     {
-      numRuns: 15,
+      // Every accepted prefix starts an isolated Git replay, so bound the number of histories.
+      numRuns: 10,
       // A branch that diverged and merged back, with work above the merge.
       examples: [
         [

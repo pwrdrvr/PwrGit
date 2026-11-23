@@ -48,8 +48,10 @@ function modelTarget(model: Model): { repository: string | null; guessing: boole
 
 // `-C` from a stable cwd: Git for Windows can hold a cwd inside a directory
 // we later remove (src/main/git/AGENTS.md).
-function git(dir: string, ...args: string[]): void {
-  execFileSync("git", ["-C", dir, ...args], { cwd: tmpdir(), stdio: "ignore" });
+function git(dir: string, ...args: string[]): string {
+  return execFileSync("git", ["-C", dir, ...args], {
+    cwd: tmpdir(), encoding: "utf8", stdio: ["ignore", "pipe", "pipe"]
+  }).trim();
 }
 
 function check(model: Model, gh: GhDefaultRepository | null): void {
@@ -125,6 +127,10 @@ class PwrGitSetDefault implements fc.AsyncCommand<Model, Real> {
     const repo = m.remotes.get(this.name)!;
     const target = ranked(m).find((name) => m.remotes.get(name) === repo)!;
     m.keys = new Map([[target, ["base"]]]);
+    // The selected repository must be recorded in local Git config for gh to read later.
+    expect(git(r.dir, "config", "--local", "--get-regexp", "^remote\\..*\\.gh-resolved$")).toBe(
+      `remote.${target}.gh-resolved base`
+    );
     // "Use for gh" on the fork's remote ends any disagreement with moving on.
     if (m.movedOn === this.name) expect(ghDefaultNotice(result.value, this.name)).toBeNull();
     // setGhDefault returns the state it read back from Git after the write.

@@ -1,3 +1,4 @@
+import { execFileSync } from "node:child_process";
 import {
   mkdirSync,
   mkdtempSync,
@@ -29,17 +30,16 @@ const DAY_MS = 24 * 60 * 60 * 1000;
 const scratch = mkdtempSync(join(tmpdir(), "pwrgit-root-discovery-"));
 afterAll(() => rmSync(scratch, { recursive: true, force: true }));
 
-async function git(dir: string, ...args: string[]): Promise<void> {
-  const result = await systemGit(args, dir);
-  if (!result.ok) throw new Error(result.error.message);
-  if (result.value.exitCode !== 0) throw new Error(`${args.join(" ")}: ${result.value.stderr}`);
+function git(dir: string, ...args: string[]): void {
+  // Fixtures use PATH Git and keep the process cwd outside the checkout.
+  execFileSync("git", ["-C", dir, ...args], { cwd: tmpdir(), stdio: ["ignore", "pipe", "pipe"] });
 }
 
-async function initRepo(dir: string): Promise<void> {
+function initRepo(dir: string): void {
   mkdirSync(dir, { recursive: true });
-  await git(dir, "init", "-q", "-b", "main", "--template=");
+  git(dir, "init", "-q", "-b", "main", "--template=");
   // Discovery needs a real HEAD for linked worktrees. The tree can be empty.
-  await git(dir, "-c", "user.email=t@t.com", "-c", "user.name=Tester",
+  git(dir, "-c", "user.email=t@t.com", "-c", "user.name=Tester",
     "-c", "maintenance.auto=false", "-c", "commit.gpgSign=false",
     "-c", `core.hooksPath=${join(dir, ".git", "no-hooks")}`, "commit", "--allow-empty", "-qm", "init");
 }
@@ -73,7 +73,7 @@ let runNo = 0;
 async function runScenario(ops: Op[]): Promise<void> {
   const root = join(scratch, `run-${(runNo += 1)}`);
   mkdirSync(root, { recursive: true });
-  await initRepo(join(root, "launch-repo"));
+  initRepo(join(root, "launch-repo"));
 
   const db = openDatabase(":memory:");
   const profile: Profile = new ProfileService(db).create({
@@ -134,7 +134,7 @@ async function runScenario(ops: Op[]): Promise<void> {
         const dir = op.nested
           ? join(root, "group", `repo-${made}`)
           : join(root, `repo-${made}`);
-        await initRepo(dir);
+        initRepo(dir);
         checkouts.push(dir);
         primaries.push(dir);
         newSinceLastTick = true;
@@ -144,7 +144,7 @@ async function runScenario(ops: Op[]): Promise<void> {
         made += 1;
         const of = primaries[op.of % primaries.length]!;
         const dir = join(root, `wt-${made}`);
-        await git(of, "worktree", "add", "-q", dir, "-b", `wt-${made}`);
+        git(of, "worktree", "add", "-q", dir, "-b", `wt-${made}`);
         checkouts.push(dir);
         newSinceLastTick = true;
         break;
@@ -187,7 +187,7 @@ describe("root discovery while the app runs", () => {
       fc.asyncProperty(fc.array(opArb, { minLength: 1, maxLength: 8 }), (ops) =>
         runScenario([...ops, { kind: "tick" }])
       ),
-      { numRuns: 12 }
+      { numRuns: 12, examples: [[[{ kind: "worktree", of: 0 }]]] }
     );
   }, 120_000);
 
