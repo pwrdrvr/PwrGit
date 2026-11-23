@@ -1,6 +1,6 @@
 import type { CSSProperties } from "react";
-import { createContext, useCallback, useContext, useEffect, useState } from "react";
-import type { RepositoryStack, StackAction, StackSnapshot } from "@pwrgit/shared";
+import { createContext, useCallback, useContext, useEffect, useMemo, useState, useSyncExternalStore } from "react";
+import { stackPositionForPr, type PrSummary, type RepositoryStack, type StackAction, type StackPosition, type StackSnapshot } from "@pwrgit/shared";
 import { dispatch, subscribe } from "../../lib/pwrgit";
 
 export type StackPick = { repoId: string; stack: RepositoryStack; action?: StackAction; branch?: string | undefined };
@@ -25,6 +25,29 @@ export function useStackLaneStyle(repoId: string, stack: RepositoryStack): CSSPr
     const color = lanes.byBranch.get(layer.branch);
     if (color) return { "--stack-lane": color } as CSSProperties;
   }
+}
+
+/** The latest snapshot any surface loaded, per repository. A PR chip reads its
+ * stack from here instead of loading a snapshot of its own. */
+const known = new Map<string, StackSnapshot>();
+const listeners = new Set<() => void>();
+function remember(repoId: string, snapshot: StackSnapshot) {
+  if (known.get(repoId) === snapshot) return;
+  known.set(repoId, snapshot);
+  for (const listener of listeners) listener();
+}
+function subscribeKnown(listener: () => void) {
+  listeners.add(listener);
+  return () => { listeners.delete(listener); };
+}
+
+/** The stack this PR is in, open or closed, from snapshots already loaded. */
+export function useStackPositionForPr(repoId: string | undefined, pr: Pick<PrSummary, "number" | "repoPath">):
+  StackPosition | undefined {
+  const snapshot = useSyncExternalStore(subscribeKnown, () => repoId === undefined ? undefined : known.get(repoId));
+  return useMemo(() => snapshot ? stackPositionForPr(snapshot.stacks, pr) : undefined,
+    // A PR is the same PR while its number and repository are; its other fields refresh.
+    [snapshot, pr.number, pr.repoPath]);
 }
 
 type Read = ReturnType<typeof loadSnapshot>;
@@ -59,7 +82,9 @@ export function useStackSnapshot(repoId: string | undefined, profileId: string |
     const load = (fresh: boolean) => {
       const stamp = ++generation;
       void readSnapshot(repoId, profileId, fresh).then(result => {
-        if (live && generation === stamp && result.ok) setAnswer({ repoId, profileId, snapshot: result.value });
+        if (!live || generation !== stamp || !result.ok) return;
+        remember(repoId, result.value);
+        setAnswer({ repoId, profileId, snapshot: result.value });
       }).catch(() => undefined);
     };
     const invalidate = (payload: { repoId: string }) => {

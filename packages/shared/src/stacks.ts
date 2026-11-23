@@ -72,6 +72,9 @@ export type RepositoryStack = {
   canTrack?: boolean;
   trunk: { branch: string; head?: string; local?: boolean };
   layers: StackLayer[];
+  /** Absent while the stack is open. GitHub closes a stack once its PRs merge
+   * or close; it stays in the snapshot so a member PR can still name it. */
+  closed?: "merged" | "closed";
 };
 
 export type StackSnapshot = {
@@ -90,6 +93,16 @@ export function stackPosition(stacks: readonly RepositoryStack[], predicate: (la
     if (index !== -1) return { stack, index: index + 1, layer: stack.layers[index] };
   }
   return undefined;
+}
+
+/** The stack a pull request belongs to, found by the PR rather than its
+ * branch: a merged PR's branch is usually deleted. An open stack wins over a
+ * closed one that still lists the same PR. */
+export function stackPositionForPr(stacks: readonly RepositoryStack[], pr: Pick<PrSummary, "number" | "repoPath">):
+  StackPosition | undefined {
+  const member = (layer: StackLayer) => layer.pr?.number === pr.number &&
+    (!layer.pr.repoPath || !pr.repoPath || layer.pr.repoPath === pr.repoPath);
+  return stackPosition(stacks.filter(stack => !stack.closed), member) ?? stackPosition(stacks.filter(stack => stack.closed), member);
 }
 
 /** A fork, gap, cycle, or duplicate head never gets an arbitrary stacked order. */
