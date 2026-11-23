@@ -906,7 +906,8 @@ if (!gotSingleInstanceLock) {
       stackRunner(execGit), new NativeStackLocks(mcpExecutablePath),
       repoId => openPrService.list(repoId),
       (repoId, branch) => prService.cachedBranchPrObservation(repoId, branch),
-      (repoId, forgeRepo) => openPrService.cachedGitHubStacks(repoId, forgeRepo)
+      (repoId, forgeRepo) => openPrService.cachedGitHubStacks(repoId, forgeRepo),
+      (repoId, forgeRepo) => prService.cachedPrTitles(repoId, forgeRepo)
     );
     registerStackReadHandlers(bus, id => indexer.getRepo(id), stackReader);
     registerStackWriteHandlers(bus, {

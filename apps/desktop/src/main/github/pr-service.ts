@@ -272,6 +272,25 @@ export class PrService {
     return cached === undefined ? undefined : cached?.pr ?? null;
   }
 
+  cachedPrTitles(repoId: string, forgeRepo: string): ReadonlyMap<number, string> {
+    const rows = this.db.prepare(`
+      SELECT number, title FROM (
+        SELECT number, title, unixepoch(fetched_at) * 1000 AS observed_at
+          FROM commit_pr WHERE repo_id = ? AND lower(host || '/' || repo_path) = ?
+        UNION ALL
+        SELECT number, title, unixepoch(fetched_at) * 1000 AS observed_at
+          FROM branch_pr WHERE repo_id = ? AND lower(host || '/' || repo_path) = ?
+        UNION ALL
+        SELECT pr.number, pr.title, state.fetched_at AS observed_at
+          FROM repo_open_pr pr LEFT JOIN repo_open_pr_state state USING (repo_id, forge_repo)
+          WHERE pr.repo_id = ? AND pr.forge_repo = ?
+      )
+      WHERE number IS NOT NULL AND title IS NOT NULL AND trim(title) <> ''
+      ORDER BY observed_at
+    `).all(repoId, forgeRepo, repoId, forgeRepo, repoId, forgeRepo) as { number: number; title: string }[];
+    return new Map(rows.map(({ number, title }) => [number, title]));
+  }
+
   cachedBranchPrObservation(repoId: string, branch: string): { pr: PrSummary; fetchedAt: number } | null | undefined {
     const row = this.db
       .prepare(

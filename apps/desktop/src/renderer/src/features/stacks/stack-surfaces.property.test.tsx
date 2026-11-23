@@ -151,9 +151,9 @@ test("R10 closed stacks change neither the index count, rows nor auto-expansion"
       expect(heading?.querySelector(".ref-section__count")?.textContent).toBe(String(active.length));
       expect(heading?.getAttribute("aria-expanded")).toBe("false");
       await click(heading ?? null);
-      expect(Array.from(index!.querySelectorAll("button[aria-label^='Open stack view for']"), button =>
-        button.getAttribute("aria-label")?.split(".")[0])).toEqual(
-        active.map(stack => `Open stack view for Stack #${stack.githubNumber}`));
+      expect(Array.from(index!.querySelectorAll("button[data-nav-anchor^='stack:']"), button =>
+        button.getAttribute("data-nav-anchor"))).toEqual(
+        active.map(stack => `stack:${repo.id}:${stack.id}`));
     }), { numRuns: 20, examples: [[["merged"]], [["open", "closed"]]] });
 });
 

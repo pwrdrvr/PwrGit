@@ -41,6 +41,7 @@ export class StackReader {
     private readonly readOpen: (repoId: string) => Promise<ChangeRequestList>,
     private readonly readBranchPr: (repoId: string, branch: string) => BranchPrObservation | null | undefined,
     private readonly readGitHubStacks: (repoId: string, forgeRepo: string) => readonly GitHubStack[] = () => [],
+    private readonly readPrTitles: (repoId: string, forgeRepo: string) => ReadonlyMap<number, string> = () => new Map(),
   ) {}
 
   async location(repo: Pick<Repo, "path" | "identity">) {
@@ -116,6 +117,10 @@ export class StackReader {
       });
     }
     const busy = await store.journalBlocker(commonDir);
+    const titlesByScope = new Map<string, ReadonlyMap<number, string>>();
+    for (const { scope } of closed) {
+      if (!titlesByScope.has(scope)) titlesByScope.set(scope, this.readPrTitles(repo.id, scope));
+    }
     const snapshot: StackSnapshot = {
       schemaVersion: catalog.schemaVersion, readOnly: catalog.schemaVersion !== 1,
       stacks: closed.map(({ scope, stack }): RepositoryStack => ({
@@ -126,7 +131,7 @@ export class StackReader {
         trunk: { branch: stack.trunk },
         layers: stack.members.map((pr, index) => ({
           branch: pr.headRefName!, parent: stack.members[index - 1]?.headRefName ?? stack.trunk,
-          pr, forgeRepo: scope, local: false,
+          pr: { ...pr, title: titlesByScope.get(scope)?.get(pr.number) ?? pr.title }, forgeRepo: scope, local: false,
           health: { inSync: false, needsRestack: false, parentMerged: false, needsPush: false, drift: false, remoteAhead: false },
         })),
       })),

@@ -190,19 +190,22 @@ test("R9 API membership, position and closure survive any missing branch refs", 
     const presence = fc.record({ local: fc.boolean(), remote: fc.boolean() });
     const stack = fc.record({
       state: fc.constantFrom("open", "merged", "closed"),
-      members: fc.array(presence, { minLength: 2, maxLength: 4 }),
+      members: fc.array(fc.tuple(presence, fc.boolean()), { minLength: 2, maxLength: 4 }),
     });
     await fc.assert(fc.asyncProperty(fc.array(stack, { minLength: 1, maxLength: 4 }), async specs => {
       const commands: string[] = [];
+      const cachedTitles = new Map<number, string>();
       const rows = specs.map(({ state, members }, stackIndex) => ({
         number: 4231 + stackIndex, open: state === "open", base: { ref: "main" },
-        pull_requests: members.map(({ local, remote }, index) => {
+        pull_requests: members.map(([{ local, remote }, cached], index) => {
           const branch = `history-${stackIndex}-${index}`;
+          const number = 4200 + stackIndex * 10 + index;
+          if (cached) cachedTitles.set(number, `Cached title ${number}`);
           for (const [ref, present] of [[`refs/heads/${branch}`, local], [`refs/remotes/origin/${branch}`, remote]] as const) {
             commands.push(present ? `update ${ref} ${base}` : `delete ${ref}`);
           }
           return {
-            number: 4200 + stackIndex * 10 + index,
+            number,
             state: state === "open" && index === members.length - 1 ? "open" : "closed",
             merged_at: state === "merged" || index === 0 ? "2026-11-12T10:00:00Z" : null,
             head: { ref: branch, sha: base },
@@ -221,7 +224,8 @@ test("R9 API membership, position and closure survive any missing branch refs", 
       const reader = new StackReader(runner, locks, async () => ({
         forge: "github", fetchedAt: 100, truncated: false, entries: [],
         remotes: [listRemote(forgeRepo, false)],
-      }), () => undefined, () => parseGitHubStacks(rows, "example", "orbit-deploy"));
+      }), () => undefined, () => parseGitHubStacks(rows, "example", "orbit-deploy"),
+      (repoId, scope) => repoId === "here" && scope === forgeRepo ? cachedTitles : new Map());
       const snapshot = await reader.list(testRepo(cwd));
       for (const [stackIndex, row] of rows.entries()) {
         for (const [index, member] of row.pull_requests.entries()) {
@@ -231,13 +235,16 @@ test("R9 API membership, position and closure survive any missing branch refs", 
           expect(position?.stack.githubNumber).toBe(row.number);
           expect(position?.stack.githubUrl).toBe(`https://github.com/example/orbit-deploy/stack/${row.number}`);
           expect(position?.stack.closed).toBe(row.open ? undefined : specs[stackIndex].state);
-          if (!row.open) expect(Object.values(position!.layer.health)).not.toContain(true);
+          if (!row.open) {
+            expect(Object.values(position!.layer.health)).not.toContain(true);
+            expect(position?.layer.pr?.title).toBe(cachedTitles.get(member.number) ?? member.head.ref);
+          }
           expect(stackPositionForPr(snapshot.stacks, { number: member.number, repoPath: "example/other" })).toBeUndefined();
         }
       }
     }), { numRuns: 18, examples: [[[{
-      state: "merged", members: [{ local: false, remote: false }, { local: false, remote: false }],
+      state: "merged", members: [[{ local: false, remote: false }, true], [{ local: false, remote: false }, false]],
     }, {
-      state: "open", members: [{ local: false, remote: false }, { local: true, remote: true }],
+      state: "open", members: [[{ local: false, remote: false }, false], [{ local: true, remote: true }, false]],
     }]]] });
   }));
