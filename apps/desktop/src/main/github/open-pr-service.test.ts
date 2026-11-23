@@ -1,8 +1,8 @@
 import { execFileSync } from "node:child_process";
-import { mkdtempSync, writeFileSync } from "node:fs";
+import { cpSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import type { OpenChangeRequest, PrSummary } from "@pwrgit/shared";
 import { openDatabase, type DB } from "../persistence/db";
 import type { ResolvedForge } from "../forge/providers";
@@ -15,8 +15,8 @@ const ORIGIN: ForgeRepo = { kind: "github", host: "github.com", path: "octo/orbi
 const UPSTREAM: ForgeRepo = { kind: "github", host: "github.com", path: "orbit-hq/orbit" };
 
 function git(dir: string, args: string[]): string {
-  return execFileSync("git", args, {
-    cwd: dir,
+  return execFileSync("git", ["-C", dir, ...args], {
+    cwd: tmpdir(),
     encoding: "utf8",
     stdio: ["ignore", "pipe", "ignore"]
   }).trim();
@@ -59,6 +59,8 @@ describe("OpenPrService", () => {
   let listCalls: number;
   let listFails: boolean;
   let upstreamFails: boolean;
+  let fixtures: string | undefined;
+  let template: string;
   let root: string;
   let byNumber: Map<number, PrSummary | null>;
   let numberCalls: number[][];
@@ -95,29 +97,41 @@ describe("OpenPrService", () => {
     return { provider, repo };
   };
 
-  beforeEach(() => {
-    root = mkdtempSync(join(tmpdir(), "pwrgit-open-pr-"));
-    const bare = join(root, "orbit.git");
-    execFileSync("git", ["init", "--bare", "-b", "main", bare], { stdio: "ignore" });
-    const seed = join(root, "seed");
-    execFileSync("git", ["clone", bare, seed], { stdio: "ignore" });
+  beforeAll(() => {
+    fixtures = mkdtempSync(join(tmpdir(), "pwrgit-open-pr-"));
+    template = join(fixtures, "template");
+    const bare = join(template, "orbit.git");
+    git(fixtures, ["init", "--bare", "-b", "main", bare]);
+    const seed = join(template, "seed");
+    git(template, ["clone", bare, seed]);
     git(seed, ["config", "user.email", "t@t.com"]);
     git(seed, ["config", "user.name", "Tester"]);
     writeFileSync(join(seed, "README.md"), "# orbit\n");
     git(seed, ["add", "."]);
     git(seed, ["commit", "-m", "init"]);
-    git(seed, ["push", "origin", "main"]);
-    git(seed, ["push", "origin", "main:feat/fetched"]);
-    work = join(root, "work");
-    execFileSync("git", ["clone", bare, work], { stdio: "ignore" });
+    git(seed, ["push", "origin", "main", "main:feat/fetched"]);
+    const checkout = join(template, "work");
+    git(template, ["clone", bare, checkout]);
     // Pushed after the clone, so the checkout has never seen it.
     git(seed, ["push", "origin", "main:feat/unfetched"]);
     const tip = git(seed, ["rev-parse", "HEAD"]);
     git(bare, ["update-ref", "refs/pull/121/head", tip]);
-    git(work, ["branch", "spike/local"]);
+    git(checkout, ["branch", "spike/local"]);
+
+    // Each copy's fetches and pushes must use its own bare repository.
+    git(seed, ["remote", "set-url", "origin", "../orbit.git"]);
+    git(checkout, ["remote", "set-url", "origin", "../orbit.git"]);
+  });
+
+  beforeEach(({ onTestFinished }) => {
+    root = mkdtempSync(join(fixtures!, "case-"));
+    cpSync(template, root, { recursive: true });
+    work = join(root, "work");
+    // A linked worktree records absolute paths, so add it after the copy.
     git(work, ["worktree", "add", join(root, "work-console"), "-b", "feat/console"]);
 
     db = openDatabase(":memory:");
+    onTestFinished(() => { db.close(); });
     db.prepare(
       "INSERT INTO profiles (id, name, email) VALUES ('p', 'P', 'p@example.com')"
     ).run();
@@ -153,7 +167,9 @@ describe("OpenPrService", () => {
     });
   });
 
-  afterEach(() => db.close());
+  afterAll(() => {
+    if (fixtures) rmSync(fixtures, { recursive: true, force: true, maxRetries: 3 });
+  });
 
   const stored = (): number[] =>
     (
@@ -691,7 +707,7 @@ describe("OpenPrService", () => {
      */
     const addUpstream = (): string => {
       const bare = join(root, "upstream.git");
-      execFileSync("git", ["init", "--bare", "-b", "main", bare], { stdio: "ignore" });
+      git(root, ["init", "--bare", "-b", "main", bare]);
       const seed = join(root, "seed");
       git(seed, ["push", bare, "main", "main:feat/up"]);
       git(bare, ["update-ref", "refs/pull/405/head", git(seed, ["rev-parse", "HEAD"])]);

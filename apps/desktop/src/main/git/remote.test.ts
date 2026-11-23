@@ -1,9 +1,9 @@
 import { execFileSync } from "node:child_process";
 import { timedGitSync } from "./test-support/git-tripwire";
-import { existsSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import {
   err,
   ok,
@@ -126,10 +126,16 @@ describe("the push review reports what actually went wrong", () => {
 });
 
 function git(dir: string, args: string[]): void {
-  timedGitSync(args, dir, () => execFileSync("git", args, { cwd: dir, stdio: "ignore" }));
+  timedGitSync(args, dir, () => execFileSync("git", ["-C", dir, ...args], {
+    cwd: tmpdir(),
+    stdio: "ignore"
+  }));
 }
 function gitOut(dir: string, args: string[]): string {
-  return timedGitSync(args, dir, () => execFileSync("git", args, { cwd: dir, encoding: "utf8" })).trim();
+  return timedGitSync(args, dir, () => execFileSync("git", ["-C", dir, ...args], {
+    cwd: tmpdir(),
+    encoding: "utf8"
+  })).trim();
 }
 function fileText(dir: string, file: string): string {
   return readFileSync(join(dir, file), "utf8").replaceAll("\r\n", "\n");
@@ -152,8 +158,8 @@ function commitAt(dir: string, file: string, msg: string, date: string): void {
   writeFileSync(join(dir, file), `${file}\n`);
   git(dir, ["add", "."]);
   const stamp = `${date}T12:00:00Z`;
-  timedGitSync(["commit", "-m", msg], dir, () => execFileSync("git", ["commit", "-m", msg], {
-    cwd: dir,
+  timedGitSync(["commit", "-m", msg], dir, () => execFileSync("git", ["-C", dir, "commit", "-m", msg], {
+    cwd: tmpdir(),
     stdio: "ignore",
     env: {
       ...process.env,
@@ -173,8 +179,15 @@ function recoverySnapshot(
   };
 }
 
-function makeDivergedFixture(): { local: string; remote: string } {
-  const root = mkdtempSync(join(tmpdir(), "pwrgit-diverged-"));
+let snapshotsRoot: string | undefined;
+
+function copySnapshot(name: "diverged" | "fork"): string {
+  const root = mkdtempSync(join(snapshotsRoot!, `${name}-`));
+  cpSync(join(snapshotsRoot!, name), root, { recursive: true });
+  return root;
+}
+
+function initDivergedFixture(root: string): void {
   git(root, ["init", "--bare", "-b", "main", "origin.git"]);
 
   const local = join(root, "local");
@@ -186,7 +199,14 @@ function makeDivergedFixture(): { local: string; remote: string } {
   const remote = join(root, "remote");
   git(root, ["clone", "origin.git", "remote"]);
   configure(remote, "remote");
-  return { local, remote };
+  // Git resolves sibling remotes inside each test's private copy.
+  git(local, ["remote", "set-url", "origin", "../origin.git"]);
+  git(remote, ["remote", "set-url", "origin", "../origin.git"]);
+}
+
+function makeDivergedFixture(): { local: string; remote: string } {
+  const root = copySnapshot("diverged");
+  return { local: join(root, "local"), remote: join(root, "remote") };
 }
 
 function makeUnbornTrackedFixture(): { local: string; upstreamHead: string } {
@@ -212,6 +232,11 @@ let cloneA: string;
 let cloneB: string;
 
 beforeAll(() => {
+  snapshotsRoot = mkdtempSync(join(tmpdir(), "pwrgit-remote-snapshots-"));
+  const diverged = join(snapshotsRoot, "diverged");
+  mkdirSync(diverged);
+  initDivergedFixture(diverged);
+
   const root = mkdtempSync(join(tmpdir(), "pwrgit-remote-"));
   git(root, ["init", "--bare", "-b", "main", "origin.git"]);
 
@@ -224,6 +249,10 @@ beforeAll(() => {
   cloneB = join(root, "B");
   git(root, ["clone", "origin.git", "B"]);
   configure(cloneB, "B");
+});
+
+afterAll(() => {
+  if (snapshotsRoot) rmSync(snapshotsRoot, { recursive: true, force: true, maxRetries: 3 });
 });
 
 describe("remote ops (bare-remote fixture)", () => {
@@ -2230,8 +2259,9 @@ describe("reset targets on a fork", () => {
    * `origin/main`. `source` is a working clone of the original, for the
    * commits that land there after the fork was made.
    */
-  function makeForkFixture(): { local: string; source: string; fork: string } {
-    const root = mkdtempSync(join(tmpdir(), "pwrgit-fork-"));
+  beforeAll(() => {
+    const root = join(snapshotsRoot!, "fork");
+    mkdirSync(root);
     git(root, ["init", "--bare", "-b", "main", "source.git"]);
     const source = join(root, "source");
     git(root, ["clone", "source.git", "source"]);
@@ -2244,9 +2274,15 @@ describe("reset targets on a fork", () => {
     // and a test here reads a stashed edit back byte for byte.
     git(root, ["clone", "-c", "core.autocrlf=false", "fork.git", "local"]);
     configure(local, "local");
-    git(local, ["remote", "add", "upstream", join(root, "source.git")]);
+    git(source, ["remote", "set-url", "origin", "../source.git"]);
+    git(local, ["remote", "set-url", "origin", "../fork.git"]);
+    git(local, ["remote", "add", "upstream", "../source.git"]);
     git(local, ["fetch", "upstream"]);
-    return { local, source, fork: join(root, "fork.git") };
+  });
+
+  function makeForkFixture(): { local: string; source: string; fork: string } {
+    const root = copySnapshot("fork");
+    return { local: join(root, "local"), source: join(root, "source"), fork: join(root, "fork.git") };
   }
 
   /** Two merges land on the original after the fork was made. */
