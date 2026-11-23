@@ -1,5 +1,12 @@
 # Changelog
 
+## v0.62.0 - 2026-11-22
+
+- Stacks - Added local branch-stack views with tracked and inferred stacks, branch health, and read-only MCP tools for inspecting them. Adopt an inferred stack, preview and run a restack, add a branch on top, or detach or forget a branch. Local operations include conflict resolution in a worktree, interrupted-operation recovery and guarded undo.
+- CPU diagnostics - Added configurable hot-CPU capture rules in Troubleshooting, with editable thresholds and durations for spike, sustained and slow-burn captures. Settings show the effective sampling cadence and any environment override.
+- Bulk pull - Improved soft-pull refreshes by reducing redundant Git subprocesses and sharing verified ancestry checks across larger worktree families, while retaining live checkout safety checks and fallbacks for uncertain state.
+- Refresh performance - Improved lineage refreshes by skipping equivalent graph renders, and reduced repeated Git checks when sweeping old authored-worktree tips. Lineage trace marks identify refresh sources without recording repository names, paths or refs.
+
 ## v0.61.3 - 2026-11-22
 
 - Window placement - Fixed Settings, Logs and document viewers opening on the primary display instead of the display of the window that opened them. Auxiliary windows fit within that display's work area, while existing windows on the same display retain their placement.
