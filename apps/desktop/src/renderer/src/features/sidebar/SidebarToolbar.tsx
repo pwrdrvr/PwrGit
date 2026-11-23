@@ -450,7 +450,9 @@ export function SidebarToolbar({
           )}
           <span className="sidebar-toolbar__label">{face.label}</span>
           {face.liveCount !== undefined && (
-            <span className="sidebar-toolbar__count">{face.liveCount}</span>
+            <span className="sidebar-toolbar__count" data-fit-text-columns={face.liveCount.length}>
+              {face.liveCount}
+            </span>
           )}
         </button>
         <button
@@ -482,6 +484,7 @@ export function SidebarToolbar({
         {syncBusy && syncProgress !== null && (
           <OutcomeBar
             className="sidebar-toolbar__progress"
+            fitOverlay
             counts={syncProgress.counts}
             inFlight={syncProgress.inFlight}
             queued={syncProgress.queued}

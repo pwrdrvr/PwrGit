@@ -16,6 +16,7 @@ type Scene = {
   overflow: boolean;
   tick: number;
   forkSource?: boolean;
+  progress?: { completed: number; inFlight: number };
 };
 
 const noop = () => undefined;
@@ -69,6 +70,8 @@ const compactGraph: LaneGraph = {
 const expandedGraph: LaneGraph = {
   ...compactGraph,
   head: compactGraph.commits[0]!.hash,
+  tips: Object.fromEntries(compactGraph.commits.slice(0, 24).map((commit, index) =>
+    [commit.hash, [`feature/widget-${index}`]])),
   shownBranches: Array.from({ length: 24 }, (_, i) => `feature/widget-${i}`),
   matchedBranches: 128
 };
@@ -115,7 +118,7 @@ Object.assign(window, {
 
 let scene: Scene = { toolbar: "lineage", width: 360, expanded: false, overflow: false, tick: 0 };
 const selected = new Set<string>();
-function ToolbarScene({ toolbar, width, expanded, overflow, tick, forkSource }: Scene) {
+function ToolbarScene({ toolbar, width, expanded, overflow, tick, forkSource, progress: report }: Scene) {
   const state: WorktreeState = {
     ...branchState, worktreeId: worktree.id, hasUpstream: true, updatedAt: sampledAt,
     ...(expanded ? { dirty: 812, behind: forkSource ? 0 : 812 } : {})
@@ -142,7 +145,12 @@ function ToolbarScene({ toolbar, width, expanded, overflow, tick, forkSource }: 
           <SidebarToolbar
             hasProfile rootCount={1} repoCount={42} recentCount={9}
             fetchInterval={15} syncVerb={expanded ? "pull" : "fetch"}
-            syncBusy={expanded} syncProgress={expanded ? progress : null}
+            syncBusy={expanded} syncProgress={!expanded ? null : report === undefined ? progress : {
+              ...progress,
+              counts: { ...countOutcomes([]), success: report.completed },
+              inFlight: report.inFlight,
+              queued: 42 - report.completed - report.inFlight
+            }}
             syncScope={expanded ? "recent" : "all"} onAddFolder={noop}
             onClone={noop} onFork={noop} onSync={noop} onMaintenance={noop}
           />
@@ -160,7 +168,7 @@ const render = () => flushSync(() => root.render(<ToolbarScene key={key} {...sce
 export const toolbarFit = {
   ready: Promise.all(
     ['500 11px "Geist Sans"', '600 11px "Geist Sans"', '700 10px "Geist Sans"',
-      '600 10px "Geist Mono"', '700 9.5px "Geist Mono"'].map((font) => document.fonts.load(font))
+      '500 9.5px "Geist Mono"', '600 10px "Geist Mono"', '700 9.5px "Geist Mono"'].map((font) => document.fonts.load(font))
   ),
   mount(next: Omit<Scene, "tick">) {
     document.documentElement.removeAttribute("style");

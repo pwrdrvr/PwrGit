@@ -1231,9 +1231,10 @@ export function LineageGraph({
             <>
               <div
                 className="branch-pop__backdrop"
+                data-fit-overlay=""
                 onClick={() => setBranchesOpen(false)}
               />
-              <div ref={branchesPopRef} className="branch-pop" role="menu">
+              <div ref={branchesPopRef} className="branch-pop" role="menu" data-fit-overlay="">
                 {[
                   ...(data?.shownBranches ?? []),
                   ...(data?.upstreamRefs ?? [])

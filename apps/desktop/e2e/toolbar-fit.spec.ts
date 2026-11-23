@@ -270,6 +270,115 @@ test("refits at the same width when a pending font becomes available", async () 
   expect(loaded.depth).toBeGreaterThan(fallback.depth);
 });
 
+test("same-column sync reports leave the sidebar fit alone", async () => {
+  await mount("sidebar");
+  await page.evaluate(() => window.toolbarFit.update({ progress: { completed: 10, inFlight: 2 } }));
+  const fit = await checkFit("sidebar");
+  const results = await page.evaluate(async (config) => {
+    const count = document.querySelector(".sidebar-toolbar__count")!;
+    const width = count.getBoundingClientRect().width;
+    const computedStyle = window.getComputedStyle;
+    let reads = 0;
+    window.getComputedStyle = (element, pseudo) => {
+      if (element.matches(config.box)) reads++;
+      return computedStyle(element, pseudo);
+    };
+    try {
+      const samples = [];
+      for (let completed = 10; completed <= 40; completed++) {
+        window.toolbarFit.update({ progress: { completed, inFlight: completed % 2 === 0 ? 1 : 2 } });
+        await new Promise<void>((resolve) => queueMicrotask(() => queueMicrotask(resolve)));
+        samples.push({
+          reads, count: count.textContent, sameWidth: count.getBoundingClientRect().width === width
+        });
+      }
+      return samples;
+    } finally {
+      window.getComputedStyle = computedStyle;
+    }
+  }, CASES.sidebar);
+  expect(results).toEqual(Array.from({ length: 31 }, (_, index) => ({
+    reads: 0, count: `${10 + index}/42`, sameWidth: true
+  })));
+  expect(await checkFit("sidebar")).toEqual(fit);
+});
+
+test("a sync report with a longer count can change the fit without a resize", async () => {
+  await mount("sidebar");
+  const report = (completed: number) => page.evaluate((value) => {
+    window.toolbarFit.update({ progress: { completed: value, inFlight: 2 } });
+  }, completed);
+  await report(9);
+  let tooNarrow = CASES.sidebar.width - 1;
+  let wideEnough = 395;
+  while (wideEnough - tooNarrow > 1) {
+    const width = Math.floor((tooNarrow + wideEnough) / 2);
+    await resize("sidebar", width);
+    if ((await checkFit("sidebar")).depth === 0) wideEnough = width;
+    else tooNarrow = width;
+  }
+  await resize("sidebar", wideEnough);
+  const before = await checkFit("sidebar");
+  expect(before.depth).toBe(0);
+  await report(10);
+  const after = await checkFit("sidebar");
+  expect(after.width).toBe(before.width);
+  expect(after.depth).toBeGreaterThan(before.depth);
+  await report(9);
+  expect(await checkFit("sidebar")).toEqual(before);
+});
+
+test("the out-of-flow branch navigator opens and closes without refitting the toolbar", async () => {
+  await mount("lineage");
+  const trigger = page.locator(".graph-branches");
+  const menu = page.getByRole("menu");
+  const results = await page.evaluate(async (config) => {
+    const computedStyle = window.getComputedStyle;
+    let reads = 0;
+    window.getComputedStyle = (element, pseudo) => {
+      if (element.matches(config.box)) reads++;
+      return computedStyle(element, pseudo);
+    };
+    const trigger = document.querySelector<HTMLButtonElement>(".graph-branches")!;
+    try {
+      const samples = [];
+      for (let index = 0; index < 5; index++) {
+        trigger.click();
+        await new Promise<void>((resolve) => {
+          requestAnimationFrame(() => requestAnimationFrame(() => resolve()));
+        });
+        samples.push({ reads, open: document.querySelector(".branch-pop") !== null });
+      }
+      return samples;
+    } finally {
+      window.getComputedStyle = computedStyle;
+    }
+  }, CASES.lineage);
+  expect(results).toEqual(Array.from({ length: 5 }, (_, index) => ({ reads: 0, open: index % 2 === 0 })));
+  await expect(menu.getByRole("menuitem").first()).toBeFocused();
+  await page.keyboard.press("ArrowDown");
+  await expect(menu.getByRole("menuitem").nth(1)).toBeFocused();
+  await page.keyboard.press("Escape");
+  await expect(trigger).toBeFocused();
+  await expect(menu).toHaveCount(0);
+  await checkFit("lineage");
+});
+
+if (photos !== undefined) {
+  test("captures live sync and the branch navigator", async () => {
+    mkdirSync(photos, { recursive: true });
+    await mount("sidebar");
+    await page.evaluate(() => window.toolbarFit.update({ progress: { completed: 18, inFlight: 2 } }));
+    await waitForLayout("sidebar");
+    await page.locator(CASES.sidebar.row).screenshot({ path: join(photos, "sidebar-live.png") });
+    await mount("lineage");
+    await resize("lineage", 390);
+    await page.locator(".graph-branches").press("Enter");
+    await expect(page.getByRole("menu")).toBeVisible();
+    await page.locator(".toolbar-case").screenshot({ path: join(photos, "lineage-menu.png") });
+  });
+}
+
 for (const toolbar of ["lineage", "worktree", "sidebar"] as const) {
   test(`benchmark each toolbar in isolation (${toolbar})`, async () => {
     test.skip(process.env["PWRGIT_FIT_BENCH"] !== "1", "Opt-in browser profiling");
@@ -289,7 +398,12 @@ for (const toolbar of ["lineage", "worktree", "sidebar"] as const) {
       await page.locator(CASES[toolbar].row).screenshot({ path: join(photos, `${toolbar}.png`) });
       await resize(toolbar, CASES[toolbar].width);
     }
-    for (const workload of ["unchanged", "content", "width"] as const) {
+    for (const workload of ["unchanged", "content", "width", "display"] as const) {
+      if (workload === "display" && toolbar === "worktree") continue;
+      if (workload === "display" && toolbar === "sidebar") {
+        await page.evaluate(() => window.toolbarFit.update({ expanded: true, progress: { completed: 10, inFlight: 2 } }));
+        await waitForLayout(toolbar);
+      }
       const run = (count: number) => page.evaluate(async ({ count, workload, config, toolbar }) => {
         const row = document.querySelector(config.row)!;
         const classes = row.classList;
@@ -320,7 +434,13 @@ for (const toolbar of ["lineage", "worktree", "sidebar"] as const) {
                 await Promise.resolve();
               }
             } else {
-              row.closest<HTMLElement>(".toolbar-case")!.style.width = `${config.width + (alternate ? 130 : 0)}px`;
+              if (workload === "width") {
+                row.closest<HTMLElement>(".toolbar-case")!.style.width = `${config.width + (alternate ? 130 : 0)}px`;
+              } else if (toolbar === "lineage") {
+                row.querySelector<HTMLButtonElement>(".graph-branches")!.click();
+              } else {
+                window.toolbarFit.update({ progress: { completed: 11 + i % 30, inFlight: 2 } });
+              }
               await new Promise<void>((resolve) =>
                 requestAnimationFrame(() => requestAnimationFrame(() => resolve()))
               );
@@ -337,7 +457,7 @@ for (const toolbar of ["lineage", "worktree", "sidebar"] as const) {
         }
       }, { count, config: CASES[toolbar], workload, toolbar });
       await run(10);
-      const count = workload === "width" ? 30 : 100;
+      const count = workload === "width" || workload === "display" ? 30 : 100;
       for (let sample = 0; sample < 5; sample++) {
         const before = await readMetrics();
         const result = await run(count);

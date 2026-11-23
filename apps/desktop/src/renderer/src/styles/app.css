@@ -997,7 +997,9 @@ textarea,
 .sidebar-toolbar__count {
   flex: 0 0 auto;
   font: 600 11px/1 var(--font-mono);
+  /* The measured toolbar uses the column count as this label's width signal. */
   font-variant-numeric: tabular-nums;
+  font-kerning: none;
 }
 .sidebar-toolbar--icons .sidebar-toolbar__split:has(.sidebar-toolbar__count) {
   min-width: 84px;
