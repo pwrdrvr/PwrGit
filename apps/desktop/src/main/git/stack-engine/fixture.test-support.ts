@@ -1,4 +1,4 @@
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createSystemGit } from "../test-support/system-git";
@@ -56,7 +56,8 @@ export function memoryStore(initial: GhStackCatalog): CatalogStore {
 export async function withRepo<T>(fn: (cwd: string, base: string) => Promise<T>) {
   const cwd = await mkdtemp(join(tmpdir(), "pwrgit-stack-"));
   try {
-    await git(cwd, "init", "-q", "-b", "main");
+    await git(cwd, "init", "-q", "-b", "main", "--template=");
+    await mkdir(join(cwd, ".git", "info"), { recursive: true });
     for (const [key, value] of [
       ["user.name", "Fixture"], ["user.email", "fixture@example.invalid"],
       ["commit.gpgSign", "false"], ["core.autocrlf", "false"], ["core.hooksPath", join(cwd, ".git", "no-hooks")],
