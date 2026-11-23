@@ -1,10 +1,8 @@
-import { execFileSync } from "node:child_process";
 import {
   mkdirSync,
   mkdtempSync,
   realpathSync,
-  rmSync,
-  writeFileSync
+  rmSync
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -31,19 +29,19 @@ const DAY_MS = 24 * 60 * 60 * 1000;
 const scratch = mkdtempSync(join(tmpdir(), "pwrgit-root-discovery-"));
 afterAll(() => rmSync(scratch, { recursive: true, force: true }));
 
-function git(dir: string, args: string[]): void {
-  execFileSync("git", args, { cwd: dir, stdio: "ignore" });
+async function git(dir: string, ...args: string[]): Promise<void> {
+  const result = await systemGit(args, dir);
+  if (!result.ok) throw new Error(result.error.message);
+  if (result.value.exitCode !== 0) throw new Error(`${args.join(" ")}: ${result.value.stderr}`);
 }
 
-function initRepo(dir: string): void {
+async function initRepo(dir: string): Promise<void> {
   mkdirSync(dir, { recursive: true });
-  git(dir, ["init", "-q", "-b", "main"]);
-  git(dir, ["config", "user.email", "t@t.com"]);
-  git(dir, ["config", "user.name", "Tester"]);
-  git(dir, ["config", "maintenance.auto", "false"]);
-  writeFileSync(join(dir, "README.md"), "# repo\n");
-  git(dir, ["add", "."]);
-  git(dir, ["commit", "-q", "-m", "init"]);
+  await git(dir, "init", "-q", "-b", "main", "--template=");
+  // Discovery needs a real HEAD for linked worktrees. The tree can be empty.
+  await git(dir, "-c", "user.email=t@t.com", "-c", "user.name=Tester",
+    "-c", "maintenance.auto=false", "-c", "commit.gpgSign=false",
+    "-c", `core.hooksPath=${join(dir, ".git", "no-hooks")}`, "commit", "--allow-empty", "-qm", "init");
 }
 
 type Op =
@@ -75,7 +73,7 @@ let runNo = 0;
 async function runScenario(ops: Op[]): Promise<void> {
   const root = join(scratch, `run-${(runNo += 1)}`);
   mkdirSync(root, { recursive: true });
-  initRepo(join(root, "launch-repo"));
+  await initRepo(join(root, "launch-repo"));
 
   const db = openDatabase(":memory:");
   const profile: Profile = new ProfileService(db).create({
@@ -136,7 +134,7 @@ async function runScenario(ops: Op[]): Promise<void> {
         const dir = op.nested
           ? join(root, "group", `repo-${made}`)
           : join(root, `repo-${made}`);
-        initRepo(dir);
+        await initRepo(dir);
         checkouts.push(dir);
         primaries.push(dir);
         newSinceLastTick = true;
@@ -146,7 +144,7 @@ async function runScenario(ops: Op[]): Promise<void> {
         made += 1;
         const of = primaries[op.of % primaries.length]!;
         const dir = join(root, `wt-${made}`);
-        git(of, ["worktree", "add", "-q", dir, "-b", `wt-${made}`]);
+        await git(of, "worktree", "add", "-q", dir, "-b", `wt-${made}`);
         checkouts.push(dir);
         newSinceLastTick = true;
         break;

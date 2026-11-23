@@ -1,10 +1,10 @@
 import { execFileSync, spawnSync } from "node:child_process";
-import { mkdtempSync, realpathSync, rmSync } from "node:fs";
+import { cpSync, mkdtempSync, realpathSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import fc from "fast-check";
 import { afterAll, expect, it } from "vitest";
-import { ghDefaultNotice } from "@pwrgit/shared";
+import { ghDefaultNotice, type GhDefaultRepository } from "@pwrgit/shared";
 import { readGhDefault, setGhDefault } from "./repository-setup";
 import { createSystemGit } from "./test-support/system-git";
 
@@ -30,7 +30,7 @@ type Model = {
   keys: Map<string, string[]>;
   movedOn: string | null;
 };
-type Real = { dir: string };
+type Real = { dir: string; gh?: GhDefaultRepository | null };
 
 // gh's ranking, written as buckets rather than a comparator.
 function ranked(model: Model): string[] {
@@ -52,8 +52,7 @@ function git(dir: string, ...args: string[]): void {
   execFileSync("git", ["-C", dir, ...args], { cwd: tmpdir(), stdio: "ignore" });
 }
 
-async function check(model: Model, real: Real): Promise<void> {
-  const gh = await readGhDefault(systemGit, real.dir);
+function check(model: Model, gh: GhDefaultRepository | null): void {
   const expected = modelTarget(model);
   expect(gh?.repository ?? null).toBe(expected.repository);
   expect(gh?.status === "ambiguous").toBe(expected.guessing);
@@ -64,13 +63,18 @@ async function check(model: Model, real: Real): Promise<void> {
   expect(ghDefaultNotice(gh, model.movedOn) !== null, JSON.stringify({ model: [...model.remotes], keys: [...model.keys], movedOn: model.movedOn })).toBe(shows);
 }
 
+async function checkConfig(model: Model, real: Real): Promise<void> {
+  real.gh = await readGhDefault(systemGit, real.dir);
+  check(model, real.gh);
+}
+
 class AddRemote implements fc.AsyncCommand<Model, Real> {
   constructor(readonly name: string, readonly repo: string) {}
   check = (m: Readonly<Model>): boolean => !m.remotes.has(this.name);
   async run(m: Model, r: Real): Promise<void> {
     git(r.dir, "remote", "add", this.name, `git@github.com:${this.repo}.git`);
     m.remotes.set(this.name, this.repo);
-    await check(m, r);
+    await checkConfig(m, r);
   }
   toString = (): string => `add ${this.name}=${this.repo}`;
 }
@@ -83,7 +87,7 @@ class RemoveRemote implements fc.AsyncCommand<Model, Real> {
     git(r.dir, "remote", "remove", this.name);
     m.remotes.delete(this.name);
     m.keys.delete(this.name);
-    await check(m, r);
+    await checkConfig(m, r);
   }
   toString = (): string => `remove ${this.name}`;
 }
@@ -99,7 +103,7 @@ class GhCliSetDefault implements fc.AsyncCommand<Model, Real> {
       const unset = spawnSync("git", ["-C", r.dir, "config", "--unset", `remote.${current}.gh-resolved`], { cwd: tmpdir() });
       if (unset.status !== 0) {
         expect(m.keys.get(current)!.length).toBeGreaterThan(1);
-        await check(m, r);
+        await checkConfig(m, r);
         return;
       }
       m.keys.delete(current);
@@ -107,7 +111,7 @@ class GhCliSetDefault implements fc.AsyncCommand<Model, Real> {
     const target = order.find((name) => m.remotes.get(name) === this.repo)!;
     git(r.dir, "config", "--add", `remote.${target}.gh-resolved`, "base");
     m.keys.set(target, [...(m.keys.get(target) ?? []), "base"]);
-    await check(m, r);
+    await checkConfig(m, r);
   }
   toString = (): string => `gh repo set-default ${this.repo}`;
 }
@@ -117,13 +121,15 @@ class PwrGitSetDefault implements fc.AsyncCommand<Model, Real> {
   check = (m: Readonly<Model>): boolean => m.remotes.has(this.name);
   async run(m: Model, r: Real): Promise<void> {
     const result = await setGhDefault(systemGit, r.dir, this.name);
-    expect(result.ok).toBe(true);
+    if (!result.ok) throw new Error(result.error.message);
     const repo = m.remotes.get(this.name)!;
     const target = ranked(m).find((name) => m.remotes.get(name) === repo)!;
     m.keys = new Map([[target, ["base"]]]);
     // "Use for gh" on the fork's remote ends any disagreement with moving on.
-    if (result.ok && m.movedOn === this.name) expect(ghDefaultNotice(result.value, this.name)).toBeNull();
-    await check(m, r);
+    if (m.movedOn === this.name) expect(ghDefaultNotice(result.value, this.name)).toBeNull();
+    // setGhDefault returns the state it read back from Git after the write.
+    r.gh = result.value;
+    check(m, r.gh);
   }
   toString = (): string => `PwrGit: use ${this.name} for gh`;
 }
@@ -133,7 +139,9 @@ class AnswerMovedOn implements fc.AsyncCommand<Model, Real> {
   check = (): boolean => true;
   async run(m: Model, r: Real): Promise<void> {
     m.movedOn = this.remote;
-    await check(m, r);
+    // This answer changes the notice while the Git config stays the same.
+    if (r.gh === undefined) await checkConfig(m, r);
+    else check(m, r.gh);
   }
   toString = (): string => `moved on: ${this.remote ?? "unanswered"}`;
 }
@@ -143,6 +151,8 @@ afterAll(() => rmSync(root, { recursive: true, force: true }));
 let run = 0;
 
 it("PwrGit's gh reading and warning track every change to remotes and gh's default", async () => {
+  const empty = join(root, "empty");
+  git(root, "init", "-q", "--template=", empty);
   const name = fc.constantFrom(...NAMES);
   const commands = [
     fc.tuple(name, fc.constantFrom(...REPOS)).map(([n, repo]) => new AddRemote(n, repo)),
@@ -154,7 +164,7 @@ it("PwrGit's gh reading and warning track every change to remotes and gh's defau
   await fc.assert(
     fc.asyncProperty(fc.commands(commands, { maxCommands: 14 }), async (cmds) => {
       const dir = join(root, `r${run++}`);
-      execFileSync("git", ["init", "-q", dir], { cwd: tmpdir() });
+      cpSync(empty, dir, { recursive: true });
       await fc.asyncModelRun(() => ({
         model: { remotes: new Map(), keys: new Map(), movedOn: null },
         real: { dir }
