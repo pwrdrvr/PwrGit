@@ -1,5 +1,5 @@
 import { useLayoutEffect, useRef, useState, type ReactNode } from "react";
-import type { ChangeRequestEntry, Repo, RepositoryStack, StackAction, StackLayer, StackPosition, Worktree } from "@pwrgit/shared";
+import type { ChangeRequestEntry, Repo, RepositoryStack, StackAction, StackPosition, Worktree } from "@pwrgit/shared";
 import { dispatch } from "../../lib/pwrgit";
 import { showErrorToast, showInfoToast } from "../../lib/toast";
 import { hoverTooltip, useViewportTooltip } from "../../lib/useViewportTooltip";
@@ -13,23 +13,10 @@ import type { ChangeRequestRow } from "../sidebar/change-request-groups";
 import { StackNode, StackPopoverTrigger } from "./StackPopover";
 import {
   stackActionAt, stackDestination, stackLayerKey, stackMembers, stackName, stackNextAction,
-  stackPositionLabel, stackSource, stackState, stackStateLabel, type StackListItem
+  stackPositionLabel, stackSource, stackStateLabel, type StackListItem
 } from "./stack-presentation";
 import { useStackLaneStyle, useStackNavigation } from "./stack-navigation";
 import "./stacks.css";
-
-function branchHealthLabels(layer: StackLayer, action?: ReturnType<typeof stackActionAt>): string[] {
-  const { health } = layer;
-  return [
-    ...(action?.label === "Restack" ? ["Needs restack"] : []),
-    ...(health.needsRestack && !action && !layer.behindParent ? ["Parent tip moved"] : []),
-    ...(health.needsPush ? ["Needs push"] : []),
-    ...(health.parentMerged ? ["Parent merged"] : []),
-    ...(health.drift ? ["PR base differs"] : []),
-    ...(health.remoteAhead ? ["Remote ahead"] : []),
-    ...(health.inSync && layer.pr?.state !== "merged" ? ["In sync"] : []),
-  ];
-}
 
 export function StackListGroup({ item, repoId, entries, writable, renderRow }: {
   item: Extract<StackListItem, { kind: "stack" }>; repoId: string; entries: readonly ChangeRequestEntry[];
@@ -165,12 +152,16 @@ export function StackView({ stack, repoId, onClose, onShowRail, toolbar, onPlan,
     if (event.key === "Escape") { event.stopPropagation(); onClose(); }
   }}>
     <header className="stack-view__header">
-      <button type="button" className="stack-button" onClick={onClose} aria-label="Back to worktree">←</button>
-      <h1>{stackName(stack)}</h1>
-      <small>{stackDestination(stack)}</small>
-      <span className="stack-health-badge">{stackSource(stack)}</span>
-      {onShowRail && <button type="button" className="stack-button" onClick={onShowRail}>Show panel</button>}
-      {toolbar}
+      <div className="stack-view__heading">
+        <button type="button" className="stack-button" onClick={onClose} aria-label="Back to worktree">←</button>
+        <h1>{stackName(stack)}</h1>
+        <small>{stackDestination(stack)}</small>
+        <span className="stack-health-badge">{stackSource(stack)}</span>
+      </div>
+      {(toolbar || onShowRail) && <div className="stack-view__tools">
+        {onShowRail && <button type="button" className="stack-button" onClick={onShowRail}>Show panel</button>}
+        {toolbar}
+      </div>}
     </header>
     {stack.source !== "tracked" && <p className="stack-view__provenance prov">
       {stack.githubNumber !== undefined
@@ -183,7 +174,8 @@ export function StackView({ stack, repoId, onClose, onShowRail, toolbar, onPlan,
         const { layer, index } = position;
         const active = (selectedBranch ?? members[0]?.layer.branch) === layer.branch;
         const action = stackActionAt(position, writable ?? Boolean(onPlan));
-        const health = branchHealthLabels(layer, action);
+        const openPr = layer.pr?.state === "open" ? layer.pr : undefined;
+        const checks = openPr?.checkState === "failing" || openPr?.checkState === "pending" ? openPr.checkState : undefined;
         return <li key={layer.branch} data-stack-branch={layer.branch} data-stack-position={index}
           className={`stack-card stack-track${action ? " has-action" : ""}${active ? " is-current" : ""}${fresh?.has(layer.branch) ? " is-fresh" : ""}`}>
           <StackNode position={position} current={active} />
@@ -198,14 +190,16 @@ export function StackView({ stack, repoId, onClose, onShowRail, toolbar, onPlan,
           <div className="stack-card__line stack-card__detail">
             <span className="stack-card__ordinal">{index}/{members.length}</span>
             {layer.pr && <code>{layer.branch}</code>}
-            <span className="stack-health-badge" data-stack-state={stackState(layer)}>{stackStateLabel(layer)}</span>
-            {layer.behindParent !== undefined && layer.behindParent > 0 &&
-              <span className="stack-health-badge stack-card__distance">{index === 1 ? layer.parent : "parent"} +{layer.behindParent}</span>}
-            {health.map(label => <span key={label} className={`stack-health-badge${label === "Needs restack" ? " stack-health-badge--stale" : ""}`}>{label}</span>)}
+            {checks && <span className="stack-health-badge" data-stack-state={checks}>{checks === "failing" ? "checks failing" : "checks running"}</span>}
+            {openPr?.mergeState === "conflicting" && <span className="stack-health-badge" data-stack-state="conflicting">merge conflict</span>}
+            {action?.label === "Restack" && <span className="stack-health-badge stack-health-badge--stale">Needs restack</span>}
+            {layer.health.parentMerged && layer.pr?.state !== "merged" && <span className="stack-health-badge">Parent merged</span>}
+            {index === 1 && (layer.behindParent ?? 0) > 0 &&
+              <span className="stack-health-badge stack-card__distance">{layer.parent} +{layer.behindParent}</span>}
           </div>
         </li>;
       })}
-      <li className="stack-card stack-card--trunk stack-track"><StackNode /><strong>{stack.trunk.branch}</strong><small>Trunk</small></li>
+      <li className="stack-card stack-card--trunk stack-track"><StackNode /><strong>{stack.trunk.branch}</strong><small>trunk</small></li>
     </ol>
   </section>;
 }

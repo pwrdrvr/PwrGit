@@ -234,3 +234,31 @@ test("R6 shows amber for a plannable action only", async () => {
       expect(footer?.textContent?.includes(merged ? "Sync stack…" : "Restack stack…")).toBe(actionable);
     }), { examples: [[false, false, true, false], [true, false, true, false], [true, true, true, true]], numRuns: 12 });
 });
+
+test("stack cards badge only facts that need attention", async () => {
+  await fc.assert(fc.asyncProperty(
+    fc.constantFrom("passing", "failing", "pending", "unknown"),
+    fc.boolean(),
+    fc.nat(5),
+    async (checkState, conflicting, distance) => {
+      const stack = makeStack(2);
+      const layers = stack.layers.map((layer, index) => ({
+        ...layer,
+        pr: { ...makePr(index), checkState, mergeState: conflicting ? "conflicting" as const : "mergeable" as const },
+        behindParent: distance,
+        health: { ...layer.health, needsRestack: false, inSync: distance === 0 },
+      }));
+      const el = await render({ ...stack, layers }, { initial: true });
+      const expected = [
+        ...(checkState === "failing" ? ["checks failing"] : checkState === "pending" ? ["checks running"] : []),
+        ...(conflicting ? ["merge conflict"] : []),
+      ];
+      const badges = (position: number) => Array.from(
+        el.querySelectorAll(`.stack-view [data-stack-position="${position}"] .stack-health-badge`),
+        badge => badge.textContent
+      );
+      expect(badges(2)).toEqual(expected);
+      expect(badges(1)).toEqual([...expected, ...(distance > 0 ? [`main +${distance}`] : [])]);
+    }
+  ), { examples: [["passing", false, 0]], numRuns: 16 });
+});
