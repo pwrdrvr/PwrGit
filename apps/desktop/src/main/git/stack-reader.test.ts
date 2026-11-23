@@ -248,3 +248,35 @@ test("R9 API membership, position and closure survive any missing branch refs", 
       state: "open", members: [[{ local: false, remote: false }, false], [{ local: true, remote: true }, false]],
     }]]] });
   }));
+
+test("a tracked stack keeps unpublished work and uses GitHub merge observations", () =>
+  withStack(async ({ cwd, commonDir, initial, bottom, top }) => {
+    await git(cwd, "merge", "--ff-only", "bottom");
+    await git(cwd, "branch", "unpublished", top);
+    const tracked = initial.stacks[0];
+    tracked.number = 4231;
+    tracked.branches[0].pullRequest = { number: 81 };
+    tracked.branches[1].pullRequest = { number: 82 };
+    tracked.branches.push({ branch: "unpublished", head: top, base: top });
+    await writeFile(join(commonDir, "gh-stack"), JSON.stringify(initial));
+
+    await fc.assert(fc.asyncProperty(fc.boolean(), async closed => {
+      const row = {
+        number: 4231, open: !closed, base: { ref: "main" },
+        pull_requests: [
+          { number: 81, state: "closed", merged_at: "2026-11-12T10:00:00Z", head: { ref: "bottom", sha: bottom } },
+          { number: 82, state: closed ? "closed" : "open", merged_at: closed ? "2026-11-12T10:00:00Z" : null, head: { ref: "top", sha: top } },
+        ],
+      };
+      const reader = new StackReader(runner, locks, async () => ({
+        forge: "github", fetchedAt: 100, truncated: false, entries: [],
+        remotes: [listRemote(forgeRepo, false)],
+      }), () => undefined, () => parseGitHubStacks([row], "example", "orbit-deploy"));
+      const snapshot = await reader.list(testRepo(cwd));
+      const local = snapshot.stacks.find(stack => stack.source === "tracked");
+      expect(local?.layers.map(layer => layer.branch)).toEqual(["bottom", "top", "unpublished"]);
+      expect(local?.closed).toBeUndefined();
+      expect(snapshot.stacks.find(stack => stack.githubNumber === 4231)?.closed).toBe(closed ? "merged" : undefined);
+      if (!closed) expect(local?.layers[1]).toMatchObject({ syncReady: true, health: { parentMerged: true } });
+    }), { numRuns: 2, examples: [[true], [false]] });
+  }));

@@ -1,5 +1,5 @@
 import { memo, useId, useLayoutEffect, useRef, useState, type CSSProperties, type MouseEvent, type ReactNode } from "react";
-import type { Commit, LaneBranchInfo, MovedTag, PrSummary, StackPosition } from "@pwrgit/shared";
+import { stackPositionForPr, type Commit, type LaneBranchInfo, type MovedTag, type PrSummary, type StackPosition } from "@pwrgit/shared";
 import { BranchGlyph } from "../../lib/BranchGlyph";
 import { ChevronGlyph } from "../../lib/ChevronGlyph";
 import { CheckoutGlyph } from "../../lib/CheckoutGlyph";
@@ -192,9 +192,9 @@ export function GraphRow({
   // PR is drawn on this row (the row's PR, or the branch's own); keep one.
   const refStackChip = (name: string) => {
     const position = stackPositions?.get(name);
-    const prNumber = position?.layer.pr?.number;
-    return position !== undefined && !(prNumber !== undefined &&
-      (prNumber === pullRequest?.number || prNumber === branchInfo?.[name]?.pr?.number));
+    const branchPr = branchInfo?.[name]?.pr;
+    return position !== undefined && ![pullRequest, branchPr].some(pr =>
+      pr && stackPositionForPr([position.stack], pr)?.layer === position.layer);
   };
   const firstStackRef = refs.find(refStackChip);
   const orderedRefs = firstStackRef && firstStackRef !== refs[0]
@@ -351,7 +351,7 @@ export function GraphRow({
           <BranchGlyph size={8} strokeWidth={2.6} />
           <span className="ref-chip__name">{name}</span>
         </button>
-        {position && stackRepoId && refStackChip(name) && <StackPositionChip position={position} repoId={stackRepoId} writable={stackWritable} />}
+        {position && stackRepoId && (browser !== undefined || refStackChip(name)) && <StackPositionChip position={position} repoId={stackRepoId} writable={stackWritable} />}
         {pr !== undefined && (browser === undefined
           ? <PrChip pr={pr} hoverIntent={hoverIntent} stackRepoId={stackRepoId} stackWritable={stackWritable} />
           : <span className="ref-list__pr">{prChipLabel(pr)}</span>)}

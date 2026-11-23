@@ -28,6 +28,7 @@ type StackSource = {
   catalogRepository: string;
   open: ChangeRequestEntry[];
   linked?: GitHubStack;
+  observations?: GitHubStack;
 };
 
 function parsedCatalogKey(value: string): string {
@@ -72,10 +73,10 @@ export class StackReader {
       const match = linked.find(candidate => candidate.scope === catalogScope && (stack.number === candidate.stack.number ||
         candidate.stack.members.some(pr => stack.branches.some(branch => branch.pullRequest?.number === pr.number ||
           (!branch.pullRequest && branch.branch === pr.headRefName)))));
-      if (!match && closed.some(candidate => candidate.scope === catalogScope && (
-        stack.number === candidate.stack.number || (stack.branches.length > 0 && stack.branches.every(branch =>
-          candidate.stack.members.some(pr => branch.pullRequest?.number === pr.number)))
-      ))) return [];
+      const entirelyHistorical = !match && closed.some(candidate => candidate.scope === catalogScope &&
+        stack.branches.length > 0 && stack.branches.every(branch =>
+          candidate.stack.members.some(pr => branch.pullRequest?.number === pr.number)));
+      if (entirelyHistorical) return [];
       const sameMembers = match && match.stack.trunk === stack.trunk.branch &&
         match.stack.members.length === stack.branches.length &&
         match.stack.members.every((pr, index) => {
@@ -87,6 +88,7 @@ export class StackReader {
         stack, catalogRepository: catalog.repository, inferred: false,
         open: open.entries.filter(entry => !catalog.repository || entry.forgeRepo === catalogScope),
         ...(sameMembers ? { linked: match.stack } : {}),
+        ...(match ? { observations: match.stack } : {}),
       }];
     });
     const sources: StackSource[] = [];
@@ -183,7 +185,7 @@ export class StackReader {
             (!entry || (cached.pr.number === entry.pr.number && cached.fetchedAt >= (listFetchedAt ?? 0)))) {
           return cached.pr;
         }
-        const member = linked?.members.find(pr => number !== undefined ? pr.number === number : pr.headRefName === branch.branch);
+        const member = (source.observations ?? linked)?.members.find(pr => number !== undefined ? pr.number === number : pr.headRefName === branch.branch);
         if (member && member.state !== "open") return member;
         if (entry) return entry.pr;
         if (member) return member;

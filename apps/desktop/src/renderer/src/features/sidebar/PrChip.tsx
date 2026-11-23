@@ -31,6 +31,7 @@ export function PrChip({
   stacked = false,
   stackTag = true,
   stackRepoId,
+  forgeRepo,
   stackWritable,
   hoverIntent: sharedIntent
 }: {
@@ -47,6 +48,7 @@ export function PrChip({
    *  (a Lineage row). Without either, any loaded snapshot that holds this PR
    *  by forge repository answers. */
   stackRepoId?: string | undefined;
+  forgeRepo?: string | undefined;
   /** Whether the stack popover may offer Sync or Restack. */
   stackWritable?: boolean | undefined;
   /** Callers rendering many chips (commit rows) pass their own gate; a lone
@@ -76,7 +78,7 @@ export function PrChip({
   const status = prPresentation(pr);
   const isDraft = status.draft;
   const label = prChipLabel(pr);
-  const stackPosition = useStackPositionForPr(stackRepoId ?? repoId, pr);
+  const stackPosition = useStackPositionForPr(stackRepoId ?? repoId, pr, forgeRepo);
   const card = <PrStatusCard pr={pr} repoId={repoId} stackPosition={stackPosition} />;
   const open = (): void => void dispatch("shell:openExternal", { url: pr.url });
   const activate = (altKey: boolean): void => {

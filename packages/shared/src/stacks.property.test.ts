@@ -67,6 +67,13 @@ test("a PR finds its stack by number, whatever its branch is called and whether 
       const number = numbers[pick % numbers.length];
       const found = stackPositionForPr(stacks, { number, repoPath: "example/orbit" });
       const owner = stacks.find(stack => stack.layers.some(layer => layer.pr?.number === number))!;
+      const otherHost = stackOf("other", [number]);
+      otherHost.layers[0].forgeRepo = "github.example/example/orbit";
+      owner.layers.forEach(layer => { layer.forgeRepo = "github.com/example/orbit"; });
+      expect(stackPositionForPr([otherHost, ...stacks], { number, host: "GitHub.COM", repoPath: "Example/Orbit" })?.stack)
+        .toBe(owner);
+      expect(stackPositionForPr([...stacks, otherHost], { number }, "github.example/example/orbit")?.stack)
+        .toBe(otherHost);
       expect(found?.stack).toBe(owner);
       expect(found?.layer.pr?.number).toBe(number);
       expect(found?.index).toBe(owner.layers.findIndex(layer => layer.pr?.number === number) + 1);

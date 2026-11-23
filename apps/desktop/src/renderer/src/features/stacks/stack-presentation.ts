@@ -141,7 +141,7 @@ export function stackListItems(
   const items: StackListItem[] = [];
   for (const row of rows) {
     const position = positions.get(changeRequestKey(row.entry)) ??
-      (keepOrder ? stackPositionForPr(allStacks, row.entry.pr) : undefined);
+      (keepOrder ? stackPositionForPr(allStacks, row.entry.pr, row.entry.forgeRepo) : undefined);
     if (!position || keepOrder || !complete.has(position.stack.id)) items.push({ kind: "row", row, position });
     else if (!emitted.has(position.stack.id)) {
       emitted.add(position.stack.id);

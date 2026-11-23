@@ -1,3 +1,4 @@
+import { forgeRepoKey } from "./forge-product";
 import type { ChangeRequestEntry, PrSummary } from "./types";
 
 export type StackBranchHealth = {
@@ -103,10 +104,19 @@ export function stackPosition(stacks: readonly RepositoryStack[], predicate: (la
 /** The stack a pull request belongs to, found by the PR rather than its
  * branch: a merged PR's branch is usually deleted. An open stack wins over a
  * closed one that still lists the same PR. */
-export function stackPositionForPr(stacks: readonly RepositoryStack[], pr: Pick<PrSummary, "number" | "repoPath">):
+export function stackPositionForPr(stacks: readonly RepositoryStack[], pr: Pick<PrSummary, "number" | "repoPath" | "host">, forgeRepo?: string):
   StackPosition | undefined {
-  const member = (layer: StackLayer) => layer.pr?.number === pr.number &&
-    (!layer.pr.repoPath || !pr.repoPath || layer.pr.repoPath === pr.repoPath);
+  const key = forgeRepo?.toLowerCase() ?? (pr.host && pr.repoPath ? forgeRepoKey(pr.host, pr.repoPath) : undefined);
+  const member = (layer: StackLayer) => {
+    const candidate = layer.pr;
+    if (candidate?.number !== pr.number) return false;
+    if (key) {
+      const scope = layer.forgeRepo ?? (candidate.host && candidate.repoPath
+        ? forgeRepoKey(candidate.host, candidate.repoPath) : undefined);
+      return scope?.toLowerCase() === key;
+    }
+    return !pr.repoPath || candidate.repoPath?.toLowerCase() === pr.repoPath.toLowerCase();
+  };
   return stackPosition(stacks.filter(stack => !stack.closed), member) ?? stackPosition(stacks.filter(stack => stack.closed), member);
 }
 

@@ -68,8 +68,12 @@ describe("PrService", () => {
   it("reads the newest cached title by PR number and forge repository", () => {
     db.prepare(`INSERT INTO commit_pr (repo_id, commit_sha, number, title, host, repo_path, fetched_at)
       VALUES ('repo', 'past-tip', 12, 'Older cached title', 'github.com', 'Example/PwrGit', '2026-11-21T10:00:00Z'),
-             ('repo', 'merged-tip', 12, 'Renamed merged PR', 'github.com', 'example/pwrgit', '2026-11-22T10:00:00Z'),
+             ('repo', 'merged-tip', 12, 'Renamed merged PR', 'github.com', 'example/pwrgit', '2026-11-22T10:00:00.950Z'),
              ('repo', 'other-tip', 12, 'Different repository', 'github.com', 'example/other', '2026-11-23T10:00:00Z')`).run();
+    db.prepare(`INSERT INTO repo_open_pr (repo_id, forge_repo, number, url, title, state)
+      VALUES ('repo', 'github.com/example/pwrgit', 12, '', 'Earlier open-list title', 'open')`).run();
+    db.prepare(`INSERT INTO repo_open_pr_state (repo_id, forge_repo, remote, fetched_at)
+      VALUES ('repo', 'github.com/example/pwrgit', 'origin', ?)`).run(Date.parse("2026-11-22T10:00:00.900Z"));
     expect(service.cachedPrTitles("repo", "github.com/example/pwrgit")).toEqual(new Map([[12, "Renamed merged PR"]]));
     expect(commitFetches).toEqual([]);
     expect(statusFetches).toEqual([]);

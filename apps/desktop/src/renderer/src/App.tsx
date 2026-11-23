@@ -852,7 +852,7 @@ export function App() {
     [stackPick, selectStack, visibleStackLanes]);
   const { snapshot: lineageStacks } = useStackSnapshot(selectedRepo?.id, selectedRepo?.profileId);
   const { snapshot: changeRequestStacks } = useStackSnapshot(changeRequestRepo?.id, changeRequestRepo?.profileId);
-  const changeRequestStackPosition = shownChangeRequest && stackPositionForPr(changeRequestStacks?.stacks ?? [], shownChangeRequest.entry.pr);
+  const changeRequestStackPosition = shownChangeRequest && stackPositionForPr(changeRequestStacks?.stacks ?? [], shownChangeRequest.entry.pr, shownChangeRequest.entry.forgeRepo);
   const lineageVisible = stack === null && shownChangeRequest === null && diffTarget === null && fileInsightTarget === null;
   const visibleLineageRepoId = lineageVisible && selectedWorktree !== null ? selectedWorktree.repoId : null;
   useLayoutEffect(() => {

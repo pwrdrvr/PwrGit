@@ -461,7 +461,7 @@ export function ChangeRequestTable({
             tabIndex={-1}
           >
             <div className="refs-table__identity refs-pr-identity">
-              <PrChip pr={pr} repoId={repoId} />
+              <PrChip pr={pr} repoId={repoId} forgeRepo={entry.forgeRepo} />
               <div>
                 <strong className="refs-pr-title" {...hoverTooltip(tip, pr.title)}>
                   {pr.title}

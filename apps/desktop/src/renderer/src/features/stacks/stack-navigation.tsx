@@ -47,22 +47,24 @@ function subscribeKnown(listener: () => void) {
  * Without a repository (a Lineage row, the PR view) any loaded snapshot can
  * answer, but only for a PR that names its forge repository: a bare number
  * would match the wrong repo's PR. */
-export function useStackPositionForPr(repoId: string | undefined, pr: Pick<PrSummary, "number" | "repoPath">):
+export function useStackPositionForPr(repoId: string | undefined, pr: Pick<PrSummary, "number" | "repoPath" | "host">, forgeRepo?: string):
   StackPosition | undefined {
   const version = useSyncExternalStore(subscribeKnown, () => knownVersion, () => knownVersion);
   return useMemo(() => {
     if (repoId !== undefined) {
       const snapshot = known.get(repoId);
-      if (snapshot) return stackPositionForPr(snapshot.stacks, pr);
+      if (snapshot) return stackPositionForPr(snapshot.stacks, pr, forgeRepo);
     }
-    if (!pr.repoPath) return undefined;
+    if (!forgeRepo && !(pr.host && pr.repoPath)) return undefined;
+    let historical: StackPosition | undefined;
     for (const snapshot of known.values()) {
-      const position = stackPositionForPr(snapshot.stacks, pr);
-      if (position) return position;
+      const position = stackPositionForPr(snapshot.stacks, pr, forgeRepo);
+      if (position && !position.stack.closed) return position;
+      historical ??= position;
     }
-    return undefined;
+    return historical;
   // A PR is the same PR while its number and repository are; its other fields refresh.
-  }, [version, repoId, pr.number, pr.repoPath]);
+  }, [version, repoId, pr.number, pr.repoPath, pr.host, forgeRepo]);
 }
 
 type Read = ReturnType<typeof loadSnapshot>;

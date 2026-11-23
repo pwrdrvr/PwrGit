@@ -73,7 +73,7 @@ export function StackPopoverTrigger({
 
   const close = () => { restoreFocus(anchor, panel); setOpen(false); };
   // A trigger inside Lineage’s native ref browser belongs to its top layer.
-  const host = anchor.current?.closest("[popover]") ?? anchor.current?.closest(".app") ?? anchor.current?.parentElement;
+  const host = anchor.current?.closest("[popover], [data-viewport-tooltip]") ?? anchor.current?.closest(".app") ?? anchor.current?.parentElement;
   return <>
     <button type="button" className={className} ref={anchor} aria-label={label}
       aria-haspopup="dialog" aria-expanded={open} aria-controls={open ? id : undefined}
@@ -81,7 +81,7 @@ export function StackPopoverTrigger({
       onDoubleClick={event => event.stopPropagation()}
       onClick={event => {
         event.stopPropagation();
-        if (!open) dismissHoverTooltips();
+        if (!open) dismissHoverTooltips(event.currentTarget);
         setOpen(!open);
       }}>{children}</button>
     {open && host && createPortal(<div className="stack-popover" style={laneStyle} ref={panel} role="dialog" aria-modal="true" aria-label={stackName(stack)}
@@ -128,6 +128,10 @@ export function StackPopoverTrigger({
               aria-label={`${stackPositionLabel(position)}, ${entry.pr.title}${active ? ", this PR" : ""}`}
               onClick={() => {
                 close();
+                if (!repoId) {
+                  void dispatch("shell:openExternal", { url: entry.pr.url });
+                  return;
+                }
                 selection.select({ repoId, entry, via: "pointer", manyRemotes: new Set(entries.map(row => row.remote)).size > 1 });
               }}>{content}</button> : <div className="stack-popover__row" data-ghost={branch === layer.branch ? "" : undefined}>{content}</div>}
           </li>;

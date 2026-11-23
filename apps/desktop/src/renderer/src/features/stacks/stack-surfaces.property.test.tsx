@@ -6,6 +6,7 @@ import fc from "fast-check";
 import { afterEach, expect, test, vi } from "vitest";
 import { ok, stackPositionForPr, type ChangeRequestEntry, type PrSummary, type Repo, type RepositoryStack, type StackLayer } from "@pwrgit/shared";
 import { useHoverIntent } from "../../lib/hoverIntent";
+import { useViewportTooltip } from "../../lib/useViewportTooltip";
 import { ChangeRequestSelectionContext } from "../change-request/change-request-selection";
 import { GraphRow } from "../graph/GraphRow";
 import { PrChip } from "../sidebar/PrChip";
@@ -14,7 +15,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { RepoChangeRequestSection } from "../sidebar/RepoChangeRequestSection";
 import { StackToolbar } from "./StackToolbar";
 import { StackView, StacksSidebar } from "./StackViews";
-import { StackNavigationContext, type StackPick } from "./stack-navigation";
+import { StackNavigationContext, useStackSnapshot, type StackPick } from "./stack-navigation";
 
 const repo: Repo = { id: "orbit", name: "Orbit", path: "/test/orbit", profileId: "test", pinned: false, worktrees: [] };
 const scope = "github.com/example/orbit";
@@ -429,11 +430,11 @@ test("R9 a merged PR whose branch is gone still shows its stack beside its chip 
     fc.tuple(fc.constant(height), fc.integer({ min: 1, max: height }))), async ([height, at]) => {
     const base = makeStack(height);
     const layers = base.layers.map((layer, index) => ({ ...layer, local: false,
-      pr: { ...makePr(index), state: "merged" as const, repoPath: "example/orbit" } }));
+      pr: { ...makePr(index), state: "merged" as const, repoPath: "example/orbit", host: "github.com" } }));
     const stack: RepositoryStack = { ...base, githubNumber: 4231, closed: "merged", layers };
     await render(stack, { listed: [] });
     const member = layers[at - 1].pr;
-    const outsider = { ...makePr(200), state: "merged" as const, repoPath: "example/orbit" };
+    const outsider = { ...makePr(200), state: "merged" as const, repoPath: "example/orbit", host: "github.com" };
     const host = document.createElement("div");
     document.body.append(host);
     const root = createRoot(host);
@@ -474,4 +475,48 @@ test("R9 a merged PR whose branch is gone still shows its stack beside its chip 
       host.remove();
     }
   }), { numRuns: 14 });
+});
+
+test("a checkout-less chip prefers open membership and opens member URLs from a context card", async () => {
+  await fc.assert(fc.asyncProperty(fc.integer({ min: 2, max: 4 }), async height => {
+    const base = makeStack(height);
+    const pr = { ...makePr(900), repoPath: "Example/Orbit", host: "github.com" };
+    const old: RepositoryStack = {
+      ...base, githubNumber: 801, closed: "merged", layers: [{ ...base.layers[0], pr }],
+    };
+    const current: RepositoryStack = {
+      ...base, githubNumber: 802, layers: [...base.layers.slice(0, -1), { ...base.layers[height - 1], pr }],
+    };
+    await render(old, { listed: [] });
+    const dispatch = vi.fn(async (name: string) => ok(name === "stack:list"
+      ? { schemaVersion: 1, readOnly: false, stacks: [current] } : null));
+    Object.assign(window.pwrgit, { dispatch });
+    const container = document.createElement("div");
+    document.body.append(container);
+    const root = createRoot(container);
+    function ContextCard() {
+      useStackSnapshot("clone-2", repo.profileId);
+      const tip = useViewportTooltip("commit-context-card", { interactive: true });
+      return <div className="app"><button type="button" onClick={e =>
+        tip.show(e.currentTarget, <PrChip pr={pr} />)}>Show context</button>{tip.tooltipNode}</div>;
+    }
+    try {
+      await act(async () => root.render(<ContextCard />));
+      const trigger = container.querySelector("button")!;
+      vi.spyOn(trigger, "getBoundingClientRect").mockReturnValue(new DOMRect(8, 8, 100, 20));
+      await click(trigger);
+      const card = document.querySelector(".commit-context-card")!;
+      const tag = card.querySelector(".stack-position");
+      expect(tag?.textContent).toBe(`${height}/${height}`);
+      showPopover(tag);
+      const dialog = card.querySelector(".stack-popover");
+      expect(dialog?.getAttribute("aria-label")).toBe("Stack #802");
+      await click(dialog?.querySelector("button[aria-current='true']") ?? null);
+      expect(dispatch).toHaveBeenCalledWith("shell:openExternal", { url: pr.url });
+      expect(card.isConnected).toBe(true);
+    } finally {
+      act(() => root.unmount());
+      container.remove();
+    }
+  }), { numRuns: 4 });
 });

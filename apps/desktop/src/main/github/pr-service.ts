@@ -275,10 +275,10 @@ export class PrService {
   cachedPrTitles(repoId: string, forgeRepo: string): ReadonlyMap<number, string> {
     const rows = this.db.prepare(`
       SELECT number, title FROM (
-        SELECT number, title, unixepoch(fetched_at) * 1000 AS observed_at
+        SELECT number, title, unixepoch(fetched_at, 'subsec') * 1000 AS observed_at
           FROM commit_pr WHERE repo_id = ? AND lower(host || '/' || repo_path) = ?
         UNION ALL
-        SELECT number, title, unixepoch(fetched_at) * 1000 AS observed_at
+        SELECT number, title, unixepoch(fetched_at, 'subsec') * 1000 AS observed_at
           FROM branch_pr WHERE repo_id = ? AND lower(host || '/' || repo_path) = ?
         UNION ALL
         SELECT pr.number, pr.title, state.fetched_at AS observed_at

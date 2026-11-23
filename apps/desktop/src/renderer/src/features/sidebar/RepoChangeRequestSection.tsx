@@ -380,7 +380,7 @@ export function RepoChangeRequestSection({
         <div className="ref-cr-row__line">
           {/* Beside the rail the rail node is the status and the rail the
               stack; on its own the chip is both, with its 2/3 tag. */}
-          <PrChip pr={pr} repoId={repo.id} stacked={position !== undefined && !ungrouped} stackWritable={writable} />
+          <PrChip pr={pr} repoId={repo.id} forgeRepo={entry.forgeRepo} stacked={position !== undefined && !ungrouped} stackWritable={writable} />
           <span className="ref-cr-row__title" {...hoverTooltip(tip, pr.title)}>
             {pr.title}
           </span>
@@ -434,7 +434,7 @@ export function RepoChangeRequestSection({
               key={changeRequestKey(other)}
               aria-label={`Also #${other.pr.number} on ${other.remote}`}
             >
-              <PrChip pr={other.pr} repoId={repo.id} />
+              <PrChip pr={other.pr} repoId={repo.id} forgeRepo={other.forgeRepo} />
               {manyRemotes && (
                 <span className="ref-cr-paired__remote">{other.remote}</span>
               )}

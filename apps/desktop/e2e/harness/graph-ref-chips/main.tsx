@@ -33,7 +33,7 @@ function makeScene(count: number, deep = false) {
     const name = firstRef(i);
     if (deep && kind === 6) {
       const layer = {
-        branch: name, parent: "main",
+        branch: name, parent: "main", pr: samplePr,
         health: { inSync: true, needsRestack: false, parentMerged: false, needsPush: false, drift: false, remoteAhead: false }
       };
       stackPositions.set(name, {
