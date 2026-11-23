@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import fc from "fast-check";
 import { afterAll, beforeAll, expect, it, vi } from "vitest";
+import { markRetryableTestBody } from "../../../../../scripts/ci/vitest-test-body.ts";
 import { openDatabase } from "../persistence/db";
 import { ProfileService } from "../profiles/profile-service";
 import { RepoIndexer } from "./repo-indexer";
@@ -56,7 +57,8 @@ afterAll(() => {
   rmSync(scratch, { recursive: true, force: true });
 });
 
-it("reconciles refs with scoped search and starts no branch transactions for matching rows", async () => {
+it("reconciles refs with scoped search and starts no branch transactions for matching rows", async ({ task }) => {
+  markRetryableTestBody(task);
   await fc.assert(fc.asyncProperty(
     fc.uniqueArray(fc.integer({ min: 0, max: 20 }), { minLength: 2, maxLength: 5 }),
     fc.integer({ min: 1, max: 4 }),

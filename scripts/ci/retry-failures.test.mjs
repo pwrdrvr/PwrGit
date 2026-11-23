@@ -36,6 +36,18 @@ describe("failure classification", () => {
     expect(unsafeFailure([{ message: `${exit.message} (EIO)` }], e2e)).toBe(true);
     expect(unsafeFailure([exit, { message: "Error: worker process exited unexpectedly (code=23, signal=null)" }], e2e)).toBe(true);
   });
+
+  it("accepts the Vitest test-body timeout diagnostic only for unit retries with clean error evidence", () => {
+    const message = 'Test timed out in 20000ms.\nIf this is a long-running test, pass a timeout value as the last argument or configure it globally with "testTimeout".';
+    const timeout = { name: "Error", message };
+    const unit = { allowVitestTimeout: true };
+    expect(unsafeFailure([timeout], unit)).toBe(false);
+    expect(unsafeFailure([{ ...timeout, message: message.replace("\n", "\r\n") }], unit)).toBe(false);
+    expect(unsafeFailure([timeout], { allowCommandExit: true })).toBe(true);
+    expect(unsafeFailure([{ ...timeout, code: "ETIMEDOUT" }], unit)).toBe(true);
+    expect(unsafeFailure([{ ...timeout, message: "Test timed out in 20000ms." }], unit)).toBe(true);
+    expect(unsafeFailure([timeout, { name: "Error", message: "Worker exited unexpectedly" }], unit)).toBe(true);
+  });
 });
 
 describe("unit retry selection", () => {

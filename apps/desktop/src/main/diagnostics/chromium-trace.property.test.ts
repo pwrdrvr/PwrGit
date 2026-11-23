@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import fc from "fast-check";
 import { expect, it, vi } from "vitest";
+import { markRetryableTestBody } from "../../../../../scripts/ci/vitest-test-body.ts";
 import { ChromiumTrace } from "./chromium-trace";
 
 const emptyTrace = JSON.stringify({ traceEvents: [] });
@@ -23,7 +24,8 @@ async function waitForPartialExport(directory: string): Promise<void> {
   }, { timeout: 3_000 });
 }
 
-it("reserves one frozen export across overlapping triggers, rearming, disarm and clock adjustments", async () => {
+it("reserves one frozen export across overlapping triggers, rearming, disarm and clock adjustments", async ({ task }) => {
+  markRetryableTestBody(task);
   await fc.assert(fc.asyncProperty(
     fc.array(fc.tuple(fc.integer({ min: 2, max: 5 }), fc.integer({ min: 1, max: 1000 }),
       fc.constantFrom("publish", "profile-failed", "disarm", "disarm-after-filtering")), { minLength: 1, maxLength: 12 }),

@@ -6,6 +6,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import { afterEach, describe, expect, it } from "vitest";
+import { markRetryableTestBody } from "./ci/vitest-test-body.ts";
 import { isAncestorPid, MACHINE_TOOL_LOCK, OWNER_ENV, processStartedAt } from "./resource-run.mjs";
 
 const directories = [];
@@ -204,7 +205,8 @@ describe("shared resource lease", () => {
     expect(rows).toEqual(rows[0] === "a:start" ? ["a:start", "a:end", "b:start", "b:end"] : ["b:start", "b:end", "a:start", "a:end"]);
   });
 
-  it("lets nested wrappers inherit the verified enclosing lease", async () => {
+  it("lets nested wrappers inherit the verified enclosing lease", async ({ task }) => {
+    markRetryableTestBody(task);
     const f = await fixture();
     const nested = encode({ lockPath: f.lockPath, cwd: f.directory, args: evalArgs("console.log(process.env.NODE_OPTIONS)") });
     const result = await launch(f, { args: [f.driver, nested] }, {

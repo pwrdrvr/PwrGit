@@ -4,6 +4,7 @@ import { createRequire } from "node:module";
 import { resolve, relative } from "node:path";
 import { pathToFileURL } from "node:url";
 import { describe, expect, it, vi } from "vitest";
+import { markRetryableTestBody } from "./ci/vitest-test-body.ts";
 import { nodeHeapArguments } from "./tool-resource-policy.mjs";
 import {
   BYTECODE_BUDGET, budgetFailures, discoverModules, enforceBudget, measureBytecode, transformedModules,
@@ -72,7 +73,8 @@ describe("renderer bytecode oracle", () => {
     expect(budgetFailures(invalid)).toEqual(invalid);
   });
 
-  it("preserves Fast Refresh without sharing the desktop cache or discovering dependencies", async () => {
+  it("preserves Fast Refresh without sharing the desktop cache or discovering dependencies", async ({ task }) => {
+    markRetryableTestBody(task);
     await fixture(async (root) => {
       const entry = resolve(root, "HookView.tsx");
       // A local custom hook exercises the same Refresh signature transform
@@ -119,7 +121,8 @@ describe("renderer bytecode oracle", () => {
     }, "apps/desktop/.local");
   });
 
-  it.each([false, true])("compiles without execution and finds nested/anonymous over-budget functions (oversized=%s)", async (oversized) => {
+  it.for([false, true])("compiles without execution and finds nested/anonymous over-budget functions (oversized=%s)", async (oversized, { task }) => {
+    markRetryableTestBody(task);
     await fixture(async (root) => {
       const entry = resolve(root, "entry.tsx");
       const body = Array.from({ length: oversized ? 1600 : 3 }, (_, i) => `input.step(${i});`).join("\n");

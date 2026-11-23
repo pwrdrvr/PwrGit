@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import fc from "fast-check";
 import { afterAll, beforeAll, expect, it, vi } from "vitest";
+import { markRetryableTestBody } from "../../../../../scripts/ci/vitest-test-body.ts";
 import { CommandBus } from "../command-bus";
 import { openDatabase } from "../persistence/db";
 import type { RepoIndexer } from "./repo-indexer";
@@ -38,7 +39,8 @@ afterAll(() => rmSync(template, { recursive: true, force: true }));
 // resolves back to its own object store. Repair preserves refs, checkout
 // contents, index bytes, missing/locked registrations, and the other profile.
 // Repeating repair must leave all of those observations unchanged.
-it("maintenance repair reconnects moved repositories without changing work or another profile", async () => {
+it("maintenance repair reconnects moved repositories without changing work or another profile", async ({ task }) => {
+  markRetryableTestBody(task);
   await fc.assert(fc.asyncProperty(fc.record({
     detached: fc.boolean(), locked: fc.boolean(), packed: fc.boolean(),
     missing: fc.boolean(), linkedCaller: fc.boolean()
