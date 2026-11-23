@@ -72,7 +72,7 @@ describe("renderer bytecode oracle", () => {
     expect(budgetFailures(invalid)).toEqual(invalid);
   });
 
-  it("includes Fast Refresh hook signatures without startup dependency discovery", async () => {
+  it("preserves Fast Refresh without sharing the desktop cache or discovering dependencies", async () => {
     await fixture(async (root) => {
       const entry = resolve(root, "HookView.tsx");
       // A local custom hook exercises the same Refresh signature transform
@@ -84,9 +84,12 @@ describe("renderer bytecode oracle", () => {
         }
         throw new Error('APPLICATION MUST NOT EXECUTE');
       `);
-      const desktopRequire = createRequire(resolve("apps/desktop/package.json"));
-      const { DevEnvironment, normalizePath } = await import(desktopRequire.resolve("vite"));
+      const desktopRoot = resolve("apps/desktop");
+      const desktopRequire = createRequire(resolve(desktopRoot, "package.json"));
+      const { DevEnvironment, normalizePath, resolveConfig: resolveViteConfig } = await import(desktopRequire.resolve("vite"));
+      const { resolveConfig: resolveElectronConfig } = await import(desktopRequire.resolve("electron-vite"));
       const listen = vi.spyOn(DevEnvironment.prototype, "listen");
+      vi.stubEnv("NODE_ENV", process.env.NODE_ENV);
       let development;
       try {
         for await (const module of transformedModules(root, { productionInput: entry })) {
@@ -94,14 +97,19 @@ describe("renderer bytecode oracle", () => {
         }
         // Vite starts discovery from listen(). Use its resolved client config
         // as the oracle so the check is independent of cache state and timing.
-        const rendererRoot = normalizePath(resolve("apps/desktop/src/renderer"));
+        const rendererRoot = normalizePath(resolve(desktopRoot, "src/renderer"));
         const call = listen.mock.calls.find(([server]) => server.config.root === rendererRoot);
         expect(call, "renderer dev server started").toBeDefined();
         const { optimizeDeps } = call[0].environments.client.config;
         expect(optimizeDeps.noDiscovery, "compile-only server skips dependency discovery").toBe(true);
         expect(optimizeDeps.include).not.toContain("pixelmatch");
+        const desktopConfig = await resolveElectronConfig({ root: desktopRoot }, "serve");
+        // The desktop dev command runs from apps/desktop, unlike this test.
+        const desktopVite = await resolveViteConfig({ ...desktopConfig.config.renderer, root: rendererRoot }, "serve");
+        expect(call[0].config.cacheDir, "oracle and desktop dev server use different caches").not.toBe(desktopVite.cacheDir);
       } finally {
         listen.mockRestore();
+        vi.unstubAllEnvs();
       }
       expect(development.code).toContain("$RefreshSig$");
       expect(development.code).toMatch(/_s\(\);/);

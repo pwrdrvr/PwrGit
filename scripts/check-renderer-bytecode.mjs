@@ -132,6 +132,8 @@ export async function* transformedModules(sourceRoot, { productionInput } = {}) 
       ...devConfig.config.renderer,
       root: resolve(desktopRoot, "src/renderer"),
       configFile: false,
+      // Plugins can still request prebundles. Keep them out of the app's cache.
+      cacheDir: resolve(desktopRoot, "node_modules/.cache/pwrgit/renderer-bytecode"),
       // This server only requests transforms. Clear the renderer's prebundle
       // list and skip discovery so shutdown has no dependency scan to cancel.
       optimizeDeps: { noDiscovery: true, include: [] },

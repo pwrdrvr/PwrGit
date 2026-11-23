@@ -32,7 +32,8 @@ at `30e49f153a5016f253e27e99bca9af95010a2b95` to PwrGit's toolchain.
   development JSX and Fast Refresh hook instrumentation. Keep HMR enabled in
   the transform configuration with its WebSocket transport disabled. Skip
   startup dependency discovery on this compile-only server so shutdown has no
-  dependency scan to cancel.
+  dependency scan to cancel. Use a dedicated Vite cache for the oracle so
+  plugin-provided prebundles cannot replace the desktop dev server's bundles.
 - Build the actual production renderer configuration in production mode,
   with its esbuild minifier, into memory. Check all emitted JavaScript
   chunks and worker assets, including bundled dependencies. Production
