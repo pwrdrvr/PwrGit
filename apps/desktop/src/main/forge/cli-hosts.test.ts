@@ -54,14 +54,76 @@ describe("parseGhHosts", () => {
         kind: "github",
         host: "github.com",
         account: "octo-dev",
-        scopes: ["gist", "read:org", "repo"]
+        scopes: ["gist", "read:org", "repo"],
+        accounts: [
+          {
+            host: "github.com",
+            login: "octo-dev",
+            active: true,
+            state: "success",
+            tokenSource: "keyring"
+          }
+        ]
       },
       {
         kind: "github",
         host: "github.acme-inc.com",
         account: "o.dev",
-        scopes: ["repo"]
+        scopes: ["repo"],
+        accounts: [
+          {
+            host: "github.acme-inc.com",
+            login: "o.dev",
+            active: true,
+            state: "success",
+            tokenSource: "keyring"
+          }
+        ]
       }
+    ]);
+  });
+
+  it("keeps every account on a host, and which one is active", () => {
+    // A host can be pinned to any of them, so dropping the inactive ones
+    // would leave Settings nothing to offer.
+    const json = JSON.stringify({
+      hosts: {
+        "ghe.contoso-labs.test": [
+          { login: "a.hopper", active: false, state: "success", tokenSource: "keyring" },
+          { login: "release-bot", active: true, state: "error", tokenSource: "oauth_token" }
+        ]
+      }
+    });
+    expect(parseGhHosts(json)[0]?.accounts).toEqual([
+      {
+        host: "ghe.contoso-labs.test",
+        login: "a.hopper",
+        active: false,
+        state: "success",
+        tokenSource: "keyring"
+      },
+      {
+        host: "ghe.contoso-labs.test",
+        login: "release-bot",
+        active: true,
+        state: "error",
+        tokenSource: "oauth_token"
+      }
+    ]);
+  });
+
+  it("drops a login that could never be pinned", () => {
+    // It would become `gh auth token --user` argv: a leading dash is a flag.
+    const json = JSON.stringify({
+      hosts: {
+        "github.com": [
+          { login: "--hostname", active: false },
+          { login: "octo-dev", active: true }
+        ]
+      }
+    });
+    expect(parseGhHosts(json)[0]?.accounts?.map((entry) => entry.login)).toEqual([
+      "octo-dev"
     ]);
   });
 

@@ -20,8 +20,9 @@ Code paths in backticks are relative to [apps/desktop/src/main/forge](../../../a
   the runner's `onStderr` hook. Keep the output of a non-zero exit: glab exits
   non-zero when ANY configured instance fails, and still lists the hosts it
   reached.
-- `gh` allows several accounts per host. Take the **active** one: `gh api
-  --hostname` uses it.
+- `gh` allows several accounts per host. Enumeration keeps **every** one,
+  and which is active (`DiscoveredForgeHost.accounts`). See
+  [Host accounts](#host-accounts) for which one PwrGit reads as.
 - **A hostname is never evidence, in any layer.** Nothing reads a host's NAME
   to decide its product.
   - Shared's `classifyForgeHost` (`resolve.ts` delegates to it) once read a
@@ -81,6 +82,52 @@ Code paths in backticks are relative to [apps/desktop/src/main/forge](../../../a
   surface that names a product or a sign-in goes in that test.
   - A row is `origin: "cli"` only when **its own product's** CLI reported the
     host. A host `gh` reports that config gives to GitLab is a `config` row.
+
+## Host accounts
+
+A GitHub host reads as the CLI's active account unless the user pins one in
+Settings → Forges (`ForgeHostConfig.account`). The logic is
+`../github/gh-account.ts`; `index.ts` wires it to `ForgeHosts.accountFor`.
+
+- **A pin changes three things together.** The token comes from
+  `gh auth token --hostname H --user A`. The token cache is keyed by host
+  **and** account: one slot per host handed the previous account's token to
+  the next for the rest of the TTL. Every other `gh` spawn for H has no
+  `--user`, so `runGh` adds A's token to its environment: `GH_TOKEN` for
+  github.com (and `*.ghe.com`), `GH_ENTERPRISE_TOKEN` + `GH_HOST` for an
+  Enterprise host. The MCP server's `gh` goes through the same store
+  (`agent-access/desktop-mcp-runner.ts`).
+- **A stale pin never falls back.** A pinned account `gh` no longer holds has
+  no token, so the probe reports the host signed out and a spawn fails as an
+  authentication error (`GhAccountUnavailableError`). Its row reads as nobody
+  (`ForgeHostRow.account` is absent) and shows a warning with "Use active
+  account". Reading as the active account instead would put one name on
+  screen while reading as another.
+- **An environment token outranks a pin.** `githubEnvToken`: `GH_TOKEN` or
+  `GITHUB_TOKEN` for github.com, and `GH_ENTERPRISE_TOKEN` only for the host
+  `GH_HOST` names. It is read from the user's environment, never from a
+  spawn's overrides: a provider sets `GH_HOST` to *target* a host, which must
+  not promote the user's Enterprise token to it. The row carries the variable's
+  name (`tokenEnv`), never its value, and offers no choice.
+- **Only where there is a choice.** `FORGE_PRODUCTS[kind].accountChoice` is
+  true for GitHub only; `glab` and `cafe` hold one account per host.
+  `ForgeHosts.accountFor` ignores a stored account anywhere else. The select
+  shows for two or more accounts, or for an existing pin.
+- **`gh auth …` is never given an injected token.** It would print it back.
+  A pinned `auth token` also strips the environment-token variables, so an
+  Enterprise token meant for another `GH_HOST` cannot answer in its place.
+- **The login is argv.** `sanitizeForgeHostAccount` (shared) guards the write
+  path, the settings read and enumeration: a value starting with `-` would be
+  a `gh` flag.
+- **The account joins the probe signature.** `ForgeProbeTarget.account` is in
+  `index.ts`'s `forgeTargetSignature`, so choosing one re-probes like a switch.
+- **Unpinned spawns must stay synchronous.** `GitHubCredentials.run` spawns
+  in the same tick when no pin applies, because callers attach to the child's
+  streams synchronously.
+- `gh-account.model.test.ts` drives sign-ins, sign-outs, `gh auth switch`,
+  pins and environment changes against an oracle. The account dimension of
+  `forge-surfaces.property.test.ts` holds the row, the card, `owners()` and
+  the MCP runner to one answer.
 
 ## Status, capabilities, and who may call a forge
 

@@ -5,6 +5,7 @@ import {
   type CliRunOptions,
   type CliSpec
 } from "../forge/cli-runner";
+import { GitHubCredentials } from "./gh-account";
 
 /**
  * GitHub's binding of the shared forge CLI runner.
@@ -60,6 +61,16 @@ export const GH_CLI_SPEC: CliSpec = {
 
 const gh = createCliClient(GH_CLI_SPEC);
 
+/**
+ * The one credential store for every `gh` spawn in the app: which account
+ * each host reads as, and its token. See `gh-account.ts`. Built over the
+ * plain runner, so its own `gh auth token` calls are never given an injected
+ * token to print back.
+ */
+export const githubCredentials = new GitHubCredentials({
+  run: (args, options) => gh.run(args, options)
+});
+
 export type GhRunOptions = CliRunOptions;
 export type GhCliErrorCode = CliError["code"];
 export { CliError as GhCliError };
@@ -88,10 +99,17 @@ export function ghErrorMessage(cause: unknown): string {
   return gh.errorMessage(cause);
 }
 
-/** Run the configured GitHub CLI without exposing its credential storage. */
+/**
+ * Run the configured GitHub CLI without exposing its credential storage.
+ *
+ * As the target host's pinned account, when it has one: the command's
+ * environment carries that account's token (`githubCredentials.run`). A
+ * pinned account that no longer resolves fails the command as an
+ * authentication error rather than running it as gh's active account.
+ */
 export async function runGh(
   args: string[],
   options: GhRunOptions = {}
 ): Promise<string> {
-  return gh.run(args, options);
+  return githubCredentials.run(args, options);
 }

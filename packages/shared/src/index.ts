@@ -3,6 +3,7 @@ export * from "./git-discovery";
 export * from "./gh-default-intent";
 export * from "./types";
 export * from "./forge-host-name";
+export * from "./forge-host-account";
 export * from "./forge-product";
 export * from "./change-request-query";
 export * from "./search-name";

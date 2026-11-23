@@ -16,9 +16,13 @@ fails.
   `source` (the fork-network root) with `parent`. `fork()` reads the result
   back, so "created" and "already exists" are one path.
 - **Auth.** `getGitHubToken(host)` (`pr-client.ts`) runs
-  `gh auth token --hostname <host>`, reusing the user's gh login. The cache
-  (approximately 5 min) is **keyed by host**; a single slot leaks one host's
-  token to another.
+  `gh auth token --hostname <host>`, adding `--user <account>` when the host
+  is pinned to an account. The cache (approximately 5 min) is **keyed by host
+  and account**; a single slot leaks one token to another. `runGh` gives every
+  other spawn for a pinned host that account's token through its environment.
+  A stale pin is signed out and never falls back. Read [Host
+  accounts](../../../../../docs/guides/main-forge/forge-hosts-and-status.md#host-accounts)
+  before changing `gh-account.ts`, `runGh` or the token cache.
 - `GITHUB_TOKEN` applies to **github.com only**. It is a github.com PAT, and
   an Enterprise host must not get it. `gh` uses `GH_ENTERPRISE_TOKEN` for the
   same reason.

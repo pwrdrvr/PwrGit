@@ -2,6 +2,7 @@ import { parseCafeAuthStatus, runCafe, type CafeRunner } from "./gitcafe/cafe-cl
 import {
   canonicalForgeHostname,
   FORGE_KINDS,
+  sanitizeForgeHostAccount,
   type ForgeKind
 } from "@pwrgit/shared";
 import { runGh } from "../github/gh-cli";
@@ -18,10 +19,31 @@ export type DiscoveredForgeHost = {
   kind: ForgeKind;
   /** Canonical lowercase hostname. */
   host: string;
-  /** The signed-in account, when the CLI names one. */
+  /** The CLI's ACTIVE account, when it names one — what the CLI itself
+   *  would read with. Not necessarily what PwrGit reads with: a host can pin
+   *  another of `accounts` (`ForgeHostConfig.account`). */
   account?: string;
   /** GitHub only: `gh` reports token scopes, `glab` does not. */
   scopes?: string[];
+  /**
+   * Every account the CLI holds for this host, active one included.
+   *
+   * Only `gh` reports more than one; the others leave this absent. Kept whole
+   * so Settings can offer the choice and `ForgeHosts` can tell a pinned
+   * account that is still signed in from one that is not.
+   */
+  accounts?: DiscoveredForgeAccount[];
+};
+
+/** One account `gh auth status --json hosts` reports for a host. */
+export type DiscoveredForgeAccount = {
+  host: string;
+  login: string;
+  active: boolean;
+  /** gh's own check of the token: `success`, `error`, `timeout`. */
+  state?: string;
+  /** Where gh found the token: `keyring`, `oauth_token`, `GH_TOKEN`, … */
+  tokenSource?: string;
 };
 
 /** The shared spelling, so a host enumerated here matches the key every
@@ -34,7 +56,14 @@ function canonical(host: string): string {
 type GhAuthStatus = {
   hosts?: Record<
     string,
-    Array<{ host?: unknown; login?: unknown; active?: unknown; scopes?: unknown }>
+    Array<{
+      host?: unknown;
+      login?: unknown;
+      active?: unknown;
+      scopes?: unknown;
+      state?: unknown;
+      tokenSource?: unknown;
+    }>
   >;
 };
 
@@ -42,9 +71,12 @@ type GhAuthStatus = {
  * Parse `gh auth status --json hosts`.
  *
  * The shape is host → accounts, because `gh` supports several accounts per
- * host. We take the active one, falling back to the first: PwrGit reads with
- * whichever credential `gh api --hostname` would use, and that is the active
- * account. Surfacing all of them would imply a choice PwrGit cannot make.
+ * host. Every account is kept (`accounts`), because a host can be pinned to
+ * any of them. `account` is the ACTIVE one, falling back to the first: it is
+ * what `gh api --hostname` uses, and what PwrGit reads with when nothing is
+ * pinned. A login that would not survive `sanitizeForgeHostAccount` is
+ * dropped — it could never be pinned, and naming it would offer a choice that
+ * cannot be saved.
  */
 export function parseGhHosts(json: string): DiscoveredForgeHost[] {
   let parsed: GhAuthStatus;
@@ -68,6 +100,20 @@ export function parseGhHosts(json: string): DiscoveredForgeHost[] {
     const list = Array.isArray(accounts) ? accounts : [];
     const chosen = list.find((entry) => entry?.active === true) ?? list[0];
     const login = typeof chosen?.login === "string" ? chosen.login : undefined;
+    const every: DiscoveredForgeAccount[] = [];
+    for (const entry of list) {
+      const name = sanitizeForgeHostAccount(entry?.login);
+      if (name === null || every.some((seen) => seen.login === name)) continue;
+      every.push({
+        host,
+        login: name,
+        active: entry === chosen,
+        ...(typeof entry?.state === "string" ? { state: entry.state } : {}),
+        ...(typeof entry?.tokenSource === "string"
+          ? { tokenSource: entry.tokenSource }
+          : {})
+      });
+    }
     // `scopes` is one comma-separated string, not a list.
     const scopes =
       typeof chosen?.scopes === "string"
@@ -80,7 +126,8 @@ export function parseGhHosts(json: string): DiscoveredForgeHost[] {
       kind: "github",
       host,
       ...(login === undefined ? {} : { account: login }),
-      ...(scopes === undefined || scopes.length === 0 ? {} : { scopes })
+      ...(scopes === undefined || scopes.length === 0 ? {} : { scopes }),
+      ...(every.length === 0 ? {} : { accounts: every })
     });
   }
   return out;

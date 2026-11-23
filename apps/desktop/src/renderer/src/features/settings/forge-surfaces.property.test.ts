@@ -11,7 +11,11 @@ import {
   type ForgeStatus
 } from "@pwrgit/shared";
 import { classifyProvider } from "@pwrgit/mcp-server/remote";
+import { createDesktopMcpRunner } from "../../../../main/agent-access/desktop-mcp-runner";
 import { discoverForgeHosts } from "../../../../main/forge/cli-hosts";
+import { GitHubRepoProvider } from "../../../../main/forge/github/repo-provider";
+import type { CliRunOptions } from "../../../../main/forge/cli-runner";
+import { GitHubCredentials } from "../../../../main/github/gh-account";
 import { ForgeHosts, ForgeHostsView } from "../../../../main/forge/hosts";
 import { resolveForgeRepo } from "../../../../main/forge/resolve";
 import { ForgeStatusService, type ForgeProbe } from "../../../../main/forge/status";
@@ -46,6 +50,14 @@ import { forgeProductState } from "./ForgeProductSection";
  * - the MCP server's `classifyProvider`, which reads only the environment, so
  *   it is held to what the app answers from the environment alone.
  *
+ * And which ACCOUNT a GitHub host is read as. `gh` holds several accounts per
+ * host and a host can be pinned to one (`ForgeHostConfig.account`), so the
+ * row's "reads as", the card's signed-in answer, the identity reads
+ * (`GitHubRepoProvider.owners()`, what `IdentityService` and the fork dialog
+ * ask) and the MCP server's `gh` spawns must all name the same account — and
+ * a pinned account `gh` no longer holds must read as nobody everywhere. Those
+ * run through the real `GitHubCredentials` over a fake `gh`.
+ *
  * The reference is `ForgeHosts.kindFor` / `isEnabled` plus the world's own
  * sign-ins: "logged in at h" means h resolves to product k, the switch allows
  * it, k's CLI is installed, and that CLI holds a credential for h.
@@ -56,8 +68,11 @@ type CliWorld = {
   /** `ok` reports every sign-in; `fails` exits non-zero with nothing usable;
    *  `old` is a CLI that predates the JSON flag and prints usage text. */
   enumeration: "ok" | "fails" | "old";
-  /** Canonical host → account. */
+  /** Canonical host → the ACTIVE account. */
   signedIn: ReadonlyMap<string, string>;
+  /** Canonical host → further accounts the CLI holds there, not active. Only
+   *  `gh` reports them; the other CLIs hold one account per host. */
+  extra: ReadonlyMap<string, readonly string[]>;
   /** `gh auth token --hostname h` failing outright, rather than answering
    *  "no token", on a host it holds nothing for. */
   probeThrows: boolean;
@@ -74,6 +89,11 @@ type World = {
 };
 
 const SAAS_HOSTS = FORGE_KINDS.map((kind) => FORGE_PRODUCTS[kind].saasHost);
+/** Logins a host can hold besides its active one, and can be pinned to.
+ *  Hyphenated, so a generated active login (lowercase letters only) never
+ *  collides with one. `pin-zed` is never signed in anywhere: a stale pin. */
+const EXTRA_LOGINS = ["pin-ana", "pin-bot"] as const;
+const PIN_LOGINS = [...EXTRA_LOGINS, "pin-zed"] as const;
 
 const LOWER = [..."abcdefghijklmnopqrstuvwxyz"];
 const ALNUM = [...LOWER, ..."0123456789"];
@@ -130,6 +150,21 @@ function remoteUrl(hostSpelled: string, form: number): string {
 }
 
 function cliArb(pool: string[], maxSignedIn: number): fc.Arbitrary<CliWorld> {
+  return cliCoreArb(pool, maxSignedIn).chain((cli) => {
+    const hosts = [...cli.signedIn.keys()];
+    return fc
+      .tuple(...hosts.map(() => fc.subarray([...EXTRA_LOGINS])))
+      .map((extras) => ({
+        ...cli,
+        extra: new Map(hosts.map((host, index) => [host, extras[index] ?? []]))
+      }));
+  });
+}
+
+function cliCoreArb(
+  pool: string[],
+  maxSignedIn: number
+): fc.Arbitrary<Omit<CliWorld, "extra">> {
   return fc.record({
     installed: fc.boolean(),
     enumeration: fc.constantFrom("ok", "ok", "fails", "old"),
@@ -171,7 +206,8 @@ const worldArb: fc.Arbitrary<World> = fc
             config: fc.record(
               {
                 kind: fc.constantFrom<ForgeKind | "bogus">(...FORGE_KINDS, "bogus"),
-                enabled: fc.boolean()
+                enabled: fc.boolean(),
+                account: fc.constantFrom<string>(...PIN_LOGINS)
               },
               { requiredKeys: [] }
             )
@@ -218,7 +254,16 @@ function ghStatus(cli: CliWorld): string {
     hosts: Object.fromEntries(
       [...cli.signedIn].map(([host, login]) => [
         host,
-        [{ state: "success", active: true, host, login, scopes: "repo" }]
+        [
+          { state: "success", active: true, host, login, scopes: "repo" },
+          ...(cli.extra.get(host) ?? []).map((extra) => ({
+            state: "success",
+            active: false,
+            host,
+            login: extra,
+            scopes: "repo"
+          }))
+        ]
       ])
     )
   });
@@ -252,9 +297,60 @@ function enumerator<T>(cli: CliWorld, answer: () => T): () => Promise<T> {
   };
 }
 
+/** Every account a CLI holds at a canonical host, active first. */
+function accountsAt(cli: CliWorld, key: string): string[] {
+  const active = cli.signedIn.get(key);
+  return active === undefined ? [] : [active, ...(cli.extra.get(key) ?? [])];
+}
+
+/** The login a fake `gh` token stands for: `tok|host|login`. */
+function loginOfToken(token: string | undefined): string | undefined {
+  return token?.split("|")[2];
+}
+
+/** The account a fake `gh` spawn reads as: an injected token's owner, else
+ *  the host's active account. */
+function spawnLogin(
+  world: World,
+  host: string,
+  env: Readonly<Record<string, string | undefined>> | undefined
+): string | undefined {
+  const injected = loginOfToken(env?.["GH_TOKEN"] ?? env?.["GH_ENTERPRISE_TOKEN"]);
+  return injected ?? world.clis.github.signedIn.get(canonicalForgeHostname(host) ?? "");
+}
+
+/**
+ * A fake `gh`: `auth token` per account, and `api user`/`api user/orgs` as
+ * whichever account the spawn's environment says.
+ */
+function fakeGh(world: World) {
+  const cli = world.clis.github;
+  return async (args: string[], options?: CliRunOptions): Promise<string> => {
+    if (!cli.installed) throw new Error("ENOENT");
+    const flag = (name: string): string | undefined => {
+      const index = args.indexOf(name);
+      return index === -1 ? undefined : args[index + 1];
+    };
+    const host =
+      flag("--hostname") ?? options?.env?.["GH_HOST"] ?? FORGE_PRODUCTS.github.saasHost;
+    const key = canonicalForgeHostname(host) ?? "";
+    if (args[0] === "auth") {
+      const login = flag("--user") ?? cli.signedIn.get(key);
+      if (login === undefined || !accountsAt(cli, key).includes(login)) {
+        throw new Error("no oauth token found");
+      }
+      return `tok|${key}|${login}`;
+    }
+    const login = spawnLogin(world, key, options?.env);
+    if (login === undefined) throw new Error("HTTP 401: Bad credentials");
+    return args.includes("user/orgs") ? "[]" : JSON.stringify({ login });
+  };
+}
+
 /** The credential each CLI would find. An undefined host is the CLI's own
- *  default, which in this world is the product's SaaS host. */
-function probesFor(world: World): ForgeProbe[] {
+ *  default, which in this world is the product's SaaS host. GitHub's goes
+ *  through the real credential store, so a pin is honoured as the app does. */
+function probesFor(world: World, credentials: GitHubCredentials): ForgeProbe[] {
   return FORGE_KINDS.map((kind) => {
     const cli = world.clis[kind];
     return {
@@ -265,6 +361,9 @@ function probesFor(world: World): ForgeProbe[] {
         return true;
       },
       loggedIn: async (host) => {
+        if (FORGE_PRODUCTS[kind].accountChoice) {
+          return (await credentials.token(host)) !== null;
+        }
         const key = canonicalForgeHostname(host ?? FORGE_PRODUCTS[kind].saasHost);
         if (key !== null && cli.signedIn.has(key)) return true;
         if (cli.probeThrows) throw new Error("exit status 1");
@@ -276,6 +375,7 @@ function probesFor(world: World): ForgeProbe[] {
 
 type Built = {
   world: World;
+  credentials: GitHubCredentials;
   hosts: ForgeHosts;
   envOnly: ForgeHosts;
   view: ForgeHostsView;
@@ -298,12 +398,18 @@ async function build(world: World): Promise<Built> {
     discovered: () => [],
     env: world.env
   });
+  const credentials = new GitHubCredentials({
+    run: fakeGh(world),
+    env: () => world.env
+  });
+  credentials.setAccountChooser((host) => hosts.accountFor(host));
   const status = new ForgeStatusService({
-    probes: probesFor(world),
+    probes: probesFor(world, credentials),
     hosts: () => hosts.statusTargets()
   });
   return {
     world,
+    credentials,
     hosts,
     envOnly,
     view: new ForgeHostsView(hosts, async () => {}),
@@ -323,13 +429,24 @@ function truth(built: Built, host: string) {
   const kind = built.hosts.kindFor(host).kind;
   const enabled = built.hosts.isEnabled(host).enabled;
   const cli = kind === null ? undefined : built.world.clis[kind];
+  // The pin, as the setting states it. A pinned account the CLI does not
+  // hold is no credential at all: nothing falls back to the active one.
+  const pin = built.hosts.accountFor(host);
+  const held = cli === undefined ? [] : accountsAt(cli, key);
+  const readsAs =
+    pin === undefined ? cli?.signedIn.get(key) : held.includes(pin) ? pin : undefined;
   return {
     key,
     kind,
     enabled,
     installed: cli?.installed === true,
+    readsAs,
     loggedIn:
-      kind !== null && enabled && cli?.installed === true && cli.signedIn.has(key)
+      kind !== null &&
+      enabled &&
+      cli?.installed === true &&
+      cli.signedIn.has(key) &&
+      readsAs !== undefined
   };
 }
 
@@ -403,6 +520,10 @@ function disagreements(built: Built): string[] {
     const want = truth(built, row.host);
     const status = statusOf(built, row.kind);
     if (!want.installed || !row.enabled) continue;
+    // A pinned account the CLI no longer holds: the row warns that nothing is
+    // read, so the card saying signed out is the agreement, not a conflict.
+    // `accountDisagreements` holds both sides of it to `truth`.
+    if (row.chosenAccount !== undefined && row.account === undefined) continue;
     const cardSays = forgeLoggedInAt(status, row.host);
     if (row.origin === "cli" && !cardSays) {
       problems.push(`Settings row ${row.host} says ${row.cli} is signed in; card says signed out`);
@@ -442,11 +563,68 @@ function disagreements(built: Built): string[] {
   return problems;
 }
 
+/**
+ * Every surface that names the account a host is read as, against `truth`.
+ *
+ * Async because two of them spawn: the identity reads (`owners()` runs
+ * `gh api user`) and the MCP server's `gh pr list`, each through the same
+ * credential store as the app.
+ */
+async function accountDisagreements(built: Built): Promise<string[]> {
+  const problems: string[] = [];
+  const mcp = createDesktopMcpRunner(
+    async () => {
+      throw new Error("no git in this world");
+    },
+    async (_command, _args, options) => {
+      const repo = _args[_args.indexOf("--repo") + 1] ?? "";
+      const host = repo.split("/").length >= 3 ? repo.split("/")[0]! : "github.com";
+      const login = spawnLogin(built.world, host, options.env);
+      return login === undefined
+        ? { exitCode: 4, stdout: "", stderr: "HTTP 401" }
+        : { exitCode: 0, stdout: login, stderr: "" };
+    },
+    (args, env) => built.credentials.spawnEnv(args, env)
+  );
+  for (const row of built.view.rows()) {
+    const want = truth(built, row.host);
+    // Only a row a CLI reported names an account at all.
+    const expected = row.origin === "cli" ? want.readsAs : undefined;
+    if (row.account !== expected) {
+      problems.push(`Settings row ${row.host} reads as ${row.account}, reference ${expected}`);
+    }
+    if (!FORGE_PRODUCTS[row.kind].accountChoice) continue;
+    if (!want.installed || !row.enabled || row.origin !== "cli") continue;
+
+    const owners = await new GitHubRepoProvider(
+      (args, options) => built.credentials.run(args, options),
+      row.host
+    )
+      .owners()
+      .catch(() => null);
+    const identity = owners?.[0]?.login;
+    if (identity !== row.account) {
+      problems.push(`identity reads at ${row.host} as ${identity}; row says ${row.account}`);
+    }
+
+    const repo = row.host === "github.com" ? "team/app" : `${row.host}/team/app`;
+    const answered = await mcp("gh", ["pr", "list", "--repo", repo], { cwd: "/" });
+    const asMcp = answered.exitCode === 0 ? answered.stdout : undefined;
+    if (asMcp !== row.account) {
+      problems.push(`MCP gh at ${row.host} reads as ${asMcp}; row says ${row.account}`);
+    }
+  }
+  return problems;
+}
+
 describe("forge surfaces agree on which product runs at a host, and whether it can be read", () => {
   it("for any hosts, sign-ins, settings and env allowlists", async () => {
     await fc.assert(
       fc.asyncProperty(worldArb, async (world) => {
-        expect(disagreements(await build(world))).toEqual([]);
+        const built = await build(world);
+        expect([...disagreements(built), ...(await accountDisagreements(built))]).toEqual(
+          []
+        );
       })
     );
   });

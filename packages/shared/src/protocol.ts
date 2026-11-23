@@ -795,6 +795,18 @@ export type ForgeHostConfig = {
    * how the pane CLEARS a name rather than a name of its own.
    */
   label?: string;
+  /**
+   * The CLI account PwrGit reads this host as, when the user pinned one.
+   *
+   * Absent means "whichever account the CLI has active" — `gh auth switch`
+   * then moves PwrGit too. Present pins it: `gh auth token --user` mints the
+   * token, and every `gh` spawn for the host carries it in its environment. A
+   * pinned account that no longer resolves makes the host signed out; nothing
+   * falls back to another account. Only products with
+   * `FORGE_PRODUCTS[kind].accountChoice` honour it. The empty string is how
+   * the pane CLEARS a pin, like `label`.
+   */
+  account?: string;
 };
 
 /** Per-host forge configuration, keyed by canonical lowercase hostname. */
@@ -805,6 +817,13 @@ export type ForgeSettings = {
 /** Where a resolved forge-host value came from. The UI shows `auto` so a
  *  derived default never reads as a choice somebody made. */
 export type ForgeValueSource = "auto" | "config" | "env";
+
+/** One account a forge CLI holds for a host. */
+export type ForgeHostAccount = {
+  login: string;
+  /** The account the CLI itself would use (`gh auth switch`). */
+  active: boolean;
+};
 
 /** One forge host, resolved, as Settings renders it. */
 export type ForgeHostRow = {
@@ -819,7 +838,26 @@ export type ForgeHostRow = {
   /** `cli` — a CLI is signed in here. `config` — the user added it and no CLI
    *  reports it, which is the row that offers a sign-in command. */
   origin: "cli" | "config";
+  /**
+   * The account PwrGit reads this host as: the pinned account when one is
+   * chosen and still signed in, else the CLI's active account. Absent when a
+   * pinned account no longer resolves — the host then reads as nobody, and
+   * every surface that names an account must say so rather than name another.
+   */
   account?: string;
+  /** Every account the CLI holds for this host, when it can hold several
+   *  (`gh`). Absent for a CLI with one account per host. */
+  accounts?: ForgeHostAccount[];
+  /** The account the user pinned (`ForgeHostConfig.account`), whether or not
+   *  it still resolves. Absent means "the active account". */
+  chosenAccount?: string;
+  /**
+   * The environment variable whose token this host reads with, when one
+   * applies (`GITHUB_TOKEN` for github.com, `GH_ENTERPRISE_TOKEN` for the host
+   * `GH_HOST` names). The name only — a token value never leaves main. While
+   * set, the account choice does not apply.
+   */
+  tokenEnv?: string;
   scopes?: string[];
   /** The CLI that speaks to this host, for the remediation command. */
   cli: string;
