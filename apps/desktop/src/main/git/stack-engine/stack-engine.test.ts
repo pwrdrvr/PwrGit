@@ -113,3 +113,30 @@ test("a patch newly present upstream is accounted for in the proof", () => withR
   await engine.apply(plan, "upstream-patch", 1);
   expect(await git(cwd, "diff", upstream, "layer")).toBe("");
 }));
+
+test("the journal recovers an atomic ref commit interrupted before linked worktrees follow", () =>
+  withStack(async ({ cwd, engine, commonDir, store }) => {
+    await commit(cwd, "trunk.txt", "advance\n");
+    const linked = join(cwd, "linked");
+    await git(cwd, "worktree", "add", "-q", linked, "top");
+    const plan = await engine.plan({ kind: "restack", root: "bottom" });
+    let journal: import(".").StackJournalEntry | undefined;
+    const fault: GitRunner = {
+      run(cwd, args, opts) {
+        if (args[0] === "read-tree" && args[1] === "-m") throw new Error("worktree follow interrupted");
+        return runner.run(cwd, args, opts);
+      },
+    };
+    const interrupted = new StackEngine(fault, store, cwd, commonDir);
+    await expect(interrupted.apply(plan, "recovery", 1, { begin: async entry => { journal = entry; } }))
+      .rejects.toThrow("worktree follow interrupted");
+    expect(journal).toBeDefined();
+    expect(await git(cwd, "rev-parse", "top")).toBe(plan.moves.at(-1)?.next);
+    await expect(readFile(join(linked, "trunk.txt"), "utf8")).rejects.toThrow();
+    await engine.recover(journal!);
+    await engine.recover(journal!);
+    expect(await readFile(join(linked, "trunk.txt"), "utf8")).toBe("advance\n");
+    expect(await git(linked, "status", "--porcelain")).toBe("");
+    expect((await store.read(commonDir)).catalog).toEqual(plan.after);
+  })
+);

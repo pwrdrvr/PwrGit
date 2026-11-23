@@ -1,4 +1,4 @@
-import type { StackSnapshot } from "./stacks";
+import type { StackAction, StackApplied, StackConflict, StackPlanPreview, StackSnapshot } from "./stacks";
 // Typed Commands + Events registry — the single source of truth for the
 // command-bus across main / preload / renderer.
 //
@@ -1091,6 +1091,35 @@ export interface Commands {
   "stack:list": {
     req: { repoId: RepoId; profileId: ProfileId };
     res: StackSnapshot;
+  };
+
+  "stack:plan": {
+    req: { repoId: RepoId; profileId: ProfileId; stackId: string; action: StackAction };
+    res: StackPlanPreview;
+  };
+  "stack:apply": {
+    req: { repoId: RepoId; profileId: ProfileId; planId: string; cleanPrefix?: boolean; worktreeId?: string };
+    res: StackApplied;
+  };
+  "stack:resolve": {
+    req: { repoId: RepoId; profileId: ProfileId; planId: string };
+    res: StackConflict;
+  };
+  "stack:conflict": {
+    req: { repoId: RepoId; profileId: ProfileId; stackId: string };
+    res: StackConflict | null;
+  };
+  "stack:finishConflict": {
+    req: { repoId: RepoId; profileId: ProfileId; planId: string; close?: boolean };
+    res: { applied?: StackApplied; plan?: StackPlanPreview };
+  };
+  "stack:recover": {
+    req: { repoId: RepoId; profileId: ProfileId };
+    res: null;
+  };
+  "stack:undo": {
+    req: { repoId: RepoId; profileId: ProfileId; operationId: string };
+    res: null;
   };
 
   // Repos & discovery (U6)
@@ -2835,6 +2864,7 @@ export interface Events {
   "worktree:changed": { worktreeId: string };
   /** Repo-wide commit/ref data moved; invalidate every graph view of this repo. */
   "graph:changed": { repoId: RepoId };
+  "stack:changed": { repoId: RepoId; profileId: ProfileId };
   /**
    * The index or working tree of one worktree moved — re-read `changes:list`.
    * Distinct from `worktree:changed`, which only fires when the *coarse* state

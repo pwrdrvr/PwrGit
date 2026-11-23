@@ -1,3 +1,6 @@
+import { StackPlanRail } from "./features/stacks/StackPlanRail";
+import { StackToolbar } from "./features/stacks/StackToolbar";
+import { useStackOperation } from "./features/stacks/useStackOperation";
 import { StackNavigationContext, type StackPick, useStackSnapshot } from "./features/stacks/stack-navigation";
 import { StackRail, StackView } from "./features/stacks/StackViews";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
@@ -12,6 +15,7 @@ import type {
   RebaseOperation,
   Repo,
   RepoSearchHit,
+  StackSnapshot,
   TagSummary,
   Worktree
 } from "@pwrgit/shared";
@@ -798,15 +802,42 @@ export function App() {
     null;
   const shownChangeRequest = changeRequestRepo === null ? null : changeRequest;
   const stackRepo = stackPick ? repos.find(repo => repo.id === stackPick.repoId) : undefined;
-  const { snapshot: shownStacks } = useStackSnapshot(stackRepo?.id, stackRepo?.profileId);
+  const { snapshot: shownStacks, refresh: refreshShownStacks } = useStackSnapshot(stackRepo?.id, stackRepo?.profileId);
+  const latestShownStacks = useRef(shownStacks);
+  const appliedStackPick = useRef<{ pick: StackPick; previousSnapshot: StackSnapshot | undefined } | null>(null);
+  useLayoutEffect(() => { latestShownStacks.current = shownStacks; }, [shownStacks]);
+  const stackOperation = useStackOperation(stackRepo, stackPick?.stack.id, (repoId, updated) => {
+    const pick = { repoId, stack: updated };
+    // Apply may change the stack ID before the next catalog snapshot arrives.
+    appliedStackPick.current = { pick, previousSnapshot: latestShownStacks.current };
+    setStackPick(pick);
+    refreshShownStacks();
+  }, showRail);
+  const awaitingSnapshot = appliedStackPick.current?.pick === stackPick &&
+    appliedStackPick.current?.previousSnapshot === shownStacks;
   const stack = stackPick && stackRepo
-    ? shownStacks ? shownStacks.stacks.find(model => model.id === stackPick.stack.id) ?? null : stackPick.stack
+    ? shownStacks && !awaitingSnapshot
+      ? shownStacks.stacks.find(model => model.id === stackPick.stack.id) ??
+        (stackOperation.pending === "run" ? stackPick.stack : null)
+      : stackPick.stack
     : null;
   useEffect(() => {
     if (stackPick && stack === null) setStackPick(current => current === stackPick ? null : current);
   }, [stack, stackPick]);
+  const requestedStackAction = useRef<StackPick | null>(null);
+  useEffect(() => {
+    if (stackPick?.action && stack && stackOperation.pending === null && stackPick !== requestedStackAction.current) {
+      requestedStackAction.current = stackPick;
+      void stackOperation.requested(stackPick.action);
+    }
+  }, [stack, stackOperation, stackPick]);
+  const stackWritable = !!shownStacks && !shownStacks.readOnly && !shownStacks.busy && stackOperation.pending === null;
+  const stackStage = stackOperation.stage;
+  const stackWorktreeId = selectedWorktree?.repoId === stackRepo?.id ? selectedWorktree?.id : undefined;
+  const stackRunningBranch = stackOperation.pending === "run" && stackStage.phase === "plan" ? stackStage.plan.moves[0]?.branch : undefined;
+  const stackFresh = stackStage.phase === "done" ? new Set(stackStage.applied.plan.moves.map(move => move.branch)) : undefined;
   const { snapshot: lineageStacks } = useStackSnapshot(selectedRepo?.id, selectedRepo?.profileId);
-  const lineageVisible = shownChangeRequest === null && diffTarget === null && fileInsightTarget === null;
+  const lineageVisible = stack === null && shownChangeRequest === null && diffTarget === null && fileInsightTarget === null;
   const visibleLineageRepoId = lineageVisible && selectedWorktree !== null ? selectedWorktree.repoId : null;
   useLayoutEffect(() => {
     setVisibleLineageRepo(visibleLineageRepoId);
@@ -1240,6 +1271,15 @@ export function App() {
             />
           )}
           {stack && stackRepo && <StackView stack={stack} repoId={stackRepo.id} onClose={closeStack}
+            toolbar={shownStacks?.busy ? <>
+              <span role="status">{shownStacks.busy}</span>
+              {shownStacks.recoveryAvailable && <button type="button" className="stack-button"
+                disabled={stackOperation.pending !== null} onClick={() => void stackOperation.recover()}>Recover stack</button>}
+            </> : <StackToolbar key={stack.id} stack={stack} disabled={!stackWritable}
+              onPlan={action => void stackOperation.requested(action)} />}
+            {...(stackWritable ? { onPlan: action => void stackOperation.requested(action) } : {})}
+            {...(stackRunningBranch ? { runningBranch: stackRunningBranch } : {})}
+            {...(stackFresh ? { fresh: stackFresh } : {})}
             {...(railCollapsed ? { onShowRail: showRail } : {})} />}
           {selectedRepo !== null && selectedWorktree !== null ? (
             // Hidden, not unmounted, while a change request is shown: going
@@ -1449,7 +1489,12 @@ export function App() {
           />
         )}
 
-        {!railCollapsed && stack && <StackRail stack={stack} onCollapse={() => setRailCollapsed(true)} />}
+        {!railCollapsed && stack && (stackStage.phase !== "idle" || stackOperation.pending || stackOperation.error
+          ? <StackPlanRail controls={stackOperation} {...(stackWorktreeId ? { worktreeId: stackWorktreeId } : {})}
+              onCollapse={() => setRailCollapsed(true)} onOpenWorktree={worktreeId => {
+                if (stackRepo) setPendingReveal({ repoId: stackRepo.id, worktreeId, branch: null });
+              }} />
+          : <StackRail stack={stack} onCollapse={() => setRailCollapsed(true)} />)}
         {!railCollapsed && shownChangeRequest === null && stack === null && (
           <Rail
             worktree={selectedWorktree}

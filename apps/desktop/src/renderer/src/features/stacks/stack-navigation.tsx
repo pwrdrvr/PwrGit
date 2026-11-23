@@ -1,8 +1,8 @@
 import { createContext, useCallback, useContext, useEffect, useState } from "react";
-import type { RepositoryStack, StackSnapshot } from "@pwrgit/shared";
+import type { RepositoryStack, StackAction, StackSnapshot } from "@pwrgit/shared";
 import { dispatch, subscribe } from "../../lib/pwrgit";
 
-export type StackPick = { repoId: string; stack: RepositoryStack };
+export type StackPick = { repoId: string; stack: RepositoryStack; action?: StackAction };
 export const StackNavigationContext = createContext<{
   pick: StackPick | null;
   select: (pick: StackPick) => void;
@@ -56,6 +56,7 @@ export function useStackSnapshot(repoId: string | undefined, profileId: string |
       subscribe("graph:changed", invalidate),
       subscribe("pr:openChanged", invalidate),
       subscribe("pr:changed", invalidate),
+      subscribe("stack:changed", event => { if (event.profileId === profileId) invalidate(event); }),
     ];
     window.addEventListener("focus", focus);
     return () => {

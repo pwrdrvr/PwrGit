@@ -196,6 +196,9 @@ import { mcpExecutablePath } from "./agent-access/mcp-executable";
 import { NativeStackLocks } from "./git/stack-catalog-store";
 import { StackReader, stackRunner } from "./git/stack-reader";
 import { registerStackReadHandlers } from "./git/stack-read-handlers";
+import { registerStackWriteHandlers } from "./git/stack-write-handlers";
+import { StackGit } from "./git/stack-engine/git";
+import { expireStackUndo } from "./git/stack-engine/undo-retention";
 import { AgentAccessService } from "./agent-access/agent-access-service";
 import { registerAgentAccessHandlers } from "./agent-access/agent-access-handlers";
 import { initLogConsole } from "./log-console";
@@ -905,6 +908,19 @@ if (!gotSingleInstanceLock) {
       (repoId, branch) => prService.cachedBranchPrObservation(repoId, branch)
     );
     registerStackReadHandlers(bus, id => indexer.getRepo(id), stackReader);
+    registerStackWriteHandlers(bus, {
+      findRepo: id => indexer.getRepo(id),
+      findProfile: id => profiles.get(id),
+      reader: stackReader,
+      git: execGit,
+      queue: worktreeOperations,
+      changed: async repo => {
+        await indexer.refreshRepoWorktrees(repo.id);
+        emitEvent("stack:changed", { repoId: repo.id, profileId: repo.profileId });
+        for (const worktree of repo.worktrees) emitEvent("changes:changed", { worktreeId: worktree.id });
+        await refresher.refreshRepoWorktrees(repo.id);
+      },
+    });
     const avatarThumbnails = new GitHubAvatarThumbnailCache(db, {
       cacheDir: join(app.getPath("userData"), "cache", "github-avatar-thumbnails")
     });
@@ -1424,7 +1440,19 @@ if (!gotSingleInstanceLock) {
     );
     const maintenanceHandlers = registerMaintenanceHandlers(
       bus, db, execGit, worktreeOperations, indexer, prService, Date.now,
-      async (repoId, repoPath) => (await stateService.resolveDefaultBranch(repoId, repoPath)).name || null
+      async (repoId, repoPath) => (await stateService.resolveDefaultBranch(repoId, repoPath)).name || null,
+      async repoId => {
+        const repo = indexer.getRepo(repoId);
+        if (!repo) return;
+        const git = new StackGit(stackReader.runner, repo.path);
+        try {
+          if (!await git.output(["for-each-ref", "--count=1", "refs/pwrgit/undo/"])) return;
+          const { commonDir, store } = await stackReader.location(repo);
+          await store.withOperationLock(commonDir, () => expireStackUndo(git, Date.now()));
+        } catch (error) {
+          logMain("warn", "stack", "Could not expire stack undo refs", error);
+        }
+      }
     );
     registerGraphHandlers(bus, db, stateService);
     registerChangesHandlers(bus, db, refresher, worktreeOperations);

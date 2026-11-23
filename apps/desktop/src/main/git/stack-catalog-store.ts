@@ -4,7 +4,11 @@ import { once } from "node:events";
 import { open, readFile, rename, lstat, unlink } from "node:fs/promises";
 import { join } from "node:path";
 import { promisify } from "node:util";
-import { parseGhStackCatalog, requireWritableCatalog, type ApplyHooks, type CatalogStore, type GhStackCatalog } from "./stack-engine";
+import { parseGhStackCatalog, requireWritableCatalog, type ApplyHooks, type CatalogStore, type GhStackCatalog, type StackJournalEntry } from "./stack-engine";
+
+import type { ConflictJournal } from "./stack-conflicts";
+
+type ApplyJournal = StackJournalEntry & { resolution?: { journal: ConflictJournal; tip: string } };
 
 const foreignJournals = {
   "gh-stack-rebase-state": "gh stack is mid-rebase in this clone",
@@ -109,18 +113,25 @@ export class GhStackCatalogStore implements CatalogStore {
     }
   }
 
-  async journalBlocker(commonDir: string): Promise<string | undefined> {
+  async journalBlocker(commonDir: string, allowOwn = false): Promise<string | undefined> {
     for (const [file, message] of Object.entries(foreignJournals)) {
       if (await exists(join(commonDir, file))) return message;
     }
-    if (await exists(join(commonDir, journal))) return "PwrGit has an unfinished stack operation in this clone";
+    if (!allowOwn && await exists(join(commonDir, journal))) return "PwrGit has an unfinished stack operation in this clone";
     return undefined;
   }
 
   withOperationLock<T>(commonDir: string, fn: () => Promise<T>): Promise<T> {
+    return this.withJournalLock(commonDir, false, fn);
+  }
+
+  withJournalLock<T>(commonDir: string, allowOwn: boolean, fn: () => Promise<T>): Promise<T> {
     return this.locks.withLock(commonDir, "operation", async () => {
-      const blocker = await this.journalBlocker(commonDir);
+      const blocker = await this.journalBlocker(commonDir, allowOwn);
       if (blocker) throw new Error(blocker);
+      // A catalog-only holder must be noticed before any branch can move.
+      // No catalog lock is retained across Git or worktree mutations.
+      await this.locks.withLock(commonDir, "catalog", async () => undefined);
       return fn();
     });
   }
@@ -137,13 +148,40 @@ export class GhStackCatalogStore implements CatalogStore {
     });
   }
 
-  journalHooks(commonDir: string): ApplyHooks {
+  async readJournal(commonDir: string): Promise<unknown> {
+    try { return JSON.parse(await readFile(join(commonDir, journal), "utf8")); }
+    catch (error) {
+      if (!missing(error)) throw error;
+      return undefined;
+    }
+  }
+
+  async readResolutionJournal(commonDir: string): Promise<ConflictJournal | undefined> {
+    const entry = await this.readJournal(commonDir) as ConflictJournal | undefined;
+    return entry?.kind === "resolution" ? entry : undefined;
+  }
+
+  async readApplyJournal(commonDir: string): Promise<ApplyJournal | undefined> {
+    const entry = await this.readJournal(commonDir) as Partial<ApplyJournal> | undefined;
+    if ((entry?.direction === "apply" || entry?.direction === "undo") && entry.receipt && Array.isArray(entry.worktrees)) {
+      return entry as ApplyJournal;
+    }
+    return undefined;
+  }
+
+  writeJournal(commonDir: string, value: unknown): Promise<void> {
+    return this.atomicWrite(commonDir, journal, value);
+  }
+
+  async removeJournal(commonDir: string): Promise<void> {
+    await unlink(join(commonDir, journal));
+    await syncDirectory(commonDir);
+  }
+
+  journalHooks(commonDir: string, resolution?: ApplyJournal["resolution"]): ApplyHooks {
     return {
-      begin: async entry => this.atomicWrite(commonDir, journal, entry),
-      finish: async () => {
-        await unlink(join(commonDir, journal));
-        await syncDirectory(commonDir);
-      },
+      begin: entry => this.writeJournal(commonDir, resolution ? { ...entry, resolution } : entry),
+      finish: () => this.removeJournal(commonDir),
     };
   }
 

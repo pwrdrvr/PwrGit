@@ -30,6 +30,12 @@ export type StackStep = {
   newTip?: string;
   proof?: { preserved: number; dropped: Patch[] };
   conflict?: { commit: string; files: string[] };
+  resolved?: boolean;
+};
+
+export type ResolvedStackStep = {
+  branch: string; oldTip: string; newBase: string; newTip: string;
+  previousProof?: StackStep["proof"];
 };
 
 export interface StackPlan {
@@ -54,10 +60,17 @@ export interface StackReceipt {
   when: number;
 }
 
+export type StackJournalEntry = {
+  direction: "apply" | "undo";
+  receipt: StackReceipt;
+  worktrees: WorktreeFollow[];
+};
+
 /** App-owned journal lifecycle stays with the host. The portable engine calls
  * these hooks under the catalog's operation lock and never opens a file. */
 export interface ApplyHooks {
   beforeTransaction?: () => Promise<void>;
-  begin?: (entry: { direction: "apply" | "undo"; receipt: StackReceipt; worktrees: WorktreeFollow[] }) => Promise<void>;
+  begin?: (entry: StackJournalEntry) => Promise<void>;
   finish?: () => Promise<void>;
+  abort?: () => Promise<void>;
 }

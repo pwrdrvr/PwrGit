@@ -133,9 +133,10 @@ export function RepoChangeRequestSection({
     relocateKey: repo.worktrees.map((w) => `${w.id}:${w.branch}`).join("|")
   });
   const stackNavigation = useStackNavigation();
-  const { snapshot } = useStackSnapshot(stackNavigation ? repo.id : undefined, repo.profileId);
+  const { snapshot, refresh: refreshStacks } = useStackSnapshot(stackNavigation ? repo.id : undefined, repo.profileId);
   const stacks = snapshot?.stacks ?? [];
-  const stackSection = <StacksSidebar repo={repo} stacks={stacks} />;
+  const stackSection = <StacksSidebar repo={repo} stacks={stacks} writable={snapshot?.readOnly === false && !snapshot.busy}
+    {...(snapshot?.recoveryAvailable ? { recoverEmpty: refreshStacks } : {})} />;
   const tip = useViewportTooltip();
   const [open, setOpen] = usePersistedOpen(
     `pwrgit.changeRequestsOpen.${repo.id}`
@@ -168,7 +169,7 @@ export function RepoChangeRequestSection({
       : repo.identity.host;
   const loading = list == null;
   const forge = loading ? predicted : (list.forge ?? null);
-  if (forge === null) return stacks.length ? stackSection : null;
+  if (forge === null) return stackSection;
   const shown: ChangeRequestList = list ?? {
     forge,
     fetchedAt: null,

@@ -2,7 +2,7 @@
 import { act, type ComponentProps } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { Commit, Repo, RepoSearchHit, RepositoryStack, StackSnapshot, Worktree } from "@pwrgit/shared";
+import type { Commit, Repo, RepoSearchHit, RepositoryStack, StackPlanPreview, StackSnapshot, Worktree } from "@pwrgit/shared";
 import { useStackNavigation } from "./features/stacks/stack-navigation";
 import type { RepoSwitcherOverlay } from "./features/sidebar/RepoSwitcherOverlay";
 
@@ -17,6 +17,7 @@ const mocks = vi.hoisted(() => ({
   profiles: {} as Record<string, unknown>,
   tree: {} as Record<string, unknown>,
   openProfile: vi.fn(),
+  stack: null as RepositoryStack | null,
   dispatch: vi.fn(),
   subscribers: new Map<string, (payload: unknown) => void>(),
   reveal: null as ((repoId: string, remote: string | null) => void) | null,
@@ -52,8 +53,12 @@ vi.mock("./features/contributions/ContributionScreen", () => ({
 vi.mock("./features/sidebar/Sidebar", () => ({
   Sidebar: () => {
     const nav = useStackNavigation();
-    return <button data-testid="stack-pick" aria-pressed={nav?.pick != null}
-      onClick={() => nav?.select({ repoId: "demo-two", stack: exampleStack })}>Open demo stack</button>;
+    return <>
+      <button data-testid="stack-pick" aria-pressed={nav?.pick != null}
+        onClick={() => nav?.select({ repoId: "demo-two", stack: mocks.stack ?? exampleStack })}>Open demo stack</button>
+      <button onClick={() => nav?.select({ repoId: "demo-one", stack: exampleStack })}>Open clone stack</button>
+      <button onClick={() => nav?.select({ repoId: "demo-one", stack: exampleStack, action: { kind: "restack" } })}>Restack clone stack</button>
+    </>;
   },
 }));
 vi.mock("./features/sidebar/RepoSwitcherOverlay", () => ({
@@ -173,6 +178,7 @@ beforeEach(() => {
   mocks.openProfile.mockReset();
   mocks.search = null;
   mocks.reveal = null;
+  mocks.stack = null;
   mocks.subscribers.clear();
   mocks.dispatch
     .mockReset()
@@ -335,6 +341,99 @@ describe("Contributions navigation in App", () => {
 });
 
 describe("Stack navigation in App", () => {
+  it.each(["plan", "apply"] as const)("isolates a clone's stack state across a pending %s", async command => {
+    vi.stubGlobal("pwrgit", {});
+    const plan: StackPlanPreview = { id: "plan", action: { kind: "restack" }, steps: [], moves: [], blocked: [], cleanPrefix: false };
+    let completePlan!: (result: unknown) => void;
+    const firstPlan = new Promise(resolve => { completePlan = resolve; });
+    mocks.dispatch.mockImplementation(async (name: string, request: { repoId?: string }) => {
+      switch (name) {
+        case "stack:list":
+          return { ok: true, value: { schemaVersion: 1, readOnly: false, stacks: [exampleStack] } };
+        case "stack:plan":
+          return command === "plan" && request.repoId === "demo-two" ? firstPlan : { ok: true, value: plan };
+        case "stack:apply":
+          return { ok: true, value: { operationId: "applied", plan, stack: exampleStack } };
+        case "stack:conflict":
+          return { ok: true, value: null };
+        default:
+          return { ok: true, value: { repoId: null, worktreeId: null, branch: null } };
+      }
+    });
+    const button = (label: string) => [...container.querySelectorAll("button")].find(node => node.textContent === label)!;
+    const ledger = () => container.querySelector('[aria-label="Proof ledger"]');
+    try {
+      await act(async () => root.render(<App />));
+      await act(async () => button("Open demo stack").click());
+      await act(async () => button("Restack").click());
+      if (command === "plan") {
+        await act(async () => button("Restack clone stack").click());
+        const requests = mocks.dispatch.mock.calls.filter(([name]) => name === "stack:plan").map(([, request]) => request.repoId);
+        expect(requests).toEqual(["demo-two", "demo-one"]);
+      } else {
+        await act(async () => button("Run locally").click());
+        expect(ledger()).not.toBeNull();
+        await act(async () => button("Open clone stack").click());
+        expect(ledger()).toBeNull();
+      }
+    } finally {
+      await act(async () => completePlan({ ok: true, value: plan }));
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it.each([false, true])("keeps an adopted stack selected as reads catch up (inferred stack disappears before apply returns: %s)",
+    async notifyBeforeReply => {
+      vi.stubGlobal("pwrgit", {});
+      const inferred: RepositoryStack = { ...exampleStack, id: "inferred", source: "inferred" };
+      const adopted: RepositoryStack = { ...exampleStack, id: "adopted" };
+      const plan: StackPlanPreview = { id: "plan", action: { kind: "adopt" }, steps: [], moves: [], blocked: [], cleanPrefix: false };
+      let finishApply!: (result: unknown) => void;
+      let finishRead!: (result: unknown) => void;
+      const apply = new Promise(resolve => { finishApply = resolve; });
+      const read = new Promise(resolve => { finishRead = resolve; });
+      let latest: RepositoryStack[] | null = [inferred];
+      const snapshot = (stacks: RepositoryStack[]) => ({ ok: true, value: { stacks, schemaVersion: 1, readOnly: false } });
+      mocks.stack = inferred;
+      mocks.dispatch.mockImplementation(async (name: string, request: { repoId?: string }) => {
+        if (name === "stack:list") {
+          if (request.repoId !== "demo-two") return snapshot([]);
+          return latest ? snapshot(latest) : read;
+        }
+        if (name === "stack:plan") return { ok: true, value: plan };
+        if (name === "stack:apply") return apply;
+        if (name === "stack:conflict") return { ok: true, value: null };
+        return { ok: true, value: { repoId: null, worktreeId: null, branch: null } };
+      });
+      const button = (label: string) => [...container.querySelectorAll("button")].find(node => node.textContent === label)!;
+      try {
+        await act(async () => root.render(<App />));
+        await act(async () => button("Open demo stack").click());
+        await act(async () => button("Adopt stack").click());
+        await act(async () => button("Run locally").click());
+        if (notifyBeforeReply) {
+          latest = [];
+          await act(async () => window.dispatchEvent(new Event("focus")));
+          expect(container.querySelector(".stack-view")).not.toBeNull();
+        }
+        latest = null;
+        await act(async () => finishApply({ ok: true, value: { operationId: "adopt", plan, stack: adopted } }));
+        expect(button("Restack")).toBeDefined();
+        expect(container.querySelector('[aria-label="Proof ledger"]')).not.toBeNull();
+        latest = [adopted];
+        await act(async () => finishRead(snapshot(latest!)));
+        expect(button("Restack")?.disabled).toBe(false);
+        latest = [];
+        await act(async () => window.dispatchEvent(new Event("focus")));
+        expect(container.querySelector(".stack-view")).toBeNull();
+      } finally {
+        await act(async () => {
+          finishApply({ ok: false, error: { message: "cancelled test" } });
+          finishRead(snapshot([]));
+        });
+        vi.unstubAllGlobals();
+      }
+    });
   it.each([false, true])("uses one pane owner and restores the title after removal (worktree selected: %s)", async selected => {
     if (!selected) window.localStorage.clear();
     vi.stubGlobal("pwrgit", {});

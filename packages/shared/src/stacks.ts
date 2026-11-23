@@ -61,6 +61,7 @@ export type StackSnapshot = {
   readOnly: boolean;
   stacks: RepositoryStack[];
   busy?: string;
+  recoveryAvailable?: boolean;
 };
 
 export type StackPosition = { stack: RepositoryStack; layer: StackLayer; index: number };
@@ -112,3 +113,45 @@ export function inferPullRequestStacks(entries: readonly ChangeRequestEntry[], t
   }
   return stacks;
 }
+
+export type StackAction =
+  | { kind: "restack"; from?: string }
+  | { kind: "add_branch"; branch: string }
+  | { kind: "adopt" }
+  | { kind: "remove"; branch: string; mode: "detach" | "forget" };
+
+export type StackPlanStep = {
+  branch: string;
+  parent: string;
+  oldBase: string;
+  newBase: string;
+  oldTip: string;
+  newTip?: string;
+  proof?: { preserved: number; dropped: { commit: string; id: string }[] };
+  conflict?: { commit: string; files: string[] };
+  resolved?: boolean;
+};
+
+export type StackPlanPreview = {
+  id: string;
+  action: StackAction;
+  steps: StackPlanStep[];
+  moves: { branch: string; old: string | null; next: string | null }[];
+  blocked: { path: string; files: string[] }[];
+  cleanPrefix: boolean;
+};
+
+export type StackApplied = {
+  operationId: string;
+  plan: StackPlanPreview;
+  checkoutWarning?: string;
+  stack?: RepositoryStack;
+};
+
+export type StackConflict = {
+  plan: StackPlanPreview;
+  branch: string;
+  worktreePath: string;
+  worktreeId: string | null;
+  phase: "resolving" | "resolved" | "aborted" | "unverified";
+};

@@ -1,7 +1,7 @@
 import { parseGhStackCatalog, requireWritableCatalog, type GhStackCatalog } from "./catalog";
 import { isOid, StackGit } from "./git";
 import { planStack } from "./plan";
-import type { ApplyHooks, CatalogStore, GitRunner, StackOperation, StackPlan, StackReceipt } from "./types";
+import type { ApplyHooks, CatalogStore, GitRunner, ResolvedStackStep, StackJournalEntry, StackOperation, StackPlan, StackReceipt } from "./types";
 
 export * from "./catalog";
 export * from "./types";
@@ -23,8 +23,8 @@ export class StackEngine {
     this.git = new StackGit(runner, cwd);
   }
 
-  plan(operation: StackOperation): Promise<StackPlan> {
-    return planStack(this.git, this.store, this.commonDir, operation);
+  plan(operation: StackOperation, resolved: ResolvedStackStep[] = []): Promise<StackPlan> {
+    return planStack(this.git, this.store, this.commonDir, operation, resolved);
   }
 
   async apply(plan: StackPlan, id: string, when: number, hooks: ApplyHooks = {}, cleanPrefix = false): Promise<StackReceipt> {
@@ -61,7 +61,7 @@ export class StackEngine {
         const absent = await this.git.run(["show-ref", "--exists", `${prefix}/receipt`]).then(
           result => result.exitCode === 2, () => false,
         );
-        if (absent) await hooks.finish?.();
+        if (absent) await (hooks.abort ?? hooks.finish)?.();
         throw error;
       }
       await this.finish("apply", receipt, sha256, receipt.moves, worktrees, hooks);
@@ -92,12 +92,37 @@ export class StackEngine {
         await this.git.transaction(moves, {});
       } catch (error) {
         const unchanged = await this.tipsUnchanged(moves).catch(() => false);
-        if (unchanged) await hooks.finish?.();
+        if (unchanged) await (hooks.abort ?? hooks.finish)?.();
         throw error;
       }
       await this.finish("undo", receipt, sha256, moves, worktrees, hooks);
       return receipt;
     });
+  }
+
+  async recover(journal: StackJournalEntry): Promise<"aborted" | "completed"> {
+    const { receipt, direction, worktrees } = journal;
+    const prefix = undoPrefix(receipt.id);
+    const applying = direction === "apply";
+    const { catalog, sha256 } = await this.store.read(this.commonDir);
+    requireWritableCatalog(catalog);
+    const from = applying ? receipt.before : receipt.after;
+    const to = applying ? receipt.after : receipt.before;
+    if (!sameCatalog(catalog, from) && !sameCatalog(catalog, to)) {
+      throw new Error("The stack catalog changed after the interruption");
+    }
+    const manifest = await this.git.run(["cat-file", "blob", `${prefix}/receipt`]);
+    const recorded = manifest.exitCode === 0 && manifest.stdout === JSON.stringify(receipt);
+    const tips = await Promise.all(receipt.moves.map(move => this.git.tip(move.branch)));
+    const tipsAre = (before: boolean) => receipt.moves.every((move, index) =>
+      tips[index] === (before === applying ? move.old : move.next));
+    if (sameCatalog(catalog, from) && tipsAre(true) && (applying ? !recorded : receipt.moves.length > 0)) {
+      return "aborted"; // The transaction never committed.
+    }
+    if (!recorded || !tipsAre(false)) throw new Error("Stack refs changed after the interruption");
+    for (const worktree of worktrees) await this.git.follow(worktree);
+    await this.store.writeIfUnchanged(this.commonDir, to, sha256);
+    return "completed";
   }
 
   private async tipsUnchanged(moves: StackReceipt["moves"]): Promise<boolean> {
