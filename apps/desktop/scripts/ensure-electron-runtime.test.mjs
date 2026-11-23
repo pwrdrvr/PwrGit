@@ -3,12 +3,12 @@ import { randomBytes, createHash } from "node:crypto";
 import { chmodSync, copyFileSync, cpSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
+import { delimiter, dirname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { promisify } from "node:util";
 import { setTimeout } from "node:timers/promises";
 import fc from "fast-check";
-import { afterEach, expect, it } from "vitest";
+import { afterEach, expect, it, vi } from "vitest";
 import { markRetryableTestBody } from "../../../scripts/ci/vitest-test-body.ts";
 import { ensureRuntime, inventory, platformPath } from "./electron-runtime-cache.mjs";
 
@@ -16,6 +16,45 @@ const here = dirname(fileURLToPath(import.meta.url));
 const roots = [];
 const hash = (bytes) => createHash("sha256").update(bytes).digest("hex");
 const execAsync = promisify(execFile);
+// An earlier tar.exe on PATH can be GNU tar, which cannot create ZIPs.
+const windowsTar = process.platform === "win32"
+  ? join(process.env.SystemRoot, "System32", "tar.exe")
+  : undefined;
+
+// Most cases exercise cache behavior using the real tar.exe fallback on Windows.
+// The PowerShell module oracle below exercises Expand-Archive directly.
+const cacheBlockedTools = vi.hoisted(() => process.platform === "win32" ? ["powershell.exe"] : []);
+vi.mock(import("node:child_process"), async (importOriginal) => {
+  const original = await importOriginal();
+  return {
+    ...original,
+    execFileSync: (command, ...args) => {
+      if (cacheBlockedTools.includes(command)) {
+        throw Object.assign(new Error("Host ZIP tool is unavailable"), { code: "ENOENT" });
+      }
+      const executable = command === "tar.exe" ? windowsTar ?? command : command;
+      return original.execFileSync(executable, ...args);
+    },
+  };
+});
+
+function configureZipToolsInChild(commands) {
+  if (!commands.length) return "";
+  return `
+    import childProcess from "node:child_process";
+    import { syncBuiltinESMExports as syncChildProcessExports } from "node:module";
+    const execute = childProcess.execFileSync;
+    childProcess.execFileSync = (command, ...args) => {
+      if (${JSON.stringify(commands)}.includes(command)) {
+        throw Object.assign(new Error("Host ZIP tool is unavailable"), { code: "ENOENT" });
+      }
+      const systemTar = ${JSON.stringify(windowsTar ?? null)};
+      const executable = command === "tar.exe" ? systemTar ?? command : command;
+      return execute(executable, ...args);
+    };
+    syncChildProcessExports();
+  `;
+}
 
 afterEach(() => {
   for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
@@ -32,9 +71,8 @@ function fixture(version = "44.10.1", bytes = randomBytes(1024 * 1024)) {
   writeFileSync(join(payload, "version"), version);
   writeFileSync(join(payload, "electron.d.ts"), "// fixture types\n");
   const zip = join(root, "electron.zip");
-  if (process.platform === "win32") {
-    const quote = (value) => `'${value.replace(/'/g, "''")}'`;
-    execFileSync("powershell.exe", ["-NoProfile", "-Command", `Compress-Archive -Path ${quote(join(payload, "*"))} -DestinationPath ${quote(zip)}`]);
+  if (windowsTar) {
+    execFileSync(windowsTar, ["--format", "zip", "-cf", zip, "-C", payload, ...readdirSync(payload)]);
   } else {
     execFileSync("zip", ["-q", "-r", zip, "."], { cwd: payload });
   }
@@ -57,7 +95,7 @@ function copyInstaller(target) {
 }
 
 // Skip branches must work with neither an archive nor downloader/extractor
-// dependencies. In particular, do not spawn Windows Compress-Archive here.
+// dependencies.
 function prepareSkippedInstall({ electronPresent }) {
   const root = realpathSync.native(mkdtempSync(join(tmpdir(), "pwrgit-electron-skip-")));
   roots.push(root);
@@ -77,7 +115,7 @@ function prepareSkippedInstall({ electronPresent }) {
   };
 }
 
-function prepareInstall({ root, zip, version }, name, { platform = "darwin", arch = "arm64", env = {}, denyCacheCode, blockedZipTools = [] } = {}) {
+function prepareInstall({ root, zip, version }, name, { platform = "darwin", arch = "arm64", env = {}, denyCacheCode, blockedZipTools = cacheBlockedTools } = {}) {
   const target = join(root, name);
   const electron = join(target, "node_modules/electron");
   mkdirSync(join(electron, "node_modules/@electron/get"), { recursive: true });
@@ -105,25 +143,15 @@ function prepareInstall({ root, zip, version }, name, { platform = "darwin", arc
       return require(${JSON.stringify(installedRequire.resolve("@electron-internal/extract-zip"))}).extract(zip, options);
     };
   `);
-  const bootstrap = join(scripts, "bootstrap.mjs");
-  writeFileSync(bootstrap, `
-    import childProcess from "node:child_process";
-    import { syncBuiltinESMExports } from "node:module";
-    const execute = childProcess.execFileSync;
-    childProcess.execFileSync = (command, ...args) => {
-      if (${JSON.stringify(blockedZipTools)}.includes(command)) {
-        throw Object.assign(new Error("Host ZIP tool is unavailable"), { code: "ENOENT" });
-      }
-      return execute(command, ...args);
-    };
-    syncBuiltinESMExports();
-    await import("./install.mjs");
-  `);
+  let entryPoint = join(scripts, "install.mjs");
+  if (blockedZipTools.length) {
+    entryPoint = join(scripts, "bootstrap.mjs");
+    writeFileSync(entryPoint, `${configureZipToolsInChild(blockedZipTools)}\nawait import("./install.mjs");\n`);
+  }
   const options = {
     env: { ...process.env, PWRAGENT_HOME: join(root, "home"), npm_config_platform: platform, npm_config_arch: arch, ELECTRON_SKIP_BINARY_DOWNLOAD: "", ELECTRON_INSTALL_PLATFORM: "", ELECTRON_INSTALL_ARCH: "", ...env },
     stdio: "pipe",
   };
-  const entryPoint = blockedZipTools.length ? bootstrap : join(scripts, "install.mjs");
   return {
     electron,
     binary: join(electron, "dist", platformPath(platform)),
@@ -194,6 +222,31 @@ it("regression: real bundled extractor installs without host ZIP tools and stays
   const extractions = readFileSync(join(setup.root, "extractions.jsonl"), "utf8").trim().split("\n").map(JSON.parse);
   expect(extractions).toHaveLength(1);
   expect(extractions[0].zip).toBe(setup.zip);
+});
+
+it.skipIf(process.platform !== "win32")("oracle: a shadowed tar.exe does not change the fixture ZIP or its extraction", async () => {
+  const bin = mkdtempSync(join(tmpdir(), "pwrgit-electron-bin-"));
+  roots.push(bin);
+  copyFileSync(join(process.env.SystemRoot, "System32", "where.exe"), join(bin, "tar.exe"));
+  const pathKey = Object.keys(process.env).find((key) => key.toUpperCase() === "PATH") ?? "Path";
+  vi.stubEnv(pathKey, `${bin}${delimiter}${process.env[pathKey]}`);
+  try {
+    const setup = fixture("44.9.3", randomBytes(8192));
+    expect(readFileSync(setup.zip).subarray(0, 4).toString("hex")).toBe("504b0304");
+
+    const opts = optionsFor(setup);
+    await ensureRuntime(opts);
+    const expected = await inventory(join(setup.root, "payload"));
+    expect(await inventory(join(opts.electronDir, "dist"))).toEqual(expected);
+
+    const install = prepareInstall(setup, "with-shadowed-tar", {
+      env: { PWRGIT_FIXTURE_BLOCK_EXTRACTOR: "1" },
+    });
+    install.runSync();
+    expect(await inventory(join(install.electron, "dist"))).toEqual(expected);
+  } finally {
+    vi.unstubAllEnvs();
+  }
 });
 
 it.skipIf(process.platform !== "win32")("oracle: inherited PowerShell modules do not change the installed runtime", async () => {
@@ -531,6 +584,7 @@ it("releases the package lock even when staging cleanup is denied", () => {
   const setup = fixture("44.9.3", randomBytes(8192));
   const opts = optionsFor(setup);
   const script = `
+    ${configureZipToolsInChild(cacheBlockedTools)}
     import assert from "node:assert/strict";
     import fs from "node:fs";
     import { syncBuiltinESMExports } from "node:module";
@@ -557,6 +611,7 @@ it("releases the package lock even when staging cleanup is denied", () => {
 // stale-lock recovery must both survive any run of busy codes.
 function busyLockHarness(scenarios) {
   return `
+    ${configureZipToolsInChild(cacheBlockedTools)}
     import assert from "node:assert/strict";
     import fs from "node:fs";
     import { join } from "node:path";
