@@ -1,3 +1,5 @@
+import { useFocusTrap } from "../../lib/useFocusTrap";
+import { restoreFocus, useDismissable } from "../../lib/useDismissable";
 import { useId, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import type { ChangeRequestEntry, RepositoryStack, StackPosition } from "@pwrgit/shared";
@@ -31,6 +33,9 @@ export function StackPopoverTrigger({
   const anchor = useRef<HTMLButtonElement>(null);
   const panel = useRef<HTMLDivElement>(null);
   const [open, setOpen] = useState(false);
+  const initialFocus = useRef<HTMLButtonElement | null>(null);
+  useFocusTrap({ open, containerRef: panel, initialFocusRef: initialFocus });
+  useDismissable({ open, onDismiss: () => setOpen(false), triggerRef: anchor, surfaceRef: panel });
   const next = open ? stackNextAction(stack, writable) : undefined;
   const members = open ? stackMembers(stack) : [];
 
@@ -47,9 +52,8 @@ export function StackPopoverTrigger({
       dialog.style.top = `${Math.max(8, Math.min(rect.bottom + 6, window.innerHeight - height - 8))}px`;
     };
     place();
-    (dialog.querySelector<HTMLButtonElement>(".stack-popover__member[data-start] button")
-      ?? dialog.querySelector<HTMLButtonElement>(".stack-popover__member button")
-      ?? dialog).focus({ preventScroll: true });
+    initialFocus.current = dialog.querySelector<HTMLButtonElement>(".stack-popover__member[data-start] button")
+      ?? dialog.querySelector<HTMLButtonElement>(".stack-popover__member button");
     const dismiss = (event: PointerEvent) => {
       if (event.target instanceof Node && !button.contains(event.target) && !dialog.contains(event.target)) setOpen(false);
     };
@@ -63,7 +67,7 @@ export function StackPopoverTrigger({
     };
   }, [open]);
 
-  const close = () => { setOpen(false); anchor.current?.focus({ preventScroll: true }); };
+  const close = () => { restoreFocus(anchor, panel); setOpen(false); };
   // A trigger inside Lineage’s native ref browser belongs to its top layer.
   const host = anchor.current?.closest("[popover]") ?? anchor.current?.closest(".app") ?? anchor.current?.parentElement;
   return <>
@@ -76,9 +80,8 @@ export function StackPopoverTrigger({
         if (!open) dismissHoverTooltips();
         setOpen(!open);
       }}>{children}</button>
-    {open && host && createPortal(<div className="stack-popover" style={laneStyle} ref={panel} role="dialog" aria-label={stackName(stack)}
+    {open && host && createPortal(<div className="stack-popover" style={laneStyle} ref={panel} role="dialog" aria-modal="true" aria-label={stackName(stack)}
       id={id} tabIndex={-1} onFocus={event => event.stopPropagation()} onClick={event => event.stopPropagation()} onKeyDown={event => {
-        if (event.key === "Escape") { event.stopPropagation(); event.preventDefault(); close(); }
         if (event.key !== "ArrowDown" && event.key !== "ArrowUp") return;
         const buttons = Array.from(panel.current!.querySelectorAll<HTMLButtonElement>(".stack-popover__member button"));
         if (!buttons.length) return;
@@ -96,7 +99,8 @@ export function StackPopoverTrigger({
         {members.map(position => {
           const { layer, index } = position;
           const entry = stackEntry(position, entries);
-          const active = current === layer.branch || (entry && selection.selectedKey === changeRequestPickKey(repoId, entry));
+          const active = current !== undefined ? current === layer.branch :
+            entry !== undefined && selection.selectedKey === changeRequestPickKey(repoId, entry);
           const action = stackActionAt(position, writable);
           const mergedAge = layer.pr?.mergedAt === undefined ? null : shortWhen(new Date(layer.pr.mergedAt).toISOString(), Date.now());
           const content = <>

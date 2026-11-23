@@ -181,12 +181,13 @@ export class StackReader {
           const cherry = await git.run(["cherry", trunkHead, parentHead]);
           parentMerged = cherry.exitCode === 0 && cherry.stdout.trim() === "";
         }
+        const baseIsAncestor = await isAncestor(base, localHead);
         const health = stackBranchHealth({
           branch: branch.branch, parent: parent.branch, parentMerged,
           ...(base ? { base } : {}), ...(branch.head ? { catalogHead: branch.head } : {}),
           ...(localHead ? { localHead } : {}), ...(parentHead ? { parentHead } : {}),
           ...(remoteHead ? { remoteHead } : {}), ...(pr ? { pr } : {}),
-          baseIsAncestor: await isAncestor(base, localHead),
+          baseIsAncestor,
           remoteIsAncestor: await isAncestor(remoteHead, localHead),
           localIsAncestorOfRemote: Boolean(localHead && (
             (localHead !== remoteHead && await isAncestor(localHead, remoteHead)) ||
@@ -194,17 +195,12 @@ export class StackReader {
           )),
         });
         let syncReady = false;
-        if (!inferred && index === 1 && parentMerged && localTrunk) {
-          // A remote merge does not make stale local trunk safe to replay onto.
+        if (!inferred && index === 1 && parentMerged && localTrunk && base && baseIsAncestor) {
+          // This is the history the replay will exclude, which may extend
+          // beyond the merged PR if the parent has unpublished commits.
           const mergedHead = parent.pullRequest?.mergedHead ?? (parentPr?.state === "merged" ? parentPr.headOid : undefined);
-          if (mergedHead && isOid(mergedHead) && isOid(localTrunk)) {
-            syncReady = await isAncestor(mergedHead, localTrunk);
-            if (!syncReady) {
-              const patches = await git.run(["cherry", localTrunk, mergedHead]);
-              const lines = patches.stdout.trim().split("\n");
-              syncReady = patches.exitCode === 0 && lines.every(line => line.startsWith("- "));
-            }
-          }
+          syncReady = mergedHead !== undefined && await git.containsChanges(localTrunk, mergedHead) &&
+            (base === mergedHead || await git.containsChanges(localTrunk, base));
         }
         let behindParent = 0;
         if (parentHead && base && base !== parentHead && isOid(base) && isOid(parentHead)
@@ -222,6 +218,7 @@ export class StackReader {
           branch: branch.branch, parent: parent.branch, health, local: !!localHead,
           ...(behindParent > 0 ? { behindParent } : {}),
           ...(syncReady ? { syncReady } : {}),
+          ...(!inferred && base ? { baseIsAncestor } : {}),
           ...(commitCount === undefined ? {} : { commitCount }), ...(base ? { base } : {}),
           ...(head ? { head } : {}), ...(pr ? { pr, forgeRepo: scope } : {}),
         });

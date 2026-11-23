@@ -55,7 +55,9 @@ export type StackLayer = {
   forgeRepo?: string;
   health: StackBranchHealth;
   local?: boolean;
-  /** The local trunk contains the merged bottom PR. */
+  /** Whether a recorded base is still on this local branch. */
+  baseIsAncestor?: boolean;
+  /** The local trunk contains the merged bottom PR and the replay boundary. */
   syncReady?: boolean;
   behindParent?: number;
   commitCount?: number;

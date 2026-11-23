@@ -128,7 +128,7 @@ export function ChangeRequestView({
     >
       <div className="cr-view__head">
         <div className="cr-view__row">
-          <PrChip pr={pr} stacked={stackPosition !== undefined} />
+          <PrChip pr={pr} />
           {repoId && stackPosition && <StackPositionChip repoId={repoId} position={stackPosition} writable={stackWritable} />}
           <h2 className="cr-view__title" {...truncatedTooltip(tip, pr.title)}>
             {pr.title}

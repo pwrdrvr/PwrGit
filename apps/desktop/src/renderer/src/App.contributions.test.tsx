@@ -3,6 +3,7 @@ import { act, type ComponentProps } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Commit, Repo, RepoSearchHit, RepositoryStack, StackPlanPreview, StackSnapshot, Worktree } from "@pwrgit/shared";
+import { StackPositionChip } from "./features/stacks/StackPopover";
 import { useStackNavigation } from "./features/stacks/stack-navigation";
 import type { RepoSwitcherOverlay } from "./features/sidebar/RepoSwitcherOverlay";
 
@@ -30,7 +31,7 @@ vi.mock("./features/agent/agent-store", () => ({
   useAgentOffered: () => false
 }));
 vi.mock("./features/change-request/useChangeRequestView", () => ({
-  useChangeRequestView: () => ({ view: null })
+  useChangeRequestView: () => ({ view: null, fetching: null, error: null, scope: { kind: "all" }, scopeError: null, patch: null, files: [], totals: null })
 }));
 vi.mock("./lib/pwrgit", () => ({
   windowProfileId: () => "demo-profile",
@@ -70,13 +71,17 @@ vi.mock("./features/sidebar/RepoSwitcherOverlay", () => ({
 vi.mock("./features/graph/LineageGraph", () => ({
   LineageGraph: ({
     repoId,
-    revealCommit
+    revealCommit,
+    stacks
   }: {
     repoId: string;
     revealCommit: { hash: string } | null;
+    stacks?: RepositoryStack[];
   }) => (
     <div data-testid="lineage">
       {repoId}:{revealCommit?.hash}
+      {stacks?.[0] && <StackPositionChip repoId={repoId}
+        position={{ stack: stacks[0], layer: stacks[0].layers[0], index: 1 }} />}
     </div>
   )
 }));
@@ -341,6 +346,70 @@ describe("Contributions navigation in App", () => {
 });
 
 describe("Stack navigation in App", () => {
+  it("navigates to another member from both Lineage and the PR header", async () => {
+    vi.stubGlobal("pwrgit", {});
+    const model = {
+      ...exampleStack,
+      layers: [1, 2].map(number => ({
+        ...exampleStack.layers[0], branch: `branch-${number}`, forgeRepo: "github.com/example/demo",
+        pr: { number, title: `Stack change ${number}`, url: `https://example.invalid/pull/${number}`,
+          state: "open" as const, isDraft: false, checkState: "failing" as const },
+      })),
+    };
+    mocks.dispatch.mockImplementation(async (name: string) => ({
+      ok: true, value: name === "stack:list" ? { schemaVersion: 1, readOnly: false, stacks: [model] } : { repoId: null, worktreeId: null, branch: null },
+    }));
+    const open = async (scope: string) => {
+      const chip = container.querySelector<HTMLButtonElement>(`${scope} .stack-position`)!;
+      vi.spyOn(chip, "getBoundingClientRect").mockReturnValue(new DOMRect(8, 8, 100, 20));
+      await act(async () => chip.click());
+    };
+    const pick = async (title: string) => {
+      const member = [...container.querySelectorAll<HTMLButtonElement>(".stack-popover__row")].find(row => row.textContent?.includes(title))!;
+      await act(async () => member.click());
+      expect(container.querySelector(".cr-view__title")?.textContent).toBe(title);
+      expect(container.querySelector(".cr-view__head .pr-chip__dot")).not.toBeNull();
+    };
+    try {
+      await act(async () => root.render(<App />));
+      await open('[data-testid="lineage"]');
+      await pick("Stack change 2");
+      await open(".cr-view__head");
+      await pick("Stack change 1");
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it("moves the card and rail selection together when a member disappears", async () => {
+    vi.stubGlobal("pwrgit", {});
+    const [bottom] = exampleStack.layers;
+    const top = { ...bottom, branch: "top", parent: bottom.branch };
+    const model = { ...exampleStack, layers: [bottom, top] };
+    let latest = model;
+    mocks.stack = model;
+    mocks.dispatch.mockImplementation(async (name: string) => {
+      if (name === "stack:list") return { ok: true, value: { schemaVersion: 1, readOnly: false, stacks: [latest] } };
+      if (name === "stack:conflict") return { ok: true, value: null };
+      return { ok: true, value: { repoId: null, worktreeId: null, branch: null } };
+    });
+    const selectedCard = () => container.querySelector('.stack-card__title[aria-pressed="true"]')?.textContent;
+    const railBranch = () => container.querySelector(".stack-rail__facts dd")?.textContent;
+    try {
+      await act(async () => root.render(<App />));
+      await act(async () => container.querySelector<HTMLButtonElement>('[data-testid="stack-pick"]')!.click());
+      const topCard = container.querySelector<HTMLButtonElement>('[data-stack-branch="top"] .stack-card__title')!;
+      await act(async () => topCard.click());
+      expect([selectedCard(), railBranch()]).toEqual([top.branch, top.branch]);
+
+      latest = { ...model, layers: [bottom] };
+      await act(async () => window.dispatchEvent(new Event("focus")));
+      expect([selectedCard(), railBranch()]).toEqual([bottom.branch, bottom.branch]);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
   it.each(["plan", "apply"] as const)("isolates a clone's stack state across a pending %s", async command => {
     vi.stubGlobal("pwrgit", {});
     const plan: StackPlanPreview = { id: "plan", action: { kind: "restack" }, steps: [], moves: [], blocked: [], cleanPrefix: false };

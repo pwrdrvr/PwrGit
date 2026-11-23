@@ -101,6 +101,13 @@ export async function planStack(git: StackGit, store: CatalogStore, commonDir: s
     if (index < 0) throw new Error("The branch is no longer in this stack");
     const removed = stack.branches[index];
     const child = stack.branches[index + 1];
+    if (operation.verifiedSyncTrunk !== undefined) {
+      const trunk = requireTip(expectedTips, stack.trunk.branch);
+      if (index !== 0 || operation.mode !== "detach" || trunk !== operation.verifiedSyncTrunk ||
+          !child?.base || !await git.containsChanges(trunk, child.base)) {
+        throw new Error("Local trunk must include the recorded replay boundary before syncing");
+      }
+    }
     if (child && operation.mode === "detach" && !child.base) {
       const childTip = requireTip(expectedTips, child.branch);
       const anchors = [removed.head, expectedTips[removed.branch]];

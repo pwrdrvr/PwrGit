@@ -6,6 +6,7 @@ import fc from "fast-check";
 import { afterEach, expect, test, vi } from "vitest";
 import { ok, type ChangeRequestEntry, type PrSummary, type Repo, type RepositoryStack } from "@pwrgit/shared";
 import { useHoverIntent } from "../../lib/hoverIntent";
+import { ChangeRequestSelectionContext } from "../change-request/change-request-selection";
 import { GraphRow } from "../graph/GraphRow";
 import { RepoChangeRequestSection } from "../sidebar/RepoChangeRequestSection";
 import { StackToolbar } from "./StackToolbar";
@@ -46,16 +47,18 @@ afterEach(() => {
   cleanup?.();
   vi.restoreAllMocks();
 });
-async function render(stack: RepositoryStack, { writable = true, initial = false, recent = false, extra = false }:
-  { writable?: boolean; initial?: boolean; recent?: boolean; extra?: boolean } = {}) {
+async function render(stack: RepositoryStack, { writable = true, initial = false, recent = false, extra = false, listed, selectedKey = null }:
+  { writable?: boolean; initial?: boolean; recent?: boolean; extra?: boolean; listed?: readonly PrSummary[]; selectedKey?: string | null } = {}) {
   cleanup?.();
   const container = document.createElement("div");
   document.body.append(container);
   const root = createRoot(container);
   cleanup = () => { act(() => root.unmount()); container.remove(); cleanup = undefined; };
   const pick = { repoId: repo.id, stack };
-  const entries: ChangeRequestEntry[] = stack.layers.flatMap(layer => layer.pr?.state === "open"
-    ? [{ pr: layer.pr, forgeRepo: scope, remote: "origin", location: { kind: "local", branch: layer.branch } }] : []);
+  const list = listed ?? stack.layers.flatMap(layer => layer.pr?.state === "open" ? [layer.pr] : []);
+  const entries: ChangeRequestEntry[] = list.map(pr => ({
+    pr, forgeRepo: scope, remote: "origin", location: { kind: "local", branch: pr.headRefName! },
+  }));
   if (extra) entries.splice(1, 0, { pr: { ...makePr(99), title: "Unstacked" }, forgeRepo: scope, remote: "origin",
     location: { kind: "local", branch: "unstacked" } });
   const snapshot = { stacks: [stack], schemaVersion: 1, readOnly: !writable };
@@ -70,14 +73,16 @@ async function render(stack: RepositoryStack, { writable = true, initial = false
   } });
   function Fixture() {
     const [selected, select] = useState<StackPick | null>(initial ? pick : null);
-    return <StackNavigationContext.Provider value={{ pick: selected, select }}>
+    return <ChangeRequestSelectionContext.Provider value={{ selectedKey, select: noop, clear: noop }}>
+    <StackNavigationContext.Provider value={{ pick: selected, select }}>
       <Graph stack={stack} />
       <div data-list=""><RepoChangeRequestSection repo={repo} now={0} focusedWorktree={null} onRevealWorktree={noop}
         onCreateWorktree={noop} onOpenBrowser={noop} /></div>
       <div data-index=""><StacksSidebar repo={repo} stacks={[stack]} writable={writable} /></div>
       {selected && <StackView stack={stack} repoId={repo.id} writable={writable} onClose={() => select(null)}
         toolbar={<StackToolbar stack={stack} disabled={!writable} onPlan={noop} />} />}
-    </StackNavigationContext.Provider>;
+    </StackNavigationContext.Provider>
+    </ChangeRequestSelectionContext.Provider>;
   }
   await act(async () => root.render(<Fixture />));
   return container;
@@ -285,4 +290,58 @@ test("stack cards badge only facts that need attention", async () => {
       expect(badges(1)).toEqual([...expected, ...(distance > 0 ? [`main +${distance}`] : [])]);
     }
   ), { examples: [["passing", false, 0]], numRuns: 16 });
+});
+
+test("open-list and stack updates in either order never duplicate a reopened PR", async () => {
+  await fc.assert(fc.asyncProperty(fc.integer({ min: 2, max: 6 }), fc.boolean(), async (height, listFirst) => {
+    const stack = makeStack(height);
+    const all = stack.layers.map((_, index) => makePr(index));
+    for (const [listed, reopened] of (listFirst ? [[false, false], [true, false], [true, true]] : [[false, false], [false, true], [true, true]])) {
+      const layers = stack.layers.map((layer, index) => ({
+        ...layer, pr: index === 0 && !reopened ? { ...all[index], state: "closed" as const } : all[index],
+      }));
+      const el = await render({ ...stack, layers }, { listed: listed ? all : all.slice(1) });
+      const rows = [...el.querySelectorAll("[data-list] .ref-cr-row")];
+      expect(rows).toHaveLength(listed ? height : height - 1);
+      expect(new Set(rows.map(row => row.getAttribute("data-nav-anchor"))).size).toBe(rows.length);
+      if (listed) expect(el.querySelector("[data-list] .stack-group__ghost")).toBeNull();
+    }
+  }), { numRuns: 8 });
+});
+
+test("the tag's branch takes precedence over the selected PR and owns Escape", async () => {
+  const stack = makeStack(2);
+  const layers = stack.layers.map((layer, index) => ({ ...layer, pr: makePr(index) }));
+  const el = await render({ ...stack, layers }, { recent: true, selectedKey: `${repo.id}\n${scope}#2` });
+  const tag = [...el.querySelectorAll<HTMLButtonElement>(".stack-position-tag")].find(button => button.textContent === "1/2")!;
+  act(() => tag.focus());
+  showPopover(tag);
+  const current = el.querySelectorAll(".stack-popover [aria-current='true']");
+  expect(current).toHaveLength(1);
+  expect(current[0]?.textContent).toContain("Layer 1");
+  expect(document.activeElement).toBe(current[0]);
+  const last = el.querySelector<HTMLButtonElement>(".stack-popover__footer button:last-child")!;
+  act(() => last.focus());
+  const tab = new KeyboardEvent("keydown", { key: "Tab", bubbles: true, cancelable: true });
+  act(() => last.dispatchEvent(tab));
+  expect(tab.defaultPrevented).toBe(true);
+  expect(document.activeElement?.getAttribute("aria-label")).toBe("Close stack popover");
+  const escape = new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true });
+  act(() => document.activeElement?.dispatchEvent(escape));
+  expect(escape.defaultPrevented).toBe(true);
+  expect(el.querySelector(".stack-popover")).toBeNull();
+  expect(document.activeElement).toBe(tag);
+});
+
+test("an invalid recorded base anywhere in the replay range suppresses Restack", async () => {
+  await fc.assert(fc.asyncProperty(fc.integer({ min: 1, max: 8 }), async height => {
+    const stack = makeStack(height);
+    const layers = stack.layers.map((layer, index) => ({
+      ...layer, pr: makePr(index), baseIsAncestor: index + 1 !== height,
+    }));
+    const el = await render({ ...stack, layers }, { initial: true });
+    expect(el.querySelector(".stack-health-badge--stale")).toBeNull();
+    showPopover(el.querySelector(".stack-group__caption"));
+    expect(el.querySelector(".stack-popover__footer")?.textContent).not.toContain("Restack");
+  }), { numRuns: 8 });
 });

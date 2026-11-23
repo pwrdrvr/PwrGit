@@ -832,6 +832,7 @@ export function App() {
   useEffect(() => {
     if (stackPick && stack === null) setStackPick(current => current === stackPick ? null : current);
   }, [stack, stackPick]);
+  const shownStackBranch = stack?.layers.find(layer => layer.branch === stackSelectedBranch)?.branch ?? stack?.layers.at(-1)?.branch;
   const requestedStackAction = useRef<StackPick | null>(null);
   useEffect(() => {
     if (stackPick?.action && stack && stackOperation.pending === null && stackPick !== requestedStackAction.current) {
@@ -1196,8 +1197,8 @@ export function App() {
         setContributionsOpen(false);
         requestAnimationFrame(() => document.querySelector<HTMLButtonElement>("[data-contributions-nav]")?.focus());
       }} /> : <StackNavigationContext.Provider value={stackNavigation}>
+      <ChangeRequestSelectionContext.Provider value={changeRequestSelection}>
       <div className="app-body" style={{ gridTemplateColumns }}>
-        <ChangeRequestSelectionContext.Provider value={changeRequestSelection}>
         <Sidebar
           onLocateTag={(repoId, tag) => {
             const repo = repos.find((r) => r.id === repoId);
@@ -1255,7 +1256,6 @@ export function App() {
             setProfileModal({ mode: "edit", profile: activeProfile })
           }
         />
-        </ChangeRequestSelectionContext.Provider>
 
         <PaneResizer
           side="left"
@@ -1289,7 +1289,7 @@ export function App() {
             />
           )}
           {stack && stackRepo && <StackView stack={stack} repoId={stackRepo.id} onClose={closeStack}
-            writable={stackWritable} selectedBranch={stackSelectedBranch} onSelectBranch={setStackSelectedBranch}
+            writable={stackWritable} selectedBranch={shownStackBranch} onSelectBranch={setStackSelectedBranch}
             toolbar={shownStacks?.busy ? <>
               <span role="status">{shownStacks.busy}</span>
               {shownStacks.recoveryAvailable && <button type="button" className="stack-button"
@@ -1514,7 +1514,7 @@ export function App() {
               onCollapse={() => setRailCollapsed(true)} onOpenWorktree={worktreeId => {
                 if (stackRepo) setPendingReveal({ repoId: stackRepo.id, worktreeId, branch: null });
               }} />
-          : <StackRail stack={stack} worktrees={stackRepo.worktrees} branch={stackSelectedBranch} writable={stackWritable} onCollapse={() => setRailCollapsed(true)} />)}
+          : <StackRail stack={stack} worktrees={stackRepo.worktrees} branch={shownStackBranch} writable={stackWritable} onCollapse={() => setRailCollapsed(true)} />)}
         {!railCollapsed && shownChangeRequest === null && stack === null && (
           <Rail
             worktree={selectedWorktree}
@@ -1582,6 +1582,7 @@ export function App() {
           </button>
         )}
       </div>
+      </ChangeRequestSelectionContext.Provider>
       </StackNavigationContext.Provider>
       }
       {overlayOpen && (

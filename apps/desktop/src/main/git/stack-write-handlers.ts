@@ -43,10 +43,10 @@ function stackOperation(stack: RepositoryStack, action: StackAction): StackOpera
   if (stack.source === "inferred") throw new Error("Adopt this stack before changing it");
   const root = stack.layers[0].branch;
   if (action.kind === "sync") {
-    if (root !== action.mergedParent || !stack.layers[1]?.syncReady || !stack.layers[1].base) {
+    if (root !== action.mergedParent || !stack.layers[1]?.syncReady || !stack.layers[1].base || !stack.trunk.head) {
       throw new Error("Update local trunk to include the merged bottom branch before syncing this stack");
     }
-    return { kind: "remove", mode: "detach", root, branch: root };
+    return { kind: "remove", mode: "detach", root, branch: root, verifiedSyncTrunk: stack.trunk.head };
   }
   return { ...action, root };
 }

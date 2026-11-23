@@ -26,6 +26,7 @@ test("shows stack positions and navigates between the stack and lineage", async 
         await page.screenshot({ path: join(shots, "stack-before.png") });
       }
       await page.evaluate(() => (window as unknown as { showStacks(): void }).showStacks());
+      await page.getByRole("combobox", { name: "Pull request order" }).selectOption("stack");
       await expect(page.locator(".stack-group__caption").getByText("Restack")).toBeVisible();
       await expect(page.locator(".stack-sidebar .ref-section__head")).toHaveAttribute("aria-expanded", "false");
       const graphPosition = page.locator(".graph-row").getByRole("button", { name: "windows/scheduler, position 2 of 3. Show stack" });
@@ -48,7 +49,15 @@ test("shows stack positions and navigates between the stack and lineage", async 
       const nestedStack = refBrowser.getByRole("dialog", { name: "windows/scheduler" });
       await expect(nestedStack).toBeVisible();
       await expect(page.getByRole("region", { name: "Stack", exact: true })).toHaveCount(0);
-      await nestedStack.getByRole("button", { name: "Close stack popover" }).click();
+      const closeStack = nestedStack.getByRole("button", { name: "Close stack popover" });
+      const openView = nestedStack.getByRole("button", { name: "Open stack view" });
+      await closeStack.focus();
+      await page.keyboard.press("Shift+Tab");
+      await expect(openView).toBeFocused();
+      await page.keyboard.press("Tab");
+      await expect(closeStack).toBeFocused();
+      await page.keyboard.press("Escape");
+      await expect(nestedStack).toHaveCount(0);
       await expect(refBrowser).toBeVisible();
       await page.keyboard.press("Escape");
       await expect(refBrowser).toHaveCount(0);

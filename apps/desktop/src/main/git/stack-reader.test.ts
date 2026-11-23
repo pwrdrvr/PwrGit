@@ -170,3 +170,17 @@ test("GitHub's ordered stack response identifies a remote-only stack and its mer
       ],
     }]);
   }));
+
+test("an externally rebased child exposes the same invalid boundary the planner rejects", () =>
+  withStack(async ({ cwd, commonDir, initial, engine, bottom }) => {
+    await writeFile(join(commonDir, "gh-stack"), JSON.stringify(initial));
+    await git(cwd, "switch", "-q", "bottom");
+    const amended = await commit(cwd, "bottom.txt", "amended parent\n", true);
+    await git(cwd, "rebase", "--onto", amended, bottom, "top");
+    const reader = new StackReader(runner, locks, async () => ({
+      forge: null, fetchedAt: null, truncated: false, remotes: [], entries: [],
+    }), () => undefined);
+    const snapshot = await reader.list(testRepo(cwd));
+    expect(snapshot.stacks[0].layers[1]).toMatchObject({ baseIsAncestor: false, health: { needsRestack: true } });
+    await expect(engine.plan({ kind: "restack", root: "bottom", from: "top" })).rejects.toThrow("outside its history");
+  }));

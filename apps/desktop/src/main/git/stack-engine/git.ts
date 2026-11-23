@@ -40,6 +40,19 @@ export class StackGit {
     return result.exitCode === 0;
   }
 
+  /** A clean merge that leaves the target tree unchanged proves the combined
+   * change is already there, including when several commits were squashed. */
+  async containsChanges(tip: string, boundary: string): Promise<boolean> {
+    if (!isOid(tip) || !isOid(boundary)) return false;
+    const ancestry = await this.run(["merge-base", "--is-ancestor", boundary, tip]);
+    if (ancestry.exitCode === 0) return true;
+    if (ancestry.exitCode !== 1) return false;
+    const merged = await this.run(["merge-tree", "--write-tree", tip, boundary]);
+    if (merged.exitCode !== 0) return false;
+    const tree = await this.run(["rev-parse", `${tip}^{tree}`]);
+    return tree.exitCode === 0 && merged.stdout.trim() === tree.stdout.trim();
+  }
+
   async transaction(moves: RefMove[], expected: Record<string, string | null>, creates: string[] = []) {
     for (const branch of new Set([...Object.keys(expected), ...moves.map(move => move.branch)])) {
       await this.output(["check-ref-format", branchRef(branch)]);
