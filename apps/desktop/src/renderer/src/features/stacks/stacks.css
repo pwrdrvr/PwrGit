@@ -144,27 +144,20 @@
 .stack-train::before { content: ""; position: absolute; inset-inline: 6px; border-top: 1.5px solid var(--stack-lane); }
 .stack-train .stack-node-wrap { position: relative; --stack-node-size: 7px; width: 13px; }
 
-/* 3b: the ladder, when list order is not stack order. One pip per member, top
-   of stack first, trunk last; the ringed pip is this PR, and the chip beside
-   it has no dot of its own. */
-.ref-cr-row.has-stack-ladder { position: relative; padding-inline-start: 20px; }
-.stack-ladder {
-  --stack-node-fill: var(--bg-sidebar);
-  position: absolute;
-  inset-inline-start: 2px;
-  top: 6px;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 3px;
-  width: 14px;
-  padding: 0;
+/* 3b: when list order is not stack order there is no rail to draw, so a
+   stacked row shows only its position, e.g. 2/3. It opens the stack. */
+.stack-position-tag {
+  flex: none;
+  padding: 0 3px;
   border: 0;
+  border-radius: 3px;
   background: transparent;
+  color: var(--text-muted);
+  font: 600 9.5px/1.3 var(--font-mono);
+  cursor: pointer;
 }
-.ref-cr-row.is-selected .stack-ladder { --stack-node-fill: var(--bg-row-active); }
-.stack-ladder .stack-node-wrap { --stack-node-size: 6px; width: 10px; height: 8px; }
-.stack-ladder__position { flex: none; color: var(--text-muted); font: 600 9.5px/1.3 var(--font-mono); }
+.stack-position-tag:hover, .stack-position-tag[aria-expanded="true"] { color: var(--accent-bright); background: var(--bg-panel-hover); }
+.stack-position-tag:focus-visible { outline: 1.5px solid var(--accent); outline-offset: 1px; }
 
 .stack-popover {
   position: fixed;

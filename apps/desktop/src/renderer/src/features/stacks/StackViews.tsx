@@ -48,11 +48,12 @@ export function StackListGroup({ item, repoId, entries, writable, renderRow }: {
   </div>;
 }
 
-export function StackLadder({ position, repoId, writable }: { position: StackPosition; repoId: string; writable: boolean }) {
+/** Outside the grouped view a stacked row has no rail, so it keeps its own
+ * status dot and shows the stack only as its position, which opens the stack. */
+export function StackPositionTag({ position, repoId, writable }: { position: StackPosition; repoId: string; writable: boolean }) {
   return <StackPopoverTrigger repoId={repoId} stack={position.stack} writable={writable} current={position.layer.branch}
-    className="stack-ladder" label={`${stackMembers(position.stack).map(stackPositionLabel).join("; ")}; trunk ${position.stack.trunk.branch}. Show stack`}>
-    {stackMembers(position.stack).map(member => <StackNode key={member.layer.branch} position={member} current={member.index === position.index} />)}
-    <StackNode />
+    className="stack-position-tag" label={`${stackPositionLabel(position)}, in ${stackName(position.stack)}. Show stack`}>
+    {position.index}/{position.stack.layers.length}
   </StackPopoverTrigger>;
 }
 

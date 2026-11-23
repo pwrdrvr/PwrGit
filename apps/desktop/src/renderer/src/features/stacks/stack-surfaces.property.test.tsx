@@ -183,9 +183,33 @@ test("R3 uses one PR state for the card chip and stack nodes", async () => {
       expect(el.querySelector("[data-list] .stack-group [data-stack-position] .stack-node")?.getAttribute("data-stack-state")).toBe(state);
       showPopover(el.querySelector("[data-list] .stack-group__caption"));
       expect(el.querySelector(".stack-popover .stack-node")?.getAttribute("data-stack-state")).toBe(state);
-      const fallback = await render(model, { recent: true });
-      expect(fallback.querySelector(".stack-ladder .stack-node")?.getAttribute("data-stack-state")).toBe(state);
     }), { numRuns: 18 });
+});
+
+// Out of stack order there is no rail to hang a node on, so a stacked row is
+// an ordinary row plus its position: one status mark (the chip's own dot), no
+// stack nodes, and an i/n tag that opens the stack with this PR marked.
+test("R7 a stacked row outside its group shows only its position", async () => {
+  await fc.assert(fc.asyncProperty(fc.integer({ min: 1, max: 6 }).chain(height =>
+    fc.tuple(fc.constant(height), fc.integer({ min: 1, max: height }))), async ([height, opened]) => {
+    const stack = makeStack(height);
+    const el = await render({ ...stack, layers: stack.layers.map((layer, index) => ({ ...layer, pr: makePr(index) })) },
+      { recent: true });
+    const rows = Array.from(el.querySelectorAll("[data-list] .ref-cr-row"));
+    expect(rows).toHaveLength(height);
+    for (const row of rows) {
+      const index = Number(/^#(\d+)/.exec(row.getAttribute("aria-label") ?? "")?.[1]);
+      expect(row.querySelectorAll(".stack-node")).toHaveLength(0);
+      expect(row.querySelectorAll(".pr-chip__dot")).toHaveLength(1);
+      expect(row.querySelector(".stack-position-tag")?.textContent).toBe(`${index}/${height}`);
+    }
+    const tag = rows.find(row => row.getAttribute("aria-label")?.startsWith(`#${opened} `))!.querySelector(".stack-position-tag");
+    showPopover(tag);
+    const marked = Array.from(document.querySelectorAll(".stack-popover__member"))
+      .filter(member => member.textContent?.includes("This PR"));
+    expect(marked).toHaveLength(1);
+    expect(marked[0].textContent).toContain(`Layer ${opened}`);
+  }), { numRuns: 12 });
 });
 
 test("R4 groups all stack layers exactly once, including ghosts", async () => {

@@ -17,7 +17,7 @@ import {
   changeRequestPickKey,
   useChangeRequestSelection
 } from "../change-request/change-request-selection";
-import { StackListGroup, StackLadder, StacksSidebar } from "../stacks/StackViews";
+import { StackListGroup, StackPositionTag, StacksSidebar } from "../stacks/StackViews";
 import { stackItemRows, stackListItems, stackPositionLabel, type StackListItem } from "../stacks/stack-presentation";
 import type { StackPosition } from "@pwrgit/shared";
 import { useStackNavigation, useStackSnapshot } from "../stacks/stack-navigation";
@@ -328,7 +328,7 @@ export function RepoChangeRequestSection({
     }
   };
 
-  const row = ({ entry, paired }: ChangeRequestRow, position?: StackPosition, ladder = false): ReactElement => {
+  const row = ({ entry, paired }: ChangeRequestRow, position?: StackPosition, ungrouped = false): ReactElement => {
     const { pr, location } = entry;
     const key = changeRequestKey(entry);
     const index = rowIndices.get(key)!;
@@ -350,7 +350,7 @@ export function RepoChangeRequestSection({
       <div
         className={`ref-cr-row${location.kind === "worktree" ? " is-checked-out" : ""}${
           selected ? " is-selected" : ""
-        }${ladder && position ? " has-stack-ladder" : ""}`}
+        }`}
         key={key}
         // Back returns the sidebar to this row (sidebar-anchor.ts).
         data-nav-anchor={`cr:${repo.id}:${key}`}
@@ -375,10 +375,10 @@ export function RepoChangeRequestSection({
           primary(entry);
         }}
       >
-        {ladder && position && <StackLadder position={position} repoId={repo.id} writable={writable} />}
         <div className="ref-cr-row__line">
-          <PrChip pr={pr} repoId={repo.id} stacked={position !== undefined} />
-          {ladder && position && <span className="stack-ladder__position">{position.index}/{position.stack.layers.length}</span>}
+          {/* Beside the rail the rail node is the status; on its own the chip is. */}
+          <PrChip pr={pr} repoId={repo.id} stacked={position !== undefined && !ungrouped} />
+          {ungrouped && position && <StackPositionTag position={position} repoId={repo.id} writable={writable} />}
           <span className="ref-cr-row__title" {...hoverTooltip(tip, pr.title)}>
             {pr.title}
           </span>
