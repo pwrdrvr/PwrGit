@@ -87,6 +87,19 @@ test("each scene is measured at its section-row width", () => {
   for (const s of scenes) expect(s.measured, `${s.repo} @ ${s.row}`).toBeCloseTo(s.row, 0);
 });
 
+test("Stacks keeps a visible glyph and the full tooltip at the glyph step", async () => {
+  const narrow = page.locator('.harness-grid [data-repo="atlas"][data-row="170"]');
+  const heading = narrow.locator(".stack-sidebar .ref-section__head");
+  const shots = process.env["PWRGIT_STACK_HEADING_SHOT"];
+  if (shots) await narrow.screenshot({ path: shots });
+  await expect(narrow.locator(".repo-sections")).toHaveClass(/fit-glyphs/);
+  await expect(heading).toHaveAccessibleName("Stacks 1");
+  await expect(heading.locator(".ref-section__glyph")).toBeVisible();
+  await heading.hover();
+  await expect(page.getByText("Stacks · 1", { exact: true })).toBeVisible();
+  await page.mouse.move(0, 0);
+});
+
 test("no heading overlaps, wraps or cuts a label or chip at any width", () => {
   for (const s of scenes) {
     expect(s.problems, `${s.repo} @ ${s.row}: ${s.sectionSteps.join(" ")}`).toEqual([]);

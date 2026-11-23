@@ -19,6 +19,7 @@ export type StackHealthFacts = {
   remoteHead?: string;
   baseIsAncestor: boolean;
   remoteIsAncestor: boolean;
+  localIsAncestorOfRemote: boolean;
   parentMerged: boolean;
   pr?: PrSummary;
 };
@@ -31,9 +32,9 @@ export function stackBranchHealth(facts: StackHealthFacts): StackBranchHealth {
     inSync: Boolean(base && parentHead === base && facts.baseIsAncestor),
     needsRestack: Boolean(base && parentHead && parentHead !== base),
     parentMerged: facts.parentMerged,
-    needsPush: Boolean(localHead && pr?.headOid && localHead !== pr.headOid),
+    needsPush: Boolean(localHead && pr?.headOid && localHead !== pr.headOid && !facts.localIsAncestorOfRemote),
     drift: Boolean(pr?.baseRefName && pr.baseRefName !== parent),
-    remoteAhead: Boolean(localHead && remoteHead && !knownRemote && !facts.remoteIsAncestor),
+    remoteAhead: facts.localIsAncestorOfRemote || Boolean(localHead && remoteHead && !knownRemote && !facts.remoteIsAncestor),
   };
 }
 

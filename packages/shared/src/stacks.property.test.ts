@@ -27,8 +27,21 @@ test("a known remote head cannot be remote-ahead after a local rewrite", () => {
   fc.assert(fc.property(fc.uniqueArray(fc.string({ minLength: 1 }), { minLength: 4, maxLength: 4 }),
     fc.boolean(), ([old, remote, next, parent], baseIsAncestor) => {
       const common = { branch: "layer", parent: "base", base: old, localHead: next, parentHead: parent,
-        baseIsAncestor, remoteIsAncestor: false, parentMerged: false };
+        baseIsAncestor, remoteIsAncestor: false, localIsAncestorOfRemote: false, parentMerged: false };
       expect(stackBranchHealth({ ...common, catalogHead: old, remoteHead: old })).toMatchObject({ remoteAhead: false, needsRestack: true });
       expect(stackBranchHealth({ ...common, catalogHead: old, remoteHead: remote }).remoteAhead).toBe(true);
+    }));
+});
+
+test("a strict remote descendant stays remote-ahead after the cached PR catches up", () => {
+  fc.assert(fc.property(fc.uniqueArray(fc.string({ minLength: 1 }), { minLength: 2, maxLength: 2 }),
+    fc.boolean(), ([localHead, remoteHead], cacheCaughtUp) => {
+      const health = stackBranchHealth({
+        branch: "layer", parent: "base", localHead, remoteHead, catalogHead: remoteHead,
+        baseIsAncestor: false, remoteIsAncestor: false, parentMerged: false,
+        localIsAncestorOfRemote: true,
+        pr: { ...entry(1, "layer", "base").pr, headOid: cacheCaughtUp ? remoteHead : localHead },
+      });
+      expect(health).toMatchObject({ remoteAhead: true, needsPush: false });
     }));
 });

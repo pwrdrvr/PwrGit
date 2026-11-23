@@ -9,18 +9,24 @@ export const StackNavigationContext = createContext<{
 } | null>(null);
 export const useStackNavigation = () => useContext(StackNavigationContext);
 
-const pending = new Map<string, ReturnType<typeof loadSnapshot>>();
+type Read = ReturnType<typeof loadSnapshot>;
+const pending = new Map<string, { result: Read; next?: Read }>();
 function loadSnapshot(repoId: string, profileId: string) {
   return dispatch("stack:list", { repoId, profileId });
 }
 
-function readSnapshot(repoId: string, profileId: string) {
+function readSnapshot(repoId: string, profileId: string, fresh = false): Read {
   const key = JSON.stringify([repoId, profileId]);
   const current = pending.get(key);
-  if (current) return current;
-  const next = loadSnapshot(repoId, profileId).finally(() => pending.delete(key));
-  pending.set(key, next);
-  return next;
+  if (current) {
+    if (!fresh) return current.next ?? current.result;
+    // A pending dispatch may have captured its data before the invalidation.
+    const reread = () => readSnapshot(repoId, profileId);
+    return current.next ??= current.result.then(reread, reread);
+  }
+  const result = loadSnapshot(repoId, profileId).finally(() => pending.delete(key));
+  pending.set(key, { result });
+  return result;
 }
 
 export function useStackSnapshot(repoId: string | undefined, profileId: string | undefined) {
@@ -32,29 +38,31 @@ export function useStackSnapshot(repoId: string | undefined, profileId: string |
     let live = true;
     let timer: number | undefined;
     let generation = 0;
-    const load = () => {
+    const load = (fresh: boolean) => {
       const stamp = ++generation;
-      void readSnapshot(repoId, profileId).then(result => {
+      void readSnapshot(repoId, profileId, fresh).then(result => {
         if (live && generation === stamp && result.ok) setAnswer({ repoId, profileId, snapshot: result.value });
       }).catch(() => undefined);
     };
     const invalidate = (payload: { repoId: string }) => {
       if (payload.repoId !== repoId) return;
+      ++generation;
       window.clearTimeout(timer);
-      timer = window.setTimeout(load, 50);
+      timer = window.setTimeout(() => load(true), 50);
     };
-    load();
+    load(revision > 0);
+    const focus = () => load(true);
     const stop = [
       subscribe("graph:changed", invalidate),
       subscribe("pr:openChanged", invalidate),
       subscribe("pr:changed", invalidate),
     ];
-    window.addEventListener("focus", load);
+    window.addEventListener("focus", focus);
     return () => {
       live = false;
       window.clearTimeout(timer);
       for (const off of stop) off();
-      window.removeEventListener("focus", load);
+      window.removeEventListener("focus", focus);
     };
   }, [repoId, profileId, revision]);
   return { snapshot: answer?.repoId === repoId && answer?.profileId === profileId ? answer?.snapshot : undefined, refresh };

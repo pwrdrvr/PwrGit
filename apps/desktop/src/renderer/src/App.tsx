@@ -802,6 +802,9 @@ export function App() {
   const stack = stackPick && stackRepo
     ? shownStacks ? shownStacks.stacks.find(model => model.id === stackPick.stack.id) ?? null : stackPick.stack
     : null;
+  useEffect(() => {
+    if (stackPick && stack === null) setStackPick(current => current === stackPick ? null : current);
+  }, [stack, stackPick]);
   const { snapshot: lineageStacks } = useStackSnapshot(selectedRepo?.id, selectedRepo?.profileId);
   const lineageVisible = shownChangeRequest === null && diffTarget === null && fileInsightTarget === null;
   const visibleLineageRepoId = lineageVisible && selectedWorktree !== null ? selectedWorktree.repoId : null;
@@ -1109,7 +1112,7 @@ export function App() {
         onOpenSearch={() => setOverlayOpen(true)}
         contributionsOpen={contributionsOpen}
         {...(activeProfile ? { onOpenContributions: () => setContributionsOpen(open => !open) } : {})}
-        repo={contributionsOpen ? null : stackRepo ?? (shownChangeRequest === null ? selectedRepo : changeRequestRepo)}
+        repo={contributionsOpen ? null : stack && stackRepo ? stackRepo : shownChangeRequest === null ? selectedRepo : changeRequestRepo}
         worktree={contributionsOpen || stack !== null ? null : selectedWorktree}
         history={contributionsOpen ? { ...historyControls, canGoBack: true, backLabel: "Repositories", canGoForward: false } : historyControls}
         {...(shownChangeRequest === null
@@ -1379,7 +1382,7 @@ export function App() {
                 </ErrorBoundary>
               )}
             </div>
-          ) : shownChangeRequest !== null ? null : showStartScreen &&
+          ) : shownChangeRequest !== null || stack !== null ? null : showStartScreen &&
             activeProfile !== null ? (
             // design/New User Journey - UX Review, card 4c: a profile with no
             // repositories gets the ways to get one, not a selection prompt.

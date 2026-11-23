@@ -902,7 +902,7 @@ if (!gotSingleInstanceLock) {
     const stackReader = new StackReader(
       stackRunner(execGit), new NativeStackLocks(mcpExecutablePath),
       repoId => openPrService.list(repoId),
-      (repoId, branch) => prService.cachedBranchPr(repoId, branch)
+      (repoId, branch) => prService.cachedBranchPrObservation(repoId, branch)
     );
     registerStackReadHandlers(bus, id => indexer.getRepo(id), stackReader);
     const avatarThumbnails = new GitHubAvatarThumbnailCache(db, {

@@ -1,7 +1,8 @@
 import { StrictMode, useEffect, useState, type Dispatch, type ReactNode, type SetStateAction } from "react";
 import { flushSync } from "react-dom";
 import { createRoot } from "react-dom/client";
-import { ok } from "@pwrgit/shared";
+import { ok, type RepositoryStack } from "@pwrgit/shared";
+import { StackNavigationContext } from "../../../src/renderer/src/features/stacks/stack-navigation";
 import "../../../src/renderer/src/styles/app.css";
 import { ChangeRequestSelectionContext } from "../../../src/renderer/src/features/change-request/change-request-selection";
 import { RepoRow } from "../../../src/renderer/src/features/sidebar/RepoRow";
@@ -30,6 +31,14 @@ const byId = new Map(
   Object.values(HARNESS_REPOS).map((entry) => [entry.repo.id, entry])
 );
 
+const stack: RepositoryStack = {
+  id: "priority-alerts", source: "tracked", catalogRepository: "github.com:contrived/atlas-api-gateway",
+  trunk: { branch: "main" },
+  layers: [{ branch: "priority-alerts", parent: "main", health: {
+    inSync: true, needsRestack: false, needsPush: false, parentMerged: false, drift: false, remoteAhead: false,
+  } }],
+};
+
 const bridge = {
   profileId: "profile-harness",
   platform: "darwin",
@@ -39,6 +48,7 @@ const bridge = {
     const entry = repoId === undefined ? undefined : byId.get(repoId);
     if (name === "repo:refs" && entry !== undefined) return ok(entry.refs);
     if (name === "pr:openList" && entry !== undefined) return ok(entry.changeRequests);
+    if (name === "stack:list") return ok({ schemaVersion: 1, readOnly: false, stacks: repoId === "atlas" ? [stack] : [] });
     if (name === "forge:hosts") return ok({ hosts: [], overrides: {} });
     return ok({ rows: [], total: 0 });
   },
@@ -153,23 +163,23 @@ function Harness({ inset }: { inset: number }) {
     .split(",")
     .filter((key): key is RepoKey => key in HARNESS_REPOS);
   return (
-    <ChangeRequestSelectionContext.Provider
-      value={{ selectedKey: null, select: noop, clear: noop }}
-    >
-      <div className="harness-grid" style={{ gridTemplateColumns: `repeat(${ROWS.length}, max-content)` }}>
-        {repos.flatMap((key, repoIndex) =>
-          ROWS.map((row, widthIndex) => (
-            <Tree
-              key={`${key}-${row}`}
-              entry={HARNESS_REPOS[key]}
-              row={row}
-              tree={row + inset}
-              expanded={!collapsed.has(sceneKey(HARNESS_REPOS[key].repo.id, row))}
-              focusable={keyboardRow === 0 || keyboardRow === repoIndex * ROWS.length + widthIndex + 1}
-            />
-          ))
-        )}
-      </div>
+    <ChangeRequestSelectionContext.Provider value={{ selectedKey: null, select: noop, clear: noop }}>
+      <StackNavigationContext.Provider value={{ pick: null, select: noop }}>
+        <div className="harness-grid" style={{ gridTemplateColumns: `repeat(${ROWS.length}, max-content)` }}>
+          {repos.flatMap((key, repoIndex) =>
+            ROWS.map((row, widthIndex) => (
+              <Tree
+                key={`${key}-${row}`}
+                entry={HARNESS_REPOS[key]}
+                row={row}
+                tree={row + inset}
+                expanded={!collapsed.has(sceneKey(HARNESS_REPOS[key].repo.id, row))}
+                focusable={keyboardRow === 0 || keyboardRow === repoIndex * ROWS.length + widthIndex + 1}
+              />
+            ))
+          )}
+        </div>
+      </StackNavigationContext.Provider>
     </ChangeRequestSelectionContext.Provider>
   );
 }
@@ -225,7 +235,10 @@ async function settled(): Promise<void> {
     const loading = [...document.querySelectorAll(".ref-section__count")].some(
       (el) => el.textContent === "…"
     );
-    if (!loading && document.querySelectorAll(".harness-scene").length > 0) return;
+    const scenes = [...document.querySelectorAll(".harness-grid .harness-scene")];
+    const awaitingStacks = scenes.some(scene =>
+      scene.getAttribute("data-repo") === "atlas" && scene.querySelector(".ref-cr-section") && !scene.querySelector(".stack-sidebar"));
+    if (!loading && !awaitingStacks && document.querySelectorAll(".harness-scene").length > 0) return;
     await new Promise((resolve) => setTimeout(resolve, 10));
   }
   throw new Error("the harness never settled");

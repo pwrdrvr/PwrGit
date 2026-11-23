@@ -1,3 +1,6 @@
+import fc from "fast-check";
+import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import { StackResources } from "./stack-tools.js";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { ResourceUpdatedNotificationSchema } from "@modelcontextprotocol/sdk/types.js";
@@ -62,5 +65,46 @@ test("stack resources update on change and enforce repository and subscription g
     await client.close();
     await server.close();
     rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("unsubscribe or close during the initial read cannot start a ghost poll", async () => {
+  vi.useFakeTimers({ toFake: ["setInterval", "clearInterval"] });
+  try {
+    await fc.assert(fc.asyncProperty(fc.boolean(), fc.boolean(), async (close, resubscribe) => {
+      type Snapshot = Awaited<ReturnType<NonNullable<AppBackend["stackList"]>>>;
+      const empty: Snapshot = { schemaVersion: 1, readOnly: false, stacks: [] };
+      let finishInitial!: (snapshot: Snapshot) => void;
+      let markBegan!: () => void;
+      const initial = new Promise<Snapshot>(resolve => { finishInitial = resolve; });
+      const began = new Promise<void>(resolve => { markBegan = resolve; });
+      const stackList = vi.fn(async () => empty).mockImplementationOnce(() => {
+        markBegan();
+        return initial;
+      });
+      const mcp = new McpServer({ name: "stack-model", version: "1" });
+      const resources = new StackResources(mcp, {
+        catalog: () => ({ activeProfileId: "profile", profiles: [], repositories: [
+          { id: "orbit", path: tmpdir(), name: "Orbit", profileId: "profile", pinned: false, worktrees: [] },
+        ] }), open: vi.fn(), refresh: vi.fn(), stackList,
+      }, new FixedMcpAuthorizer(fullAccessAuthorization()), true);
+      const uri = "pwrgit://repository/orbit/stacks";
+      try {
+        const subscription = resources.subscribe(uri);
+        await began;
+        if (close) resources.close();
+        else resources.unsubscribe(uri);
+        if (resubscribe) await resources.subscribe(uri);
+        finishInitial({ ...empty, stacks: [{ id: "obsolete" }] });
+        await subscription;
+        expect(vi.getTimerCount()).toBe(resubscribe ? 1 : 0);
+        await vi.advanceTimersByTimeAsync(15_000);
+        expect(stackList).toHaveBeenCalledTimes(resubscribe ? 3 : 1);
+      } finally {
+        resources.close();
+      }
+    }), { numRuns: 12 });
+  } finally {
+    vi.useRealTimers();
   }
 });

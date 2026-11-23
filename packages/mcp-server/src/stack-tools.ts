@@ -8,7 +8,7 @@ const readOnly = { readOnlyHint: true, destructiveHint: false, idempotentHint: t
 const resourcePattern = /^pwrgit:\/\/repository\/([a-zA-Z0-9_.%-]+)\/stacks$/;
 
 export class StackResources {
-  private readonly subscriptions = new Map<string, NodeJS.Timeout>();
+  private readonly subscriptions = new Map<string, { timer?: NodeJS.Timeout }>();
 
   constructor(
     private readonly mcp: McpServer,
@@ -69,29 +69,41 @@ export class StackResources {
 
   async subscribe(uri: string) {
     const id = this.repoId(uri);
-    let previous = JSON.stringify(await this.load(id, true));
-    if (!this.supportsSubscriptions || this.subscriptions.has(uri)) return;
+    if (!this.supportsSubscriptions || this.subscriptions.has(uri)) {
+      await this.load(id, true);
+      return;
+    }
     if (this.subscriptions.size >= 64) throw new Error("Stack watch limit reached");
+    const subscription: { timer?: NodeJS.Timeout } = {};
+    this.subscriptions.set(uri, subscription);
+    const active = () => this.subscriptions.get(uri) === subscription;
+    let previous: string;
+    try {
+      previous = JSON.stringify(await this.load(id, true));
+    } catch (error) {
+      if (active()) this.unsubscribe(uri);
+      throw error;
+    }
+    if (!active()) return;
     let polling = false;
-    const timer = setInterval(() => {
+    subscription.timer = setInterval(() => {
       if (polling) return;
       polling = true;
       void this.load(id, true).then(async snapshot => {
         const next = JSON.stringify(snapshot);
-        if (next !== previous && this.subscriptions.get(uri) === timer) {
+        if (next !== previous && active()) {
           previous = next;
           await this.mcp.server.sendResourceUpdated({ uri });
         }
       }).catch(error => {
-        if (error instanceof McpAccessError && this.subscriptions.get(uri) === timer) this.unsubscribe(uri);
+        if (error instanceof McpAccessError && active()) this.unsubscribe(uri);
       }).finally(() => { polling = false; });
     }, 15_000);
-    timer.unref();
-    this.subscriptions.set(uri, timer);
+    subscription.timer.unref();
   }
 
   unsubscribe(uri: string) {
-    clearInterval(this.subscriptions.get(uri));
+    clearInterval(this.subscriptions.get(uri)?.timer);
     this.subscriptions.delete(uri);
   }
 

@@ -1,6 +1,8 @@
 import { useState } from "react";
 import type { Repo, RepositoryStack, StackLayer, StackPosition } from "@pwrgit/shared";
 import { RefreshGlyph } from "../../lib/RefreshGlyph";
+import { useViewportTooltip } from "../../lib/useViewportTooltip";
+import { SectionGlyph, steppedTooltip } from "../sidebar/section-fit";
 import { SectionChevron } from "../sidebar/SectionChevron";
 import { PrChip } from "../sidebar/PrChip";
 import { useStackNavigation } from "./stack-navigation";
@@ -41,14 +43,20 @@ function StackSignals({ layer }: { layer: StackLayer }) {
 export function StacksSidebar({ repo, stacks }: { repo: Repo; stacks: RepositoryStack[] }) {
   const navigation = useStackNavigation();
   const [expanded, setExpanded] = useState(true);
+  const tip = useViewportTooltip();
   if (!stacks.length || !navigation) return null;
   const stale = stacks.reduce((count, stack) => count + stack.layers.filter(layer => layer.health.needsRestack).length, 0);
   return <div className="ref-section stack-sidebar">
     <div className="ref-section__head-wrap">
-      <button type="button" className="ref-section__head" aria-expanded={expanded} onClick={event => {
-        event.stopPropagation(); setExpanded(value => !value);
-      }}>
+      <button type="button" className="ref-section__head" aria-expanded={expanded}
+        {...steppedTooltip(tip, `Stacks · ${stacks.length}`)}
+        onClick={event => {
+          event.stopPropagation();
+          tip.hide();
+          setExpanded(value => !value);
+        }}>
         <SectionChevron open={expanded} />
+        <SectionGlyph kind="stacks" />
         <span className="ref-section__label">Stacks</span>
         <span className="ref-section__count">{stacks.length}</span>
       </button>
@@ -73,6 +81,7 @@ export function StacksSidebar({ repo, stacks }: { repo: Repo; stacks: Repository
         </ol>
       </div>;
     })}
+    {tip.tooltipNode}
   </div>;
 }
 

@@ -1,5 +1,5 @@
 import {
-  forgeProductFor, inferPullRequestStacks, stackBranchHealth, type ChangeRequestEntry, type ChangeRequestList,
+  forgeProductFor, forgeRepoKey, inferPullRequestStacks, stackBranchHealth, type ChangeRequestEntry, type ChangeRequestList,
   type PrSummary, type Repo, type RepositoryStack, type StackLayer, type StackSnapshot,
 } from "@pwrgit/shared";
 import type { GitExec } from "./dugite";
@@ -10,12 +10,17 @@ import { isOid, StackGit } from "./stack-engine/git";
 export function stackRunner(execute: GitExec): GitRunner {
   return {
     async run(cwd, args, opts) {
-      const result = await execute(args, cwd, opts?.stdin === undefined ? undefined : { input: opts.stdin });
+      const result = await execute(args, cwd, {
+        env: { GIT_NO_LAZY_FETCH: "1" },
+        ...(opts?.stdin === undefined ? {} : { input: opts.stdin }),
+      });
       if (!result.ok) throw new Error(result.error.message);
       return result.value;
     },
   };
 }
+
+type BranchPrObservation = { pr: PrSummary; fetchedAt: number };
 
 type StackSource = {
   stack: GhStack;
@@ -33,7 +38,7 @@ export class StackReader {
     readonly runner: GitRunner,
     private readonly locks: NativeStackLocks,
     private readonly readOpen: (repoId: string) => Promise<ChangeRequestList>,
-    private readonly readBranchPr: (repoId: string, branch: string) => PrSummary | null | undefined,
+    private readonly readBranchPr: (repoId: string, branch: string) => BranchPrObservation | null | undefined,
   ) {}
 
   async location(repo: Pick<Repo, "path" | "identity">) {
@@ -48,14 +53,17 @@ export class StackReader {
   }
 
   async list(repo: Repo): Promise<StackSnapshot> {
-    const [{ commonDir, store, tracked }, open] = await Promise.all([this.location(repo), this.readOpen(repo.id)]);
+    const { commonDir, store, tracked } = await this.location(repo);
+    const open = await this.readOpen(repo.id);
     const { catalog } = tracked;
     const sources: StackSource[] = catalog.stacks.map(stack => ({
       stack, catalogRepository: catalog.repository, inferred: false,
       open: open.entries.filter(entry => !catalog.repository || entry.forgeRepo === parsedCatalogKey(catalog.repository)),
     }));
     const trackedBranches = new Set(catalog.stacks.flatMap(stack => stack.branches.map(branch => branch.branch)));
-    for (const entries of inferPullRequestStacks(open.entries, trackedBranches)) {
+    const remotes = new Map(open.remotes.map(remote => [remote.forgeRepo, remote]));
+    const completeEntries = open.entries.filter(entry => !(remotes.get(entry.forgeRepo)?.truncated ?? open.truncated));
+    for (const entries of inferPullRequestStacks(completeEntries, trackedBranches)) {
       const [{ forgeRepo, pr }] = entries;
       const separator = forgeRepo.indexOf("/");
       sources.push({
@@ -81,6 +89,7 @@ export class StackReader {
     const ancestors = new Map<string, boolean>();
     const isAncestor = async (base: string | undefined, tip: string | undefined) => {
       if (!base || !tip || !isOid(base) || !isOid(tip)) return false;
+      if (base === tip) return true;
       const key = `${base} ${tip}`;
       if (!ancestors.has(key)) {
         ancestors.set(key, (await git.run(["merge-base", "--is-ancestor", base, tip])).exitCode === 0);
@@ -91,21 +100,27 @@ export class StackReader {
       const { stack, inferred, catalogRepository } = source;
       if (!stack.branches.length) continue;
       const scope = parsedCatalogKey(catalogRepository);
-      const remote = open.remotes.find(entry => entry.forgeRepo === scope)?.name ?? "origin";
+      const remote = remotes.get(scope)?.name ?? "origin";
       const trunkHead = local(stack.trunk.branch) ?? stack.trunk.head;
       const layers: StackLayer[] = [];
       const lookupPr = (branch: GhStackBranch) => {
-        const entry = source.open.find(({ pr }) => branch.pullRequest?.number === pr.number ||
-          (!pr.headRepoPath && pr.headRefName === branch.branch));
-        if (entry) return entry.pr;
+        const number = branch.pullRequest?.number;
+        const entry = source.open.find(({ pr }) => number !== undefined
+          ? pr.number === number
+          : !pr.headRepoPath && pr.headRefName === branch.branch);
         const cached = this.readBranchPr(repo.id, branch.branch);
-        if (cached?.host && cached.repoPath && `${cached.host}/${cached.repoPath}`.toLowerCase() === scope) return cached;
-        return undefined;
+        const listFetchedAt = entry ? remotes.get(entry.forgeRepo)?.fetchedAt ?? open.fetchedAt : null;
+        if (cached?.pr.host && cached.pr.repoPath && forgeRepoKey(cached.pr.host, cached.pr.repoPath) === scope &&
+            (number === undefined || cached.pr.number === number) &&
+            (!entry || (cached.pr.number === entry.pr.number && cached.fetchedAt >= (listFetchedAt ?? 0)))) {
+          return cached.pr;
+        }
+        return entry?.pr;
       };
       for (const [index, branch] of stack.branches.entries()) {
         const parent = stack.branches[index - 1] ?? stack.trunk;
         const pr = lookupPr(branch);
-        const parentPr = index > 0 ? lookupPr(parent) : undefined;
+        const parentPr = layers[index - 1]?.pr;
         const localHead = local(branch.branch);
         const parentHead = local(parent.branch);
         const remoteHead = refs.get(`refs/remotes/${remote}/${branch.branch}`);
@@ -130,6 +145,10 @@ export class StackReader {
           ...(remoteHead ? { remoteHead } : {}), ...(pr ? { pr } : {}),
           baseIsAncestor: await isAncestor(base, localHead),
           remoteIsAncestor: await isAncestor(remoteHead, localHead),
+          localIsAncestorOfRemote: Boolean(localHead && (
+            (localHead !== remoteHead && await isAncestor(localHead, remoteHead)) ||
+            (localHead !== pr?.headOid && await isAncestor(localHead, pr?.headOid))
+          )),
         });
         const head = localHead ?? branch.head ?? pr?.headOid;
         layers.push({
