@@ -1,8 +1,8 @@
 import fc from "fast-check";
 import { err, ok, type BulkSyncMode, type BulkSyncProgress } from "@pwrgit/shared";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { bulkSyncRepositories, type BulkSyncRepoInput } from "./bulk-sync";
-import type { GitExec, GitExecOptions } from "./dugite";
+import { bulkSyncRepositories, watchedGit, type BulkSyncRepoInput } from "./bulk-sync";
+import type { GitExec, GitExecOptions, GitProcessEvent } from "./dugite";
 import { PULL_OPERATION_TIMEOUT_MS, PULL_STALL_TIMEOUT_MS } from "./pull-watchdog";
 import { logMain } from "../logs";
 
@@ -188,7 +188,7 @@ describe("bulk sync termination property", () => {
         if (args[0] === "remote") return ok({ stdout: "origin\n", stderr: "", exitCode: 0 });
         if (args[0] === "config") return ok({ stdout: "", stderr: "", exitCode: 1 });
         options?.onProcess?.({ event: "spawn", pid: 123, exitCode: null, signalCode: null });
-        const output = complete ? `remote: https://operator:${secret}@example.test/repo.git\n` : `remote: https://operator:${secret}`;
+        const output = `dropped old line\noutput 1\noutput 2\noutput 3\nremote: https://operator:${secret}${complete ? "@example.test/repo.git\n" : ""}`;
         const boundary = split % output.length;
         options?.onStderr?.(output.slice(0, boundary));
         options?.onStderr?.(output.slice(boundary));
@@ -200,16 +200,101 @@ describe("bulk sync termination property", () => {
       });
       try {
         await vi.advanceTimersByTimeAsync(PULL_STALL_TIMEOUT_MS + 1);
-        const logs = vi.mocked(logMain).mock.calls.map((call) => call[2]).join("\n");
-        expect(logs).toContain(`pid=123 event=${exited ? "exit" : "spawn"} exit=${exited ? "0" : "none"}`);
-        expect(logs).toContain(complete ? "https://[redacted]@example.test/repo.git" : "unfinished stderr withheld");
-        expect(logs).not.toContain(secret);
+        const calls = vi.mocked(logMain).mock.calls;
+        const warning = calls.find(([level, scope]) => level === "warn" && scope === "remote")?.[2];
+        const timeout = calls.find(([level, scope]) => level === "error" && scope === "remote")?.[2];
+        expect(warning).toContain("bulk sync still waiting: git fetch");
+        expect(timeout).toContain("direct Git termination requested");
+        for (const evidence of [warning, timeout]) {
+          expect(evidence).toContain(`pid=123 event=${exited ? "exit" : "spawn"} exit=${exited ? "0" : "none"}`);
+          expect(evidence).toContain(complete
+            ? "stderr tail: output 2 | output 3 | remote: https://[redacted]@example.test/repo.git"
+            : "stderr tail: output 1 | output 2 | output 3;");
+          if (!complete) expect(evidence).toContain("unfinished stderr withheld");
+          expect(evidence).not.toContain(secret);
+          expect(evidence).not.toContain("dropped old line");
+        }
       } finally {
         controller.abort();
         await operation;
       }
       expect(vi.getTimerCount()).toBe(0);
     }));
+  });
+});
+
+describe("bulk sync lifecycle logging property", () => {
+  // Routine process events stay available to the watchdog and callers.
+  // execGit owns logging for ordinary nonzero exits.
+  async function assertQuietCompletion(pid: number, chunks: string[], exitCode: number): Promise<void> {
+    vi.mocked(logMain).mockClear();
+    const spawn: GitProcessEvent = { event: "spawn", pid, exitCode: null, signalCode: null };
+    const exit: GitProcessEvent = { event: "exit", pid, exitCode, signalCode: null };
+    const close: GitProcessEvent = { ...exit, event: "close" };
+    const output = ok({ stdout: "", stderr: chunks.join(""), exitCode });
+    const git = watchedGit(async (_args, _cwd, options) => {
+      options?.onProcess?.(spawn);
+      for (const chunk of chunks) {
+        options?.onActivity?.();
+        options?.onStderr?.(chunk);
+      }
+      options?.onProcess?.(exit);
+      options?.onProcess?.(close);
+      return output;
+    }, undefined);
+    const onProcess = vi.fn();
+    const onActivity = vi.fn();
+    const onStderr = vi.fn();
+    expect(await git(["config", "--list"], "/repos/example", { onProcess, onActivity, onStderr })).toBe(output);
+    expect(onProcess.mock.calls).toEqual([[spawn], [exit], [close]]);
+    expect(onActivity).toHaveBeenCalledTimes(chunks.length);
+    expect(onStderr.mock.calls).toEqual(chunks.map((chunk) => [chunk]));
+    expect(logMain).not.toHaveBeenCalled();
+  }
+
+  it("keeps a successful config probe quiet", async () => {
+    await assertQuietCompletion(1, [], 0);
+  });
+
+  it("forwards ordinary process events and output without lifecycle logs", async () => {
+    await fc.assert(fc.asyncProperty(
+      fc.integer({ min: 1 }), fc.array(fc.string()), fc.constantFrom(0, 1, 128), assertQuietCompletion
+    ));
+  });
+
+  it.each(["abort", "signal"] as const)("records one diagnostic for an abnormal %s", async (outcome) => {
+    vi.mocked(logMain).mockClear();
+    const controller = new AbortController();
+    const failure = err({ kind: "git" as const, code: outcome === "abort" ? "aborted" : "spawn_failed", message: "Git stopped." });
+    const onProcess = vi.fn();
+    let reportProcess: GitExecOptions["onProcess"];
+    const close: GitProcessEvent = { event: "close", pid: 123, exitCode: null, signalCode: "SIGTERM" };
+    const git = watchedGit(async (_args, _cwd, options) => {
+      reportProcess = options?.onProcess;
+      options?.onProcess?.({ event: "spawn", pid: 123, exitCode: null, signalCode: null });
+      options?.onStderr?.("auth: https://operator:fixture-secret@example.test/repo.git\n");
+      if (outcome === "abort") {
+        controller.abort();
+        expect(options?.signal?.aborted).toBe(true);
+      } else {
+        options?.onProcess?.({ event: "exit", pid: 123, exitCode: null, signalCode: "SIGTERM" });
+        options?.onProcess?.(close);
+      }
+      return failure;
+    }, undefined);
+    expect(await git(["fetch", "origin"], "/repos/example", { signal: controller.signal, onProcess })).toBe(failure);
+    if (outcome === "abort") {
+      // Cancellation can settle before the child closes its streams.
+      reportProcess?.({ ...close, event: "exit", signalCode: "SIGKILL" });
+      reportProcess?.({ ...close, signalCode: "SIGKILL" });
+      expect(onProcess.mock.calls.map(([event]) => event.event)).toEqual(["spawn", "exit", "close"]);
+    }
+    expect(logMain).toHaveBeenCalledExactlyOnceWith(outcome === "abort" ? "debug" : "warn", "remote", expect.stringContaining(
+      outcome === "abort" ? "pid=123 event=spawn exit=none signal=none" : "pid=123 event=close exit=none signal=SIGTERM"
+    ));
+    const message = vi.mocked(logMain).mock.calls[0]?.[2];
+    expect(message).toContain("https://[redacted]@example.test/repo.git");
+    expect(message).not.toContain("fixture-secret");
   });
 });
 
