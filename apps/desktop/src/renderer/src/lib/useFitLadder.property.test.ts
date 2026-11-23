@@ -275,7 +275,10 @@ it("fits in-flow changes while ignoring overlay and same-column updates, even in
   }
 
   const operations = fc.array(fc.tuple(
-    fc.constantFrom("overlay", "same-columns", "columns", "in-flow", "mixed"),
+    fc.constantFrom(
+      "overlay", "overlay-child", "same-columns", "columns", "in-flow",
+      "mixed", "mixed-nodes", "remove-in-flow"
+    ),
     fc.integer({ min: 1, max: 3 })
   ), { minLength: 4, maxLength: 16 });
   let key = 0;
@@ -297,14 +300,27 @@ it("fits in-flow changes while ignoring overlay and same-column updates, even in
     };
     await act(() => TestResizeObserver.deliver(row));
     for (const [operation, value] of sequence) {
+      const inFlow = document.createElement("i");
+      if (operation === "remove-in-flow") {
+        await act(() => {
+          offset++;
+          row.insertBefore(inFlow, end);
+        });
+      }
       reads = 0;
-      const changesFit = operation === "columns" || operation === "in-flow" || operation === "mixed";
+      const changesFit = operation !== "overlay" && operation !== "overlay-child" && operation !== "same-columns";
       await act(() => {
         if (operation === "overlay" || operation === "mixed") {
           if (overlay.parentElement === null) row.insertBefore(overlay, end);
           else if (segment.dataset["value"] === String(value)) overlay.remove();
           segment.setAttribute("style", `flex-grow: ${value}`);
           segment.dataset["value"] = String(value);
+        }
+        if (operation === "overlay-child") {
+          if (overlay.parentElement === null) row.insertBefore(overlay, end);
+          const child = overlay.appendChild(document.createElement("i"));
+          child.style.flexGrow = String(value);
+          child.remove();
         }
         if (operation === "same-columns") {
           count.firstChild!.nodeValue = String(value).repeat(columns);
@@ -317,6 +333,16 @@ it("fits in-flow changes while ignoring overlay and same-column updates, even in
         if (operation === "in-flow" || operation === "mixed") {
           offset = (offset + value) % 3;
           end.setAttribute("width", String(offset));
+        }
+        if (operation === "mixed-nodes") {
+          const fragment = document.createDocumentFragment();
+          fragment.append(overlay.cloneNode(), inFlow);
+          offset++;
+          row.insertBefore(fragment, end);
+        }
+        if (operation === "remove-in-flow") {
+          offset--;
+          inFlow.remove();
         }
       });
       if (changesFit) {

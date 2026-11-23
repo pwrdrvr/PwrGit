@@ -97,7 +97,13 @@ export function useFitLadder(
       // hidden by a step. data-mid and data-short supply CSS-generated text.
       // The toolbars' ARIA states change paint and accessible names only.
       observer = new MutationObserver((changes) => {
-        if (changes.some(affectsFit)) refit();
+        // Subtree records survive removal. The childList record on the
+        // remaining parent accounts for any change to in-flow content.
+        const documentRoot = document.documentElement;
+        if (changes.some((change) =>
+          (change.target === row || change.target === documentRoot || box.contains(change.target)) &&
+          affectsFit(change)
+        )) refit();
       });
       const attributes = ["class", "style", "hidden", "width", "height", "data-mid", "data-short", FIT_TEXT_COLUMNS];
       observer.observe(box, {
