@@ -10,6 +10,7 @@ import { changedEvents } from "./live-events.js";
 import { McpAccessError, type McpAuthorizer } from "./access-policy.js";
 import type { LiveStatusLoader } from "./forge-status.js";
 import type { LiveStatusSnapshot } from "./types.js";
+import type { StackResources } from "./stack-tools.js";
 
 export const STATUS_RESOURCE_PROTOCOL = "pwrgit.status-resource/v1" as const;
 export const STATUS_RESOURCE_VERSION = "1.0" as const;
@@ -58,7 +59,8 @@ export class StatusResourceRegistry {
     private readonly mcp: McpServer,
     private readonly loader: LiveStatusLoader,
     private readonly authorizer: McpAuthorizer,
-    supportsSubscriptions = true
+    supportsSubscriptions = true,
+    stackResources?: StackResources,
   ) {
     mcp.registerResource(
       "pwrgit-live-status",
@@ -93,6 +95,10 @@ export class StatusResourceRegistry {
     });
     if (!supportsSubscriptions) return;
     mcp.server.setRequestHandler(SubscribeRequestSchema, async (request) => {
+      if (stackResources?.handles(request.params.uri)) {
+        await stackResources.subscribe(request.params.uri);
+        return {};
+      }
       const watch = this.requireWatch(request.params.uri);
       await this.authorizer.authorize({
         capabilities: ["forge.status.read", "status.subscribe"],
@@ -102,6 +108,10 @@ export class StatusResourceRegistry {
       return {};
     });
     mcp.server.setRequestHandler(UnsubscribeRequestSchema, async (request) => {
+      if (stackResources?.handles(request.params.uri)) {
+        stackResources.unsubscribe(request.params.uri);
+        return {};
+      }
       const watch = this.requireWatch(request.params.uri);
       this.unsubscribe(watch);
       return {};

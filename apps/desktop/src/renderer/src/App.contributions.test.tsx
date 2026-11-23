@@ -2,8 +2,16 @@
 import { act, type ComponentProps } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { Commit, Repo, RepoSearchHit } from "@pwrgit/shared";
+import type { Commit, Repo, RepoSearchHit, RepositoryStack, StackSnapshot, Worktree } from "@pwrgit/shared";
+import { useStackNavigation } from "./features/stacks/stack-navigation";
 import type { RepoSwitcherOverlay } from "./features/sidebar/RepoSwitcherOverlay";
+
+const exampleStack: RepositoryStack = {
+  id: "demo-stack", source: "tracked", catalogRepository: "", trunk: { branch: "main" },
+  layers: [{ branch: "demo-branch", parent: "main", health: {
+    inSync: true, needsRestack: false, needsPush: false, remoteAhead: false, drift: false, parentMerged: false,
+  } }],
+};
 
 const mocks = vi.hoisted(() => ({
   profiles: {} as Record<string, unknown>,
@@ -34,14 +42,20 @@ vi.mock("./lib/pwrgit", () => ({
   }
 }));
 vi.mock("./features/chrome/TitleBar", () => ({
-  TitleBar: ({ onOpenContributions }: { onOpenContributions: () => void }) => (
-    <button onClick={onOpenContributions}>Contributions</button>
+  TitleBar: ({ onOpenContributions, repo, worktree }: { onOpenContributions: () => void; repo?: Repo; worktree?: Worktree }) => (
+    <button data-repo={repo?.id} data-worktree={worktree?.id} onClick={onOpenContributions}>Contributions</button>
   )
 }));
 vi.mock("./features/contributions/ContributionScreen", () => ({
   ContributionScreen: () => <div data-testid="contributions">Analytics</div>
 }));
-vi.mock("./features/sidebar/Sidebar", () => ({ Sidebar: () => null }));
+vi.mock("./features/sidebar/Sidebar", () => ({
+  Sidebar: () => {
+    const nav = useStackNavigation();
+    return <button data-testid="stack-pick" aria-pressed={nav?.pick != null}
+      onClick={() => nav?.select({ repoId: "demo-two", stack: exampleStack })}>Open demo stack</button>;
+  },
+}));
 vi.mock("./features/sidebar/RepoSwitcherOverlay", () => ({
   RepoSwitcherOverlay: (props: ComponentProps<typeof RepoSwitcherOverlay>) => {
     mocks.search = props;
@@ -317,5 +331,39 @@ describe("Contributions navigation in App", () => {
     expect(
       container.querySelector("[data-testid=contributions]")
     ).not.toBeNull();
+  });
+});
+
+describe("Stack navigation in App", () => {
+  it.each([false, true])("uses one pane owner and restores the title after removal (worktree selected: %s)", async selected => {
+    if (!selected) window.localStorage.clear();
+    vi.stubGlobal("pwrgit", {});
+    let snapshot: StackSnapshot = { schemaVersion: 1, readOnly: false, stacks: [exampleStack] };
+    mocks.dispatch.mockImplementation(async (name: string, request: { repoId?: string }) => ({
+      ok: true,
+      value: name === "stack:list" ? { ...snapshot, stacks: request.repoId === "demo-two" ? snapshot.stacks : [] }
+        : { repoId: null, worktreeId: null, branch: null },
+    }));
+    try {
+      await act(async () => root.render(<App />));
+      const pick = container.querySelector<HTMLButtonElement>("[data-testid=stack-pick]")!;
+      const title = container.querySelector("button")!;
+      const main = container.querySelector("main")!;
+      await act(async () => pick.click());
+      expect(main.querySelector(".stack-view")).not.toBeNull();
+      expect(main.querySelector(".main-empty")).toBeNull();
+      expect(title.dataset["repo"]).toBe("demo-two");
+      expect(title.dataset["worktree"]).toBeUndefined();
+
+      snapshot = { ...snapshot, stacks: [] };
+      await act(async () => window.dispatchEvent(new Event("focus")));
+      expect(main.querySelector(".stack-view")).toBeNull();
+      expect(pick.getAttribute("aria-pressed")).toBe("false");
+      expect(title.dataset["repo"]).toBe(selected ? "demo-one" : undefined);
+      expect(title.dataset["worktree"]).toBe(selected ? "demo-one-wt" : undefined);
+      expect(Boolean(main.querySelector(".main-empty"))).toBe(!selected);
+    } finally {
+      vi.unstubAllGlobals();
+    }
   });
 });

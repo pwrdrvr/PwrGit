@@ -22,6 +22,8 @@ import {
  * copy is exactly how the CLI name ended up with two spellings.
  */
 export type ForgeProduct = {
+  /** Local catalog used for stack metadata on this forge. */
+  readonly stackCatalog: "gh-stack" | "pwrgit-stack";
   /** The product's name, as the user sees it written. */
   readonly label: string;
   /**
@@ -188,6 +190,7 @@ export type ForgeInstall = {
  */
 export const FORGE_PRODUCTS: Readonly<Record<ForgeKind, ForgeProduct>> = freeze({
   gitcafe: {
+    stackCatalog: "pwrgit-stack",
     label: "GitCafe",
     cli: "cafe",
     install: {
@@ -234,6 +237,7 @@ export const FORGE_PRODUCTS: Readonly<Record<ForgeKind, ForgeProduct>> = freeze(
     }
   },
   github: {
+    stackCatalog: "gh-stack",
     label: "GitHub",
     cli: "gh",
     install: {
@@ -286,6 +290,7 @@ export const FORGE_PRODUCTS: Readonly<Record<ForgeKind, ForgeProduct>> = freeze(
     }
   },
   gitlab: {
+    stackCatalog: "pwrgit-stack",
     label: "GitLab",
     cli: "glab",
     install: {

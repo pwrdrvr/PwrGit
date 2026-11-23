@@ -38,3 +38,5 @@ export * from "./repo-search";
 export * from "./hot-cpu-profile";
 export * from "./hot-cpu-rules";
 export * from "./startup-cpu-profile";
+
+export * from "./stacks";

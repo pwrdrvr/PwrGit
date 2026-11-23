@@ -192,6 +192,10 @@ import { ConsentBroker } from "./agent-access/consent-broker";
 import { createConsentWindow } from "./agent-access/consent-window";
 import { createDesktopMcpRunner } from "./agent-access/desktop-mcp-runner";
 import { createAppBackend } from "./agent-access/app-backend";
+import { mcpExecutablePath } from "./agent-access/mcp-executable";
+import { NativeStackLocks } from "./git/stack-catalog-store";
+import { StackReader, stackRunner } from "./git/stack-reader";
+import { registerStackReadHandlers } from "./git/stack-read-handlers";
 import { AgentAccessService } from "./agent-access/agent-access-service";
 import { registerAgentAccessHandlers } from "./agent-access/agent-access-handlers";
 import { initLogConsole } from "./log-console";
@@ -895,6 +899,12 @@ if (!gotSingleInstanceLock) {
     const openPrService = new OpenPrService(db, execGit, {
       resolveForge: (url) => resolveEnabledForge(url)
     });
+    const stackReader = new StackReader(
+      stackRunner(execGit), new NativeStackLocks(mcpExecutablePath),
+      repoId => openPrService.list(repoId),
+      (repoId, branch) => prService.cachedBranchPrObservation(repoId, branch)
+    );
+    registerStackReadHandlers(bus, id => indexer.getRepo(id), stackReader);
     const avatarThumbnails = new GitHubAvatarThumbnailCache(db, {
       cacheDir: join(app.getPath("userData"), "cache", "github-avatar-thumbnails")
     });

@@ -268,13 +268,20 @@ export class PrService {
   }
 
   cachedBranchPr(repoId: string, branch: string): PrSummary | null | undefined {
+    const cached = this.cachedBranchPrObservation(repoId, branch);
+    return cached === undefined ? undefined : cached?.pr ?? null;
+  }
+
+  cachedBranchPrObservation(repoId: string, branch: string): { pr: PrSummary; fetchedAt: number } | null | undefined {
     const row = this.db
       .prepare(
-        `SELECT number, url, title, state, is_draft, ${PR_DETAIL_COLUMNS_SQL}
+        `SELECT number, url, title, state, is_draft, ${PR_DETAIL_COLUMNS_SQL}, fetched_at
          FROM branch_pr WHERE repo_id = ? AND branch = ?`
       )
-      .get(repoId, branch) as CachedPr | undefined;
-    return row === undefined ? undefined : summaryFromCached(row);
+      .get(repoId, branch) as (CachedPr & { fetched_at: string }) | undefined;
+    if (!row) return undefined;
+    const pr = summaryFromCached(row);
+    return pr ? { pr, fetchedAt: Date.parse(row.fetched_at) } : null;
   }
 
   ownsWorktree(repoId: string, worktreeId: string): boolean {

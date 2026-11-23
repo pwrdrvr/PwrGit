@@ -7,6 +7,7 @@ import {
 } from "react";
 import {
   forgeLabel,
+  stackPosition,
   type ChangeRequestEntry,
   type ChangeRequestList,
   type Repo,
@@ -17,6 +18,8 @@ import {
   changeRequestPickKey,
   useChangeRequestSelection
 } from "../change-request/change-request-selection";
+import { StackPositionChip, StacksSidebar } from "../stacks/StackViews";
+import { useStackNavigation, useStackSnapshot } from "../stacks/stack-navigation";
 import { PlusGlyph } from "../../lib/PlusGlyph";
 import { RefreshGlyph } from "../../lib/RefreshGlyph";
 import { hoverTooltip, useViewportTooltip } from "../../lib/useViewportTooltip";
@@ -129,6 +132,10 @@ export function RepoChangeRequestSection({
     // groups without any change to the open list itself.
     relocateKey: repo.worktrees.map((w) => `${w.id}:${w.branch}`).join("|")
   });
+  const stackNavigation = useStackNavigation();
+  const { snapshot } = useStackSnapshot(stackNavigation ? repo.id : undefined, repo.profileId);
+  const stacks = snapshot?.stacks ?? [];
+  const stackSection = <StacksSidebar repo={repo} stacks={stacks} />;
   const tip = useViewportTooltip();
   const [open, setOpen] = usePersistedOpen(
     `pwrgit.changeRequestsOpen.${repo.id}`
@@ -161,7 +168,7 @@ export function RepoChangeRequestSection({
       : repo.identity.host;
   const loading = list == null;
   const forge = loading ? predicted : (list.forge ?? null);
-  if (forge === null) return null;
+  if (forge === null) return stacks.length ? stackSection : null;
   const shown: ChangeRequestList = list ?? {
     forge,
     fetchedAt: null,
@@ -313,6 +320,7 @@ export function RepoChangeRequestSection({
   const row = ({ entry, paired }: ChangeRequestRow, index: number): ReactElement => {
     const { pr, location } = entry;
     const key = changeRequestKey(entry);
+    const position = stackPosition(stacks, layer => layer.pr?.number === pr.number && layer.forgeRepo === entry.forgeRepo);
     const age = compactAge(pr.updatedAt ?? pr.createdAt, now);
     // Null only for a missing head the forge did not name either: nothing to
     // copy, so no copy target.
@@ -358,6 +366,8 @@ export function RepoChangeRequestSection({
       >
         <div className="ref-cr-row__line">
           <PrChip pr={pr} repoId={repo.id} />
+          {position && stackNavigation && <StackPositionChip position={position}
+            onSelect={() => stackNavigation.select({ repoId: repo.id, stack: position.stack })} />}
           <span className="ref-cr-row__title" {...hoverTooltip(tip, pr.title)}>
             {pr.title}
           </span>
@@ -469,6 +479,8 @@ export function RepoChangeRequestSection({
   };
 
   return (
+    <>
+    {stackSection}
     <div className="ref-section ref-cr-section">
       <div className="ref-section__head-wrap">
         <button
@@ -674,5 +686,6 @@ export function RepoChangeRequestSection({
       )}
       {tip.tooltipNode}
     </div>
+    </>
   );
 }

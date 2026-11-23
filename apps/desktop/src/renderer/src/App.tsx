@@ -1,3 +1,5 @@
+import { StackNavigationContext, type StackPick, useStackSnapshot } from "./features/stacks/stack-navigation";
+import { StackRail, StackView } from "./features/stacks/StackViews";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type {
   ChangeRequestEntry,
@@ -176,6 +178,14 @@ export function App() {
    * the change request (Esc, or picking any worktree) goes back to it.
    */
   const [changeRequest, setChangeRequest] = useState<ChangeRequestPick | null>(null);
+  const [stackPick, setStackPick] = useState<StackPick | null>(null);
+  const closeStack = useCallback(() => setStackPick(null), []);
+  const selectStack = useCallback((pick: StackPick) => {
+    setChangeRequest(null);
+    setContributionsOpen(false);
+    setStackPick(pick);
+  }, []);
+  const stackNavigation = useMemo(() => ({ pick: stackPick, select: selectStack }), [stackPick, selectStack]);
   const restoredSelectionForProfileRef = useRef<string | null>(null);
   const worktreePrMonitorIdRef = useRef(crypto.randomUUID());
   // A queued "jump to this repo (and optionally this worktree)" — from ⌘F
@@ -520,6 +530,7 @@ export function App() {
     if (resolved.kind === "select") {
       setContributionsOpen(false);
       setChangeRequest(null);
+      setStackPick(null);
       setSelection({ repoId: repo.id, worktreeId: resolved.worktreeId });
       // A repo-name pick must reveal the row even when its primary checkout
       // was already selected and the user has since scrolled it away.
@@ -585,6 +596,7 @@ export function App() {
   const selectWorktree = useCallback((repo: Repo, worktree: Worktree) => {
     setContributionsOpen(false);
     setChangeRequest(null);
+    setStackPick(null);
     setSelection({ repoId: repo.id, worktreeId: worktree.id });
   }, []);
 
@@ -594,7 +606,7 @@ export function App() {
         changeRequest === null
           ? null
           : changeRequestPickKey(changeRequest.repoId, changeRequest.entry),
-      select: setChangeRequest,
+      select: pick => { setStackPick(null); setChangeRequest(pick); },
       clear: () => setChangeRequest(null)
     }),
     [changeRequest]
@@ -785,6 +797,15 @@ export function App() {
     changeRequestRepo?.worktrees.find((w) => !w.missing)?.id ??
     null;
   const shownChangeRequest = changeRequestRepo === null ? null : changeRequest;
+  const stackRepo = stackPick ? repos.find(repo => repo.id === stackPick.repoId) : undefined;
+  const { snapshot: shownStacks } = useStackSnapshot(stackRepo?.id, stackRepo?.profileId);
+  const stack = stackPick && stackRepo
+    ? shownStacks ? shownStacks.stacks.find(model => model.id === stackPick.stack.id) ?? null : stackPick.stack
+    : null;
+  useEffect(() => {
+    if (stackPick && stack === null) setStackPick(current => current === stackPick ? null : current);
+  }, [stack, stackPick]);
+  const { snapshot: lineageStacks } = useStackSnapshot(selectedRepo?.id, selectedRepo?.profileId);
   const lineageVisible = shownChangeRequest === null && diffTarget === null && fileInsightTarget === null;
   const visibleLineageRepoId = lineageVisible && selectedWorktree !== null ? selectedWorktree.repoId : null;
   useLayoutEffect(() => {
@@ -970,6 +991,7 @@ export function App() {
     // Every other way of selecting a worktree leaves a change request open in
     // place; so does this one.
     setChangeRequest(null);
+    setStackPick(null);
     setSelection({ repoId: location.repoId, worktreeId: location.worktreeId });
     setPendingCommit(
       location.commit === undefined
@@ -1012,6 +1034,10 @@ export function App() {
       requestAnimationFrame(() => document.querySelector<HTMLButtonElement>("[data-contributions-nav]")?.focus());
       return;
     }
+    if (stack !== null) {
+      closeStack();
+      return;
+    }
     if (shownChangeRequest !== null) {
       setChangeRequest(null);
       return;
@@ -1025,13 +1051,13 @@ export function App() {
       return;
     }
     history.goBack();
-  }, [contributionsOpen, diffTarget, fileInsightTarget, history, shownChangeRequest]);
+  }, [closeStack, contributionsOpen, diffTarget, fileInsightTarget, history, shownChangeRequest, stack]);
   const goForward = useCallback(() => history.goForward(), [history]);
   useHistoryNavHotkeys({ onBack: goBack, onForward: goForward });
   const backTarget = history.stacks.back[history.stacks.back.length - 1];
   const forwardTarget = history.stacks.forward[0];
   const backLabel =
-    shownChangeRequest !== null
+    stack !== null ? "Lineage" : shownChangeRequest !== null
       ? selectedWorktree === null
         ? undefined
         : selectedWorktree.branch
@@ -1047,6 +1073,7 @@ export function App() {
   const historyControls = {
     canGoBack:
       history.canGoBack ||
+      stack !== null ||
       shownChangeRequest !== null ||
       diffTarget !== null ||
       fileInsightTarget !== null,
@@ -1085,8 +1112,8 @@ export function App() {
         onOpenSearch={() => setOverlayOpen(true)}
         contributionsOpen={contributionsOpen}
         {...(activeProfile ? { onOpenContributions: () => setContributionsOpen(open => !open) } : {})}
-        repo={contributionsOpen ? null : shownChangeRequest === null ? selectedRepo : changeRequestRepo}
-        worktree={contributionsOpen ? null : selectedWorktree}
+        repo={contributionsOpen ? null : stack && stackRepo ? stackRepo : shownChangeRequest === null ? selectedRepo : changeRequestRepo}
+        worktree={contributionsOpen || stack !== null ? null : selectedWorktree}
         history={contributionsOpen ? { ...historyControls, canGoBack: true, backLabel: "Repositories", canGoForward: false } : historyControls}
         {...(shownChangeRequest === null
           ? {}
@@ -1122,7 +1149,8 @@ export function App() {
       {contributionsOpen && activeProfile ? <ContributionScreen profileId={activeProfile.id} onClose={() => {
         setContributionsOpen(false);
         requestAnimationFrame(() => document.querySelector<HTMLButtonElement>("[data-contributions-nav]")?.focus());
-      }} /> : <div className="app-body" style={{ gridTemplateColumns }}>
+      }} /> : <StackNavigationContext.Provider value={stackNavigation}>
+      <div className="app-body" style={{ gridTemplateColumns }}>
         <ChangeRequestSelectionContext.Provider value={changeRequestSelection}>
         <Sidebar
           onLocateTag={(repoId, tag) => {
@@ -1140,6 +1168,7 @@ export function App() {
               return;
             }
             setChangeRequest(null);
+            setStackPick(null);
             setSelection({ repoId, worktreeId: worktree.id });
             setPendingTag({ worktreeId: worktree.id, tag });
           }}
@@ -1210,12 +1239,14 @@ export function App() {
               {...(railCollapsed ? { onShowRail: showRail } : {})}
             />
           )}
+          {stack && stackRepo && <StackView stack={stack} repoId={stackRepo.id} onClose={closeStack}
+            {...(railCollapsed ? { onShowRail: showRail } : {})} />}
           {selectedRepo !== null && selectedWorktree !== null ? (
             // Hidden, not unmounted, while a change request is shown: going
             // back is instant, the way the graph stays under an open diff.
             <div
               className="worktree-view"
-              style={{ display: shownChangeRequest === null ? "contents" : "none" }}
+              style={{ display: shownChangeRequest === null && stack === null ? "contents" : "none" }}
             >
               <WorktreeHeader
                 repo={selectedRepo}
@@ -1238,6 +1269,8 @@ export function App() {
               >
                 <LineageGraph
                   repoId={selectedRepo.id}
+                  {...(lineageStacks ? { stacks: lineageStacks.stacks } : {})}
+                  onOpenStack={model => selectStack({ repoId: selectedRepo.id, stack: model })}
                   repoName={selectedRepo.name}
                   worktreeId={selectedWorktree.id}
                   worktreePath={selectedWorktree.path}
@@ -1349,7 +1382,7 @@ export function App() {
                 </ErrorBoundary>
               )}
             </div>
-          ) : shownChangeRequest !== null ? null : showStartScreen &&
+          ) : shownChangeRequest !== null || stack !== null ? null : showStartScreen &&
             activeProfile !== null ? (
             // design/New User Journey - UX Review, card 4c: a profile with no
             // repositories gets the ways to get one, not a selection prompt.
@@ -1416,7 +1449,8 @@ export function App() {
           />
         )}
 
-        {!railCollapsed && shownChangeRequest === null && (
+        {!railCollapsed && stack && <StackRail stack={stack} onCollapse={() => setRailCollapsed(true)} />}
+        {!railCollapsed && shownChangeRequest === null && stack === null && (
           <Rail
             worktree={selectedWorktree}
             state={worktreeState}
@@ -1477,13 +1511,13 @@ export function App() {
             The PR view's header carries one too. */}
         {railCollapsed &&
           shownChangeRequest === null &&
-          (selectedRepo === null || selectedWorktree === null) && (
+          stack === null && (selectedRepo === null || selectedWorktree === null) && (
           <button className="rail-reopen" onClick={showRail}>
             ‹ Panel
           </button>
         )}
       </div>
-
+      </StackNavigationContext.Provider>
       }
       {overlayOpen && (
         <RepoSwitcherOverlay

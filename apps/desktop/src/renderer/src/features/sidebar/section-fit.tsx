@@ -88,7 +88,7 @@ export function useRefitSections(): void {
   useLayoutEffect(() => refit());
 }
 
-export type SectionKind = "worktrees" | "changeRequests" | "branches" | "tags" | "remotes";
+export type SectionKind = "worktrees" | "stacks" | "changeRequests" | "branches" | "tags" | "remotes";
 
 /**
  * The glyph a heading draws at `fit-glyphs`, before its label. Hidden until
@@ -101,6 +101,10 @@ export function SectionGlyph({ kind }: { kind: SectionKind }): ReactElement {
     <span className="ref-section__glyph" aria-hidden="true">
       {kind === "worktrees" ? (
         <WorktreeGlyph />
+      ) : kind === "stacks" ? (
+        <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinejoin="round">
+          <path d="m2 5 6-3 6 3-6 3zM2 8l6 3 6-3M2 11l6 3 6-3" />
+        </svg>
       ) : kind === "changeRequests" ? (
         <ChangeRequestGlyph size={12} />
       ) : kind === "branches" ? (

@@ -51,6 +51,11 @@ export function createAppBackend(db: DB, profiles: ProfileService, indexer: Repo
         })
       };
     },
+    async stackList(repo) {
+      const result = await bus.dispatch("stack:list", { repoId: repo.id, profileId: repo.profileId });
+      if (!result.ok) throw new Error(result.error.message);
+      return result.value;
+    },
     async open(repo, worktreeId) {
       const result = await bus.dispatch("profile:openWindow", { profileId: repo.profileId, revealRepoId: repo.id,
         ...(worktreeId ? { revealWorktreeId: worktreeId } : {}) });

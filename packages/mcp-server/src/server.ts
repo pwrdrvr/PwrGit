@@ -18,6 +18,7 @@ import {
 import { readRepositoryInfo } from "./git-metadata.js";
 import { liveStatusCapabilities } from "./live-events.js";
 import { StatusResourceRegistry } from "./status-resources.js";
+import { StackResources } from "./stack-tools.js";
 import {
   McpAccessError,
   PolicyFileAuthorizer,
@@ -107,11 +108,15 @@ export async function createPwrGitMcpServer(
     }
   );
   limitMcpRequests(mcp.server);
+  const stackResources = options.appBackend?.stackList
+    ? new StackResources(mcp, options.appBackend, authorizer, options.supportsSubscriptions ?? true)
+    : undefined;
   const statusResources = new StatusResourceRegistry(
     mcp,
     liveStatusLoader,
     authorizer,
-    options.supportsSubscriptions ?? true
+    options.supportsSubscriptions ?? true,
+    stackResources
   );
 
   mcp.registerResource(
@@ -387,6 +392,7 @@ export async function createPwrGitMcpServer(
       if (closed) return;
       closed = true;
       statusResources.close();
+      stackResources?.close();
       await mcp.close().catch(() => undefined);
     }
   };
