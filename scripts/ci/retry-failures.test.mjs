@@ -18,6 +18,24 @@ describe("failure classification", () => {
     expect(unsafeFailure([{ name: "AssertionError", message: "expected 1 to be 2" }])).toBe(false);
     expect(unsafeFailure([{ message: "Error: \u001b[2mexpect(\u001b[22mreceived)" }])).toBe(false);
   });
+
+  it("accepts a confirmed worktree-list exit only for E2E and only with clean error evidence", () => {
+    const command = "Command failed: git worktree list\nfatal: Invalid path '/repo/.git/worktrees/fix-cache-installer': No such file or directory";
+    const exit = { message: `TestCommandExitError: ${command}` };
+    const e2e = { allowCommandExit: true };
+    expect(unsafeFailure([exit], e2e)).toBe(false);
+    expect(unsafeFailure([{ message: `${exit.message.replaceAll("\n", "\r\n")}\r\n` }], e2e)).toBe(false);
+    expect(unsafeFailure([exit])).toBe(true);
+    expect(unsafeFailure([{ message: `Error: ${command}` }], e2e)).toBe(true);
+    for (const reason of ["Permission denied", "No space left on device"]) {
+      expect(unsafeFailure([{ message: exit.message.replace("No such file or directory", reason) }], e2e)).toBe(true);
+      expect(unsafeFailure([{ message: `${exit.message}\nfatal: ${reason}\n` }], e2e)).toBe(true);
+    }
+    expect(unsafeFailure([{ message: exit.message.replace("git worktree list", "git add README.md") }], e2e)).toBe(true);
+    expect(unsafeFailure([{ message: exit.message.replace("/.git/worktrees/", "/elsewhere/") }], e2e)).toBe(true);
+    expect(unsafeFailure([{ message: `${exit.message} (EIO)` }], e2e)).toBe(true);
+    expect(unsafeFailure([exit, { message: "Error: worker process exited unexpectedly (code=23, signal=null)" }], e2e)).toBe(true);
+  });
 });
 
 describe("unit retry selection", () => {

@@ -1,13 +1,18 @@
+// A missing linked-worktree record can race with Git's worktree enumeration.
+// Require the whole diagnostic so other command exits still fail closed.
+const missingWorktreeMetadata = /^TestCommandExitError: Command failed: git worktree list\r?\nfatal: Invalid path '(?:[^\r\n]+[/\\])?\.git[/\\]worktrees[/\\][^/\\\r\n]+': No such file or directory(?:\r?\n)?$/;
+
 // A runner can attach OS and process failures to an individual test rather
 // than emitting a global error. Do not use those failures as retry candidates.
-export function unsafeFailure(errors) {
+export function unsafeFailure(errors, { allowCommandExit = false } = {}) {
   if (!Array.isArray(errors) || errors.length === 0) return true;
   const infrastructure = /\b(?:EACCES|EPERM|ENOSPC|EMFILE|ENFILE|ENOMEM|EIO|EADDRINUSE|EADDRNOTAVAIL|ECONNREFUSED|ECONNRESET|EPIPE|ENOENT|ETIMEDOUT)\b|(?:browser|worker|process) (?:has )?(?:crashed|exited unexpectedly|closed unexpectedly)/i;
   return errors.some((error) => {
     if (!error) return true;
     const message = String(error.message ?? error.value ?? "").replace(/\x1b\[[0-9;]*m/g, "");
     const isAssertion = error.name === "AssertionError" || /^Error:\s*expect\(/.test(message);
-    return !isAssertion || infrastructure.test(`${error.code ?? ""} ${message}`);
+    const isCommandExit = allowCommandExit && missingWorktreeMetadata.test(message);
+    return !(isAssertion || isCommandExit) || infrastructure.test(`${error.code ?? ""} ${message}`);
   });
 }
 

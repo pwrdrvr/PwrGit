@@ -21,12 +21,22 @@ const GIT_ENV: NodeJS.ProcessEnv = {
   GIT_COMMITTER_EMAIL: "test@pwrgit.com"
 };
 
+function gitWithEnv(cwd: string, args: string[], env = GIT_ENV): string {
+  try {
+    return execFileSync("git", args, { cwd, env, encoding: "utf8" }).trim();
+  } catch (error) {
+    // Playwright serializes the error name and message, but drops the child
+    // process status and signal. Preserve the distinction for CI retry selection.
+    if (error instanceof Error && "status" in error && typeof error.status === "number"
+      && error.status > 0 && "signal" in error && error.signal === null && !("code" in error)) {
+      error.name = "TestCommandExitError";
+    }
+    throw error;
+  }
+}
+
 function git(cwd: string, ...args: string[]): string {
-  return execFileSync("git", args, {
-    cwd,
-    env: GIT_ENV,
-    encoding: "utf8"
-  }).trim();
+  return gitWithEnv(cwd, args);
 }
 
 const slug = (branch: string): string => branch.replace(/\//g, "-");
@@ -362,16 +372,12 @@ export function createGitSandbox(): GitSandbox {
   ): void => {
     writeFileSync(join(cwd, file), `${message}\n`);
     git(cwd, "add", "-A");
-    execFileSync("git", ["commit", "-m", message], {
-      cwd,
-      env: {
-        ...GIT_ENV,
-        GIT_AUTHOR_NAME: "Someone Else",
-        GIT_AUTHOR_EMAIL: email,
-        GIT_COMMITTER_NAME: "Someone Else",
-        GIT_COMMITTER_EMAIL: email
-      },
-      encoding: "utf8"
+    gitWithEnv(cwd, ["commit", "-m", message], {
+      ...GIT_ENV,
+      GIT_AUTHOR_NAME: "Someone Else",
+      GIT_AUTHOR_EMAIL: email,
+      GIT_COMMITTER_NAME: "Someone Else",
+      GIT_COMMITTER_EMAIL: email
     });
   };
 
@@ -427,10 +433,8 @@ export function createGitSandbox(): GitSandbox {
     epochSeconds: number
   ): void => {
     const date = `${epochSeconds} +0000`;
-    execFileSync("git", ["commit", "--allow-empty", "-m", message], {
-      cwd,
-      env: { ...GIT_ENV, GIT_AUTHOR_DATE: date, GIT_COMMITTER_DATE: date },
-      encoding: "utf8"
+    gitWithEnv(cwd, ["commit", "--allow-empty", "-m", message], {
+      ...GIT_ENV, GIT_AUTHOR_DATE: date, GIT_COMMITTER_DATE: date
     });
   };
 

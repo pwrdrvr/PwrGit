@@ -30,7 +30,7 @@ export default class CiRetryReporter {
       expectedStatus: test.expectedStatus,
       status: test.results.length === 1 ? test.results[0].status : null,
       unsafeFailure: test.outcome() === "unexpected"
-        ? unsafeFailure(test.results.flatMap((attempt) => attempt.errors ?? [])) : false,
+        ? unsafeFailure(test.results.flatMap((attempt) => attempt.errors ?? []), { allowCommandExit: true }) : false,
       completed: test.results.length === 1
         && test.results.every((attempt) => attempt.status !== "interrupted")
         && (test.outcome() !== "skipped" || test.expectedStatus === "skipped"),

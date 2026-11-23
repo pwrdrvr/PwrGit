@@ -516,6 +516,10 @@ test.describe("removing a worktree whose folder resists", () => {
       await confirmDialogButton(window).click();
 
       // The read-only cache no longer stops anything.
+      await expect(dialog.locator(".prune__count")).toHaveText(
+        stuckOnDisk ? "1 removed" : "2 removed",
+        { timeout: 40_000 }
+      );
       await expect.poll(() => existsSync(goCache), { timeout: 40_000 }).toBe(false);
       expect(box.git(repo.path, "worktree", "list")).not.toContain(goCache);
 
@@ -543,6 +547,8 @@ test.describe("removing a worktree whose folder resists", () => {
 
       execFileSync("chflags", ["nouchg", immutable]);
       await card.getByRole("button", { name: "Retry" }).click();
+      // The alert clears when Retry starts. Wait for Git's removal result.
+      await expect(dialog.locator(".prune__count")).toHaveText("2 removed", { timeout: 40_000 });
       await expect(dialog.getByRole("alert")).toHaveCount(0, { timeout: 40_000 });
       await expect.poll(() => existsSync(stuck), { timeout: 40_000 }).toBe(false);
       expect(box.git(repo.path, "worktree", "list")).not.toContain(stuck);
