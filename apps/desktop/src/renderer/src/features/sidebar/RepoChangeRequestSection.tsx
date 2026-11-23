@@ -17,7 +17,7 @@ import {
   changeRequestPickKey,
   useChangeRequestSelection
 } from "../change-request/change-request-selection";
-import { StackListGroup, StackPositionTag, StacksSidebar } from "../stacks/StackViews";
+import { StackListGroup, StacksSidebar } from "../stacks/StackViews";
 import { stackItemRows, stackListItems, stackPositionLabel, type StackListItem } from "../stacks/stack-presentation";
 import type { StackPosition } from "@pwrgit/shared";
 import { useStackNavigation, useStackSnapshot } from "../stacks/stack-navigation";
@@ -376,9 +376,9 @@ export function RepoChangeRequestSection({
         }}
       >
         <div className="ref-cr-row__line">
-          {/* Beside the rail the rail node is the status; on its own the chip is. */}
-          <PrChip pr={pr} repoId={repo.id} stacked={position !== undefined && !ungrouped} />
-          {ungrouped && position && <StackPositionTag position={position} repoId={repo.id} writable={writable} />}
+          {/* Beside the rail the rail node is the status and the rail the
+              stack; on its own the chip is both, with its 2/3 tag. */}
+          <PrChip pr={pr} repoId={repo.id} stacked={position !== undefined && !ungrouped} stackWritable={writable} />
           <span className="ref-cr-row__title" {...hoverTooltip(tip, pr.title)}>
             {pr.title}
           </span>

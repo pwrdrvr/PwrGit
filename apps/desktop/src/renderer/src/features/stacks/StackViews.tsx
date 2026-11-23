@@ -12,7 +12,7 @@ import { lastSegment } from "../sidebar/repo-view";
 import type { ChangeRequestRow } from "../sidebar/change-request-groups";
 import { StackNode, StackPopoverTrigger } from "./StackPopover";
 import {
-  stackActionAt, stackDestination, stackLayerKey, stackMembers, stackName, stackNextAction,
+  STACK_BUCKET_LABELS, stackBucket, stackTally, type StackBucket, stackActionAt, stackDestination, stackLayerKey, stackMembers, stackName, stackNextAction,
   stackPositionLabel, stackSource, stackStateLabel, type StackListItem
 } from "./stack-presentation";
 import { useStackLaneStyle, useStackNavigation } from "./stack-navigation";
@@ -48,19 +48,31 @@ export function StackListGroup({ item, repoId, entries, writable, renderRow }: {
   </div>;
 }
 
-/** Outside the grouped view a stacked row has no rail, so it keeps its own
- * status dot and shows the stack only as its position, which opens the stack. */
-export function StackPositionTag({ position, repoId, writable }: { position: StackPosition; repoId: string; writable: boolean }) {
-  return <StackPopoverTrigger repoId={repoId} stack={position.stack} writable={writable} current={position.layer.branch}
-    className="stack-position-tag" label={`${stackPositionLabel(position)}, in ${stackName(position.stack)}. Show stack`}>
-    {position.index}/{position.stack.layers.length}
-  </StackPopoverTrigger>;
-}
-
-function StackTrain({ repoId, stack }: { repoId: string; stack: RepositoryStack }) {
-  const laneStyle = useStackLaneStyle(repoId, stack);
-  return <span className="stack-train" style={laneStyle}><StackNode />{stackMembers(stack).reverse().map(position =>
-    <StackNode key={position.layer.branch} position={position} showPosition />)}</span>;
+/** The Stacks row's hover card: the stack top first, trunk last. Pointing at a
+ * count names that state and marks its members; the rest dim (board 8b). */
+function StackTallyCard({ stack, bucket }: { stack: RepositoryStack; bucket?: StackBucket }) {
+  const count = bucket && stack.layers.filter(layer => stackBucket(layer) === bucket).length;
+  return <div className="stack-tally-card">
+    <p className="stack-tally-card__head">
+      <strong>{stackName(stack)}{bucket && ` · ${count} ${STACK_BUCKET_LABELS[bucket]}`}</strong>
+      <span>{stackDestination(stack)} · {stackSource(stack)}</span>
+    </p>
+    <ol className="stack-tally-card__list">
+      {stackMembers(stack).map(position => {
+        const { layer, index } = position;
+        const mark = bucket === undefined ? undefined : stackBucket(layer) === bucket ? "on" : "dim";
+        return <li key={layer.branch} data-mark={mark}>
+          <span className="stack-node-wrap" aria-hidden="true"><span className="stack-node" data-stack-state={stackBucket(layer)} /></span>
+          <span className="stack-tally-card__n">{index}/{stack.layers.length}</span>
+          <span className="stack-tally-card__t">{layer.pr ? `#${layer.pr.number} ${layer.pr.title}` : layer.branch}</span>
+        </li>;
+      })}
+      <li className="stack-tally-card__trunk" data-mark={bucket === undefined ? undefined : "dim"}>
+        <StackNode /><span /><span className="stack-tally-card__t">{stack.trunk.branch}</span>
+      </li>
+    </ol>
+    <p className="stack-tally-card__foot">Click to open the stack view</p>
+  </div>;
 }
 
 export function StacksSidebar({ repo, stacks, shownStacks, writable = false, recoverEmpty }: {
@@ -103,16 +115,22 @@ export function StacksSidebar({ repo, stacks, shownStacks, writable = false, rec
       const selected = navigation.pick?.repoId === repo.id && navigation.pick.stack.id === stack.id;
       const next = stackNextAction(stack, writable);
       const members = stackMembers(stack);
-      const summary = `${stackName(stack)} · ${stackDestination(stack)} · ${stackSource(stack)}\n${members.map(position =>
-        `${stackPositionLabel(position)} · ${position.layer.pr?.title ?? position.layer.branch}`).join("\n")}\n${stack.trunk.branch} · Trunk`;
+      const tally = stackTally(stack);
       return <button type="button" key={stack.id} className="stack-sidebar__title"
         aria-pressed={selected} data-nav-anchor={`stack:${repo.id}:${stack.id}`}
-        {...hoverTooltip(tip, summary)}
-        aria-label={`Open stack view for ${stackName(stack)}. ${members.map(stackPositionLabel).join("; ")}; trunk ${stack.trunk.branch}`}
+        {...hoverTooltip(tip, <StackTallyCard stack={stack} />)}
+        aria-label={`Open stack view for ${stackName(stack)}: ${tally.map(({ bucket, count }) =>
+          `${count} ${STACK_BUCKET_LABELS[bucket]}`).join(", ")}. ${members.map(stackPositionLabel).join("; ")}; trunk ${stack.trunk.branch}`}
         onClick={event => { event.stopPropagation(); tip.hide(); navigation.select({ repoId: repo.id, stack }); }}>
         <strong>{stackName(stack)}</strong>
-        <StackTrain repoId={repo.id} stack={stack} />
-        <small>{stack.layers.length}</small>
+        {/* Counts, worst first, not a train: the row says what state the
+            stack's PRs are in; order is the popover's and the rail's job. */}
+        <span className="stack-tally" aria-hidden="true">
+          {tally.map(({ bucket, count }) => <span key={bucket} className="stack-tally__count" data-bucket={bucket}
+            {...hoverTooltip(tip, <StackTallyCard stack={stack} bucket={bucket} />)}>
+            <span className="stack-node-wrap"><span className="stack-node" data-stack-state={bucket} /></span>{count}
+          </span>)}
+        </span>
         {next && <span className="stack-health-badge stack-health-badge--stale">{next.label}</span>}
       </button>;
     })}
