@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it } from "vitest";
 import { spawnSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import path from "node:path";
@@ -7,11 +7,13 @@ import { planE2eRetry, verifyE2eRetry } from "./retry-failures.mjs";
 const canDenyDirectoryWrites = process.platform !== "win32" && process.getuid?.() !== 0;
 
 describe("Playwright retry identity oracle", () => {
-  it("selects the same test for an assertion or command exit and refuses unsafe runs", () => {
+  let run;
+  beforeEach(({ onTestFinished }) => {
     const desktop = path.resolve("apps/desktop");
     const cache = path.join(desktop, "node_modules/.cache");
     mkdirSync(cache, { recursive: true });
     const directory = mkdtempSync(path.join(cache, "ci-retry-oracle-"));
+    onTestFinished(() => rmSync(directory, { recursive: true, force: true }));
     const config = path.join(directory, "playwright.config.cjs");
     const reporter = path.resolve("scripts/ci/playwright-ci-reporter.mjs");
     const sandbox = path.resolve("apps/desktop/e2e/fixtures/git-sandbox.ts");
@@ -76,7 +78,7 @@ describe("Playwright retry identity oracle", () => {
       test('passing case', () => expect(['first', 'command', 'unknown-command', 'permission', 'spawn-error', 'worker-exit']).toContain(phase));
       test.skip('intentional skip', () => {});
     `);
-    const run = (phase, args = []) => {
+    run = (phase, args = []) => {
       const report = path.join(directory, `${phase}.json`);
       const result = spawnSync(process.execPath, [cli, "test", "-c", config, ...args], {
         cwd: desktop, encoding: "utf8",
@@ -84,34 +86,39 @@ describe("Playwright retry identity oracle", () => {
       });
       return { result, report: JSON.parse(readFileSync(report, "utf8")), last: JSON.parse(readFileSync(last, "utf8")) };
     };
-    try {
-      const first = run("first");
-      expect(first.result.status).toBe(1);
-      const plan = planE2eRetry(first.report, first.last, 20);
-      expect(plan.tests).toHaveLength(1);
-      const command = run("command");
-      expect(command.result.status).toBe(1);
-      expect(planE2eRetry(command.report, command.last, 20)).toEqual(plan);
-      const retry = run("retry", ["--last-failed"]);
-      expect(retry.result.status, retry.result.stderr).toBe(0);
-      expect(verifyE2eRetry(plan, retry.report)).toBe(true);
-      const incomplete = run("first", ["--max-failures=1"]);
-      expect(incomplete.report.complete).toBe(false);
-      expect(() => planE2eRetry(incomplete.report, incomplete.last, 20)).toThrow();
-      const unsafePhases = ["unknown-command", "spawn-error", "worker-exit"];
-      if (canDenyDirectoryWrites) unsafePhases.push("permission");
-      for (const phase of unsafePhases) {
-        const unsafe = run(phase);
-        expect(unsafe.report.tests.some((test) => test.unsafeFailure), phase).toBe(true);
-        expect(() => planE2eRetry(unsafe.report, unsafe.last, 20), phase).toThrow();
-      }
-      for (const phase of ["hook", "fixture"]) {
-        const outsideBody = run(phase);
-        expect(outsideBody.report.hookErrors, phase).toBeGreaterThan(0);
-        expect(() => planE2eRetry(outsideBody.report, outsideBody.last, 20), phase).toThrow();
-      }
-    } finally {
-      rmSync(directory, { recursive: true, force: true });
-    }
-  }, 30_000);
+  });
+
+  // Keep the failed runs and their --last-failed retry in one fixture.
+  it("retries the same test after an assertion or recognized command exit", () => {
+    const first = run("first");
+    expect(first.result.status).toBe(1);
+    const plan = planE2eRetry(first.report, first.last, 20);
+    expect(plan.tests).toHaveLength(1);
+    const command = run("command");
+    expect(command.result.status).toBe(1);
+    expect(planE2eRetry(command.report, command.last, 20)).toEqual(plan);
+    const retry = run("retry", ["--last-failed"]);
+    expect(retry.result.status, retry.result.stderr).toBe(0);
+    expect(verifyE2eRetry(plan, retry.report)).toBe(true);
+  });
+
+  it("refuses to retry an incomplete run", () => {
+    const incomplete = run("first", ["--max-failures=1"]);
+    expect(incomplete.report.complete).toBe(false);
+    expect(() => planE2eRetry(incomplete.report, incomplete.last, 20)).toThrow();
+  });
+
+  const unsafePhases = ["unknown-command", "spawn-error", "worker-exit"];
+  if (canDenyDirectoryWrites) unsafePhases.push("permission");
+  it.each(unsafePhases)("refuses to retry an unsafe %s failure", (phase) => {
+    const unsafe = run(phase);
+    expect(unsafe.report.tests.some((test) => test.unsafeFailure)).toBe(true);
+    expect(() => planE2eRetry(unsafe.report, unsafe.last, 20)).toThrow();
+  });
+
+  it.each(["hook", "fixture"])("refuses to retry a %s failure", (phase) => {
+    const outsideBody = run(phase);
+    expect(outsideBody.report.hookErrors).toBeGreaterThan(0);
+    expect(() => planE2eRetry(outsideBody.report, outsideBody.last, 20)).toThrow();
+  });
 });
