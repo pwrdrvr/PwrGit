@@ -30,7 +30,9 @@ at `30e49f153a5016f253e27e99bca9af95010a2b95` to PwrGit's toolchain.
   CJS globals; the wrapper's context layout affects function bytecode.
 - Check the actual electron-vite development transform, including React's
   development JSX and Fast Refresh hook instrumentation. Keep HMR enabled in
-  the transform configuration and disable only its WebSocket transport.
+  the transform configuration with its WebSocket transport disabled. Skip
+  startup dependency discovery on this compile-only server so shutdown has no
+  dependency scan to cancel.
 - Build the actual production renderer configuration in production mode,
   with its esbuild minifier, into memory. Check all emitted JavaScript
   chunks and worker assets, including bundled dependencies. Production

@@ -1,5 +1,6 @@
 import { spawn, spawnSync } from "node:child_process";
 import { mkdtemp, mkdir, readFile, writeFile, rm } from "node:fs/promises";
+import { createRequire } from "node:module";
 import { resolve, relative } from "node:path";
 import { pathToFileURL } from "node:url";
 import { describe, expect, it, vi } from "vitest";
@@ -71,7 +72,7 @@ describe("renderer bytecode oracle", () => {
     expect(budgetFailures(invalid)).toEqual(invalid);
   });
 
-  it("includes Fast Refresh hook signatures in the development bytecode oracle", async () => {
+  it("includes Fast Refresh hook signatures without startup dependency discovery", async () => {
     await fixture(async (root) => {
       const entry = resolve(root, "HookView.tsx");
       // A local custom hook exercises the same Refresh signature transform
@@ -83,9 +84,24 @@ describe("renderer bytecode oracle", () => {
         }
         throw new Error('APPLICATION MUST NOT EXECUTE');
       `);
+      const desktopRequire = createRequire(resolve("apps/desktop/package.json"));
+      const { DevEnvironment, normalizePath } = await import(desktopRequire.resolve("vite"));
+      const listen = vi.spyOn(DevEnvironment.prototype, "listen");
       let development;
-      for await (const module of transformedModules(root, { productionInput: entry })) {
-        if (module.variant === "development") { development = module; break; }
+      try {
+        for await (const module of transformedModules(root, { productionInput: entry })) {
+          if (module.variant === "development") { development = module; break; }
+        }
+        // Vite starts discovery from listen(). Use its resolved client config
+        // as the oracle so the check is independent of cache state and timing.
+        const rendererRoot = normalizePath(resolve("apps/desktop/src/renderer"));
+        const call = listen.mock.calls.find(([server]) => server.config.root === rendererRoot);
+        expect(call, "renderer dev server started").toBeDefined();
+        const { optimizeDeps } = call[0].environments.client.config;
+        expect(optimizeDeps.noDiscovery, "compile-only server skips dependency discovery").toBe(true);
+        expect(optimizeDeps.include).not.toContain("pixelmatch");
+      } finally {
+        listen.mockRestore();
       }
       expect(development.code).toContain("$RefreshSig$");
       expect(development.code).toMatch(/_s\(\);/);
