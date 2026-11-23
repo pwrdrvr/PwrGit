@@ -128,22 +128,14 @@ describe("execGitRecords", () => {
   it("discards ordinary records and stops after the bounded match count", async () => {
     const repo = mkdtempSync(join(tmpdir(), "pwrgit-record-stream-"));
     try {
-      execFileSync("git", ["init", "-b", "main"], { cwd: repo });
+      execFileSync("git", ["-C", repo, "init", "-b", "main"]);
       for (let index = 0; index < 100; index += 1) {
         writeFileSync(join(repo, `ordinary-${index}.txt`), "ordinary\n");
       }
-      execFileSync("git", ["add", "."], { cwd: repo });
+      // Staging the LF fixtures should not warn about Windows checkout conversion.
+      execFileSync("git", ["-C", repo, "-c", "core.autocrlf=false", "add", "."]);
       for (const path of ["modules/a", "modules/b"]) {
-        execFileSync(
-          "git",
-          [
-            "update-index",
-            "--add",
-            "--cacheinfo",
-            `160000,${"a".repeat(40)},${path}`
-          ],
-          { cwd: repo }
-        );
+        execFileSync("git", ["-C", repo, "update-index", "--add", "--cacheinfo", `160000,${"a".repeat(40)},${path}`]);
       }
 
       const result = await execGitRecords(
