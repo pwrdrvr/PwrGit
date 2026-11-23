@@ -1,4 +1,5 @@
 import { tmpdir } from "node:os";
+import fc from "fast-check";
 import { afterEach, expect, it, vi } from "vitest";
 import { beginGitCall, GitTripwire, timedGitSync } from "./test-support/git-tripwire";
 import { createSystemGit } from "./test-support/system-git";
@@ -60,6 +61,50 @@ it("persists sync begin before blocking, preserves exceptions, and totals many s
   expect(rows.filter(row => row.event === "end" && row.alert)).toEqual([]);
   expect(JSON.stringify(rows)).not.toContain("private failure");
   expect(vi.getTimerCount()).toBe(0);
+});
+
+it("property: every emitted millisecond field is numeric and rounded to three decimal places", () => {
+  vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "performance"] });
+  const now = vi.spyOn(performance, "now");
+  try {
+    fc.assert(fc.property(fc.integer({ min: 1, max: 1_000_000 }), ticks => {
+      const ms = ticks / 10_000;
+      const rows: Record<string, any>[] = [];
+      now.mockReturnValue(ms);
+      const tripwire = new GitTripwire(row => rows.push(row), 1);
+      const finished = tripwire.begin(["config"], tmpdir(), "sync", () => ({}));
+      const active = tripwire.begin(["fetch"], tmpdir(), "async", () => ({}));
+      try {
+        now.mockReturnValue(2 * ms + 1);
+        active.event("spawn");
+        finished.finish("returned");
+        vi.advanceTimersByTime(1);
+      } finally {
+        tripwire.finish();
+      }
+      const begin = rows[0]!;
+      const call = rows.find(row => row.event === "slow-call")!;
+      const summary = rows.at(-1)!;
+      const timings = [
+        [begin.monotonicMs, ms],
+        [call.elapsedMs, ms + 1],
+        [call.timerLatenessMs, ms],
+        [call.timeline[0].atMs, ms + 1],
+        [summary.elapsedMs, ms + 1],
+        [summary.totalGitMs, ms + 1],
+        [summary.slowest[0].elapsedMs, ms + 1],
+        [summary.active[0].elapsedMs, ms + 1],
+        [summary.active[0].timeline[0].atMs, ms + 1]
+      ];
+      for (const [reported, original] of timings) {
+        expect(typeof reported).toBe("number");
+        expect(reported).toBe(Number(reported.toFixed(3)));
+        expect(Math.abs(reported - original)).toBeLessThanOrEqual(0.0005 + 1e-10);
+      }
+    }));
+  } finally {
+    now.mockRestore();
+  }
 });
 
 it("does not let a failed diagnostic sink replace the result", () => {

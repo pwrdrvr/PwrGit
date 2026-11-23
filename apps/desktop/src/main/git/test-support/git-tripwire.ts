@@ -5,6 +5,8 @@ type Call = { snapshot(): RecordData; dispose(): void };
 const commands = new Set("add apply branch checkout clone commit config diff fetch init log merge pull push rebase remote reset rev-parse show stash status switch".split(" "));
 let current: GitTripwire | undefined;
 
+const roundMs = (value: number): number => Number(value.toFixed(3));
+
 /** Test-only observation; no process control, stream listeners or output reads. */
 export class GitTripwire {
   private readonly started = performance.now();
@@ -21,11 +23,12 @@ export class GitTripwire {
     this.timer.unref();
   }
   private write(row: RecordData): void {
-    try { this.sink({ monotonicMs: performance.now(), ...row }); } catch { /* Never change a Git result. */ }
+    try { this.sink({ monotonicMs: roundMs(performance.now()), ...row }); } catch { /* Never change a Git result. */ }
   }
   private summary(event: string, alert: boolean): void {
-    this.write({ event, alert, elapsedMs: performance.now() - this.started,
-      completedCalls: this.count, totalGitMs: this.totalMs, slowest: [...this.slowest],
+    this.write({ event, alert, elapsedMs: roundMs(performance.now() - this.started),
+      completedCalls: this.count, totalGitMs: roundMs(this.totalMs),
+      slowest: this.slowest.map(({ command, elapsedMs }) => ({ command, elapsedMs: roundMs(elapsedMs) })),
       active: [...this.calls].map(call => call.snapshot()) });
   }
   finish(failed = false): void {
@@ -43,7 +46,7 @@ export class GitTripwire {
     const timeline: { event: string; atMs: number }[] = [];
     let done = false;
     let timer: ReturnType<typeof setTimeout> | undefined;
-    const snapshot = () => ({ id, command, cwdId, execution, elapsedMs: performance.now() - started,
+    const snapshot = () => ({ id, command, cwdId, execution, elapsedMs: roundMs(performance.now() - started),
       timeline: [...timeline], ...state() });
     const report = (event: string) => { if (!done) this.write({ event, alert: true, ...snapshot() }); };
     const call: Call = { snapshot, dispose: () => { done = true; clearTimeout(timer); } };
@@ -52,11 +55,11 @@ export class GitTripwire {
     this.write({ event: "begin", ...snapshot() });
     if (execution === "async") {
       timer = setTimeout(() => this.write({ event: "slow-call", alert: true, ...snapshot(),
-        timerLatenessMs: Math.max(0, performance.now() - started - this.thresholdMs) }), this.thresholdMs);
+        timerLatenessMs: roundMs(Math.max(0, performance.now() - started - this.thresholdMs)) }), this.thresholdMs);
       timer.unref();
     }
     return {
-      event: (event: string) => { if (!done && timeline.length < 16) timeline.push({ event, atMs: performance.now() - started }); },
+      event: (event: string) => { if (!done && timeline.length < 16) timeline.push({ event, atMs: roundMs(performance.now() - started) }); },
       report,
       finish: (outcome: string) => {
         if (done) return;
