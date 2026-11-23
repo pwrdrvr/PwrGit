@@ -2,6 +2,7 @@
 //! owns MCP and authorization. No command execution or application launch.
 mod framing;
 mod link;
+mod stack_lock;
 #[cfg(windows)]
 mod windows;
 use base64::{Engine as _, engine::general_purpose::STANDARD};
@@ -460,6 +461,31 @@ async fn serve(path: &Path, allow_http: bool) -> io::Result<()> {
 }
 fn main() -> std::process::ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
+    if let [command, common_dir, kind, mode] = args.as_slice()
+        && command == "--desktop-stack-lock"
+        && matches!(mode.as_str(), "wait" | "probe")
+    {
+        return match stack_lock::hold(Path::new(common_dir), kind, mode == "wait") {
+            Ok(true) => std::process::ExitCode::SUCCESS,
+            Ok(false) => std::process::ExitCode::from(75),
+            Err(error) => {
+                eprintln!("pwrgit stack lock: {error}");
+                std::process::ExitCode::FAILURE
+            }
+        };
+    }
+    #[cfg(windows)]
+    if let [command, common_dir, temporary, destination] = args.as_slice()
+        && command == "--desktop-stack-replace"
+    {
+        return match stack_lock::replace_catalog(Path::new(common_dir), temporary, destination) {
+            Ok(()) => std::process::ExitCode::SUCCESS,
+            Err(error) => {
+                eprintln!("pwrgit stack catalog replacement: {error}");
+                std::process::ExitCode::FAILURE
+            }
+        };
+    }
     let command = match parse_args(&args) {
         Ok(Command::Version) => {
             println!("pwrgit-mcp {VERSION} (transport 1)");
