@@ -16,6 +16,7 @@ export type BranchChipTarget = {
   isRemote: boolean;
   x: number;
   y: number;
+  trigger?: HTMLElement;
 };
 
 /**
@@ -128,6 +129,7 @@ export function BranchChipMenu({
       y={target.y}
       label={`${target.ref} actions`}
       items={items}
+      {...(target.trigger === undefined ? {} : { triggerRef: { current: target.trigger } })}
       onClose={onClose}
     />
   );

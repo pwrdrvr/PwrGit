@@ -578,7 +578,7 @@ test("caps drawn branches and clips the lane gutter on branch-heavy repos", asyn
   );
 });
 
-test("a commit tipped by many branches caps its chips instead of flooding", async () => {
+test("a commit tipped by many branches previews a bounded set and exposes every branch", async () => {
   sandbox = createGitSandbox();
   const s = sandbox;
   const repo = s.makeRepo("tipfarm");
@@ -594,31 +594,20 @@ test("a commit tipped by many branches caps its chips instead of flooding", asyn
   await branchRow(window, "main").first().click();
 
   const headRow = window.locator(".graph-row--head");
-  // At most two named chips, and "+N" counts the rest, so all 9 tips are
-  // accounted for. How many of the two fit whole depends on the window: the
-  // 1024px Windows runner leaves the lineage card ~320px, where the second
-  // chip folds into the pill rather than being clipped mid-pill.
-  await expect
-    .poll(
-      () =>
-        headRow.locator(".ref-chips").evaluate((el) => {
-          const edge = el.getBoundingClientRect().right + 0.5;
-          const pill = el.querySelector(".ref-chip--more")?.textContent ?? "+0";
-          const named = el.querySelectorAll(".ref-chip__name").length;
-          return {
-            named,
-            accounted: named + Number(pill.slice(1)),
-            whole: [...el.querySelectorAll(":scope > *, :scope > * > *")].every(
-              (part) => part.getBoundingClientRect().right <= edge
-            )
-          };
-        }),
-      { timeout: 20_000 }
-    )
-    .toMatchObject({ accounted: 9, whole: true });
-  const named = await headRow.locator(".ref-chip__name").count();
+  const summary = headRow.getByRole("button", { name: /^Browse 9 refs at / });
+  await expect(summary).toBeVisible({ timeout: 20_000 });
+  const chips = headRow.locator(".ref-chips .ref-chip:visible");
+  const named = await chips.count();
   expect(named).toBeGreaterThanOrEqual(1);
   expect(named).toBeLessThanOrEqual(2);
+  await summary.press("Enter");
+  const refs = headRow.getByRole("region", { name: /^Refs at / });
+  await expect(refs.getByRole("listitem")).toHaveCount(9);
+  await refs.getByRole("button", { name: "Actions for branch stale/b8" }).press("Enter");
+  const actions = window.getByRole("menu", { name: "stale/b8 actions" });
+  await expect(actions.getByRole("menuitem", { name: "Copy branch name" })).toBeVisible();
+  await window.keyboard.press("Escape");
+  await expect(summary).toBeFocused();
   // And the subject stays readable.
   await expect(headRow.locator(".commit-msg")).toContainText("initial commit");
   await expect(headRow.locator(".commit-msg")).toBeInViewport();

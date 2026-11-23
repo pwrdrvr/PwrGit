@@ -1,6 +1,7 @@
-import { memo, useMemo, useRef, type MouseEvent, type ReactNode, type RefObject } from "react";
+import { memo, useId, useLayoutEffect, useRef, useState, type CSSProperties, type MouseEvent, type ReactNode } from "react";
 import type { Commit, LaneBranchInfo, MovedTag, PrSummary, RepositoryStack, StackPosition } from "@pwrgit/shared";
 import { BranchGlyph } from "../../lib/BranchGlyph";
+import { ChevronGlyph } from "../../lib/ChevronGlyph";
 import { CheckoutGlyph } from "../../lib/CheckoutGlyph";
 import { AuthorAvatar } from "./AuthorAvatar";
 import { hoverIntentHandlers, type HoverIntent } from "../../lib/hoverIntent";
@@ -12,7 +13,6 @@ import type { LaneRow, LaneSeg } from "./lane-layout";
 import type { PrLandingSeg } from "./pr-landings";
 import type { BranchChipTarget } from "./BranchChipMenu";
 import { shortWhen } from "./graph-view";
-import { useRefChipFit, type RefChipFit } from "./ref-chip-fit";
 import {
   hoverTooltip,
   useViewportTooltip
@@ -25,7 +25,7 @@ const MID = ROW_H / 2;
 /** The gutter viewport shows at most this many lanes; wider graphs scroll
  *  horizontally inside it so commit text never gets pushed off-screen. */
 export const MAX_GUTTER_LANES = 10;
-/** Most branch-tip chips shown on one row; the rest collapse into "+N". */
+/** At most two branch tips preview on a wide row. The ref list has every tip. */
 const MAX_REF_CHIPS = 2;
 export const gutterWidth = (laneCount: number): number =>
   Math.min(Math.max(1, laneCount), MAX_GUTTER_LANES) * LANE_W;
@@ -160,7 +160,7 @@ export function GraphRow({
   /** Move keyboard focus from the byline into the open person card. */
   onFocusPerson?: () => boolean;
   onOpenContextMenu: (position: { x: number; y: number }) => void;
-  /** Open the branch menu for one tip chip, at the pointer. */
+  /** Open actions for one ref from its inline chip or the ref list. */
   onOpenBranchMenu?: (target: BranchChipTarget) => void;
   /** Jump to the worktree a tip branch is checked out in. */
   onRevealWorktree?: (worktreeId: string) => void;
@@ -177,7 +177,7 @@ export function GraphRow({
     pullRequest
   } = vm;
   /** The row's plain tooltips — the tag chip, the
-   *  overflow pill, the worktree button, the author. Not the gated SHA/PR
+   *  branch names and the worktree button. Not the gated SHA/PR
    *  cards below, which repeat down a column the pointer crosses (see
    *  lib/AGENTS.md). */
   const tip = useViewportTooltip();
@@ -188,49 +188,12 @@ export function GraphRow({
   const oldStackBase = oldStackBases?.get(commit.hash);
   const isTip = chipCount > 0;
   const orderedRefs = bracket ? [bracket.layer.branch, ...refs.filter(ref => ref !== bracket.layer.branch)] : refs;
-  const chipNames = [...orderedRefs, ...remoteRefs];
-  const canTakeTag = onTakeTag !== undefined;
-  const hasPersonButton = onShowPerson !== undefined;
-  const movedTag = canTakeTag ? vm.tagMoved : undefined;
-  const publishedTags = canTakeTag ? vm.publishedTags : undefined;
-  // The strip shows only chips that fit whole; the rest fold into "+N". The
-  // tag chip keeps its name until they have all folded.
-  const { localChips, remoteChips, chipContent } = useMemo(() => {
-    const localChips = orderedRefs.slice(0, bracket ? 1 : MAX_REF_CHIPS).map((name, index) => {
-      const info = branchInfo?.[name];
-      return {
-        name,
-        pr: info?.pr?.number === pullRequest?.number ? undefined : info?.pr,
-        worktreeId: info?.worktreeId,
-        position: index === 0 ? stackPositions?.get(name) : undefined
-      };
-    });
-    const occupied = localChips.length + localChips.filter(chip => chip.position).length;
-    const remoteChips = remoteRefs.slice(0, MAX_REF_CHIPS - occupied);
-    // A graph or PR refresh can replace every row model. Refit only when a
-    // row's meta line can change size. Folded names and PR status colors,
-    // for example, update in React without changing the strip's geometry.
-    const chipContent = !isTip && vm.tag === undefined ? "" : JSON.stringify([
-      chipCount,
-      localChips.map(({ name, pr, worktreeId, position }) => [
-        name, pr && prChipLabel(pr), worktreeId !== undefined, position?.index, position?.stack.layers.length
-      ]),
-      remoteChips,
-      pullRequest && prChipLabel(pullRequest),
-      vm.tag?.name,
-      movedTag !== undefined,
-      publishedTags?.map(({ name, published }) => [name, published.remote]) ?? [],
-      isHead,
-      commit.isMerge,
-      isMine ? "you" : commit.authorName,
-      hasPersonButton,
-      oldStackBase !== undefined
-    ]);
-    return { localChips, remoteChips, chipContent };
-  }, [
-    orderedRefs, bracket, remoteRefs, branchInfo, pullRequest, isTip, chipCount, vm.tag, movedTag, oldStackBase, stackPositions,
-    publishedTags, isHead, commit.isMerge, isMine, commit.authorName, hasPersonButton
-  ]);
+  const movedTag = onTakeTag === undefined ? undefined : vm.tagMoved;
+  const publishedTags = onTakeTag === undefined ? undefined : vm.publishedTags;
+  const refCount = chipCount + Number(vm.tag !== undefined) + (publishedTags?.length ?? 0);
+  // Keep the tracked stack layer first and give its position chip the second slot.
+  const localPreview = orderedRefs.slice(0, bracket ? 1 : MAX_REF_CHIPS);
+  const remotePreview = remoteRefs.slice(0, MAX_REF_CHIPS - localPreview.length - Number(bracket !== undefined));
   const x = cx(row.lane);
 
   const showContextFor = (target: HTMLElement): void => {
@@ -260,15 +223,33 @@ export function GraphRow({
   // a left-click does not fall through to opening the commit.
   const branchMenu = (
     ref: string,
-    isRemote: boolean
-  ): {
-    onClick: (event: MouseEvent) => void;
-    onContextMenu: (event: MouseEvent) => void;
-  } => {
-    const open = (event: MouseEvent): void => {
+    isRemote: boolean,
+    browser?: RefBrowserActions
+  ) => {
+    const open = (event: MouseEvent<HTMLButtonElement>): void => {
       event.preventDefault();
       event.stopPropagation();
-      onOpenBranchMenu?.({ ref, isRemote, x: event.clientX, y: event.clientY });
+      if (onOpenBranchMenu === undefined) return;
+      const trigger = browser?.trigger ?? event.currentTarget;
+      // Keyboard activation has no pointer coordinates. The read belongs to
+      // the explicitly opened menu, never to the row's layout.
+      const keyboard = event.detail === 0 && event.clientX === 0 && event.clientY === 0;
+      const rect = keyboard ? event.currentTarget.getBoundingClientRect() : undefined;
+      const target = {
+        ref, isRemote, trigger,
+        x: rect?.left ?? event.clientX,
+        y: rect?.bottom ?? event.clientY
+      };
+      if (browser === undefined) {
+        onOpenBranchMenu(target);
+      } else {
+        browser.close();
+        // Focusing a list entry can queue a scroll. Let that event reach
+        // the closing list before the branch menu starts listening to scroll.
+        requestAnimationFrame(() => {
+          if (trigger.isConnected) onOpenBranchMenu(target);
+        });
+      }
     };
     return { onClick: open, onContextMenu: open };
   };
@@ -287,212 +268,156 @@ export function GraphRow({
     </>
   );
 
-  function renderMeta(
-    chipFit: RefChipFit | null,
-    stripRef: RefObject<HTMLSpanElement | null>
-  ): ReactNode {
-    // The initial render keeps the tag whole and measures every capped chip
-    // plus the widest pill.
-    const shownChips = chipFit?.shown ?? localChips.length + remoteChips.length;
-    const squeezeClass = chipFit?.squeeze === true ? " is-squeezed" : "";
-    const tagFit = chipFit?.tag ?? "whole";
-    const foldedChips = chipNames.slice(shownChips);
+  function renderTag(tag: NonNullable<GraphRowVM["tag"]>, browser?: RefBrowserActions) {
+    const kind = tag.kind === "annotated" ? "Annotated tag" : "Tag";
+    const name = <span className="commit-tag__name">{tag.name}</span>;
+    if (movedTag !== undefined && onTakeTag !== undefined) {
+      const { remote, targetId } = movedTag.published;
+      return (
+        <button
+          type="button"
+          className="commit-tag commit-tag--tag is-moved"
+          aria-label={`${kind} ${tag.name}, moved on ${remote} to ${targetId.slice(0, 7)}. Take ${remote}'s…`}
+          {...(browser === undefined && hoverTooltip(tip, `${remote}'s ${tag.name} is at ${targetId.slice(0, 12)}\nClick to take ${remote}'s.`))}
+          onClick={(event) => {
+            event.stopPropagation();
+            browser?.close();
+            tip.hide();
+            onTakeTag(movedTag);
+          }}
+        >
+          <TagGlyph />
+          {name}
+          <span className="commit-tag__moved" aria-hidden="true">· moved</span>
+        </button>
+      );
+    }
     return (
-      <>
-        {pullRequest !== undefined && (
-          // Hovering a PR chip shows the PR, here as everywhere else. It
-          // used to open this row's commit card instead, which made the same
-          // chip mean two different things depending on where it sat.
-          <PrChip pr={pullRequest} hoverIntent={hoverIntent} />
+      <span className="commit-tag commit-tag--tag" {...(browser === undefined && hoverTooltip(tip, `${kind} ${tag.name}`))}>
+        <TagGlyph />
+        <span className="a11y-sr-only">{kind} </span>
+        {name}
+      </span>
+    );
+  }
+
+  function renderPublishedTag(moved: MovedTag, browser?: RefBrowserActions) {
+    const { remote } = moved.published;
+    return (
+      <button
+        type="button"
+        className="commit-tag commit-tag--tag is-published"
+        aria-label={`${remote}'s ${moved.name} points here; local ${moved.name} is at ${moved.local.targetId.slice(0, 7)}. Take ${remote}'s…`}
+        {...(browser === undefined && hoverTooltip(tip, `${remote}'s ${moved.name} points here\nLocal ${moved.name} is at ${moved.local.targetId.slice(0, 12)}\nClick to take ${remote}'s.`))}
+        onClick={(event) => {
+          event.stopPropagation();
+          browser?.close();
+          tip.hide();
+          onTakeTag?.(moved);
+        }}
+      >
+        <TagGlyph />
+        <span className="commit-tag__remote">{remote}</span>
+        <span className="commit-tag__name">{moved.name}</span>
+      </button>
+    );
+  }
+
+  function renderLocal(name: string, secondary: boolean, browser?: RefBrowserActions) {
+    const info = branchInfo?.[name];
+    const pr = info?.pr?.number === pullRequest?.number ? undefined : info?.pr;
+    const position = stackPositions?.get(name);
+    const worktreeId = info?.worktreeId;
+    return (
+      <span key={name} className={`ref-group${secondary ? " ref-preview--secondary" : ""}`}>
+        <button
+          type="button"
+          className="ref-chip"
+          aria-label={`Actions for branch ${name}`}
+          title={browser === undefined ? name : undefined}
+          {...branchMenu(name, false, browser)}
+        >
+          <BranchGlyph size={8} strokeWidth={2.6} />
+          <span className="ref-chip__name">{name}</span>
+        </button>
+        {position !== undefined && onOpenStack !== undefined && (
+          <StackPositionChip position={position} onSelect={() => {
+            browser?.close();
+            onOpenStack(position.stack);
+          }} />
         )}
-        {/* Fitted with the branch chips, and last to give way: its name
-            ellipsizes to a floor, then leaves the mark alone. The tooltip
-            and the hidden name still say which tag it is. */}
-        {vm.tag !== undefined && movedTag !== undefined && onTakeTag !== undefined ? (
-          // Moved on the publisher: the chip says so and is the way to fix it.
+        {pr !== undefined && (browser === undefined
+          ? <PrChip pr={pr} hoverIntent={hoverIntent} />
+          : <span className="ref-list__pr">{prChipLabel(pr)}</span>)}
+        {worktreeId !== undefined && (
           <button
             type="button"
-            className={`commit-tag commit-tag--tag is-moved${
-              tagFit === "whole" ? "" : ` is-${tagFit}`
-            }`}
-            aria-label={`${vm.tag.kind === "annotated" ? "Annotated tag" : "Tag"} ${vm.tag.name}, moved on ${movedTag.published.remote} to ${movedTag.published.targetId.slice(0, 7)}. Take ${movedTag.published.remote}'s…`}
-            {...hoverTooltip(
-              tip,
-              `${movedTag.published.remote}'s ${vm.tag.name} is at ${movedTag.published.targetId.slice(0, 12)}\n` +
-                `Click to take ${movedTag.published.remote}'s.`
-            )}
+            className="ref-wt"
+            {...(browser === undefined && hoverTooltip(tip, "Checked out in a worktree — click to open it"))}
+            aria-label={`Open the ${name} worktree`}
             onClick={(event) => {
               event.stopPropagation();
-              tip.hide();
-              onTakeTag(movedTag);
+              browser?.close();
+              onRevealWorktree?.(worktreeId);
             }}
           >
-            <TagGlyph />
-            <span
-              className={`commit-tag__name${
-                tagFit === "glyph" ? " a11y-sr-only" : ""
-              }`}
-            >
-              {vm.tag.name}
-            </span>
-            <span className="commit-tag__moved" aria-hidden="true">· moved</span>
+            <CheckoutGlyph size={10} />
           </button>
-        ) : vm.tag !== undefined && (
-          <span
-            className={`commit-tag commit-tag--tag${
-              tagFit === "whole" ? "" : ` is-${tagFit}`
-            }`}
-            {...hoverTooltip(
-              tip,
-              `${vm.tag.kind === "annotated" ? "Annotated tag" : "Tag"} ${vm.tag.name}`
-            )}
-          >
-            <TagGlyph />
-            {/* The mark is decorative, so without this the chip announces as
-                a bare version string among the branch names beside it. */}
-            <span className="a11y-sr-only">
-              {vm.tag.kind === "annotated" ? "Annotated tag " : "Tag "}
-            </span>
-            <span
-              className={`commit-tag__name${
-                tagFit === "glyph" ? " a11y-sr-only" : ""
-              }`}
-            >
-              {vm.tag.name}
-            </span>
-          </span>
         )}
-        {onTakeTag !== undefined &&
-          publishedTags?.map((moved) => (
-            // Where the publisher's value of a local tag now points.
-            <button
-              type="button"
-              key={`published:${moved.name}`}
-              className="commit-tag commit-tag--tag is-published"
-              aria-label={`${moved.published.remote}'s ${moved.name} points here; local ${moved.name} is at ${moved.local.targetId.slice(0, 7)}. Take ${moved.published.remote}'s…`}
-              {...hoverTooltip(
-                tip,
-                `${moved.published.remote}'s ${moved.name} points here\n` +
-                  `Local ${moved.name} is at ${moved.local.targetId.slice(0, 12)}\n` +
-                  `Click to take ${moved.published.remote}'s.`
-              )}
-              onClick={(event) => {
-                event.stopPropagation();
-                tip.hide();
-                onTakeTag(moved);
-              }}
-            >
-              <TagGlyph />
-              <span className="commit-tag__remote">{moved.published.remote}</span>
-              <span className="commit-tag__name">{moved.name}</span>
-            </button>
-          ))}
+      </span>
+    );
+  }
+
+  function renderRemote(name: string, secondary: boolean, browser?: RefBrowserActions) {
+    // A remote alone ("origin", when it sits on the local branch) is a label.
+    const branch = name.includes("/");
+    const Chip = branch ? "button" : "span";
+    return (
+      <Chip
+        key={`r:${name}`}
+        className={`ref-chip ref-chip--remote${secondary ? " ref-preview--secondary" : ""}`}
+        title={browser === undefined ? name : undefined}
+        {...(branch && { type: "button", "aria-label": `Actions for remote branch ${name}`, ...branchMenu(name, true, browser) })}
+      >
+        <BranchGlyph size={8} strokeWidth={2.6} />
+        {!branch && <span className="a11y-sr-only">Remote </span>}
+        <span className="ref-chip__name">{name}</span>
+      </Chip>
+    );
+  }
+
+  function renderMeta() {
+    return (
+      <div className="commit-meta" style={{ "--ref-lane-color": color } as CSSProperties}>
+        {pullRequest !== undefined && <PrChip pr={pullRequest} hoverIntent={hoverIntent} />}
+        {vm.tag !== undefined ? renderTag(vm.tag)
+          : publishedTags?.[0] !== undefined && renderPublishedTag(publishedTags[0])}
         {isHead && <span className="commit-tag commit-tag--head">HEAD</span>}
-        {oldStackBase && <span className="commit-tag" {...hoverTooltip(tip, `Recorded parent tip of ${oldStackBase.layer.branch}`)}>
+        {oldStackBase && <span className="commit-tag commit-tag--old-parent" {...hoverTooltip(tip, `Recorded parent tip of ${oldStackBase.layer.branch}`)}>
           Old parent tip
         </span>}
-        {/* Chips are capped — a commit tipped by dozens of stale branches
-            must not flood the row — and fitted: a chip the row has no room
-            for folds into the +N pill whole rather than being clipped
-            mid-pill. The strip's tooltip lists every name either way. */}
-        {chipCount > 0 && (
-          <span
-            ref={stripRef}
-            className={`ref-chips${chipFit?.shown === 0 ? " is-folded" : ""}`}
-            {...hoverTooltip(tip, chipNames.join("\n"))}
-          >
-            {localChips.slice(0, shownChips).map(({ name, pr, worktreeId, position }) => (
-              <span key={name} className={`ref-group${squeezeClass}`}>
-                <button
-                  type="button"
-                  className={`ref-chip${squeezeClass}`}
-                  aria-label={`Actions for branch ${name}`}
-                  style={{
-                    color,
-                    borderColor: `color-mix(in srgb, ${color} 45%, transparent)`,
-                    background: `color-mix(in srgb, ${color} 13%, transparent)`
-                  }}
-                  {...branchMenu(name, false)}
-                >
-                  <BranchGlyph size={8} strokeWidth={2.6} />
-                  <span className="ref-chip__name">{name}</span>
-                </button>
-                {position && onOpenStack && <StackPositionChip position={position} onSelect={() => onOpenStack(position.stack)} />}
-                {pr !== undefined && <PrChip pr={pr} />}
-                {worktreeId !== undefined && (
-                  <button
-                    className="ref-wt"
-                    {...hoverTooltip(tip, "Checked out in a worktree — click to open it")}
-                    aria-label={`Open the ${name} worktree`}
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      onRevealWorktree?.(worktreeId);
-                    }}
-                  >
-                    <CheckoutGlyph size={10} />
-                  </button>
-                )}
-              </span>
-            ))}
-            {remoteChips
-              .slice(0, Math.max(0, shownChips - localChips.length))
-              .map((name) =>
-                // A collapsed chip names the remote alone ("origin", drawn
-                // when it sits on the local branch): its branch actions are
-                // the local chip's, so it stays a label.
-                name.includes("/") ? (
-                  <button
-                    type="button"
-                    key={`r:${name}`}
-                    className={`ref-chip ref-chip--remote${squeezeClass}`}
-                    aria-label={`Actions for branch ${name}`}
-                    style={{
-                      color,
-                      borderColor: `color-mix(in srgb, ${color} 45%, transparent)`
-                    }}
-                    {...branchMenu(name, true)}
-                  >
-                    <BranchGlyph size={8} strokeWidth={2.6} />
-                    <span className="ref-chip__name">{name}</span>
-                  </button>
-                ) : (
-                  <span
-                    key={`r:${name}`}
-                    className={`ref-chip ref-chip--remote${squeezeClass}`}
-                    style={{
-                      color,
-                      borderColor: `color-mix(in srgb, ${color} 45%, transparent)`
-                    }}
-                  >
-                    <BranchGlyph size={8} strokeWidth={2.6} />
-                    <span className="ref-chip__name">{name}</span>
-                  </span>
-                )
-              )}
-            {/* Measuring renders the pill at its widest count, so the fit
-                knows what room "+N" takes before anything folds. */}
-            {(chipFit === null || foldedChips.length > 0) && (
-              <span className="ref-chip ref-chip--more">
-                +{chipFit === null ? chipCount : foldedChips.length}
-              </span>
+        {isTip && (
+          <span className="ref-chips">
+            {localPreview.map((name, index) => renderLocal(name, index > 0))}
+            {remotePreview.map((name, index) => renderRemote(name, localPreview.length + index > 0))}
+          </span>
+        )}
+        {refCount > 0 && (
+          <RefBrowser count={refCount} commit={commit.shortHash}>
+            {(browser) => (
+              <>
+                {oldStackBase !== undefined && <p className="ref-list__note">Recorded parent tip of {oldStackBase.layer.branch}</p>}
+                <ul className="ref-list">
+                  {vm.tag !== undefined && <li>{renderTag(vm.tag, browser)}</li>}
+                  {publishedTags?.map((moved) => <li key={moved.name}>{renderPublishedTag(moved, browser)}</li>)}
+                  {orderedRefs.map((name) => <li key={name}>{renderLocal(name, false, browser)}</li>)}
+                  {remoteRefs.map((name) => <li key={`remote:${name}`}>{renderRemote(name, false, browser)}</li>)}
+                </ul>
+              </>
             )}
-          </span>
+          </RefBrowser>
         )}
-        {/* Folded chips leave the DOM, so name them for assistive tech
-            here, outside the strip the fit measures. */}
-        {chipFit !== null && foldedChips.length > 0 && (
-          <span className="a11y-sr-only">
-            {`${foldedChips.length} more ${
-              foldedChips.length === 1 ? "branch" : "branches"
-            }: ${foldedChips.join(", ")}`}
-          </span>
-        )}
-        {commit.isMerge && <span className="commit-tag">merge</span>}
-        {/* Last on the line, so the room a name leaves when it drops out
-            (app.css `.commit-byline`) trails off the end instead of opening
-            a gap before the next chip. It gives way before anything else
-            here and can go entirely, leaving the avatar — so the full name
-            is on the person card it opens, from either of them. */}
+        {commit.isMerge && <span className="commit-tag commit-tag--merge">merge</span>}
         {onShowPerson === undefined ? (
           <span className="commit-byline">{byline}</span>
         ) : (
@@ -518,7 +443,7 @@ export function GraphRow({
             {byline}
           </button>
         )}
-      </>
+      </div>
     );
   }
 
@@ -613,31 +538,77 @@ export function GraphRow({
           </span>
           <span className="commit-time">{shortWhen(commit.committedAt, now)}</span>
         </div>
-        <CommitMetaLine
-          total={chipCount}
-          hasTag={vm.tag !== undefined}
-          content={chipContent}
-          render={renderMeta}
-        />
+        {renderMeta()}
       </div>
       {tip.tooltipNode}
     </div>
   );
 }
 
-/** Keep the pre-paint fit updates local to the line whose children change. */
-function CommitMetaLine({
-  total, hasTag, content, render
-}: {
-  total: number;
-  hasTag: boolean;
-  content: string;
-  render: (fit: RefChipFit | null, stripRef: RefObject<HTMLSpanElement | null>) => ReactNode;
+type RefBrowserActions = { trigger: HTMLButtonElement; close: () => void };
+
+function RefBrowser({ count, commit, children }: {
+  count: number;
+  commit: string;
+  children: (actions: RefBrowserActions) => ReactNode;
 }) {
-  const lineRef = useRef<HTMLDivElement>(null);
-  const stripRef = useRef<HTMLSpanElement>(null);
-  const fit = useRefChipFit(lineRef, stripRef, total, hasTag, content);
-  return <div ref={lineRef} className="commit-meta">{render(fit, stripRef)}</div>;
+  const id = useId();
+  const [trigger, setTrigger] = useState<HTMLButtonElement | null>(null);
+  const label = `${count} ${count === 1 ? "ref" : "refs"}`;
+  return (
+    <>
+      <button
+        type="button"
+        className="ref-chip ref-browser"
+        popoverTarget={id}
+        aria-expanded={trigger !== null}
+        aria-label={`Browse ${label} at ${commit}`}
+        onClick={(event) => {
+          event.stopPropagation();
+          if (trigger === null) {
+            event.preventDefault();
+            setTrigger(event.currentTarget);
+          }
+        }}
+      >
+        <span className="ref-chip__name">{label}</span>
+        <ChevronGlyph size={9} />
+      </button>
+      {trigger !== null && (
+        <OpenRefBrowser id={id} commit={commit} trigger={trigger} onClose={() => setTrigger(null)}>
+          {children}
+        </OpenRefBrowser>
+      )}
+    </>
+  );
+}
+
+function OpenRefBrowser({ id, commit, trigger, onClose, children }: {
+  id: string;
+  commit: string;
+  trigger: HTMLButtonElement;
+  onClose: () => void;
+  children: (actions: RefBrowserActions) => ReactNode;
+}) {
+  const panel = useRef<HTMLDivElement>(null);
+  // Mount the list on demand. Supplying its invoker lets Chromium handle
+  // anchoring, light dismiss and sequential focus navigation.
+  useLayoutEffect(() => { panel.current?.showPopover({ source: trigger }); }, [trigger]);
+  return (
+    <div
+      ref={panel}
+      id={id}
+      popover="auto"
+      className="ref-browser-panel"
+      role="region"
+      aria-label={`Refs at ${commit}`}
+      onToggle={(event) => { if (event.newState === "closed") onClose(); }}
+      onClick={(event) => event.stopPropagation()}
+      onContextMenu={(event) => event.stopPropagation()}
+    >
+      {children({ trigger, close: () => panel.current?.hidePopover() })}
+    </div>
+  );
 }
 
 type GraphLaneSegmentsProps = {

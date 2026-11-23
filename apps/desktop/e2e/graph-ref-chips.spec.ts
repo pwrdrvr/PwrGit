@@ -59,148 +59,184 @@ function readRows() {
   return page.evaluate(() => window.graphRefHarness.readRows());
 }
 
-test("only measures strips whose content changed in a graph refresh", async () => {
-  await page.evaluate(() => window.graphRefHarness.mount(80, 490));
-  await settle();
-  const measured = await page.evaluate(() => {
-    const original = window.getComputedStyle;
-    const strips: (string | null)[] = [];
-    window.getComputedStyle = (element, pseudo) => {
-      if (element.classList.contains("ref-chips")) {
-        strips.push(element.closest(".graph-row")!.getAttribute("data-hash"));
-      }
-      return original(element, pseudo);
+test("CSS keeps the ref controls whole on mount, resize, refresh and a late font load", async () => {
+  const widths = [800, 693.5, 637, 599.875, 525.125, 490.5, 420, 382.625, 344.375, 311.125, 276, 250.5, 175, 150];
+  const readAudit = await page.evaluate(async (widths) => {
+    const geometry: Record<string, number> = {};
+    const original = {
+      rect: Element.prototype.getBoundingClientRect,
+      rects: Element.prototype.getClientRects,
+      style: window.getComputedStyle,
+      resize: window.ResizeObserver
     };
-    try {
-      window.graphRefHarness.refresh();
-      const equivalent = strips.splice(0);
-      window.graphRefHarness.changeBranch(true, true);
-      return { equivalent, updated: strips };
-    } finally {
-      window.getComputedStyle = original;
+    const restore: (() => void)[] = [];
+    // The oracle itself runs between audit windows. Count application reads
+    // during synchronous commits and through the following browser frames.
+    let audit = true;
+    const mark = (what: string) => { if (audit) geometry[what] = (geometry[what] ?? 0) + 1; };
+    Element.prototype.getBoundingClientRect = function () {
+      mark("bounding rect");
+      return original.rect.call(this);
+    };
+    Element.prototype.getClientRects = function () {
+      mark("client rects");
+      return original.rects.call(this);
+    };
+    window.getComputedStyle = (element, pseudo) => {
+      mark("computed style");
+      return original.style.call(window, element, pseudo);
+    };
+    window.ResizeObserver = class extends original.resize {
+      constructor(callback: ResizeObserverCallback) {
+        super(callback);
+        mark("resize observer");
+      }
+    };
+    for (const [proto, properties] of [
+      [Element.prototype, ["clientWidth", "clientHeight", "scrollWidth", "scrollHeight"]],
+      [HTMLElement.prototype, ["offsetWidth", "offsetHeight", "offsetLeft", "offsetTop"]]
+    ] as const) {
+      for (const name of properties) {
+        const descriptor = Object.getOwnPropertyDescriptor(proto, name)!;
+        Object.defineProperty(proto, name, {
+          ...descriptor,
+          get() { mark(name); return descriptor.get!.call(this); }
+        });
+        restore.push(() => Object.defineProperty(proto, name, descriptor));
+      }
     }
-  });
-  expect(measured).toEqual({ equivalent: [], updated: ["0000000"] });
+    const harness = window.graphRefHarness;
+    const snapshot = () => {
+      audit = false;
+      try { return harness.readRows(); } finally { audit = true; }
+    };
+    const frames = () => new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve())));
+    try {
+      harness.prepareDeepScene(widths[0]!);
+      harness.remount();
+      const cases = [];
+      for (const width of widths) {
+        harness.resize(width);
+        const resized = snapshot();
+        harness.remount();
+        const mounted = snapshot();
+        cases.push({ width, resized, mounted });
+        await frames();
+      }
+      harness.mount(5, 390, true);
+      harness.changeBranch(true, true);
+      harness.changeRow({
+        refs: ["feature/" + "W".repeat(200), "ready", "archived"],
+        remoteRefs: ["origin/" + "M".repeat(100)],
+        tag: { name: "release/" + "W".repeat(100), kind: "lightweight" },
+        isHead: true
+      });
+      const changed = snapshot();
+      await harness.loadWideFont();
+      await frames();
+      const loaded = snapshot();
+      harness.refresh();
+      const refreshed = snapshot();
+      harness.remount();
+      const fresh = snapshot();
+      return { geometry, cases, changed, loaded, refreshed, fresh };
+    } finally {
+      Element.prototype.getBoundingClientRect = original.rect;
+      Element.prototype.getClientRects = original.rects;
+      window.getComputedStyle = original.style;
+      window.ResizeObserver = original.resize;
+      for (const reset of restore) reset();
+    }
+  }, widths);
+  expect(readAudit.geometry).toEqual({});
+  const summaries = ["11 refs", "2 refs", "2 refs", "2 refs", "1 ref", "12 refs", "11 refs", "2 refs", "2 refs", null];
+  for (const { mounted, resized, width } of readAudit.cases) {
+    expect(mounted, `first frame at ${width}px`).toEqual(resized);
+    for (const [i, row] of mounted.entries()) {
+      expect(row.clipped, `row ${i} at ${width}px`).toEqual([]);
+      expect(row.summary).toBe(summaries[i % summaries.length]);
+    }
+  }
+  expect(readAudit.cases[0]!.mounted[0]!.chips.map(({ text }) => text))
+    .toEqual(["preview/WWWW-widgets-0", "feature/WWWW-widget-preview-0", "widget-0"]);
+  expect(readAudit.cases.find(({ width }) => width === 420)!.mounted[0]!.chips.map(({ text }) => text))
+    .toEqual(["preview/WWWW-widgets-0", "feature/WWWW-widget-preview-0"]);
+  expect(readAudit.changed[0]!.summary).toBe("5 refs");
+  expect(readAudit.changed[0]!.chips.some(({ truncated }) => truncated)).toBe(true);
+  expect(readAudit.changed[0]!.clipped).toEqual([]);
+  expect(readAudit.loaded[0]!.clipped).toEqual([]);
+  expect(readAudit.loaded).toEqual(readAudit.fresh);
+  expect(readAudit.refreshed).toEqual(readAudit.fresh);
 });
 
-test("width and content changes agree with a fresh fit across the chip ladder", async () => {
-  await page.evaluate(() => window.graphRefHarness.mount(10, 700));
-  await settle();
-  const wide = await readRows();
-  expect(wide[0]!.chips.map(({ text }) => text)).toEqual(["feature/WWWW-widget-preview-0", "widget-0"]);
-  expect(wide[0]!.folded).toBe(8);
-  expect(wide[3]!.chips.map(({ text }) => text)).toEqual(["origin/widget-3", "upstream"]);
+test("the ref list keeps every ordered name and reaches hidden branch actions by keyboard", async () => {
+  await page.evaluate(() => window.graphRefHarness.mount(1, 276));
+  const summary = page.getByRole("button", { name: "Browse 11 refs at 0000000" });
+  const list = page.getByRole("region", { name: "Refs at 0000000" });
+  await expect(list).toBeHidden();
+  await summary.focus();
+  await page.keyboard.press("Enter");
+  await expect(list).toBeVisible();
+  await expect(list.getByRole("listitem")).toHaveCount(11);
+  await expect(list.locator(".commit-tag__name, .ref-chip__name")).toHaveText([
+    "preview/WWWW-widgets-0", "feature/WWWW-widget-preview-0", "widget-0",
+    ...Array.from({ length: 8 }, (_, i) => `archive/0-${i}`)
+  ]);
+  await page.keyboard.press("Tab");
+  await expect(list.getByRole("button", { name: "Actions for branch feature/WWWW-widget-preview-0" })).toBeFocused();
+  await page.keyboard.press("Escape");
+  await expect(list).toBeHidden();
+  await expect(summary).toBeFocused();
 
-  let sawSqueezedBranch = false;
-  for (const width of [490, 360, 260, 150, 700]) {
-    await page.evaluate((w) => window.graphRefHarness.resize(w), width);
-    await settle();
-    const resized = await readRows();
-    for (const [i, total] of [10, 2, 2, 2, 0].entries()) {
-      const row = resized[i]!;
-      expect(row.chips.length + row.folded).toBe(total);
-      expect(row.clipped).toBe(false);
-    }
-    await page.evaluate(() => window.graphRefHarness.remount());
-    await settle();
-    expect(resized).toEqual(await readRows());
-    sawSqueezedBranch ||= resized.some((row) => row.chips.some((chip) => chip.squeezed && chip.truncated));
-    if (width === 260) expect(resized[0]).toMatchObject({ folded: 10, tag: "squeezed" });
-    if (width === 150) expect(resized[0]!.tag).toBe("glyph");
-  }
-  expect(sawSqueezedBranch).toBe(true);
+  const remote = "upstream/" + "a-long-ref-segment-".repeat(20);
+  await page.evaluate((remote) => window.graphRefHarness.changeRow({ remoteRefs: [remote, "origin"] }), remote);
+  await page.getByRole("button", { name: "Browse 13 refs at 0000000" }).press("Space");
+  const action = list.getByRole("button", { name: `Actions for remote branch ${remote}` });
+  await expect(action).toBeVisible();
+  await expect(list.locator(".ref-chip--remote .ref-chip__name")).toHaveText([remote, "origin"]);
+  expect(await action.evaluate((button) => button.scrollWidth <= button.clientWidth)).toBe(true);
+  await action.press("Enter");
+  await expect(list).toBeHidden();
+  const branchMenu = page.getByRole("menu", { name: `${remote} actions` });
+  await expect(branchMenu.getByRole("menuitem", { name: /^Reset main to upstream/ })).toBeVisible();
+  await page.keyboard.press("Escape");
+  await expect(branchMenu).toBeHidden();
+  await expect(page.getByRole("button", { name: "Browse 13 refs at 0000000" })).toBeFocused();
+});
+
+test("compact rows keep moved tags, stack positions and worktree actions in the ref list", async () => {
+  await page.evaluate(() => {
+    window.graphRefHarness.prepareDeepScene(175, 7);
+    window.graphRefHarness.remount();
+  });
+  const stackRow = page.locator('.graph-row[data-hash="0000006"]');
+  await stackRow.getByRole("button", { name: "Browse 11 refs at 0000006" }).press("Enter");
+  const stackList = stackRow.getByRole("region");
+  await expect(stackList).toContainText("#7");
+  await stackList.getByRole("button", { name: /^Open stack for feature/ }).press("Enter");
+  await expect(stackList).toBeHidden();
+  expect(await page.evaluate(() => window.graphRefHarness.lastAction())).toBe("stack:widget-stack-6");
 
   await page.evaluate(() => {
-    window.graphRefHarness.resize(490);
-    window.graphRefHarness.changeBranch(true, true);
+    const harness = window.graphRefHarness;
+    harness.mount(1, 276);
+    harness.changeBranch(true, true);
+    const local = { kind: "lightweight" as const, targetId: "old", objectId: "a" };
+    harness.changeRow({ publishedTags: ["v7", "v8"].map((name) => ({
+      name, local, published: { ...local, remote: "origin", targetId: "new" }
+    })) });
   });
-  await settle();
-  const adorned = await readRows();
-  await page.evaluate(() => window.graphRefHarness.remount());
-  await settle();
-  expect(adorned).toEqual(await readRows());
-
-  await page.evaluate(() => window.graphRefHarness.changeRow({
-    refs: ["main"],
-    remoteRefs: ["origin"],
-    tag: { name: "v2.1", kind: "lightweight" },
-    isHead: true
-  }));
-  await settle();
-  const changed = await readRows();
-  expect(changed[0]!.chips.map(({ text }) => text)).toEqual(["main", "origin"]);
-  expect(changed[0]!.folded).toBe(0);
-  await page.evaluate(() => window.graphRefHarness.remount());
-  await settle();
-  expect(changed).toEqual(await readRows());
-});
-
-test("restoring the last ref after a resize agrees with a fresh fit", async () => {
-  const refs = ["feature/repair-widget-previews"];
-  await page.evaluate((refs) => {
-    window.graphRefHarness.mount(1, 120);
-    window.graphRefHarness.changeRow({ refs, tag: undefined });
-  }, refs);
-  await settle();
-  expect((await readRows())[0]).toMatchObject({ chips: [], folded: 1 });
-
-  await page.evaluate(() => window.graphRefHarness.changeRow({ refs: [] }));
-  await expect(page.locator(".ref-chips")).toHaveCount(0);
-  await page.evaluate(() => window.graphRefHarness.resize(700));
-  await settle();
-  await page.evaluate((refs) => window.graphRefHarness.changeRow({ refs }), refs);
-  const restored = await readRows();
-  if (shots) {
-    mkdirSync(shots, { recursive: true });
-    await page.locator(".graph-harness").screenshot({ path: join(shots, "restored-ref-700.png") });
-  }
-
-  await page.evaluate(() => window.graphRefHarness.remount());
-  await settle();
-  const fresh = await readRows();
-  expect(fresh[0]).toMatchObject({ chips: [{ text: refs[0] }], folded: 0 });
-  expect(restored).toEqual(fresh);
-});
-
-test("a late font refits the row at an unchanged width", async () => {
-  await page.evaluate(() => window.graphRefHarness.mount(10, 390, true));
-  await settle();
-  const fallback = await readRows();
-  await page.evaluate(() => window.graphRefHarness.loadWideFont());
-  await settle();
-  const loaded = await readRows();
-  expect(loaded[0]!.folded).toBeGreaterThan(fallback[0]!.folded);
-  await page.evaluate(() => window.graphRefHarness.remount());
-  await settle();
-  expect(loaded).toEqual(await readRows());
-});
-
-test("first fit bounds rigid slots and checks squeezed adornments before paint", async () => {
-  for (const width of [800, 525.125, 490.5, 420, 382.625, 344.375, 311.125, 250.5, 175]) {
-    const { rigidInteriorReads, rows } = await page.evaluate((width) => {
-      window.graphRefHarness.prepareDeepScene(width);
-      const original = Element.prototype.getBoundingClientRect;
-      let reads = 0;
-      Element.prototype.getBoundingClientRect = function () {
-        if (this.matches(".ref-chips > :not(.is-squeezed) > *")) reads++;
-        return original.call(this);
-      };
-      try {
-        window.graphRefHarness.remount();
-      } finally {
-        Element.prototype.getBoundingClientRect = original;
-      }
-      // The exhaustive walk is the oracle. Read it in the same turn as mount.
-      return { rigidInteriorReads: reads, rows: window.graphRefHarness.readRows() };
-    }, width);
-    expect(rows.every((row) => !row.clipped)).toBe(true);
-    for (const [i, row] of rows.entries()) {
-      const total = [10, 2, 2, 2, 0, 12, 11, 2, 2, 0][i % 10];
-      expect(row.chips.length + row.folded).toBe(total);
-      if (i % 10 === 6) expect(row.chips.length).toBeLessThanOrEqual(1);
-    }
-    expect(rigidInteriorReads).toBe(0);
-  }
+  const summary = page.getByRole("button", { name: "Browse 13 refs at 0000000" });
+  const list = page.getByRole("region", { name: "Refs at 0000000" });
+  await summary.press("Enter");
+  await expect(list.getByRole("listitem")).toHaveCount(13);
+  await list.getByRole("button", { name: /^origin's v8 points here/ }).press("Enter");
+  await expect(list).toBeHidden();
+  expect(await page.evaluate(() => window.graphRefHarness.lastAction())).toBe("tag:v8");
+  await summary.press("Enter");
+  await list.getByRole("button", { name: /^Open the feature/ }).press("Enter");
+  await expect(list).toBeHidden();
+  expect(await page.evaluate(() => window.graphRefHarness.lastAction())).toBe("worktree:widget-checkout");
 });
 
 if (benchmark) {
@@ -214,7 +250,6 @@ if (benchmark) {
         .map((name) => readFileSync(join(assets, name), "utf8")).join("");
       expect(client).not.toContain("The current testing environment is not configured to support act");
     }
-    await page.setViewportSize({ width: 900, height: 1620 });
     const cdp = await page.context().newCDPSession(page);
     await cdp.send("Performance.enable", { timeDomain: "threadTicks" });
     const metrics = async () => Object.fromEntries(
@@ -222,8 +257,13 @@ if (benchmark) {
     );
     const cases = [24, 120].flatMap((count) => [800, 420].map((width) => ({ count, width })));
     const fits = new Map<string, string>();
+    const initialization = new Map<string, string>();
     for (let sample = 0; sample < 13; sample++) {
       for (const { count, width } of sample % 2 === 0 ? cases : [...cases].reverse()) {
+        // The deep viewport ends after the 24th row: 1px of card border,
+        // 24 × 64px, and the harness's 16px reservation. A scene with
+        // only 24 rows keeps its original room for padding and scrollbars.
+        await page.setViewportSize({ width: 900, height: count === 120 ? 1553 : 1620 });
         for (const version of sample % 2 === 0 ? versions : [...versions].reverse()) {
           await page.goto(pathToFileURL(version.html).href);
           const production = await page.evaluate(async ({ width, count }) => {
@@ -241,19 +281,35 @@ if (benchmark) {
             return performance.now() - start;
           });
           const after = await metrics();
-          const rows = await readRows();
-          expect(rows).toHaveLength(count);
-          expect(rows.filter((row) => row.chips.length > 0 || row.folded > 0 || row.tag !== "none"))
-            .toHaveLength(count - Math.floor(count / 10));
-          expect(rows.every((row) => !row.clipped)).toBe(true);
-          const visible = await page.locator(".graph-row").nth(23).evaluate((row) => (
-            row.getBoundingClientRect().bottom <= row.closest(".graph-scroll")!.getBoundingClientRect().bottom
-          ));
-          expect(visible).toBe(true);
-          const fit = createHash("sha256").update(JSON.stringify(rows)).digest("hex").slice(0, 12);
+          // Compare the same commits, lane SVGs, subjects, ages, bylines, and
+          // viewport independently of the deliberately different ref preview.
+          const scene = await page.evaluate(() => {
+            const scroll = document.querySelector(".graph-scroll")!.getBoundingClientRect();
+            const all = [...document.querySelectorAll(".graph-row")];
+            return {
+              pane: document.querySelector(".graph-harness")!.getBoundingClientRect().width,
+              monoLoaded: document.fonts.check('600 9.5px "Geist Mono"'),
+              visible: all.filter(row => row.getBoundingClientRect().top < scroll.bottom).length,
+              fullyVisible: all.filter(row => row.getBoundingClientRect().bottom <= scroll.bottom).length,
+              rows: all.map(row => [
+                row.getAttribute("data-hash"), row.querySelector(".graph-lanes")!.outerHTML,
+                ...[".commit-sha-chip", ".commit-msg", ".commit-time", ".commit-author"]
+                  .map(selector => row.querySelector(selector)!.textContent)
+              ])
+            };
+          });
+          expect(scene).toMatchObject({ pane: width, monoLoaded: true, visible: 24, fullyVisible: 24 });
+          expect(scene.rows).toHaveLength(count);
           const key = `${count}:${width}`;
-          if (!fits.has(key)) fits.set(key, fit);
-          expect(fit).toBe(fits.get(key));
+          const initialized = createHash("sha256").update(JSON.stringify(scene)).digest("hex").slice(0, 12);
+          if (!initialization.has(key)) initialization.set(key, initialized);
+          expect(initialized).toBe(initialization.get(key));
+          const rows = await readRows();
+          if (version.name === "current") expect(rows.flatMap(row => row.clipped)).toEqual([]);
+          const fit = createHash("sha256").update(JSON.stringify(rows)).digest("hex").slice(0, 12);
+          const fitKey = `${version.name}:${key}`;
+          if (!fits.has(fitKey)) fits.set(fitKey, fit);
+          expect(fit).toBe(fits.get(fitKey));
           const geometryReads = await page.evaluate(() => {
             const original = Element.prototype.getBoundingClientRect;
             let reads = 0;
@@ -268,10 +324,11 @@ if (benchmark) {
               Element.prototype.getBoundingClientRect = original;
             }
           });
+          if (version.name === "current") expect(geometryReads).toBe(0);
           // The first pass warms up the browser. Each sample still mounts into a new document.
           if (sample === 0) continue;
           console.log(JSON.stringify({
-            version: version.name, sample, count, width, fit, wallMs, geometryReads,
+            version: version.name, sample, count, width, initialized, fit, wallMs, geometryReads,
             layouts: after.LayoutCount! - before.LayoutCount!,
             layoutMs: (after.LayoutDuration! - before.LayoutDuration!) * 1000,
             taskMs: (after.TaskDuration! - before.TaskDuration!) * 1000
@@ -283,12 +340,22 @@ if (benchmark) {
 }
 
 if (shots) {
-  test("captures wide, squeezed and folded chip layouts", async () => {
+  test("captures wide and compact ref previews", async () => {
     mkdirSync(shots, { recursive: true });
-    for (const width of [700, 360, 260]) {
-      await page.evaluate((w) => window.graphRefHarness.mount(5, w), width);
-      await settle();
-      await page.locator(".graph-harness").screenshot({ path: join(shots, `ref-chips-${width}.png`) });
+    const versions = [{ name: "after", html }];
+    if (baselineHtml !== undefined) versions.unshift({ name: "before", html: baselineHtml });
+    for (const version of versions) {
+      for (const width of [700, 420, 276]) {
+        await page.goto(pathToFileURL(version.html).href);
+        await page.evaluate(async (w) => {
+          await window.graphRefHarness.ready;
+          window.graphRefHarness.mount(5, w);
+        }, width);
+        await settle();
+        await page.locator(".graph-harness").screenshot({ path: join(shots, `${version.name}-${width}.png`) });
+      }
     }
+    await page.getByRole("button", { name: "Browse 11 refs at 0000000" }).click();
+    await page.getByRole("region", { name: "Refs at 0000000" }).screenshot({ path: join(shots, "after-list.png") });
   });
 }

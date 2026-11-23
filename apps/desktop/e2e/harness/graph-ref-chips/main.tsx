@@ -1,8 +1,9 @@
 import type { LaneBranchInfo, PrSummary, StackPosition } from "@pwrgit/shared";
 import wideFont from "@fontsource/geist-sans/files/geist-sans-latin-600-normal.woff2?url";
-import type { CSSProperties } from "react";
+import { useState, type CSSProperties } from "react";
 import { flushSync } from "react-dom";
 import { createRoot } from "react-dom/client";
+import { BranchChipMenu, type BranchChipTarget } from "../../../src/renderer/src/features/graph/BranchChipMenu";
 import { GraphRow, type GraphRowVM } from "../../../src/renderer/src/features/graph/GraphRow";
 import { useHoverIntent } from "../../../src/renderer/src/lib/hoverIntent";
 import "../../../src/renderer/src/styles/app.css";
@@ -71,6 +72,7 @@ function Graph({ scene, width, lateFont }: {
   lateFont: boolean;
 }) {
   const hoverIntent = useHoverIntent();
+  const [branch, setBranch] = useState<BranchChipTarget | null>(null);
   return (
     <div className="graph-harness" style={{ width }}>
       <div
@@ -88,7 +90,7 @@ function Graph({ scene, width, lateFont }: {
               branchInfo={scene.branches}
               laneCount={scene.laneCount}
               stackPositions={scene.stackPositions}
-              onOpenStack={noop}
+              onOpenStack={stack => { lastAction = `stack:${stack.id}`; }}
               now={now}
               selected={false}
               focused={false}
@@ -100,11 +102,27 @@ function Graph({ scene, width, lateFont }: {
               onHideContext={noop}
               onFocusContext={() => false}
               onOpenContextMenu={noop}
+              {...(!scene.deep && {
+                onOpenBranchMenu: setBranch,
+                onRevealWorktree: (id: string) => { lastAction = `worktree:${id}`; }
+              })}
               onShowPerson={noop}
-              onTakeTag={noop}
+              onTakeTag={moved => { lastAction = `tag:${moved.name}`; }}
             />
           ))}
         </div>
+        {branch !== null && (
+          <BranchChipMenu
+            target={branch}
+            branchInfo={scene.branches}
+            viewingBranch="main"
+            repoId="widgets"
+            worktreeId="main-checkout"
+            onClose={() => setBranch(null)}
+            onRevealWorktree={(id) => { lastAction = `worktree:${id}`; }}
+            onSwitchBranch={target => { lastAction = `switch:${target.branch}`; }}
+          />
+        )}
       </div>
     </div>
   );
@@ -115,32 +133,40 @@ let scene = makeScene(0);
 let width = 540;
 let key = 0;
 let lateFont = false;
+let lastAction = "";
 
 function render() {
   flushSync(() => root.render(<Graph key={key} scene={scene} width={width} lateFont={lateFont} />));
 }
 
 function readRows() {
+  const visible = (element: Element) => element.getClientRects().length > 0;
+  const contains = (outer: DOMRect, inner: DOMRect) =>
+    inner.left >= outer.left - 0.5 && inner.right <= outer.right + 0.5 &&
+    inner.top >= outer.top - 0.5 && inner.bottom <= outer.bottom + 0.5;
   return [...document.querySelectorAll(".graph-row")].map((row) => {
-    const strip = row.querySelector(".ref-chips");
-    const edge = strip?.getBoundingClientRect().right ?? Infinity;
-    const tag = row.querySelector(".commit-tag--tag");
-    const byline = row.querySelector(".commit-byline")!.getBoundingClientRect();
-    const author = row.querySelector(".commit-author")!.getBoundingClientRect();
+    const line = row.querySelector(".commit-meta")!;
+    const rect = line.getBoundingClientRect();
+    const slots = [...line.querySelectorAll(
+      ":scope > :not([popover]), :scope > .ref-chips > *, :scope > .ref-chips > .ref-group > *"
+    )].filter(visible);
+    const names = [...line.querySelectorAll(".ref-chips .ref-chip__name, :scope > .commit-tag--tag .commit-tag__name")]
+      .filter(visible);
     return {
-      chips: [...row.querySelectorAll(".ref-chip__name")].map((name) => ({
+      chips: names.map((name) => ({
         text: name.textContent,
-        truncated: name.scrollWidth > name.clientWidth,
-        squeezed: name.parentElement!.classList.contains("is-squeezed")
+        truncated: name.scrollWidth > name.clientWidth
       })),
-      folded: Number(strip?.querySelector(".ref-chip--more")?.textContent?.slice(1) ?? "0"),
-      clipped: [...row.querySelectorAll(".ref-chips > *, .ref-chips > * > *")].some(
-        (part) => part.getBoundingClientRect().right > edge + 0.5
-      ),
-      tag: tag?.classList.contains("is-glyph") ? "glyph"
-        : tag?.classList.contains("is-squeezed") ? "squeezed"
-        : tag === null ? "none" : "whole",
-      byline: { width: byline.width, authorVisible: author.top < byline.bottom }
+      summary: line.querySelector(".ref-browser")?.textContent ?? null,
+      clipped: slots.flatMap((slot) => {
+        const box = slot.getBoundingClientRect();
+        const parent = slot.parentElement!;
+        return contains(rect, box) && contains(parent.getBoundingClientRect(), box) &&
+          // A whole pill still needs room for its glyph and name ellipsis.
+          [...slot.querySelectorAll(":scope > svg, :scope > .ref-chip__name, :scope > .commit-tag__name")]
+            .filter(visible).every((part) => contains(box, part.getBoundingClientRect()))
+          ? [] : [slot.className];
+      })
     };
   });
 }
@@ -148,6 +174,7 @@ function readRows() {
 export const harness = {
   production: import.meta.env.PROD,
   readRows,
+  lastAction: () => lastAction,
   ready: Promise.all([
     document.fonts.load('600 9.5px "Geist Mono"'),
     document.fonts.load('600 12.5px "Geist Sans"'),
