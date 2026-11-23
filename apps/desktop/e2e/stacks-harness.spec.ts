@@ -42,6 +42,16 @@ test("shows stack positions and navigates between the stack and lineage", async 
       await expect(page.getByRole("dialog", { name: "windows/scheduler" })).toBeVisible();
       await expect(page.getByRole("region", { name: "Stack", exact: true })).toHaveCount(0);
       await page.keyboard.press("Escape");
+      const refBrowser = page.getByRole("region", { name: "Refs at 2222222" });
+      await page.getByRole("button", { name: "Browse 2 refs at 2222222" }).click();
+      await refBrowser.getByRole("button", { name: "windows/scheduler, position 2 of 3. Show stack" }).click();
+      const nestedStack = refBrowser.getByRole("dialog", { name: "windows/scheduler" });
+      await expect(nestedStack).toBeVisible();
+      await expect(page.getByRole("region", { name: "Stack", exact: true })).toHaveCount(0);
+      await nestedStack.getByRole("button", { name: "Close stack popover" }).click();
+      await expect(refBrowser).toBeVisible();
+      await page.keyboard.press("Escape");
+      await expect(refBrowser).toHaveCount(0);
       await graphPosition.click();
       await expect(page.getByRole("region", { name: "Stack", exact: true })).toHaveCount(0);
       await page.getByRole("button", { name: "Open stack view" }).click();

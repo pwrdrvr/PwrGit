@@ -64,7 +64,8 @@ export function StackPopoverTrigger({
   }, [open]);
 
   const close = () => { setOpen(false); anchor.current?.focus({ preventScroll: true }); };
-  const host = anchor.current?.closest(".app") ?? anchor.current?.parentElement;
+  // A trigger inside Lineage’s native ref browser belongs to its top layer.
+  const host = anchor.current?.closest("[popover]") ?? anchor.current?.closest(".app") ?? anchor.current?.parentElement;
   return <>
     <button type="button" className={className} ref={anchor} aria-label={label}
       aria-haspopup="dialog" aria-expanded={open} aria-controls={open ? id : undefined}

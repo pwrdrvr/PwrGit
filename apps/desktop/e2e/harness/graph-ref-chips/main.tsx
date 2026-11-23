@@ -1,9 +1,12 @@
-import type { LaneBranchInfo, PrSummary } from "@pwrgit/shared";
+import type { LaneBranchInfo, PrSummary, StackPosition } from "@pwrgit/shared";
 import wideFont from "@fontsource/geist-sans/files/geist-sans-latin-600-normal.woff2?url";
-import type { CSSProperties } from "react";
+import { useState, type CSSProperties } from "react";
 import { flushSync } from "react-dom";
 import { createRoot } from "react-dom/client";
+import { BranchChipMenu, type BranchChipTarget } from "../../../src/renderer/src/features/graph/BranchChipMenu";
 import { GraphRow, type GraphRowVM } from "../../../src/renderer/src/features/graph/GraphRow";
+import { StackNavigationContext } from "../../../src/renderer/src/features/stacks/stack-navigation";
+import "../../../src/renderer/src/features/stacks/stacks.css";
 import { useHoverIntent } from "../../../src/renderer/src/lib/hoverIntent";
 import "../../../src/renderer/src/styles/app.css";
 
@@ -19,27 +22,42 @@ const samplePr: PrSummary = {
 };
 const firstRef = (i: number) => `feature/WWWW-widget-preview-${i}`;
 
-function makeScene(count: number) {
+function makeScene(count: number, deep = false) {
+  const laneCount = deep ? 24 : 3;
   const branches: Record<string, LaneBranchInfo> = {};
+  const stackPositions = new Map<string, StackPosition>();
+  const lanes = Array.from({ length: deep ? laneCount : 1 }, (_, lane) => ({ from: lane, to: lane }));
   const rows = Array.from({ length: count }, (_, i): GraphRowVM => {
     const hash = i.toString(16).padStart(7, "0");
     const kind = i % 10;
     const name = firstRef(i);
-    if (kind <= 2) {
+    if (deep && kind === 6) {
+      const layer = {
+        branch: name, parent: "main",
+        health: { inSync: true, needsRestack: false, parentMerged: false, needsPush: false, drift: false, remoteAhead: false }
+      };
+      stackPositions.set(name, {
+        layer, index: 1,
+        stack: { id: `widget-stack-${i}`, catalogRepository: "widgets", source: "tracked", trunk: { branch: "main" }, layers: [layer] }
+      });
+    }
+    if (kind <= 2 || stackPositions.has(name)) {
       branches[name] = {
-        ...(kind === 1 ? { pr: samplePr } : {}),
-        ...(kind === 2 ? { worktreeId: "widget-checkout" } : {})
+        ...(kind === 1 || kind === 6 ? { pr: samplePr } : {}),
+        ...(kind === 2 || kind === 6 ? { worktreeId: "widget-checkout" } : {})
       };
     }
+    const hasLocal = kind <= 2 || (deep && kind >= 5 && kind <= 8);
+    const extraRefs = kind === 0 ? 8 : kind === 5 ? 10 : kind === 6 ? 9 : 0;
     return {
       commit: {
         hash, shortHash: hash, parents: [], subject: `Widget history entry ${i}`,
         authorName: "Avery Chen", authorEmail: "avery@example.test",
         committedAt: "2026-11-18T14:00:00Z", isMerge: kind === 2
       },
-      row: { lane: kind % 3, top: [{ from: 0, to: 0 }], bottom: [{ from: 0, to: 0 }] },
-      refs: kind <= 2
-        ? [name, `widget-${i}`, ...Array.from({ length: kind === 0 ? 8 : 0 }, (_, j) => `archive/${i}-${j}`)]
+      row: { lane: deep ? i % laneCount : kind % 3, top: lanes, bottom: lanes },
+      refs: hasLocal
+        ? [name, `widget-${i}`, ...Array.from({ length: extraRefs }, (_, j) => `archive/${i}-${j}`)]
         : [],
       remoteRefs: kind === 3 ? [`origin/widget-${i}`, "upstream"] : [],
       ...(kind === 0 || kind === 4 ? { tag: { name: `preview/WWWW-widgets-${i}`, kind: "annotated" } } : {}),
@@ -47,22 +65,25 @@ function makeScene(count: number) {
       isHead: false, isHeadOnly: false, isMine: false, defaultBranch: "main"
     };
   });
-  return { rows, branches };
+  return { rows, branches, laneCount, stackPositions, deep };
 }
 
-function Graph({
-  scene, width, lateFont
-}: {
+function Graph({ scene, width, lateFont }: {
   scene: ReturnType<typeof makeScene>;
   width: number;
   lateFont: boolean;
 }) {
   const hoverIntent = useHoverIntent();
+  const [branch, setBranch] = useState<BranchChipTarget | null>(null);
   return (
+    <StackNavigationContext.Provider value={{ pick: null, select: ({ stack }) => { lastAction = `stack:${stack.id}`; } }}>
     <div className="graph-harness" style={{ width }}>
       <div
         className="graph-scroll"
-        style={lateFont ? { "--font-mono": '"Graph Fit Late", "Geist Mono", monospace' } as CSSProperties : undefined}
+        style={{
+          ...(lateFont ? { "--font-mono": '"Graph Fit Late", "Geist Mono", monospace' } as CSSProperties : {}),
+          ...(scene.deep ? { maxHeight: "calc(100vh - 16px)" } : {})
+        }}
       >
         <div className="graph-card">
           {scene.rows.map((vm) => (
@@ -70,7 +91,9 @@ function Graph({
               key={vm.commit.hash}
               vm={vm}
               branchInfo={scene.branches}
-              laneCount={3}
+              laneCount={scene.laneCount}
+              stackPositions={scene.stackPositions}
+              stackRepoId="widgets"
               now={now}
               selected={false}
               focused={false}
@@ -82,13 +105,30 @@ function Graph({
               onHideContext={noop}
               onFocusContext={() => false}
               onOpenContextMenu={noop}
+              {...(!scene.deep && {
+                onOpenBranchMenu: setBranch,
+                onRevealWorktree: (id: string) => { lastAction = `worktree:${id}`; }
+              })}
               onShowPerson={noop}
-              onTakeTag={noop}
+              onTakeTag={moved => { lastAction = `tag:${moved.name}`; }}
             />
           ))}
         </div>
+        {branch !== null && (
+          <BranchChipMenu
+            target={branch}
+            branchInfo={scene.branches}
+            viewingBranch="main"
+            repoId="widgets"
+            worktreeId="main-checkout"
+            onClose={() => setBranch(null)}
+            onRevealWorktree={(id) => { lastAction = `worktree:${id}`; }}
+            onSwitchBranch={target => { lastAction = `switch:${target.branch}`; }}
+          />
+        )}
       </div>
     </div>
+    </StackNavigationContext.Provider>
   );
 }
 
@@ -97,14 +137,51 @@ let scene = makeScene(0);
 let width = 540;
 let key = 0;
 let lateFont = false;
+let lastAction = "";
 
 function render() {
   flushSync(() => root.render(<Graph key={key} scene={scene} width={width} lateFont={lateFont} />));
 }
 
+function readRows() {
+  const visible = (element: Element) => element.getClientRects().length > 0;
+  const contains = (outer: DOMRect, inner: DOMRect) =>
+    inner.left >= outer.left - 0.5 && inner.right <= outer.right + 0.5 &&
+    inner.top >= outer.top - 0.5 && inner.bottom <= outer.bottom + 0.5;
+  return [...document.querySelectorAll(".graph-row")].map((row) => {
+    const line = row.querySelector(".commit-meta")!;
+    const rect = line.getBoundingClientRect();
+    const slots = [...line.querySelectorAll(
+      ":scope > :not([popover]), :scope > .ref-chips > *, :scope > .ref-chips > .ref-group > *"
+    )].filter(visible);
+    const names = [...line.querySelectorAll(".ref-chips .ref-chip__name, :scope > .commit-tag--tag .commit-tag__name")]
+      .filter(visible);
+    return {
+      chips: names.map((name) => ({
+        text: name.textContent,
+        truncated: name.scrollWidth > name.clientWidth || name.scrollHeight > name.clientHeight
+      })),
+      summary: line.querySelector(".ref-browser")?.textContent ?? null,
+      clipped: slots.flatMap((slot) => {
+        const box = slot.getBoundingClientRect();
+        const parent = slot.parentElement!;
+        return contains(rect, box) && contains(parent.getBoundingClientRect(), box) &&
+          // A whole pill still needs room for its glyph and name ellipsis.
+          [...slot.querySelectorAll(":scope > svg, :scope > .ref-chip__name, :scope > .commit-tag__name")]
+            .filter(visible).every((part) => contains(box, part.getBoundingClientRect()))
+          ? [] : [slot.className];
+      })
+    };
+  });
+}
+
 export const harness = {
+  production: import.meta.env.PROD,
+  readRows,
+  lastAction: () => lastAction,
   ready: Promise.all([
     document.fonts.load('600 9.5px "Geist Mono"'),
+    document.fonts.load('500 10px "Geist Mono"', "1/1"),
     document.fonts.load('600 12.5px "Geist Sans"'),
     document.fonts.load('500 10.5px "Geist Sans"'),
     document.fonts.load('700 7px "Geist Sans"')
@@ -115,6 +192,11 @@ export const harness = {
     lateFont = withLateFont;
     key++;
     render();
+  },
+  prepareDeepScene(nextWidth: number, count = 24) {
+    scene = makeScene(count, true);
+    width = nextWidth;
+    lateFont = false;
   },
   remount() {
     key++;
@@ -130,6 +212,7 @@ export const harness = {
   },
   changeBranch(pr: boolean, worktree: boolean) {
     scene = {
+      ...scene,
       rows: scene.rows.map((row) => ({ ...row })),
       branches: {
         ...scene.branches,

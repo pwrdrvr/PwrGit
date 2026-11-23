@@ -4,7 +4,7 @@ import { spawn, type ChildProcessWithoutNullStreams, type ExecFileOptions } from
 import { bindGitAbort, gitProcessGroupOptions } from "./git-process-control";
 import { bundledGitEnvironment, installedKeychainHelper, userSystemConfig } from "@pwrgit/mcp-server";
 import { tmpdir } from "node:os";
-import { delimiter, dirname, isAbsolute, relative, resolve } from "node:path";
+import { delimiter, dirname, isAbsolute, parse, relative, resolve } from "node:path";
 import dugite from "dugite";
 import { err, ok, type GitReflinkSupport, type PwrGitError, type Result } from "@pwrgit/shared";
 import { cliSearchPath } from "../forge/cli-runner";
@@ -266,6 +266,38 @@ const within = (directory: string, value: string): boolean => {
   return path === "" || (!path.startsWith("..") && !isAbsolute(path));
 };
 
+let lastInstalledGitPath: {
+  inheritedPath: string;
+  cliPath: string;
+  commandDirectory: string;
+  bundle: string;
+  shipped: string;
+  path: string;
+} | undefined;
+
+function installedGitPath(inheritedPath: string, command: string, bundle: string, shipped: string): string {
+  const windows = process.platform === "win32";
+  const cliPath = windows ? "" : cliSearchPath();
+  const commandDirectory = dirname(command);
+  const last = lastInstalledGitPath;
+  if (last?.inheritedPath === inheritedPath && last.cliPath === cliPath && last.commandDirectory === commandDirectory
+    && last.bundle === bundle && last.shipped === shipped) {
+    return last.path;
+  }
+
+  const entries = [inheritedPath, cliPath].join(delimiter).split(delimiter).filter(Boolean);
+  const path = [...new Set([
+    commandDirectory,
+    ...entries.filter((entry) => !within(bundle, entry) && !within(shipped, entry))
+  ])].join(delimiter);
+  // Relative entries can resolve differently after a CWD change. On Windows,
+  // a root like \bin also depends on the current drive.
+  if (entries.every((entry) => isAbsolute(entry) && (!windows || parse(entry).root.length > 1))) {
+    lastInstalledGitPath = { inheritedPath, cliPath, commandDirectory, bundle, shipped, path };
+  }
+  return path;
+}
+
 /**
  * An environment for an installed Git: nothing of the bundle's. Each bundle
  * variable would redirect it — `GIT_EXEC_PATH` to the bundle's helpers, the
@@ -302,13 +334,7 @@ export function installedGitEnvironment(
       else env[key] = user;
     }
   }
-  const searchPath = process.platform === "win32" ? inheritedPath : [inheritedPath, cliSearchPath()].join(delimiter);
-  env.PATH = [
-    ...new Set([
-      dirname(command),
-      ...searchPath.split(delimiter).filter((entry) => entry !== "" && !inBundle(entry))
-    ])
-  ].join(delimiter);
+  env.PATH = installedGitPath(inheritedPath, command, bundle, shipped);
   return { ...env, ...NON_INTERACTIVE_GIT_ENV };
 }
 

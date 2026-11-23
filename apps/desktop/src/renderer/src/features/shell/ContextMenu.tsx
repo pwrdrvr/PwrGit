@@ -66,6 +66,7 @@ export function ContextMenu({
   onClose,
   label,
   triggerRef,
+  focusReturnRef,
   align = "start",
   placement = "below"
 }: {
@@ -85,6 +86,8 @@ export function ContextMenu({
   label?: string;
   /** A trigger click toggles the menu instead of counting as an outside click. */
   triggerRef?: RefObject<HTMLElement | null>;
+  /** Focus returns here on Escape. Clicking this control can dismiss the menu. */
+  focusReturnRef?: RefObject<HTMLElement | null>;
 }) {
   const ref = useRef<HTMLDivElement>(null);
   // A right-click menu has no trigger element to return focus to; the empty
@@ -101,7 +104,7 @@ export function ContextMenu({
   useDismissable({
     open: true,
     onDismiss: onClose,
-    triggerRef: triggerRef ?? noTrigger,
+    triggerRef: focusReturnRef ?? triggerRef ?? noTrigger,
     surfaceRef: ref
   });
   useMenuNavigation({ open: true, menuRef: ref, onClose });
@@ -144,15 +147,18 @@ export function ContextMenu({
     };
     window.addEventListener("mousedown", onDown, true);
     window.addEventListener("contextmenu", onDown, true);
+    // The focus-return control can also be activated by Enter or Space.
+    if (focusReturnRef !== undefined) window.addEventListener("click", onDown, true);
     window.addEventListener("scroll", onClose, true);
     window.addEventListener("resize", onClose);
     return () => {
       window.removeEventListener("mousedown", onDown, true);
       window.removeEventListener("contextmenu", onDown, true);
+      window.removeEventListener("click", onDown, true);
       window.removeEventListener("scroll", onClose, true);
       window.removeEventListener("resize", onClose);
     };
-  }, [onClose, triggerRef]);
+  }, [onClose, triggerRef, focusReturnRef]);
 
   return createPortal(
     <div
