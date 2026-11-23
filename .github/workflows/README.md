@@ -381,8 +381,11 @@ in-process retry. A subsequent step retries at most 20 initially failed tests
 in that same job and prepared build. The selection and reports must prove that
 the first run completed, no collection, hook, fixture or runner error occurred,
 and every selected test passed on retry. Identifiable assertion failures are
-eligible for both runners. Unit retries also accept timeouts Vitest reports
-from an individual test body. Desktop E2E also accepts a confirmed nonzero exit
+eligible for both runners. Unit retries also accept a Vitest timeout when the
+test callback recorded its entry with `markRetryableTestBody(task)` from
+[`scripts/ci/vitest-test-body.ts`](../../scripts/ci/vitest-test-body.ts).
+Call the helper at the start of the test callback to supply evidence after
+fixture setup. Desktop E2E also accepts a confirmed nonzero exit
 from `git worktree list` in the test body when Git reports a missing linked
 worktree metadata directory. Infrastructure errors, unclassified errors and
 missing or ambiguous evidence fail the slice. Local Playwright retries retain

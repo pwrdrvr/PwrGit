@@ -61,19 +61,29 @@ describe("Vitest retry oracle", () => {
     }
   }, 30_000);
 
-  it("retries only the parameterized case whose test body timed out and refuses a hook timeout", () => {
+  it("retries only the timed-out body and refuses hook and fixture setup timeouts", () => {
     const directory = mkdtempSync(path.join(os.tmpdir(), "pwrgit-retry-timeout-oracle-"));
     try {
       const hook = run(directory, "hook-timeout");
       expect(hook.result.status).toBe(1);
       expect(() => planUnitRetry(hook.report, 20)).toThrow();
 
-      const first = run(directory, "timeout");
-      expect(first.result.status).toBe(1);
-      expect(first.report.complete).toBe(true);
-      const plan = planUnitRetry(first.report, 20);
-      expect(plan.tests.map((test) => test.name)).toEqual(["timeout batch 2"]);
-      expectVerifiedRetry(directory, plan.tests);
+      for (const phase of ["fixture-timeout", "fixture-released-on-abort"]) {
+        const fixture = run(directory, phase);
+        expect(fixture.result.status, phase).toBe(1);
+        expect(fixture.report.complete, phase).toBe(true);
+        expect(fixture.report.hookErrors, phase).toBe(0);
+        expect(() => planUnitRetry(fixture.report, 20), phase).toThrow(/infrastructure or unclassified/);
+      }
+
+      for (const [phase, name] of [["timeout", "timeout batch 2"], ["fixture-body-timeout", "uses a fixture"]]) {
+        const first = run(directory, phase);
+        expect(first.result.status, phase).toBe(1);
+        expect(first.report.complete, phase).toBe(true);
+        const plan = planUnitRetry(first.report, 20);
+        expect(plan.tests.map((test) => test.name)).toEqual([name]);
+        expectVerifiedRetry(directory, plan.tests);
+      }
     } finally {
       rmSync(directory, { recursive: true, force: true });
     }

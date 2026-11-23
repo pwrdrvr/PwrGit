@@ -9,6 +9,7 @@ import { promisify } from "node:util";
 import { setTimeout } from "node:timers/promises";
 import fc from "fast-check";
 import { afterEach, expect, it } from "vitest";
+import { markRetryableTestBody } from "../../../scripts/ci/vitest-test-body.ts";
 import { ensureRuntime, inventory, platformPath } from "./electron-runtime-cache.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -138,7 +139,8 @@ function installAt(setup, name) {
   return install.binary;
 }
 
-it("regression: explicit linux/x64 overrides conflicting darwin/arm64 npm settings", () => {
+it("regression: explicit linux/x64 overrides conflicting darwin/arm64 npm settings", ({ task }) => {
+  markRetryableTestBody(task);
   const setup = fixture("44.9.3", randomBytes(8192));
   const env = { ELECTRON_INSTALL_PLATFORM: "linux", ELECTRON_INSTALL_ARCH: "x64",
     npm_config_platform: "darwin", npm_config_arch: "arm64" };
@@ -265,7 +267,8 @@ it.each(["EACCES", "EPERM", "EROFS"])("native entry point forwards owned downloa
   expect(readFileSync(install.binary)).toEqual(setup.bytes);
 });
 
-it("preserves the missing-Electron skip without downloading", () => {
+it("preserves the missing-Electron skip without downloading", ({ task }) => {
+  markRetryableTestBody(task);
   const install = prepareSkippedInstall({ electronPresent: false });
   const globalModules = mkdtempSync(join(tmpdir(), "pwrgit-electron-node-path-"));
   roots.push(globalModules);

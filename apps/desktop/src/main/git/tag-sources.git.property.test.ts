@@ -5,6 +5,7 @@ import { join } from "node:path";
 import fc from "fast-check";
 import type { TagSyncStatus } from "@pwrgit/shared";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
+import { markRetryableTestBody } from "../../../../../scripts/ci/vitest-test-body.ts";
 import { CommandBus } from "../command-bus";
 import { openDatabase, type DB } from "../persistence/db";
 import { fetchRemote, pullFastForward } from "./git-service";
@@ -439,7 +440,8 @@ function start(): { model: Model; real: Real } {
 }
 
 describe("published tags against git", () => {
-  it("statuses, the stored count, Take and Keep agree with git through any sequence of changes", async () => {
+  it("statuses, the stored count, Take and Keep agree with git through any sequence of changes", async ({ task }) => {
+    markRetryableTestBody(task);
     await fc.assert(
       fc.asyncProperty(// A plain array, not fc.commands: at its default size fc.commands made
       // runs of about two steps, too short to re-cut, check and then decide.

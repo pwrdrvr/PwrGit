@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import fc from "fast-check";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
+import { markRetryableTestBody } from "../../../../../scripts/ci/vitest-test-body.ts";
 import { openDatabase, type DB } from "../persistence/db";
 import { ProfileService } from "../profiles/profile-service";
 import { RepoIndexer } from "./repo-indexer";
@@ -120,7 +121,8 @@ describe.each(["regressions", 0, 1, 2, 3, 4] as const)("worktree default ancestr
   }
 
   if (batch !== "regressions") {
-    it("agrees with git for arbitrary pairs in merged, forked, unrelated and packed history", async () => {
+    it("agrees with git for arbitrary pairs in merged, forked, unrelated and packed history", async ({ task }) => {
+      markRetryableTestBody(task);
       await fc.assert(fc.asyncProperty(
         fc.integer({ min: 0, max: 6 }), fc.integer({ min: 0, max: 6 }), fc.boolean(), fc.boolean(),
         (head, target, detached, packed) => check(commits[head]!, commits[target]!, detached, packed)

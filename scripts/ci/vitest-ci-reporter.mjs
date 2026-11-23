@@ -1,11 +1,19 @@
 import { mkdirSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { isUnitRunComplete, unsafeFailure } from "./retry-failures.mjs";
+import { retryTestBodyStarted } from "./vitest-test-body.ts";
 
 function matchName(test) {
   const parts = [test.name];
   for (let parent = test.parent; parent && parent.type !== "module"; parent = parent.parent) parts.unshift(parent.name);
   return parts.join(" ");
+}
+
+function ranTestBody(test) {
+  if (test.meta()[retryTestBodyStarted] !== true) return false;
+  // A marker from an earlier in-process attempt cannot identify the failing attempt.
+  const diagnostic = test.diagnostic();
+  return diagnostic?.retryCount === 0 && diagnostic.repeatCount === 0;
 }
 
 // Keep this report separate from the JSON timings report and from console logs.
@@ -75,7 +83,7 @@ export default class CiRetryReporter {
         matchName: matchName(test),
         state: test.result().state,
         unsafeFailure: test.result().state === "failed"
-          ? unsafeFailure(test.result().errors, { allowVitestTimeout: true }) : false,
+          ? unsafeFailure(test.result().errors, { allowVitestTimeout: ranTestBody(test) }) : false,
         mode: test.options.mode,
         started: this.startedTests.has(test.id),
         completed: this.finishedTests.has(test.id),

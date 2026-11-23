@@ -1,11 +1,13 @@
 import fc from "fast-check";
 import { expect, test } from "vitest";
+import { markRetryableTestBody } from "../../../../../../scripts/ci/vitest-test-body.ts";
 import { join } from "node:path";
 import { writeFile } from "node:fs/promises";
 import { StackEngine } from ".";
 import { commit, git, memoryStore, repository, runner, withRepo, withStack } from "./fixture.test-support";
 
-test.each([1, 2, 3])("Git agrees with the stack model through commits, amends, adoption, removal and undo (batch %i)", async () => {
+test.for([1, 2, 3])("Git agrees with the stack model through commits, amends, adoption, removal and undo (batch %i)", async (_batch, { task }) => {
+  markRetryableTestBody(task);
   await fc.assert(fc.asyncProperty(fc.array(fc.constantFrom("commit", "amend", "restack", "adopt", "remove", "undo"), { minLength: 3, maxLength: 8 }),
     async operations => withStack(async ({ cwd, commonDir, initial, store, engine }) => {
       let tracked = ["bottom", "top"];
@@ -74,7 +76,8 @@ test.each([1, 2, 3])("Git agrees with the stack model through commits, amends, a
     })), { numRuns: 4 });
 });
 
-test.each([1, 2, 3])("replay forecasts agree with rebase conflict files, and clean forecasts apply (batch %i)", async () => {
+test.for([1, 2, 3])("replay forecasts agree with rebase conflict files, and clean forecasts apply (batch %i)", async (_batch, { task }) => {
+  markRetryableTestBody(task);
   await fc.assert(fc.asyncProperty(fc.subarray(["one.txt", "two.txt", "three.txt"]), fc.boolean(),
     (overlap, firstPatch) => withRepo(async (cwd, initial) => {
       const filenames = ["one.txt", "two.txt", "three.txt"];
