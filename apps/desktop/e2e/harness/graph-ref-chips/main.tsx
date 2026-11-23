@@ -5,6 +5,8 @@ import { flushSync } from "react-dom";
 import { createRoot } from "react-dom/client";
 import { BranchChipMenu, type BranchChipTarget } from "../../../src/renderer/src/features/graph/BranchChipMenu";
 import { GraphRow, type GraphRowVM } from "../../../src/renderer/src/features/graph/GraphRow";
+import { StackNavigationContext } from "../../../src/renderer/src/features/stacks/stack-navigation";
+import "../../../src/renderer/src/features/stacks/stacks.css";
 import { useHoverIntent } from "../../../src/renderer/src/lib/hoverIntent";
 import "../../../src/renderer/src/styles/app.css";
 
@@ -74,6 +76,7 @@ function Graph({ scene, width, lateFont }: {
   const hoverIntent = useHoverIntent();
   const [branch, setBranch] = useState<BranchChipTarget | null>(null);
   return (
+    <StackNavigationContext.Provider value={{ pick: null, select: ({ stack }) => { lastAction = `stack:${stack.id}`; } }}>
     <div className="graph-harness" style={{ width }}>
       <div
         className="graph-scroll"
@@ -90,7 +93,7 @@ function Graph({ scene, width, lateFont }: {
               branchInfo={scene.branches}
               laneCount={scene.laneCount}
               stackPositions={scene.stackPositions}
-              onOpenStack={stack => { lastAction = `stack:${stack.id}`; }}
+              stackRepoId="widgets"
               now={now}
               selected={false}
               focused={false}
@@ -125,6 +128,7 @@ function Graph({ scene, width, lateFont }: {
         )}
       </div>
     </div>
+    </StackNavigationContext.Provider>
   );
 }
 

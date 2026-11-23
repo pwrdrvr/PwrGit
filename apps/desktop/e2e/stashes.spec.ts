@@ -80,12 +80,15 @@ test("manages the Git-native repository stash stack across worktrees", async () 
   // Pop an explicitly selected non-top entry. It restores into the selected
   // primary worktree and removes only that entry.
   const older = window.locator(".stash-entry", { hasText: "older CLI stash" });
+  const beforePop = sandbox.git(repo.path, "stash", "list", "--format=%H").split(/\r?\n/);
+  expect(beforePop).toHaveLength(3);
   await older.locator(".stash-entry__toggle").click();
   await older.getByRole("button", { name: "Pop" }).click();
-  await expect(window.getByText("older CLI stash")).toHaveCount(0, {
-    timeout: 10_000
-  });
+  // The success toast also names the popped stash.
+  await expect(older).toHaveCount(0, { timeout: 10_000 });
   await expect(window.getByText("Repository stack · 2")).toBeVisible();
+  expect(sandbox.git(repo.path, "stash", "list", "--format=%H").split(/\r?\n/))
+    .toEqual(beforePop.slice(0, 2));
 
   // Create a named entry from the UI; it is immediately ordinary-Git visible.
   await window.getByLabel("Name this stash").fill("saved from PwrGit");

@@ -6,6 +6,11 @@ import { createRoot } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { LineageGraph } from "./LineageGraph";
 
+// Minute ticks re-render age labels independently of graph refresh replies.
+vi.mock("../../lib/useRelativeClock", () => ({
+  useRelativeClock: () => Date.parse("2026-11-18T12:01:00Z")
+}));
+
 const rowCommits = vi.hoisted(() => vi.fn<(subject: string, avatar: string | undefined) => void>());
 vi.mock("./GraphRow", async (importOriginal) => {
   const actual = await importOriginal<typeof import("./GraphRow")>();

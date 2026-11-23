@@ -60,8 +60,12 @@ export function prPresentation(pr: PrSummary) {
     if (running) parts.push("checks still running");
     if (queue !== null) parts.push(mergeQueueLabel(queue));
   }
+  const stackState = !open ? pr.state : draft ? "draft" : conflicting ? "conflicting"
+    : dot === "passing" || dot === "failing" || dot === "pending" ? dot
+    : dot === "queue-failing" || dot === "queue-removed" ? "failing"
+    : dot === "queued" ? "pending" : dot === "queue-ready" ? "passing" : "open";
   return {
-    dot, draft, running, queue,
+    dot, draft, running, queue, stackState,
     label: open ? parts.join(" · ")
       : pr.state === "closed" ? "closed without merge"
         : queue?.kind === "merged_by_queue" ? "merged by queue" : "merged"

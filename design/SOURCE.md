@@ -151,6 +151,7 @@ first.
 | `PwrGit Icon.dc.html` | App icon, size ladder, tray templates, DMG background. |
 | `support.js` | Generated `dc-runtime` bundle every `.dc.html` loads. |
 | `github.md` | Provenance note for the icon asset set (matched to PwrSnap's). |
+| `Stacks You Can Read - UX Review.dc.html`, `assets/stacks-as-built/*.png` | Stacked PR review board and its as-built reference captures, copied from the Claude Design canvas on 2026-11-23. |
 | `assets/logo-pwrgit.svg` | The lineage mark. |
 | `assets/tag-locate-{before,after}.png` | Shipped-app captures for the tag chip artboard, from the Playwright tag scenario on contrived fixture repos. |
 | `assets/palette-glyph-raster-before.png` | The three shipped palette glyphs rasterised at their true 15&nbsp;px and magnified with nearest-neighbour sampling &mdash; the evidence for the review's first finding. Generated, not a capture. |

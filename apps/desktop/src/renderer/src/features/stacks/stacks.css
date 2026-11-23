@@ -1,78 +1,39 @@
-.stack-sidebar {
+.stack-train, .stack-view, .stack-group, .stack-popover {
   --stack-lane: var(--lane-1);
 }
 
-.stack-sidebar__stack {
-  margin: 2px 0 8px;
-}
-
-.stack-sidebar__title {
+.stack-sidebar__title, .stack-group__caption, .stack-group__ghost {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  gap: 8px;
+  gap: 6px;
   width: 100%;
-  padding: 4px 8px;
+  min-width: 0;
+  padding: 3px 6px;
   border: 1px solid transparent;
   border-radius: 5px;
   background: transparent;
   color: var(--text-primary);
   text-align: left;
-  font-weight: 600;
 }
 
-.stack-sidebar__title.is-inferred { border-style: dashed; border-color: var(--border-subtle); }
-.stack-sidebar__title:hover, .stack-sidebar__title[aria-pressed="true"] { background: var(--bg-panel-hover); }
-
-.stack-sidebar__spine, .stack-view__cards {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-}
-
-.stack-sidebar__spine { margin: 1px 0 0 12px; }
-
-.stack-sidebar__spine li {
-  position: relative;
-  display: flex;
-  gap: 6px;
-  align-items: baseline;
-  padding: 3px 7px 3px 11px;
-  border-inline-start: 1px solid var(--stack-lane);
-  color: var(--text-secondary);
-  font-family: var(--font-mono);
-}
-
-.stack-sidebar__spine li.is-stale { border-inline-start-style: dashed; border-color: var(--status-warning); }
-
-.stack-sidebar__spine li::before {
-  position: absolute;
-  content: "";
-  width: 5px;
-  height: 5px;
-  inset-inline-start: -3px;
-  top: 9px;
-  background: var(--stack-lane);
-  border-radius: 50%;
-}
-
-.stack-sidebar__spine li.is-stale::before { background: var(--status-warning); }
-.stack-sidebar__spine .stack-sidebar__trunk::before { border-radius: 1px; }
-
-.stack-sidebar__branch {
-  flex: 1;
+.stack-sidebar__title strong, .stack-group__caption strong, .stack-group__ghost-title {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.stack-sidebar small, .stack-view small, .stack-card__ordinal, .stack-sidebar__ordinal { color: var(--text-muted); }
-.stack-signals { display: inline-flex; gap: 4px; }
-.stack-signal--restack { color: var(--status-warning); }
-.stack-signal--push { color: var(--info-text); }
+.stack-sidebar__title strong { margin-inline-end: auto; color: var(--text-primary); font: 500 11.5px/1.3 var(--font-sans); }
+.stack-sidebar__title:hover, .stack-sidebar__title[aria-pressed="true"], .stack-group__caption:hover, .stack-group__ghost:hover {
+  background: var(--bg-panel-hover);
+}
+
+.stack-sidebar small, .stack-view small, .stack-card__ordinal, .stack-group small { color: var(--text-muted); }
 
 .stack-position, .stack-health-badge {
   flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
   padding: 1px 6px;
   border: 1px solid var(--border-subtle);
   border-radius: 999px;
@@ -83,120 +44,220 @@
 }
 
 .stack-position:hover { border-color: var(--border-strong); }
-.stack-position--stale, .stack-health-badge--stale { color: var(--status-warning); border-color: color-mix(in srgb, var(--status-warning) 50%, transparent); }
+.stack-health-badge--stale { color: var(--status-warning); border-color: var(--status-warning); }
 
-.stack-view {
-  flex: 1;
-  overflow: auto;
-  --stack-lane: var(--lane-1);
+/* ---- The rail -------------------------------------------------------------
+   One rule: beside a stacked PR the rail node is the only status mark (the PR
+   chip drops its dot there), and every node sits on the centre of its row's
+   FIRST line. Each surface says where that line is with --stack-node-y and
+   where the spine runs with --stack-spine; nothing is centred on a whole
+   multi-line row. --stack-node-fill is the surface colour, so hollow nodes
+   punch out the spine instead of showing it through. */
+.stack-node-wrap {
+  --stack-node-size: 9px;
+  display: inline-grid;
+  place-items: center;
+  width: calc(var(--stack-node-size) + 4px);
+  height: calc(var(--stack-node-size) + 4px);
+  flex: none;
+}
+.stack-node {
+  display: block;
+  box-sizing: border-box;
+  width: var(--stack-node-size);
+  height: var(--stack-node-size);
+  border: 1.5px solid currentColor;
+  border-radius: 50%;
+  background: var(--stack-node-fill, var(--bg-panel));
+  color: var(--text-muted);
+}
+/* Shape AND colour, so state never rides on hue alone (board turn 3 legend). */
+.stack-node[data-stack-state="passing"] { color: var(--status-ok); background: currentColor; }
+.stack-node[data-stack-state="failing"] { color: var(--status-error); border-width: 2.5px; }
+.stack-node[data-stack-state="pending"] { color: var(--status-warning); }
+.stack-node[data-stack-state="conflicting"] {
+  color: var(--status-error); background: currentColor; border: 0; border-radius: 0;
+  clip-path: polygon(50% 0, 100% 100%, 0 100%);
+}
+.stack-node[data-stack-state="open"] { color: var(--text-secondary); }
+.stack-node[data-stack-state="draft"] { color: var(--text-muted); border-style: dashed; }
+.stack-node[data-stack-state="merged"] { color: var(--brand-purple); background: currentColor; border-radius: 1px; transform: rotate(45deg) scale(.82); }
+.stack-node[data-stack-state="closed"] { color: var(--status-suspended); background: currentColor; }
+.stack-node[data-stack-state="no-pr"] { color: var(--text-muted); border-style: dashed; border-radius: 2px; }
+.stack-node[data-stack-state="trunk"] { color: var(--text-muted); background: currentColor; border-radius: 2px; }
+/* The current PR: an accent ring around its node, never a second colour. */
+.stack-node-wrap.is-current .stack-node {
+  box-shadow: 0 0 0 2px var(--stack-node-fill, var(--bg-panel)), 0 0 0 3.5px var(--accent);
 }
 
-.stack-view__header, .stack-card__line, .stack-card--trunk {
+.stack-track {
+  --stack-spine: 9px;
+  --stack-node-y: 50%;
+  position: relative;
+}
+.stack-track::before, .stack-track::after {
+  content: "";
+  position: absolute;
+  inset-inline-start: calc(var(--stack-spine) - 0.75px);
+  border-inline-start: 1.5px solid var(--stack-lane);
+  pointer-events: none;
+}
+/* Above the node: from the row's top edge down to the node. */
+.stack-track::before { top: 0; height: var(--stack-node-y); }
+/* Below the node: to the row's bottom edge, plus the gap to the next row. */
+.stack-track::after { top: var(--stack-node-y); bottom: calc(-1 * var(--stack-gap, 0px)); }
+.stack-track:first-child::before, .stack-group__caption + .stack-track::before,
+.stack-track:last-child::after { content: none; }
+/* Not on its parent's tip: the segment below this member, and only that one. */
+.stack-track.has-action::after { border-inline-start: 1.5px dashed var(--status-warning); }
+.stack-track.has-action + .stack-track::before { border-inline-start-color: transparent; }
+.stack-track > .stack-node-wrap {
+  position: absolute;
+  inset-inline-start: var(--stack-spine);
+  top: var(--stack-node-y);
+  transform: translate(-50%, -50%);
+  z-index: 1;
+}
+/* 3a: the Pull requests group. 20px rail column; a card's first line (the PR
+   chip, 18px) centres 14px below its top: 1px border + 4px padding + 9px. */
+.stack-group { --stack-node-fill: var(--bg-sidebar); margin-block: 8px; }
+/* The stack glyph caps the rail: its 12px box centres on the 9px spine. */
+.stack-group__caption { gap: 6px; height: 22px; padding: 0 4px 0 3px; }
+.stack-group__caption .ref-section__glyph { display: inline-flex; flex: none; color: var(--text-muted); }
+.stack-group__caption strong { min-width: 0; color: var(--text-secondary); font: 600 11px/1.3 var(--font-sans); }
+.stack-group__caption small { flex: none; white-space: nowrap; font: 500 9.5px/1.3 var(--font-mono); }
+.stack-group__caption .stack-health-badge { margin-inline-start: auto; }
+.stack-group__member, .stack-group__trunk { padding-inline-start: 20px; }
+.stack-group__member { --stack-node-y: 14px; }
+.stack-group__member[data-stack-row="ghost"], .stack-group__trunk { --stack-node-y: 11px; }
+.stack-group__ghost { height: 22px; padding: 0 6px 0 7px; color: var(--text-muted); font: 500 10.5px/1 var(--font-mono); }
+.stack-group__ghost span:first-child { flex: none; }
+.stack-group__ghost-title { color: var(--text-secondary); }
+.stack-group__ghost-title.is-pr { font: 500 11px/1.2 var(--font-sans); }
+.stack-group__ghost small { margin-inline-start: auto; white-space: nowrap; font: 500 9.5px/1 var(--font-mono); }
+.stack-group__trunk { display: flex; align-items: center; height: 22px; padding-inline-start: 27px; color: var(--text-muted); font: 500 10.5px/1 var(--font-mono); }
+.stack-sort { display: flex; justify-content: flex-end; margin: 2px 0; }
+.stack-sort select { color: var(--text-secondary); background: var(--bg-panel); border: 1px solid var(--border-subtle); border-radius: 4px; font: inherit; }
+
+/* 5a: trunk to top, left to right. */
+.stack-train { --stack-node-fill: var(--bg-sidebar); display: flex; align-items: center; position: relative; line-height: 1; }
+.stack-train::before { content: ""; position: absolute; inset-inline: 6px; border-top: 1.5px solid var(--stack-lane); }
+.stack-train .stack-node-wrap { position: relative; --stack-node-size: 7px; width: 13px; }
+
+/* 3b: when list order is not stack order there is no rail to draw, so a
+   stacked row shows only its position, e.g. 2/3. It opens the stack. */
+.stack-position-tag {
+  flex: none;
+  padding: 0 3px;
+  border: 0;
+  border-radius: 3px;
+  background: transparent;
+  color: var(--text-muted);
+  font: 600 9.5px/1.3 var(--font-mono);
+  cursor: pointer;
+}
+.stack-position-tag:hover, .stack-position-tag[aria-expanded="true"] { color: var(--accent-bright); background: var(--bg-panel-hover); }
+.stack-position-tag:focus-visible { outline: 1.5px solid var(--accent); outline-offset: 1px; }
+
+.stack-popover {
+  position: fixed;
+  z-index: 150;
+  width: min(422px, calc(100vw - 16px));
+  max-height: calc(100vh - 16px);
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--border-strong);
+  border-radius: 9px;
+  background: var(--bg-panel-elevated);
+  box-shadow: var(--shadow-popover);
+  color: var(--text-primary);
+  font-size: 12px;
+}
+.stack-popover__header, .stack-popover__footer {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 7px; padding: 8px 10px;
+}
+.stack-popover__header { border-bottom: 1px solid var(--border-subtle); }
+.stack-popover__header > span { color: var(--text-secondary); }
+.stack-popover__header button { margin-inline-start: auto; }
+.stack-popover__list { margin: 0; padding: 6px 9px; list-style: none; overflow: auto; }
+.stack-popover { --stack-node-fill: var(--bg-panel-elevated); }
+/* Spine at 9px in an 18px column; a member's node sits on its title line:
+   1px border + 6px padding + half of the 16px title line. */
+.stack-popover__member, .stack-popover__trunk { padding-inline-start: 18px; }
+.stack-popover__member { --stack-node-y: 15px; }
+.stack-popover__trunk { --stack-node-y: 50%; }
+.stack-popover__row {
+  display: grid; width: 100%; gap: 4px; padding: 6px 8px; border: 1px solid transparent;
+  border-radius: 5px; background: none; color: var(--text-primary); text-align: start;
+}
+.stack-popover__row[data-ghost], button.stack-popover__row:hover {
+  background: var(--bg-panel-hover);
+}
+.stack-popover__member.is-current .stack-popover__row {
+  background: var(--bg-row-active);
+  border-color: var(--accent-border);
+}
+.stack-popover__title { display: flex; gap: 5px; align-items: baseline; font: 600 12px/16px var(--font-sans); }
+.stack-popover__title small { flex: none; margin-inline-start: auto; color: var(--accent-bright); font: 600 9px/16px var(--font-sans); letter-spacing: .06em; text-transform: uppercase; }
+.stack-popover__meta { display: flex; flex-wrap: wrap; gap: 4px 7px; align-items: center; color: var(--text-secondary); font: 11px var(--font-mono); }
+.stack-popover__branch { overflow-wrap: anywhere; }
+.stack-popover__trunk { display: flex; align-items: center; gap: 6px; min-height: 28px; color: var(--text-secondary); }
+.stack-popover__footer { border-top: 1px solid var(--border-subtle); }
+.stack-popover__link { padding: 3px; border: 0; background: transparent; color: var(--info-text); }
+
+.stack-view { --stack-node-fill: var(--bg-stage); flex: 1; overflow: auto; }
+.stack-view__header, .stack-view__heading, .stack-view__tools, .stack-card__line, .stack-card--trunk {
   display: flex;
   align-items: center;
   gap: 9px;
 }
-
-.stack-view__header {
-  flex-wrap: wrap;
-  padding: 12px 16px;
-  border-bottom: 1px solid var(--border-subtle);
-}
-
-.stack-view__header h1 { margin: 0; font-size: 14px; }
-
-.stack-button {
-  padding: 4px 9px;
+.stack-view__heading, .stack-view__tools { flex-wrap: wrap; min-width: 0; }
+.stack-view__tools { margin-inline-start: auto; justify-content: flex-end; }
+.stack-view__header { flex-wrap: wrap; padding: 12px 16px; border-bottom: 1px solid var(--border-subtle); }
+.stack-view__header h1 { min-width: 0; margin: 0; font-size: 14px; overflow-wrap: anywhere; }
+.stack-view__heading > small { font-size: 11px; }
+.stack-view__provenance {
+  margin: 10px 16px 0;
+  padding: 8px 10px;
   border: 1px solid var(--border-subtle);
   border-radius: 6px;
   background: var(--bg-panel-elevated);
-  color: var(--text-primary);
+  color: var(--text-secondary);
+  font: 400 11px/1.5 var(--font-sans);
 }
-
+.stack-button { padding: 4px 9px; border: 1px solid var(--border-subtle); border-radius: 6px; background: var(--bg-panel-elevated); color: var(--text-primary); }
 .stack-button:hover { border-color: var(--border-strong); }
-
-.stack-view__cards {
-  display: grid;
-  gap: 10px;
-  margin: 16px 18px 16px 32px;
+.stack-view__header .stack-button, .stack-rail__facts .stack-button {
+  height: 26px;
+  padding-block: 0;
+  font: 600 11px/1 var(--font-sans);
+  white-space: nowrap;
 }
-
+.stack-view__cards { display: grid; gap: 7px; margin: 12px 14px 16px 30px; padding: 0; list-style: none; }
 .stack-card {
-  position: relative;
-  min-width: 0;
-  padding: 9px 12px;
-  border: 1px solid var(--border-subtle);
-  border-radius: 8px;
-  background: var(--bg-panel-elevated);
+  /* The spine runs 14px left of the card; the node sits on the title line:
+     1px border + 8px padding + half of 12.5px x 1.35. */
+  --stack-spine: -14px;
+  --stack-node-y: 17.5px;
+  --stack-gap: 7px;
+  min-width: 0; padding: 8px 10px; border: 1px solid var(--border-subtle); border-radius: 7px; background: var(--bg-panel-elevated);
 }
-
-.stack-card.is-stale { border-color: color-mix(in srgb, var(--status-warning) 42%, transparent); }
-
-.stack-card::before {
-  position: absolute;
-  content: "";
-  inset-inline-start: -14px;
-  top: -11px;
-  bottom: -2px;
-  border-inline-start: 1px solid var(--stack-lane);
-}
-
-.stack-card:first-child::before { top: 50%; }
-.stack-card:last-child::before { bottom: 50%; }
-.stack-card.is-stale::before { border-inline-start: 1px dashed var(--status-warning); }
-
-.stack-card::after {
-  position: absolute;
-  content: "";
-  inset-inline-start: -17px;
-  top: calc(50% - 3px);
-  width: 7px;
-  height: 7px;
-  border-radius: 50%;
-  background: var(--stack-lane);
-}
-
-.stack-card.is-stale::after { background: var(--status-warning); }
-.stack-card--trunk::after { border-radius: 1px; }
-.stack-card__line strong, .stack-card--trunk strong, .stack-card code { font-family: var(--font-mono); }
-.stack-card__detail { flex-wrap: wrap; margin-top: 5px; color: var(--text-muted); }
-.stack-card__pr-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-secondary); }
-
+.stack-card.is-current { border-color: var(--accent); background: var(--bg-row-active); }
+.stack-card__title { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding: 0; border: 0; background: transparent; color: var(--text-primary); font: 600 12.5px/1.35 var(--font-sans); }
+.stack-card--trunk { --stack-node-y: 50%; padding-block: 7px; }
+.stack-card--trunk strong { color: var(--text-secondary); font: 600 11.5px/1.3 var(--font-mono); }
+.stack-card--trunk small { font-size: 10px; }
+.stack-card code { font-family: var(--font-mono); }
+.stack-card__detail { flex-wrap: wrap; margin-top: 5px; color: var(--text-muted); font: 400 10.5px/1.4 var(--font-mono); }
+.stack-card__detail .stack-health-badge { font-size: 9.5px; }
+.stack-card__distance { color: var(--text-muted); }
 .stack-rail .rail__bar { justify-content: space-between; padding-inline-start: 12px; }
-
-.stack-rail__layers {
-  list-style: none;
-  padding: 0 12px;
-  margin: 0;
-  overflow: auto;
-}
-
-.stack-rail__layers li {
-  display: grid;
-  gap: 4px;
-  padding-block: 10px;
-  border-bottom: 1px solid var(--border-subtle);
-  overflow-wrap: anywhere;
-}
-
-.stack-rail__layers li > :not(strong) { color: var(--text-muted); }
-
-.graph-lanes-clip:has(.stack-graph-bracket) { position: relative; }
-
-.stack-graph-bracket {
-  position: absolute;
-  inset-inline-end: 1px;
-  top: 29%;
-  height: 42%;
-  width: 9px;
-  padding: 0;
-  border: 1px solid currentColor;
-  border-inline-start: 0;
-  background: transparent;
-  border-radius: 0 3px 3px 0;
-}
-
-.stack-graph-bracket:hover { background: var(--bg-panel-hover); }
+.stack-rail__facts { padding: 12px; overflow: auto; overflow-wrap: anywhere; font: 400 11px/1.45 var(--font-sans); }
+.stack-rail__facts dl { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 6px 10px; margin-block: 10px; }
+.stack-rail__facts dd[data-status="failing"], .stack-rail__facts dd[data-status="conflicting"] { color: var(--danger-text); }
+.stack-rail__facts dt { color: var(--text-muted); }
+.stack-rail__facts dd { margin-inline-start: 0; color: var(--text-secondary); }
+.stack-rail__facts p { color: var(--text-secondary); }
 
 .stack-tools, .stack-tools__new-branch, .stack-plan__actions {
   display: flex;
@@ -205,7 +266,6 @@
   gap: 6px;
 }
 
-.stack-tools { margin-inline-start: auto; }
 .stack-tools label { display: flex; align-items: center; gap: 5px; }
 .stack-tools input {
   min-width: 0;
@@ -284,3 +344,10 @@
 .stack-plan__refs li { display: grid; gap: 2px; padding-block: 4px; }
 .stack-plan__refs li span { color: var(--text-muted); font-family: var(--font-mono); }
 .stack-plan__pause, .stack-plan__actions { margin-top: 12px; }
+
+
+.stack-health-badge[data-stack-state="passing"] { color: var(--success-text); }
+.stack-health-badge[data-stack-state="failing"], .stack-health-badge[data-stack-state="conflicting"] { color: var(--danger-text); }
+.stack-health-badge[data-stack-state="merged"] { color: var(--brand-purple); }
+.stack-sort select { font-size: 11px; }
+

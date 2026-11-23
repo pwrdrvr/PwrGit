@@ -8,13 +8,13 @@ import { commit, git, memoryStore, repository, runner, withRepo, withStack } fro
 
 // Keep 12 generated histories in smaller batches because Git process startup
 // on Windows can put four histories close to Vitest's 20-second deadline.
-test.for([1, 2, 3, 4, 5, 6])("Git agrees with the stack model through commits, amends, adoption, removal and undo (batch %i)", async (_batch, { task }) => {
+test.for([1, 2, 3, 4, 5, 6])("Git agrees with the stack model through commits, amends, adoption, removal and undo (batch %i)", async (batch, { task }) => {
   markRetryableTestBody(task);
   await fc.assert(fc.asyncProperty(fc.array(fc.constantFrom("commit", "amend", "restack", "adopt", "remove", "undo"), { minLength: 3, maxLength: 8 }),
     async operations => withStack(async ({ cwd, commonDir, initial, store, engine }) => {
       let tracked = ["bottom", "top"];
-      const anchors = new Map(initial.stacks[0].branches.map(layer => [layer.branch, layer.base]));
-      let last: { id: string; tracked: string[]; tips: string } | undefined;
+      let anchors = new Map(initial.stacks[0].branches.map(layer => [layer.branch, layer.base]));
+      let last: { id: string; tracked: string[]; tips: string; anchors: typeof anchors } | undefined;
       for (const [index, operation] of operations.entries()) {
         const id = `model-${index}`;
         const tips = await git(cwd, "rev-parse", "bottom", "top");
@@ -30,11 +30,14 @@ test.for([1, 2, 3, 4, 5, 6])("Git agrees with the stack model through commits, a
           await engine.undo(last.id);
           expect(await git(cwd, "rev-parse", "bottom", "top")).toBe(last.tips);
           tracked = last.tracked;
+          // Undo restores the old tips and catalog. An empty restored catalog
+          // cannot supply the remembered bases for a later adoption.
+          anchors = last.anchors;
           last = undefined;
         } else if (operation === "restack" && tracked.length) {
           const plan = await engine.plan({ kind: "restack", root: tracked[0] });
           const receipt = await engine.apply(plan, id, index);
-          last = { id, tracked, tips };
+          last = { id, tracked, tips, anchors: new Map(anchors) };
           const layers = ["main", ...tracked];
           for (let layer = 1; layer < layers.length; layer += 1) {
             expect((await runner.run(cwd, ["merge-base", "--is-ancestor", layers[layer - 1], layers[layer]])).exitCode).toBe(0);
@@ -56,7 +59,7 @@ test.for([1, 2, 3, 4, 5, 6])("Git agrees with the stack model through commits, a
           const branch = tracked.at(-1)!;
           const plan = await engine.plan({ kind: "remove", root: tracked[0], branch, mode: "forget" });
           await engine.apply(plan, id, index);
-          last = { id, tracked, tips };
+          last = { id, tracked, tips, anchors: new Map(anchors) };
           tracked = tracked.slice(0, -1);
         } else if (operation === "adopt" && tracked.length === 0) {
           const state = await store.read(commonDir);
@@ -68,14 +71,17 @@ test.for([1, 2, 3, 4, 5, 6])("Git agrees with the stack model through commits, a
           const plan = await engine.plan({ kind: "adopt", repository, stack: { ...initial.stacks[0], branches } });
           expect(plan.catalogHash).toBe(state.sha256);
           await engine.apply(plan, id, index);
-          last = { id, tracked, tips };
+          last = { id, tracked, tips, anchors: new Map(anchors) };
           tracked = branches.map(branch => branch.branch);
         }
         const result = await store.read(commonDir);
         for (const layer of result.catalog.stacks.flatMap(stack => stack.branches)) anchors.set(layer.branch, layer.base);
         expect(result.catalog.stacks.flatMap(stack => stack.branches.map(layer => layer.branch))).toEqual(tracked);
       }
-    })), { numRuns: 2 });
+    })), {
+    numRuns: 2,
+    examples: batch === 1 ? [[["remove", "commit", "remove", "adopt", "undo", "commit", "adopt"]]] : [],
+  });
 });
 
 test.for([1, 2, 3])("replay forecasts agree with rebase conflict files, and clean forecasts apply (batch %i)", async (_batch, { task }) => {

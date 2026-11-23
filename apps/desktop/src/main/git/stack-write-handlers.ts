@@ -26,19 +26,28 @@ type Options = {
 function stackOperation(stack: RepositoryStack, action: StackAction): StackOperation {
   if (action.kind === "adopt") {
     if (stack.source !== "inferred") throw new Error("This stack is already tracked");
+    if (stack.canTrack === false) throw new Error("The stack needs local branches and a matching catalog before it can be tracked");
     return {
       kind: "adopt", repository: stack.catalogRepository,
       stack: {
-        trunk: stack.trunk,
+        ...(stack.githubNumber === undefined ? {} : { number: stack.githubNumber }),
+        trunk: { branch: stack.trunk.branch, ...(stack.trunk.head ? { head: stack.trunk.head } : {}) },
         branches: stack.layers.map(({ branch, base, head, pr }) => ({
           branch, ...(base ? { base } : {}), ...(head ? { head } : {}),
-          ...(pr ? { pullRequest: { number: pr.number, url: pr.url } } : {}),
+          ...(pr ? { pullRequest: { number: pr.number, url: pr.url,
+            ...(pr.state === "merged" ? { merged: true, ...(pr.headOid ? { mergedHead: pr.headOid } : {}) } : {}) } } : {}),
         })),
       },
     };
   }
   if (stack.source === "inferred") throw new Error("Adopt this stack before changing it");
   const root = stack.layers[0].branch;
+  if (action.kind === "sync") {
+    if (root !== action.mergedParent || !stack.layers[1]?.syncReady || !stack.layers[1].base || !stack.trunk.head) {
+      throw new Error("Update local trunk to include the merged bottom branch before syncing this stack");
+    }
+    return { kind: "remove", mode: "detach", root, branch: root, verifiedSyncTrunk: stack.trunk.head };
+  }
   return { ...action, root };
 }
 

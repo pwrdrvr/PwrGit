@@ -330,8 +330,11 @@ test("compact rows keep moved tags, stack positions and worktree actions in the 
   await stackRow.getByRole("button", { name: "Browse 11 refs at 0000006" }).press("Enter");
   const stackList = stackRow.getByRole("region");
   await expect(stackList).toContainText("#7");
-  await stackList.getByRole("button", { name: /^Open stack for feature/ }).press("Enter");
-  await expect(stackList).toBeHidden();
+  await stackList.getByRole("button", { name: /position 1 of 1\. Show stack/ }).press("Enter");
+  const stackPopover = stackList.getByRole("dialog", { name: "feature/WWWW-widget-preview-6" });
+  await expect(stackPopover).toBeVisible();
+  expect(await page.evaluate(() => window.graphRefHarness.lastAction())).not.toBe("stack:widget-stack-6");
+  await stackPopover.getByRole("button", { name: "Open stack view" }).click();
   expect(await page.evaluate(() => window.graphRefHarness.lastAction())).toBe("stack:widget-stack-6");
 
   await page.evaluate(() => {

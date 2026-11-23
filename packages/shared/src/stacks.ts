@@ -38,6 +38,14 @@ export function stackBranchHealth(facts: StackHealthFacts): StackBranchHealth {
   };
 }
 
+/** A documented GitHub REST stack, in bottom-to-top order. */
+export type GitHubStack = {
+  number: number;
+  url: string;
+  trunk: string;
+  members: PrSummary[];
+};
+
 export type StackLayer = {
   branch: string;
   parent: string;
@@ -46,13 +54,23 @@ export type StackLayer = {
   pr?: PrSummary;
   forgeRepo?: string;
   health: StackBranchHealth;
+  local?: boolean;
+  /** Whether a recorded base is still on this local branch. */
+  baseIsAncestor?: boolean;
+  /** The local trunk contains the merged bottom PR and the replay boundary. */
+  syncReady?: boolean;
+  behindParent?: number;
+  commitCount?: number;
 };
 
 export type RepositoryStack = {
   id: string;
   source: "tracked" | "inferred";
   catalogRepository: string;
-  trunk: { branch: string; head?: string };
+  githubNumber?: number;
+  githubUrl?: string;
+  canTrack?: boolean;
+  trunk: { branch: string; head?: string; local?: boolean };
   layers: StackLayer[];
 };
 
@@ -118,6 +136,7 @@ export type StackAction =
   | { kind: "restack"; from?: string }
   | { kind: "add_branch"; branch: string }
   | { kind: "adopt" }
+  | { kind: "sync"; mergedParent: string }
   | { kind: "remove"; branch: string; mode: "detach" | "forget" };
 
 export type StackPlanStep = {

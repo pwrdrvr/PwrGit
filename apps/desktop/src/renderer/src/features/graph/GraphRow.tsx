@@ -1,11 +1,11 @@
 import { memo, useId, useLayoutEffect, useRef, useState, type CSSProperties, type MouseEvent, type ReactNode } from "react";
-import type { Commit, LaneBranchInfo, MovedTag, PrSummary, RepositoryStack, StackPosition } from "@pwrgit/shared";
+import type { Commit, LaneBranchInfo, MovedTag, PrSummary, StackPosition } from "@pwrgit/shared";
 import { BranchGlyph } from "../../lib/BranchGlyph";
 import { ChevronGlyph } from "../../lib/ChevronGlyph";
 import { CheckoutGlyph } from "../../lib/CheckoutGlyph";
 import { AuthorAvatar } from "./AuthorAvatar";
 import { hoverIntentHandlers, type HoverIntent } from "../../lib/hoverIntent";
-import { StackPositionChip } from "../stacks/StackViews";
+import { StackPositionChip } from "../stacks/StackPopover";
 import { PrChip } from "../sidebar/PrChip";
 import { prChipLabel } from "../sidebar/pr-status";
 import { TagGlyph } from "../../lib/TagGlyph";
@@ -117,7 +117,8 @@ export function GraphRow({
   onTakeTag,
   stackPositions,
   oldStackBases,
-  onOpenStack
+  stackRepoId,
+  stackWritable
 }: {
   vm: GraphRowVM;
   laneCount: number;
@@ -136,7 +137,8 @@ export function GraphRow({
   branchInfo?: Record<string, LaneBranchInfo>;
   stackPositions?: ReadonlyMap<string, StackPosition>;
   oldStackBases?: ReadonlyMap<string, StackPosition>;
-  onOpenStack?: (stack: RepositoryStack) => void;
+  stackRepoId?: string;
+  stackWritable?: boolean;
   /** The author's linked forge avatar, from main's people store. Absent
    *  draws initials. */
   authorAvatarUrl?: string | undefined;
@@ -184,16 +186,17 @@ export function GraphRow({
   const width = Math.max(1, laneCount) * LANE_W;
   const color = laneColor(row.lane);
   const chipCount = refs.length + remoteRefs.length;
-  const bracket = refs.length ? refs.map(ref => stackPositions?.get(ref)).find(position => position !== undefined) : undefined;
   const oldStackBase = oldStackBases?.get(commit.hash);
   const isTip = chipCount > 0;
-  const orderedRefs = bracket ? [bracket.layer.branch, ...refs.filter(ref => ref !== bracket.layer.branch)] : refs;
+  const firstStackRef = refs.find(ref => stackPositions?.has(ref));
+  const orderedRefs = firstStackRef && firstStackRef !== refs[0]
+    ? [firstStackRef, ...refs.filter(ref => ref !== firstStackRef)] : refs;
   const movedTag = onTakeTag === undefined ? undefined : vm.tagMoved;
   const publishedTags = onTakeTag === undefined ? undefined : vm.publishedTags;
   const refCount = chipCount + Number(vm.tag !== undefined) + (publishedTags?.length ?? 0);
   // Keep the tracked stack layer first and give its position chip the second slot.
-  const localPreview = orderedRefs.slice(0, bracket ? 1 : MAX_REF_CHIPS);
-  const remotePreview = remoteRefs.slice(0, MAX_REF_CHIPS - localPreview.length - Number(bracket !== undefined));
+  const localPreview = orderedRefs.slice(0, firstStackRef ? 1 : MAX_REF_CHIPS);
+  const remotePreview = remoteRefs.slice(0, MAX_REF_CHIPS - localPreview.length - Number(firstStackRef !== undefined));
   const x = cx(row.lane);
 
   const showContextFor = (target: HTMLElement): void => {
@@ -340,12 +343,7 @@ export function GraphRow({
           <BranchGlyph size={8} strokeWidth={2.6} />
           <span className="ref-chip__name">{name}</span>
         </button>
-        {position !== undefined && onOpenStack !== undefined && (
-          <StackPositionChip position={position} onSelect={() => {
-            browser?.close();
-            onOpenStack(position.stack);
-          }} />
-        )}
+        {position && stackRepoId && <StackPositionChip position={position} repoId={stackRepoId} writable={stackWritable} />}
         {pr !== undefined && (browser === undefined
           ? <PrChip pr={pr} hoverIntent={hoverIntent} />
           : <span className="ref-list__pr">{prChipLabel(pr)}</span>)}
@@ -397,7 +395,7 @@ export function GraphRow({
           Old parent tip
         </span>}
         {isTip && (
-          <span className="ref-chips">
+          <span className="ref-chips" {...(firstStackRef && hoverTooltip(tip, [...orderedRefs, ...remoteRefs].join("\n")))}>
             {localPreview.map((name, index) => renderLocal(name, index > 0))}
             {remotePreview.map((name, index) => renderRemote(name, localPreview.length + index > 0))}
           </span>
@@ -503,10 +501,7 @@ export function GraphRow({
           />
         )}
         </svg>
-        {bracket && onOpenStack && <button type="button" className="stack-graph-bracket"
-          aria-label={`Open stack for ${bracket.layer.branch}`}
-          style={{ color }}
-          onClick={event => { event.stopPropagation(); onOpenStack(bracket.stack); }} />}
+
       </div>
 
       <div className="commit-body">

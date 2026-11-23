@@ -22,12 +22,14 @@ import { PrStatusCard } from "./PrStatusCard";
 export function PrChip({
   pr,
   repoId,
+  stacked = false,
   hoverIntent: sharedIntent
 }: {
   pr: PrSummary;
   /** The checkout this chip belongs to. Only with it can the card offer
    *  "Add to merge queue": main resolves the forge from its `origin`. */
   repoId?: string | undefined;
+  stacked?: boolean;
   /** Callers rendering many chips (commit rows) pass their own gate; a lone
    *  sidebar chip falls back to its own. */
   hoverIntent?: HoverIntent;
@@ -99,6 +101,7 @@ export function PrChip({
     <>
       <span
         className={`pr-chip pr-chip--${status.dot}${isDraft ? " pr-chip--draft" : ""}${status.running ? " pr-chip--checks-running" : ""}`}
+        data-stack-state={stacked ? status.stackState : undefined}
         role="button"
         tabIndex={0}
         aria-label={`${changeRequestLabel(
@@ -130,7 +133,9 @@ export function PrChip({
           }
         }}
       >
-        <span className="pr-chip__dot" aria-hidden="true" />
+        {/* Beside a stack rail the rail node is this PR's status mark; a second
+            dot here would say the same thing a few pixels away. */}
+        {!stacked && <span className="pr-chip__dot" aria-hidden="true" />}
         <span className="pr-chip__label">{label}</span>
         {isDraft && (
           <span className="pr-chip__draft-bar" aria-hidden="true" />

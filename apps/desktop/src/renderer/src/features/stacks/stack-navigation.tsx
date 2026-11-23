@@ -1,13 +1,31 @@
+import type { CSSProperties } from "react";
 import { createContext, useCallback, useContext, useEffect, useState } from "react";
 import type { RepositoryStack, StackAction, StackSnapshot } from "@pwrgit/shared";
 import { dispatch, subscribe } from "../../lib/pwrgit";
 
-export type StackPick = { repoId: string; stack: RepositoryStack; action?: StackAction };
+export type StackPick = { repoId: string; stack: RepositoryStack; action?: StackAction; branch?: string | undefined };
+export type StackLaneColors = {
+  repoId: string;
+  worktreeId: string;
+  byBranch: ReadonlyMap<string, string>;
+};
+
 export const StackNavigationContext = createContext<{
   pick: StackPick | null;
   select: (pick: StackPick) => void;
+  lanes?: StackLaneColors | undefined;
 } | null>(null);
 export const useStackNavigation = () => useContext(StackNavigationContext);
+
+export function useStackLaneStyle(repoId: string, stack: RepositoryStack): CSSProperties | undefined {
+  const lanes = useStackNavigation()?.lanes;
+  if (lanes?.repoId !== repoId) return;
+  // Prefer the lane nearest trunk that is drawn in the current Lineage scope.
+  for (const layer of stack.layers) {
+    const color = lanes.byBranch.get(layer.branch);
+    if (color) return { "--stack-lane": color } as CSSProperties;
+  }
+}
 
 type Read = ReturnType<typeof loadSnapshot>;
 const pending = new Map<string, { result: Read; next?: Read }>();

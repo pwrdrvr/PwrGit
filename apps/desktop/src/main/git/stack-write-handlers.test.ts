@@ -1,3 +1,4 @@
+import { StackEngine } from "./stack-engine";
 import { existsSync } from "node:fs";
 import { lstat, readFile, realpath, symlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
@@ -7,7 +8,7 @@ import type { Profile, Repo, Result } from "@pwrgit/shared";
 import { CommandBus } from "../command-bus";
 import type { GitExec } from "./dugite";
 import { GhStackCatalogStore, NativeStackLocks } from "./stack-catalog-store";
-import { commit, git, gitEnvironment, withStack } from "./stack-engine/fixture.test-support";
+import { commit, git, memoryStore, runner, gitEnvironment, withStack } from "./stack-engine/fixture.test-support";
 import { StackReader, stackRunner } from "./stack-reader";
 import { registerStackReadHandlers } from "./stack-read-handlers";
 import { registerStackWriteHandlers } from "./stack-write-handlers";
@@ -337,3 +338,55 @@ test.skipIf(!existsSync(native))("a second conflict uses a fresh checkout and pr
     }
   })
 );
+
+test.skipIf(!existsSync(native))("sync requires local trunk to include the merged parent, then replays just the remaining patches and supports undo", () =>
+  withStack(async ({ cwd, commonDir, initial, bottom: first }) => {
+    await git(cwd, "switch", "-q", "bottom");
+    const bottom = await commit(cwd, "second.txt", "second parent change\n");
+    await git(cwd, "rebase", "--onto", bottom, first, "top");
+    const top = await git(cwd, "rev-parse", "top");
+    await git(cwd, "switch", "-q", "main");
+    initial.stacks[0].branches[0].head = bottom;
+    initial.stacks[0].branches[1].base = bottom;
+    initial.stacks[0].branches[1].head = top;
+    initial.stacks[0].branches[0].pullRequest = { number: 7, merged: true, mergedHead: bottom };
+    await writeFile(join(commonDir, "gh-stack"), JSON.stringify(initial));
+    const { bus, request, stackId, catalog } = await setup(cwd, commonDir);
+    const action = { kind: "sync" as const, mergedParent: "bottom" };
+    expect(await bus.dispatch("stack:plan", { ...request, stackId, action })).toMatchObject({ ok: false });
+    await git(cwd, "merge", "-q", "--squash", "bottom");
+    await git(cwd, "commit", "-qm", "Squash bottom");
+    const trunk = await git(cwd, "rev-parse", "main");
+    const plan = value(await bus.dispatch("stack:plan", { ...request, stackId, action }));
+    expect(plan.steps.map(step => [step.branch, step.oldBase, step.newBase])).toEqual([["top", bottom, trunk]]);
+    value(await bus.dispatch("stack:apply", { ...request, planId: plan.id }));
+    expect(await git(cwd, "log", "--format=%s", `${trunk}..top`)).toBe("top.txt");
+    expect(await git(cwd, "show", "top:second.txt")).toBe("second parent change");
+    expect(await git(cwd, "rev-parse", "bottom")).toBe(bottom);
+    expect(JSON.parse(await readFile(catalog, "utf8")).stacks[0].branches.map((layer: { branch: string }) => layer.branch)).toEqual(["top"]);
+    value(await bus.dispatch("stack:undo", { ...request, operationId: plan.id }));
+    expect(await git(cwd, "rev-parse", "top")).toBe(top);
+    expect(JSON.parse(await readFile(catalog, "utf8"))).toEqual(initial);
+  }));
+
+test.skipIf(!existsSync(native))("sync refuses a replay boundary that includes an unpublished parent commit", () =>
+  withStack(async ({ cwd, commonDir, initial, bottom }) => {
+    await git(cwd, "switch", "-q", "bottom");
+    const unpublished = await commit(cwd, "unpublished.txt", "keep this change\n");
+    await git(cwd, "rebase", "--onto", unpublished, bottom, "top");
+    const tip = await git(cwd, "rev-parse", "top");
+    await git(cwd, "switch", "-q", "main");
+    await git(cwd, "merge", "-q", "--ff-only", bottom);
+    initial.stacks[0].branches[0].pullRequest = { number: 7, merged: true, mergedHead: bottom };
+    initial.stacks[0].branches[1].base = unpublished;
+    await writeFile(join(commonDir, "gh-stack"), JSON.stringify(initial));
+    const { bus, request, stackId } = await setup(cwd, commonDir);
+    const action = { kind: "sync" as const, mergedParent: "bottom" };
+    expect(await bus.dispatch("stack:plan", { ...request, stackId, action })).toMatchObject({ ok: false });
+    // Even a stale read that allowed Sync cannot authorize an unsafe boundary in the planner.
+    const updatedEngine = new StackEngine(runner, memoryStore(initial), cwd, commonDir);
+    await expect(updatedEngine.plan({ kind: "remove", root: "bottom", branch: "bottom", mode: "detach",
+      verifiedSyncTrunk: bottom })).rejects.toThrow("recorded replay boundary");
+    expect(await git(cwd, "rev-parse", "top")).toBe(tip);
+    expect(await git(cwd, "show", "top:unpublished.txt")).toBe("keep this change");
+  }));
