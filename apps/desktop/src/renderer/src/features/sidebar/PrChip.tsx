@@ -133,7 +133,9 @@ export function PrChip({
           }
         }}
       >
-        <span className={stacked ? "pr-chip__dot stack-node" : "pr-chip__dot"} data-stack-state={stacked ? status.stackState : undefined} aria-hidden="true" />
+        {/* Beside a stack rail the rail node is this PR's status mark; a second
+            dot here would say the same thing a few pixels away. */}
+        {!stacked && <span className="pr-chip__dot" aria-hidden="true" />}
         <span className="pr-chip__label">{label}</span>
         {isDraft && (
           <span className="pr-chip__draft-bar" aria-hidden="true" />

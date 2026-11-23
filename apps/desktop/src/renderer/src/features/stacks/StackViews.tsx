@@ -33,7 +33,7 @@ export function StackListGroup({ item, repoId, entries, writable, renderRow }: {
     {stackMembers(stack).map(position => {
       const { layer, index } = position;
       const row = rows.get(stackLayerKey(position) ?? "");
-      return <div key={layer.branch} data-stack-position={index}
+      return <div key={layer.branch} data-stack-position={index} data-stack-row={row ? "card" : "ghost"}
         className={`stack-group__member stack-track${stackActionAt(position, writable) ? " has-action" : ""}`}>
         <StackNode position={position} />
         {row ? renderRow(row, position) : <StackPopoverTrigger repoId={repoId} stack={stack} entries={entries} writable={writable}

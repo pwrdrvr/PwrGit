@@ -123,7 +123,7 @@ export function StackPopoverTrigger({
               }}>{content}</button> : <div className="stack-popover__row" data-ghost={branch === layer.branch ? "" : undefined}>{content}</div>}
           </li>;
         })}
-        <li className="stack-popover__trunk stack-track"><StackNode /><strong>{stack.trunk.branch}</strong><small>Trunk</small></li>
+        <li className="stack-popover__trunk stack-track"><StackNode /><strong>{stack.trunk.branch}</strong></li>
       </ol>
       <footer className="stack-popover__footer">
         {next && navigation && <button type="button" className="stack-button stack-button--primary" onClick={() => {

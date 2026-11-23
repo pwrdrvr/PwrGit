@@ -320,13 +320,13 @@
                 <button type="button" class="sg-cap" aria-label="Stack #4235, 2 pull requests into main. Show stack"><svg class="sk" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m12.83 2.18a2 2 0 0 0-1.66 0L2.6 6.08a1 1 0 0 0 0 1.83l8.58 3.91a2 2 0 0 0 1.66 0l8.58-3.9a1 1 0 0 0 0-1.83Z"></path><path d="m22 17.65-9.17 4.16a2 2 0 0 1-1.66 0L2 17.65"></path><path d="m22 12.65-9.17 4.16a2 2 0 0 1-1.66 0L2 12.65"></path></svg><span class="nm">Stack #4235</span><span>· 2 into main</span><span class="sp"></span></button>
                 <div class="sc first"><span class="rl"></span><span class="nd fail"></span>
                   <div class="cr sel">
-                    <div class="ln"><span class="prc failing"><span class="d"></span>#4206</span><span class="ti">feat(messaging): enforce per-Agent invocation trust</span><span class="age">15h</span><button type="button" class="act" aria-label="New worktree for #4206">+</button></div>
+                    <div class="ln"><span class="prc">#4206</span><span class="ti">feat(messaging): enforce per-Agent invocation trust</span><span class="age">15h</span><button type="button" class="act" aria-label="New worktree for #4206">+</button></div>
                     <div class="wh"><span class="hd">codex/2071-agent-trust-runtime</span><span class="bdg bad">conflicts</span></div>
                   </div>
                 </div>
                 <div class="sc"><span class="rl"></span><span class="nd ok"></span>
                   <div class="cr">
-                    <div class="ln"><span class="prc passing"><span class="d"></span>#4199</span><span class="ti">feat(messaging): define Agent invocation trust policies</span><span class="age">1d</span><button type="button" class="act" aria-label="New worktree for #4199">+</button></div>
+                    <div class="ln"><span class="prc">#4199</span><span class="ti">feat(messaging): define Agent invocation trust policies</span><span class="age">1d</span><button type="button" class="act" aria-label="New worktree for #4199">+</button></div>
                     <div class="wh"><span class="hd">codex/2071-agent-trust-schema</span><span class="bdg mute">main +14</span></div>
                   </div>
                 </div>
@@ -338,7 +338,7 @@
                 <div class="sc g first"><span class="rl"></span><span class="nd nopr"></span><div class="ghost"><span class="gt">feat/ledger-ui</span><span>no PR yet</span></div></div>
                 <div class="sc stale"><span class="rl hi"></span><span class="rl lo"></span><span class="nd draft"></span>
                   <div class="cr">
-                    <div class="ln"><span class="prc draft"><span class="d"></span>#4212</span><span class="ti">feat(ledger): persist approvals across restarts</span><span class="age">3h</span><button type="button" class="act" aria-label="New worktree for #4212">+</button></div>
+                    <div class="ln"><span class="prc">#4212</span><span class="ti">feat(ledger): persist approvals across restarts</span><span class="age">3h</span><button type="button" class="act" aria-label="New worktree for #4212">+</button></div>
                     <div class="wh"><span class="hd">feat/ledger-store</span><span class="bdg warn">parent merged</span></div>
                   </div>
                 </div>
@@ -362,7 +362,7 @@
             <div class="find" style="width: 470px">
               <div class="fitem"><span class="pin acc">a</span><div><h4>Caption row: one per stack</h4><p>It shows the name (GitHub’s <code>Stack #4235</code>, gh stack’s name, or the bottom branch for a stack found from PR bases) and how many PRs go into which trunk. It also carries one stack-level badge when there’s something to do, such as <b>sync</b> after a parent merged. Click it or press Space to get the popover (turn 4). It never opens a pane.</p></div></div>
               <div class="fitem"><span class="pin acc">b</span><div><h4>The rail</h4><p>The lane colour runs from the top member down into trunk. A <b>dashed amber</b> segment under a card means that card isn’t on its parent’s tip: it needs a restack or, after a merge, a sync. That’s the one place amber appears.</p></div></div>
-              <div class="fitem"><span class="pin acc">c</span><div><h4>Nodes are PR states</h4><p>Each node is drawn from the same state as the card’s PR chip, so the two never disagree. Shapes differ as well as colours (table below).</p></div></div>
+              <div class="fitem"><span class="pin acc">c</span><div><h4>The node is the status, once</h4><p>Beside a rail, the PR chip drops its dot: the node carries that PR’s state, so no state is drawn twice. The node sits on the centre of the card’s first line, level with the chip. Shapes differ as well as colours (table below).</p></div></div>
               <div class="fitem"><span class="pin acc">d</span><div><h4>Ghost rows keep the tower whole</h4><p>A merged or closed member, or a branch with no PR yet, takes one 22px line in its slot. Click a ghost for its popover row. Without ghosts, a merged bottom PR would leave #4212 looking as if it sat on main.</p></div></div>
               <div class="fitem"><span class="pin acc">e</span><div><h4>Behind trunk is a quiet fact</h4><p><code>main +14</code> on the bottom card is muted, not amber. It tells you main moved, and it asks nothing until the stack is tracked and a restack exists.</p></div></div>
               <div class="fitem"><span class="pin acc">f</span><div><h4>Keyboard</h4><p>Arrow keys still move card to card and skip the caption and ghost rows. The rail doesn’t change the tree’s <code>aria-level</code>s. The caption is a button inside the group.</p></div></div>
@@ -376,7 +376,7 @@
               <div class="cr lone">
                 <span class="lad" aria-label="Position 2 of 2: this PR failing, #4199 passing, then main"><span class="p fail me"></span><span class="p ok"></span><span class="t"></span></span>
                 <div class="body">
-                  <div class="ln"><span class="prc failing"><span class="d"></span>#4206</span><span class="ti">feat(messaging): enforce per-Agent invocation trust</span><span class="pos">2/2</span></div>
+                  <div class="ln"><span class="prc">#4206</span><span class="ti">feat(messaging): enforce per-Agent invocation trust</span><span class="pos">2/2</span></div>
                   <div class="wh"><span class="hd">codex/2071-agent-trust-runtime</span></div>
                 </div>
               </div>
@@ -387,7 +387,7 @@
               <div class="cr lone">
                 <span class="lad" aria-label="Position 1 of 2: #4206 failing above, this PR passing, then main"><span class="p fail"></span><span class="p ok me"></span><span class="t"></span></span>
                 <div class="body">
-                  <div class="ln"><span class="prc passing"><span class="d"></span>#4199</span><span class="ti">feat(messaging): define Agent invocation trust policies</span><span class="pos">1/2</span></div>
+                  <div class="ln"><span class="prc">#4199</span><span class="ti">feat(messaging): define Agent invocation trust policies</span><span class="pos">1/2</span></div>
                   <div class="wh"><span class="hd">codex/2071-agent-trust-schema</span></div>
                 </div>
               </div>
@@ -509,13 +509,13 @@
             <ol class="sv-cards">
               <li class="svc first"><span class="rl"></span><span class="nd fail"></span>
                 <div class="card sel">
-                  <div class="l1"><span class="ps">2/2</span><span class="ti">feat(messaging): enforce per-Agent invocation trust</span><span class="prc failing"><span class="d"></span>#4206</span></div>
+                  <div class="l1"><span class="ps">2/2</span><span class="ti">feat(messaging): enforce per-Agent invocation trust</span><span class="prc">#4206</span></div>
                   <div class="l2"><span>codex/2071-agent-trust-runtime</span><span>8 commits · +1451 −116</span><span class="bdg bad">checks failing</span><span class="bdg bad">conflicts</span><span>⌂ PwrAgent.trust-runtime</span></div>
                 </div>
               </li>
               <li class="svc"><span class="rl"></span><span class="nd ok"></span>
                 <div class="card">
-                  <div class="l1"><span class="ps">1/2</span><span class="ti">feat(messaging): define Agent invocation trust policies</span><span class="prc passing"><span class="d"></span>#4199</span></div>
+                  <div class="l1"><span class="ps">1/2</span><span class="ti">feat(messaging): define Agent invocation trust policies</span><span class="prc">#4199</span></div>
                   <div class="l2"><span>codex/2071-agent-trust-schema</span><span>5 commits · +612 −40</span><span class="bdg ok">checks passing</span><span class="bdg mute">main +14</span></div>
                 </div>
               </li>
