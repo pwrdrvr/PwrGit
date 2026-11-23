@@ -152,6 +152,10 @@ follow-up, not republishing. Signing and publication keep their existing credent
    GitHub Pre-release. A retry resumes a matching draft without replacing
    already verified assets.
 
+Manual dispatches of tags before v0.62.0 skip the retained Agent Access smoke
+tests because those source trees predate the fixture. The fresh installed DEB
+smoke test still runs.
+
 ## Recover a failed publication
 
 For a run whose platform jobs succeeded but publication failed, inspect the
