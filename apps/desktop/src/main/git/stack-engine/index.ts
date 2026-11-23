@@ -100,7 +100,7 @@ export class StackEngine {
     });
   }
 
-  async recover(journal: StackJournalEntry): Promise<void> {
+  async recover(journal: StackJournalEntry): Promise<"aborted" | "completed"> {
     const { receipt, direction, worktrees } = journal;
     const prefix = undoPrefix(receipt.id);
     const applying = direction === "apply";
@@ -117,11 +117,12 @@ export class StackEngine {
     const tipsAre = (before: boolean) => receipt.moves.every((move, index) =>
       tips[index] === (before === applying ? move.old : move.next));
     if (sameCatalog(catalog, from) && tipsAre(true) && (applying ? !recorded : receipt.moves.length > 0)) {
-      return; // The transaction never committed.
+      return "aborted"; // The transaction never committed.
     }
     if (!recorded || !tipsAre(false)) throw new Error("Stack refs changed after the interruption");
     for (const worktree of worktrees) await this.git.follow(worktree);
     await this.store.writeIfUnchanged(this.commonDir, to, sha256);
+    return "completed";
   }
 
   private async tipsUnchanged(moves: StackReceipt["moves"]): Promise<boolean> {

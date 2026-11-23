@@ -153,5 +153,5 @@ export type StackConflict = {
   branch: string;
   worktreePath: string;
   worktreeId: string | null;
-  phase: "resolving" | "resolved" | "aborted";
+  phase: "resolving" | "resolved" | "aborted" | "unverified";
 };

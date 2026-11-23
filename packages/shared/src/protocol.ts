@@ -1110,7 +1110,7 @@ export interface Commands {
     res: StackConflict | null;
   };
   "stack:finishConflict": {
-    req: { repoId: RepoId; profileId: ProfileId; planId: string };
+    req: { repoId: RepoId; profileId: ProfileId; planId: string; close?: boolean };
     res: { applied?: StackApplied; plan?: StackPlanPreview };
   };
   "stack:recover": {

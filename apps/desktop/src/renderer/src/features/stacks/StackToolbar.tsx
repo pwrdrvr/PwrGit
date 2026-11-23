@@ -35,15 +35,19 @@ export function StackToolbar({ stack, disabled, onPlan }: {
   </div>;
 }
 
+export function stackBranchActions(branch: string): [string, StackAction][] {
+  return [
+    ["Restack from here", { kind: "restack", from: branch }],
+    ["Detach branch", { kind: "remove", branch, mode: "detach" }],
+    ["Forget branch", { kind: "remove", branch, mode: "forget" }],
+  ];
+}
+
 export function StackBranchActions({ name, onPlan }: { name: string; onPlan: (action: StackAction) => void }) {
   return <details className="stack-branch-actions">
     <summary aria-label={`Stack actions for ${name}`}>…</summary>
     <div className="stack-branch-actions__items">
-      {([
-        ["Restack from here", { kind: "restack", from: name }],
-        ["Detach branch", { kind: "remove", branch: name, mode: "detach" }],
-        ["Forget branch", { kind: "remove", branch: name, mode: "forget" }],
-      ] satisfies [string, StackAction][]).map(([label, action]) => <button type="button" key={label}
+      {stackBranchActions(name).map(([label, action]) => <button type="button" key={label}
         className="stack-button" onClick={event => {
           event.stopPropagation();
           event.currentTarget.closest("details")?.removeAttribute("open");

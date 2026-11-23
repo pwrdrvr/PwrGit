@@ -97,9 +97,11 @@ export function StackPlanRail({
             if (conflict && conflict.phase !== "resolving") void controls.finish();
           })}
         />}
-        {stage.conflict.phase !== "resolving" && <button className="stack-button stack-button--primary" type="button"
-          disabled={pending !== null} onClick={() => void controls.finish()}>
-          {stage.conflict.phase === "aborted" ? "Close aborted rebase" : "Finish restack"}
+        {stage.conflict.phase === "resolved" && <button className="stack-button stack-button--primary" type="button"
+          disabled={pending !== null} onClick={() => void controls.finish()}>Finish restack</button>}
+        {stage.conflict.phase !== "resolving" && <button className="stack-button" type="button"
+          disabled={pending !== null} onClick={() => void controls.finish(true)}>
+          {stage.conflict.phase === "aborted" ? "Close aborted rebase" : "Close session and keep work"}
         </button>}
       </div>}
     </div>

@@ -845,3 +845,41 @@ describe("parity with the sidebar's rows", () => {
     expect(items).toEqual(["Copy branch name", "Copy origin/feature/x"]);
   });
 });
+
+it.each(["tracked", "inferred", "busy", "read-only"] as const)("offers sidebar stack verbs in the refs menu only for writable tracked members (%s)", async mode => {
+  const { StackNavigationContext } = await import("../stacks/stack-navigation");
+  const select = vi.fn();
+  const onClose = vi.fn();
+  const stack = {
+    id: "stack", source: mode === "inferred" ? "inferred" : "tracked",
+    catalogRepository: "", trunk: { branch: "main" },
+    layers: [{ branch: "topic", parent: "main", health: {
+      inSync: true, needsRestack: false, needsPush: false, drift: false, remoteAhead: false, parentMerged: false,
+    } }],
+  } as const;
+  const previous = dispatchMock.getMockImplementation()!;
+  dispatchMock.mockImplementation((channel, request) => channel === "stack:list"
+    ? Promise.resolve(ok({ schemaVersion: 1, readOnly: mode === "read-only", busy: mode === "busy" ? "interrupted" : undefined, stacks: [stack] }))
+    : previous(channel, request));
+  vi.stubGlobal("pwrgit", {});
+  try {
+    await act(async () => root.render(
+      <StackNavigationContext.Provider value={{ pick: null, select }}>
+        <RepoRefsModal repo={repo} refs={{ ...refs, branches: [{
+          name: "topic", fullName: "refs/heads/topic", head: "a".repeat(40),
+          ahead: 0, behind: 0, tracking: "unpublished", checkedOutWorktreeIds: [],
+        }] }} now={0} initialTab="branches" focusedWorktree={null} onRefresh={() => undefined}
+          onRevealWorktree={() => undefined} onCreateWorktree={() => undefined} onClose={onClose} />
+      </StackNavigationContext.Provider>
+    ));
+    await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="Actions for topic"]')!.click());
+    const items = [...document.querySelectorAll<HTMLElement>('.pop-menu [role="menuitem"]')];
+    const actions = items.filter(item => /^(Restack from here|Detach branch|Forget branch)$/.test(item.textContent ?? ""));
+    if (mode === "tracked") {
+      expect(actions.map(item => item.textContent)).toEqual(["Restack from here", "Detach branch", "Forget branch"]);
+      await act(async () => actions[1].click());
+      expect(onClose).toHaveBeenCalledOnce();
+      expect(select).toHaveBeenCalledWith({ repoId: repo.id, stack, action: { kind: "remove", branch: "topic", mode: "detach" } });
+    } else expect(actions).toEqual([]);
+  } finally { vi.unstubAllGlobals(); }
+});

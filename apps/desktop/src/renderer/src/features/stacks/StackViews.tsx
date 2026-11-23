@@ -1,6 +1,8 @@
 import { useLayoutEffect, useRef, useState } from "react";
 import type { Repo, RepositoryStack, StackAction, StackLayer, StackPosition } from "@pwrgit/shared";
 import { RefreshGlyph } from "../../lib/RefreshGlyph";
+import { dispatch } from "../../lib/pwrgit";
+import { showErrorToast, showInfoToast } from "../../lib/toast";
 import { useViewportTooltip } from "../../lib/useViewportTooltip";
 import { SectionGlyph, steppedTooltip } from "../sidebar/section-fit";
 import { SectionChevron } from "../sidebar/SectionChevron";
@@ -42,13 +44,25 @@ function StackSignals({ layer }: { layer: StackLayer }) {
   </span>;
 }
 
-export function StacksSidebar({ repo, stacks, writable = false }: {
-  repo: Repo; stacks: RepositoryStack[]; writable?: boolean;
+export function StacksSidebar({ repo, stacks, writable = false, recoverEmpty }: {
+  repo: Repo; stacks: RepositoryStack[]; writable?: boolean; recoverEmpty?: () => void;
 }) {
   const navigation = useStackNavigation();
   const [expanded, setExpanded] = useState(true);
   const tip = useViewportTooltip();
-  if (!stacks.length || !navigation) return null;
+  const [recovering, setRecovering] = useState(false);
+  if (!navigation) return null;
+  if (!stacks.length) return recoverEmpty ? <div className="ref-section stack-sidebar">
+    <button type="button" className="stack-button" disabled={recovering} onClick={() => {
+      setRecovering(true);
+      void dispatch("stack:recover", { repoId: repo.id, profileId: repo.profileId }).then(result => {
+        if (result.ok) {
+          recoverEmpty();
+          showInfoToast({ title: "Interrupted stack operation recovered", message: "Local stack state refreshed", subject: { repoId: repo.id } });
+        } else showErrorToast({ title: "Could not recover stack", message: result.error.message, subject: { repoId: repo.id } });
+      }).finally(() => setRecovering(false));
+    }}>Recover stack operation</button>
+  </div> : null;
   const stale = stacks.reduce((count, stack) => count + stack.layers.filter(layer => layer.health.needsRestack).length, 0);
   return <div className="ref-section stack-sidebar">
     <div className="ref-section__head-wrap">

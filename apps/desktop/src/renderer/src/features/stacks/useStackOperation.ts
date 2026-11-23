@@ -7,7 +7,7 @@ type Stage =
   | { phase: "idle" }
   | { phase: "plan"; plan: StackPlanPreview }
   | { phase: "conflict"; conflict: StackConflict }
-  | { phase: "done"; applied: StackApplied };
+  | { phase: "done"; key: string; applied: StackApplied };
 
 const IDLE: Stage = { phase: "idle" };
 
@@ -23,7 +23,8 @@ export function useStackOperation(
   const active = useRef(key);
   active.current = key;
   const stillSelected = () => active.current === key;
-  const [stage, setStage] = useState<Stage>(IDLE);
+  const [savedStage, setStage] = useState<Stage>(IDLE);
+  const stage = savedStage.phase === "done" && savedStage.key !== key ? IDLE : savedStage;
   const [pending, setPending] = useState<"plan" | "run" | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [operation, setOperation] = useState<OperationState | null>(null);
@@ -37,14 +38,14 @@ export function useStackOperation(
 
   useEffect(() => {
     let live = true;
-    setStage(previous => previous.phase === "done" && previous.applied.stack?.id === stackId ? previous : IDLE);
+    setStage(previous => previous.phase === "done" && previous.key === key ? previous : IDLE);
     setError(null);
     setPending(null);
     void loadConflict().then(conflict => {
       if (live && conflict) setStage({ phase: "conflict", conflict });
     }).catch(() => undefined);
     return () => { live = false; };
-  }, [loadConflict, stackId]);
+  }, [loadConflict, key]);
 
   useEffect(() => {
     if (!conflictId) { setOperation(null); return; }
@@ -72,7 +73,7 @@ export function useStackOperation(
   const report = (applied: StackApplied) => {
     if (!repoId || !profileId) return;
     if (stillSelected()) {
-      setStage({ phase: "done", applied });
+      setStage({ phase: "done", key: JSON.stringify([profileId, repoId, applied.stack?.id ?? stackId]), applied });
       if (applied.stack) onStackChanged(repoId, applied.stack);
     }
     const count = applied.plan.moves.length;
@@ -132,12 +133,12 @@ export function useStackOperation(
     } finally { if (stillSelected()) setPending(null); }
   };
 
-  const finish = async () => {
+  const finish = async (close = false) => {
     if (!repoId || !profileId || pending || stage.phase !== "conflict") return;
     setPending("run");
     setError(null);
     try {
-      const result = await dispatch("stack:finishConflict", { repoId, profileId, planId: stage.conflict.plan.id });
+      const result = await dispatch("stack:finishConflict", { repoId, profileId, planId: stage.conflict.plan.id, ...(close ? { close } : {}) });
       if (result.ok && result.value.applied) report(result.value.applied);
       else if (stillSelected()) {
         if (!result.ok) setError(result.error.message);

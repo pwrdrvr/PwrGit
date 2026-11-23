@@ -826,11 +826,11 @@ export function App() {
   }, [stack, stackPick]);
   const requestedStackAction = useRef<StackPick | null>(null);
   useEffect(() => {
-    if (stackPick?.action && stackPick !== requestedStackAction.current) {
+    if (stackPick?.action && stack && stackOperation.pending === null && stackPick !== requestedStackAction.current) {
       requestedStackAction.current = stackPick;
       void stackOperation.requested(stackPick.action);
     }
-  }, [stackOperation, stackPick]);
+  }, [stack, stackOperation, stackPick]);
   const stackWritable = !!shownStacks && !shownStacks.readOnly && !shownStacks.busy && stackOperation.pending === null;
   const stackStage = stackOperation.stage;
   const stackWorktreeId = selectedWorktree?.repoId === stackRepo?.id ? selectedWorktree?.id : undefined;

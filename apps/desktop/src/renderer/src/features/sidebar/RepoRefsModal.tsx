@@ -1,4 +1,6 @@
 import { BranchGlyph } from "../../lib/BranchGlyph";
+import { useStackNavigation, useStackSnapshot } from "../stacks/stack-navigation";
+import { stackBranchActions } from "../stacks/StackToolbar";
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
   changeRequestMatch,
@@ -635,6 +637,10 @@ export function RepoRefsModal({
   onCreateWorktree: CreateWorktreeFromRef;
   onClose: () => void;
 }) {
+  const stackNavigation = useStackNavigation();
+  const { snapshot: stackSnapshot } = useStackSnapshot(stackNavigation ? repo.id : undefined, repo.profileId);
+  const trackedStacks = stackSnapshot?.readOnly === false && !stackSnapshot.busy
+    ? stackSnapshot.stacks.filter(stack => stack.source === "tracked") : [];
   const tip = useViewportTooltip();
   const [tab, setTab] = useState<RefsTab>(initialTab);
   const [status, setStatus] = useState<BranchStatusFilter>(initialStatus);
@@ -1460,6 +1466,7 @@ export function RepoRefsModal({
                   );
                 }
                 const branch = item.branch;
+                const stack = trackedStacks.find(candidate => candidate.layers.some(layer => layer.branch === branch.name));
                 const holderId = holderIdOf(branch);
                 const checkedOut = holderId !== null;
                 const holder =
@@ -1580,6 +1587,13 @@ export function RepoRefsModal({
                               label: "Copy branch name",
                               onSelect: () => void copyText(branch.name)
                             },
+                            ...(stack && stackNavigation ? stackBranchActions(branch.name).map(([label, action]) => ({
+                              type: "item" as const, label,
+                              onSelect: () => {
+                                onClose();
+                                stackNavigation.select({ repoId: repo.id, stack, action });
+                              },
+                            })) : []),
                             { type: "sep" },
                             {
                               type: "item",

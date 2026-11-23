@@ -6,6 +6,10 @@ import { join } from "node:path";
 import { promisify } from "node:util";
 import { parseGhStackCatalog, requireWritableCatalog, type ApplyHooks, type CatalogStore, type GhStackCatalog, type StackJournalEntry } from "./stack-engine";
 
+import type { ConflictJournal } from "./stack-conflicts";
+
+type ApplyJournal = StackJournalEntry & { resolution?: { journal: ConflictJournal; tip: string } };
+
 const foreignJournals = {
   "gh-stack-rebase-state": "gh stack is mid-rebase in this clone",
   "gh-stack-modify-state": "gh stack is modifying a stack in this clone",
@@ -152,10 +156,15 @@ export class GhStackCatalogStore implements CatalogStore {
     }
   }
 
-  async readApplyJournal(commonDir: string): Promise<StackJournalEntry | undefined> {
-    const entry = await this.readJournal(commonDir) as Partial<StackJournalEntry> | undefined;
+  async readResolutionJournal(commonDir: string): Promise<ConflictJournal | undefined> {
+    const entry = await this.readJournal(commonDir) as ConflictJournal | undefined;
+    return entry?.kind === "resolution" ? entry : undefined;
+  }
+
+  async readApplyJournal(commonDir: string): Promise<ApplyJournal | undefined> {
+    const entry = await this.readJournal(commonDir) as Partial<ApplyJournal> | undefined;
     if ((entry?.direction === "apply" || entry?.direction === "undo") && entry.receipt && Array.isArray(entry.worktrees)) {
-      return entry as StackJournalEntry;
+      return entry as ApplyJournal;
     }
     return undefined;
   }
@@ -169,9 +178,9 @@ export class GhStackCatalogStore implements CatalogStore {
     await syncDirectory(commonDir);
   }
 
-  journalHooks(commonDir: string): ApplyHooks {
+  journalHooks(commonDir: string, resolution?: ApplyJournal["resolution"]): ApplyHooks {
     return {
-      begin: entry => this.writeJournal(commonDir, entry),
+      begin: entry => this.writeJournal(commonDir, resolution ? { ...entry, resolution } : entry),
       finish: () => this.removeJournal(commonDir),
     };
   }

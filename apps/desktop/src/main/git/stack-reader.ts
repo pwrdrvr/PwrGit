@@ -77,7 +77,13 @@ export class StackReader {
       schemaVersion: catalog.schemaVersion, readOnly: catalog.schemaVersion !== 1, stacks: [],
       ...(busy ? { busy } : {}),
     };
-    if (busy && !snapshot.readOnly && await store.readApplyJournal(commonDir)) snapshot.recoveryAvailable = true;
+    if (busy && !snapshot.readOnly && !await store.journalBlocker(commonDir, true)) {
+      const transaction = await store.readApplyJournal(commonDir);
+      const resolution = transaction?.resolution?.journal ?? await store.readResolutionJournal(commonDir);
+      if (resolution ? resolution.scope.repoId === repo.id && resolution.scope.profileId === repo.profileId : transaction) {
+        snapshot.recoveryAvailable = true;
+      }
+    }
     if (!sources.length) return snapshot;
     const git = new StackGit(this.runner, repo.path);
     const refs = new Map((await git.output([

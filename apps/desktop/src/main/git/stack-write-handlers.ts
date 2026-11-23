@@ -1,13 +1,14 @@
 import { randomUUID } from "node:crypto";
 import { resolve } from "node:path";
-import { err, ok, type Profile, type Repo, type RepositoryStack, type StackAction, type StackApplied, type StackPlanPreview } from "@pwrgit/shared";
+import { err, ok, type Profile, type Repo, type RepositoryStack, type StackAction, type StackApplied, type StackPlanPreview, type StackSnapshot } from "@pwrgit/shared";
 import type { CommandBus } from "../command-bus";
+import { limitConcurrency } from "../util/map-limit";
 import { commitIdentityArgs, SCRUBBED_IDENTITY_ENV } from "./commit-identity";
 import type { GitExec } from "./dugite";
 import { StackEngine, type CatalogStore, type StackOperation, type StackPlan } from "./stack-engine";
 import { StackGit } from "./stack-engine/git";
 import { switchBranchCarryingChanges } from "./git-service";
-import { collectResolution, conflictStatus, leaveResolution, readConflict, startConflict } from "./stack-conflicts";
+import { collectResolution, conflictStatus, leaveResolution, ownsConflict, readConflict, startConflict } from "./stack-conflicts";
 import { stackRunner, type StackReader } from "./stack-reader";
 import type { WorktreeOperationQueue } from "./worktree-operation-queue";
 
@@ -45,7 +46,21 @@ function preview(id: string, action: StackAction, plan: StackPlan): StackPlanPre
   return { id, action, steps: plan.steps, moves: plan.moves, blocked: plan.blocked, cleanPrefix: plan.cleanPrefix !== undefined };
 }
 
+function updatedStack(snapshot: StackSnapshot | null, id: string, operation: StackOperation, before: StackPlan["before"]) {
+  const root = operation.kind === "adopt" ? operation.stack.branches[0]?.branch :
+    operation.kind === "remove" && operation.branch === operation.root
+      ? before.stacks.find(stack => stack.branches[0]?.branch === operation.root)?.branches[1]?.branch
+      : operation.root;
+  return snapshot?.stacks.find(stack => stack.id === id) ??
+    snapshot?.stacks.find(stack => stack.source === "tracked" && stack.layers[0]?.branch === root);
+}
+
 export function registerStackWriteHandlers(bus: CommandBus, options: Options) {
+  const execute: GitExec = limitConcurrency((args, cwd, opts) => options.git(args, cwd, {
+    ...opts, env: { ...opts?.env, GIT_NO_LAZY_FETCH: "1" },
+  }), 4);
+  const list = limitConcurrency((repo: Repo) => options.reader.list(repo), 4);
+  const location = limitConcurrency((repo: Repo) => options.reader.location(repo), 4);
   const drafts = new Map<string, Draft>();
   const creating = new Set<string>();
   const carried = new Map<string, { repoId: string; path: string; from: string; to: string; oid: string }>();
@@ -64,11 +79,11 @@ export function registerStackWriteHandlers(bus: CommandBus, options: Options) {
   };
   const runnerFor = (repo: Repo) => {
     const profile = options.findProfile(repo.profileId);
-    if (!profile) return stackRunner(options.git);
+    if (!profile) return stackRunner(execute);
     const args = commitIdentityArgs({ email: profile.email, ...(profile.authorName ? { name: profile.authorName } : {}) });
     return stackRunner((command, cwd, opts) => {
-      if (command[0] !== "replay" && command[0] !== "rebase") return options.git(command, cwd, opts);
-      return options.git([...args, ...command], cwd, { ...opts, env: { ...SCRUBBED_IDENTITY_ENV, GIT_EDITOR: "true" } });
+      if (command[0] !== "replay" && command[0] !== "rebase") return execute(command, cwd, opts);
+      return execute([...args, ...command], cwd, { ...opts, env: { ...opts?.env, ...SCRUBBED_IDENTITY_ENV, GIT_EDITOR: "true" } });
     });
   };
   const inWorktreeLocks = <T>(repo: Repo, run: () => Promise<T>): Promise<T> => {
@@ -86,11 +101,11 @@ export function registerStackWriteHandlers(bus: CommandBus, options: Options) {
     creating.add(request.repoId);
     try {
       const repo = scopedRepo(request);
-      const snapshot = await options.reader.list(repo);
+      const snapshot = await list(repo);
       if (snapshot.readOnly || snapshot.busy) throw new Error(snapshot.busy ?? "This stack catalog is read-only");
       const stack = snapshot.stacks.find(model => model.id === request.stackId);
       if (!stack) throw new Error("This stack changed. Select it again.");
-      const { store, commonDir } = await options.reader.location(repo);
+      const { store, commonDir } = await location(repo);
       const engine = new StackEngine(runnerFor(repo), store, repo.path, commonDir);
       const operation = stackOperation(stack, request.action);
       if (operation.kind !== "adopt" && snapshot.stacks.filter(candidate =>
@@ -116,7 +131,7 @@ export function registerStackWriteHandlers(bus: CommandBus, options: Options) {
       const repo = scopedRepo(request);
       const applied = await options.queue.runRepository(repo.id, () => inWorktreeLocks(scopedRepo(request), async () => {
         const draft = getDraft(request.planId, repo);
-        const { store, commonDir } = await options.reader.location(repo);
+        const { store, commonDir } = await location(repo);
         if (resolve(commonDir) !== resolve(draft.commonDir)) throw new Error("The repository moved after this plan");
         const engine = new StackEngine(runnerFor(repo), store, repo.path, commonDir);
         const op = draft.plan.operation;
@@ -134,7 +149,7 @@ export function registerStackWriteHandlers(bus: CommandBus, options: Options) {
             const current = await git.run(["symbolic-ref", "--short", "HEAD"]);
             const next = receipt.moves[0]?.next;
             if (current.stdout.trim() === top && next && await git.tip(top) === next && await git.tip(op.branch) === next) {
-              const switched = await switchBranchCarryingChanges(options.git, worktree.path, op.branch);
+              const switched = await switchBranchCarryingChanges(execute, worktree.path, op.branch);
               if (!switched.ok) answer.checkoutWarning = switched.error.message;
               if (switched.ok) {
                 if (carried.size >= 50) {
@@ -146,13 +161,8 @@ export function registerStackWriteHandlers(bus: CommandBus, options: Options) {
             }
           }
         }
-        const updated = await options.reader.list(repo).catch(() => null);
-        const original = updated?.stacks.find(stack => stack.id === draft.stackId);
-        const root = op.kind === "adopt" ? op.stack.branches[0]?.branch :
-          op.kind === "remove" && op.branch === op.root
-            ? receipt.before.stacks.find(stack => stack.branches[0]?.branch === op.root)?.branches[1]?.branch
-            : op.root;
-        const next = original ?? updated?.stacks.find(stack => stack.source === "tracked" && stack.layers[0]?.branch === root);
+        const updated = await list(repo).catch(() => null);
+        const next = updatedStack(updated, draft.stackId, op, receipt.before);
         if (next) answer.stack = next;
         return answer;
       }));
@@ -166,30 +176,30 @@ export function registerStackWriteHandlers(bus: CommandBus, options: Options) {
       const repo = scopedRepo(request);
       await options.queue.runRepository(repo.id, () => inWorktreeLocks(scopedRepo(request), async () => {
         const draft = getDraft(request.planId, repo);
-        const { commonDir, store } = await options.reader.location(repo);
+        const { commonDir, store } = await location(repo);
         if (resolve(commonDir) !== resolve(draft.commonDir)) throw new Error("The repository moved after this plan");
         const git = new StackGit(runnerFor(repo), repo.path);
-        await startConflict(git, options.git, store, commonDir, {
+        await startConflict(git, execute, store, commonDir, {
           scope: { repoId: repo.id, profileId: repo.profileId }, stackId: draft.stackId,
           plan: draft.plan, preview: draft.preview,
         });
       }));
       await options.changed(repo);
       const fresh = scopedRepo(request);
-      const { commonDir, store } = await options.reader.location(fresh);
+      const { commonDir, store } = await location(fresh);
       const journal = await readConflict(store, commonDir, fresh);
       if (!journal) throw new Error("The stack resolution was closed");
-      return ok(await conflictStatus(new StackGit(runnerFor(fresh), fresh.path), options.git, fresh, journal));
+      return ok(await conflictStatus(new StackGit(runnerFor(fresh), fresh.path), execute, fresh, journal));
     } catch (error) { return resultError(error); }
   });
 
   bus.register("stack:conflict", async request => {
     try {
       const repo = scopedRepo(request);
-      const { commonDir, store } = await options.reader.location(repo);
+      const { commonDir, store } = await location(repo);
       const journal = await readConflict(store, commonDir, repo);
       if (!journal || journal.stackId !== request.stackId) return ok(null);
-      return ok(await conflictStatus(new StackGit(runnerFor(repo), repo.path), options.git, repo, journal));
+      return ok(await conflictStatus(new StackGit(runnerFor(repo), repo.path), execute, repo, journal));
     } catch (error) { return resultError(error); }
   });
 
@@ -197,14 +207,14 @@ export function registerStackWriteHandlers(bus: CommandBus, options: Options) {
     try {
       const repo = scopedRepo(request);
       const answer = await options.queue.runRepository(repo.id, () => inWorktreeLocks(scopedRepo(request), async () => {
-        const { commonDir, store } = await options.reader.location(repo);
+        const { commonDir, store } = await location(repo);
         const journal = await readConflict(store, commonDir, repo);
         if (!journal || journal.preview.id !== request.planId) throw new Error("This conflict session changed");
         const runner = runnerFor(repo);
         const git = new StackGit(runner, repo.path);
-        const status = await conflictStatus(git, options.git, repo, journal);
+        const status = await conflictStatus(git, execute, repo, journal);
         if (status.phase === "resolving") throw new Error("Finish or abort the rebase first");
-        const resolutions = await collectResolution(git, journal);
+        const resolutions = request.close ? null : await collectResolution(git, execute, journal);
         const continuation = resolutions
           ? await new StackEngine(runner, store, repo.path, commonDir).plan(journal.plan.operation, resolutions)
           : null;
@@ -215,14 +225,16 @@ export function registerStackWriteHandlers(bus: CommandBus, options: Options) {
           const current = await readConflict(store, commonDir, repo);
           if (current?.preview.id !== request.planId) throw new Error("This conflict session changed");
           if (!continuation) {
-            await leaveResolution(git, options.git, journal);
+            await leaveResolution(git, execute, journal, { keepWork: request.close === true });
             drafts.delete(journal.preview.id);
             await store.removeJournal(commonDir);
             return {};
           }
+          const resolvedTip = resolutions?.at(-1)?.newTip;
+          if (!resolvedTip) throw new Error("The conflict resolution has no recorded tip");
           const continued = preview(journal.preview.id, journal.preview.action, continuation);
           if (continuation.steps.some(step => step.conflict)) {
-            await leaveResolution(git, options.git, journal);
+            await leaveResolution(git, execute, journal, { appliedTip: resolvedTip, keepWork: true, keepBranch: true });
             await store.removeJournal(commonDir);
             drafts.set(continued.id, {
               repo: request, plan: continuation, preview: continued, commonDir, stackId: journal.stackId, expires: Date.now() + lifetime,
@@ -237,21 +249,18 @@ export function registerStackWriteHandlers(bus: CommandBus, options: Options) {
             writeIfUnchanged: store.writeIfUnchanged.bind(store),
           };
           const engine = new StackEngine(runner, held, repo.path, commonDir);
-          let checkoutWarning: string | undefined;
           const receipt = await engine.apply(continuation, continued.id, Date.now(), {
-            ...store.journalHooks(commonDir),
+            ...store.journalHooks(commonDir, { journal, tip: resolvedTip }),
             abort: () => store.writeJournal(commonDir, journal),
             finish: async () => {
-              try { await leaveResolution(git, options.git, journal, resolutions?.at(-1)?.newTip); }
-              catch (error) { checkoutWarning = error instanceof Error ? error.message : String(error); }
+              await leaveResolution(git, execute, journal, { appliedTip: resolvedTip });
               await store.removeJournal(commonDir);
             },
           });
           drafts.delete(continued.id);
-          const updated = await options.reader.list(repo).catch(() => null);
-          const stack = updated?.stacks.find(candidate => candidate.id === journal.stackId ||
-            candidate.source === "tracked" && candidate.layers[0]?.branch === journal.plan.after.stacks.at(-1)?.branches[0]?.branch);
-          return { applied: { operationId: receipt.id, plan: continued, ...(stack ? { stack } : {}), ...(checkoutWarning ? { checkoutWarning } : {}) } };
+          const updated = await list(repo).catch(() => null);
+          const stack = updatedStack(updated, journal.stackId, continuation.operation, receipt.before);
+          return { applied: { operationId: receipt.id, plan: continued, ...(stack ? { stack } : {}) } };
         });
       }));
       await options.changed(repo);
@@ -263,12 +272,28 @@ export function registerStackWriteHandlers(bus: CommandBus, options: Options) {
     try {
       const repo = scopedRepo(request);
       await options.queue.runRepository(repo.id, () => inWorktreeLocks(scopedRepo(request), async () => {
-        const { commonDir, store } = await options.reader.location(repo);
+        const { commonDir, store } = await location(repo);
         await store.withJournalLock(commonDir, true, async () => {
           const journal = await store.readApplyJournal(commonDir);
-          if (!journal) throw new Error("There is no interrupted ref transaction to resume");
-          const engine = new StackEngine(runnerFor(repo), store, repo.path, commonDir);
-          await engine.recover(journal);
+          const runner = runnerFor(repo);
+          const git = new StackGit(runner, repo.path);
+          if (journal) {
+            if (journal.resolution && !ownsConflict(journal.resolution.journal, repo)) throw new Error("The conflict is open in another profile");
+            const outcome = await new StackEngine(runner, store, repo.path, commonDir).recover(journal);
+            if (journal.resolution) {
+              const resolution = journal.resolution;
+              if (outcome === "aborted") {
+                await store.writeJournal(commonDir, resolution.journal);
+                return;
+              }
+              await leaveResolution(git, execute, resolution.journal, { appliedTip: resolution.tip, keepWork: true });
+            }
+          } else {
+            const resolution = await readConflict(store, commonDir, repo);
+            if (!resolution) throw new Error("There is no interrupted stack operation to recover");
+            await leaveResolution(git, execute, resolution, { keepWork: true });
+            drafts.delete(resolution.preview.id);
+          }
           await store.removeJournal(commonDir);
         });
       }));
@@ -281,7 +306,7 @@ export function registerStackWriteHandlers(bus: CommandBus, options: Options) {
     try {
       const repo = scopedRepo(request);
       await options.queue.runRepository(repo.id, () => inWorktreeLocks(scopedRepo(request), async () => {
-        const { commonDir, store } = await options.reader.location(repo);
+        const { commonDir, store } = await location(repo);
         const engine = new StackEngine(runnerFor(repo), store, repo.path, commonDir);
         const shift = carried.get(request.operationId);
         const git = new StackGit(runnerFor(repo), repo.path);
