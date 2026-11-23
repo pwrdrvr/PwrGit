@@ -262,7 +262,7 @@ describe("bulk sync lifecycle logging property", () => {
     ));
   });
 
-  it.each(["abort", "signal"] as const)("records one diagnostic for an abnormal %s", async (outcome) => {
+  it.each(["abort", "signal"] as const)("keeps Git stderr out of diagnostics for an abnormal %s", async (outcome) => {
     vi.mocked(logMain).mockClear();
     const controller = new AbortController();
     const failure = err({ kind: "git" as const, code: outcome === "abort" ? "aborted" : "spawn_failed", message: "Git stopped." });
@@ -272,7 +272,7 @@ describe("bulk sync lifecycle logging property", () => {
     const git = watchedGit(async (_args, _cwd, options) => {
       reportProcess = options?.onProcess;
       options?.onProcess?.({ event: "spawn", pid: 123, exitCode: null, signalCode: null });
-      options?.onStderr?.("auth: https://operator:fixture-secret@example.test/repo.git\n");
+      options?.onStderr?.("12:34:56.123456 http.c:0000 => Send header: X-Api-Key: fixture-secret\n");
       if (outcome === "abort") {
         controller.abort();
         expect(options?.signal?.aborted).toBe(true);
@@ -283,18 +283,70 @@ describe("bulk sync lifecycle logging property", () => {
       return failure;
     }, undefined);
     expect(await git(["fetch", "origin"], "/repos/example", { signal: controller.signal, onProcess })).toBe(failure);
+    const interruption = outcome === "abort"
+      ? "bulk sync aborted: git fetch origin (/repos/example); pid=123 event=spawn exit=none signal=none"
+      : "bulk sync Git stopped by signal: git fetch origin (/repos/example); pid=123 event=close exit=none signal=SIGTERM";
+    expect(logMain).toHaveBeenCalledExactlyOnceWith(outcome === "abort" ? "debug" : "warn", "remote", interruption);
     if (outcome === "abort") {
       // Cancellation can settle before the child closes its streams.
       reportProcess?.({ ...close, event: "exit", signalCode: "SIGKILL" });
       reportProcess?.({ ...close, signalCode: "SIGKILL" });
       expect(onProcess.mock.calls.map(([event]) => event.event)).toEqual(["spawn", "exit", "close"]);
+      expect(logMain).toHaveBeenCalledTimes(2);
+      expect(logMain).toHaveBeenLastCalledWith("debug", "remote",
+        "bulk sync Git closed after interruption: git fetch origin (/repos/example); pid=123 event=close exit=none signal=SIGKILL");
     }
-    expect(logMain).toHaveBeenCalledExactlyOnceWith(outcome === "abort" ? "debug" : "warn", "remote", expect.stringContaining(
-      outcome === "abort" ? "pid=123 event=spawn exit=none signal=none" : "pid=123 event=close exit=none signal=SIGTERM"
-    ));
-    const message = vi.mocked(logMain).mock.calls[0]?.[2];
-    expect(message).toContain("https://[redacted]@example.test/repo.git");
-    expect(message).not.toContain("fixture-secret");
+  });
+
+  // A child's exit can precede the watchdog deadline. Closure follows exit,
+  // and GitExec's result can arrive before or after either event.
+  const timeoutTraces = [
+    ["exit", "timeout", "settle", "close"],
+    ["timeout", "settle", "exit", "close"],
+    ["timeout", "exit", "settle", "close"],
+    ["exit", "timeout", "close", "settle"],
+    ["timeout", "exit", "close", "settle"]
+  ] as const;
+
+  it.each(timeoutTraces.map((trace) => ({ order: trace.join(", "), trace })))("records timeout closure for $order", async ({ trace }) => {
+    vi.mocked(logMain).mockClear();
+    const onProcess = vi.fn();
+    const settled = vi.fn();
+    let child!: GitExecOptions;
+    let complete!: () => void;
+    const failure = err({ kind: "git" as const, code: "aborted", message: "Git stopped." });
+    const git = watchedGit((_args, _cwd, options) => new Promise((resolve) => {
+      child = options!;
+      child.onProcess?.({ event: "spawn", pid: 123, exitCode: null, signalCode: null });
+      complete = () => resolve(failure);
+    }), undefined);
+    const operation = git(["fetch", "origin"], "/repos/example", { onProcess }).then(settled);
+    const exit: GitProcessEvent = trace[0] === "exit"
+      ? { event: "exit", pid: 123, exitCode: 0, signalCode: null }
+      : { event: "exit", pid: 123, exitCode: null, signalCode: "SIGKILL" };
+    const close: GitProcessEvent = { ...exit, event: "close" };
+    for (const [index, step] of trace.entries()) {
+      if (step === "timeout") {
+        await vi.advanceTimersByTimeAsync(PULL_STALL_TIMEOUT_MS + 1);
+        expect(child.signal?.aborted).toBe(true);
+      } else if (step === "settle") {
+        complete();
+        await vi.advanceTimersByTimeAsync(0);
+        expect(settled).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({
+          ok: false, error: expect.objectContaining({ code: "pull_stalled" })
+        }));
+      } else {
+        child.onProcess?.(step === "exit" ? exit : close);
+      }
+      const closeLogs = vi.mocked(logMain).mock.calls.filter(([, , message]) =>
+        typeof message === "string" && message.includes("event=close")
+      );
+      expect(closeLogs).toEqual(index < trace.indexOf("close") ? [] : [[
+        "debug", "remote", expect.stringContaining(`pid=123 event=close exit=${close.exitCode ?? "none"} signal=${close.signalCode ?? "none"}`)
+      ]]);
+    }
+    await operation;
+    expect(onProcess.mock.calls.map(([event]) => event.event)).toEqual(["spawn", "exit", "close"]);
   });
 });
 
