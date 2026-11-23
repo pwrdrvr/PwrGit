@@ -60,6 +60,12 @@ function readRows() {
 }
 
 test("CSS keeps the ref controls whole on mount, resize, refresh and a late font load", async () => {
+  await page.goto(pathToFileURL(html).href);
+  const stackFontReady = await page.evaluate(async () => {
+    await window.graphRefHarness.ready;
+    return document.fonts.check('500 10px "Geist Mono"', "1/1");
+  });
+  expect(stackFontReady).toBe(true);
   const widths = [800, 693.5, 637, 599.875, 525.125, 490.5, 420, 382.625, 344.375, 311.125, 276, 250.5, 175, 150];
   const readAudit = await page.evaluate(async (widths) => {
     const geometry: Record<string, number> = {};

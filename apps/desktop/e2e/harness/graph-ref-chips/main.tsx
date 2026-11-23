@@ -177,6 +177,7 @@ export const harness = {
   lastAction: () => lastAction,
   ready: Promise.all([
     document.fonts.load('600 9.5px "Geist Mono"'),
+    document.fonts.load('500 10px "Geist Mono"', "1/1"),
     document.fonts.load('600 12.5px "Geist Sans"'),
     document.fonts.load('500 10.5px "Geist Sans"'),
     document.fonts.load('700 7px "Geist Sans"')
