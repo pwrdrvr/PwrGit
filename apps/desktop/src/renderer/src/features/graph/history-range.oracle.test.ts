@@ -1,5 +1,5 @@
 import { execFileSync } from "node:child_process";
-import { mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { cpSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import fc from "fast-check";
@@ -7,16 +7,15 @@ import { afterEach, expect, it } from "vitest";
 import type { Commit } from "@pwrgit/shared";
 import { historyRangeFrom } from "./history-range";
 import { readUnpushedCommits } from "../../../../main/git/git-service";
-import { dryRunRebase } from "../../../../main/git/rebase-assistant";
+import { dryRunRebase, validateSelection } from "../../../../main/git/rebase-assistant";
 import { createSystemGit } from "../../../../main/git/test-support/system-git";
 
 /**
  * Rule: the lineage's "Edit history from here" offers exactly the runs the
- * rebase assistant can rewrite. The oracle is the assistant's own isolated
- * check (`dryRunRebase`, a squash in a throwaway clone), which runs
- * `validateSelection` and then real Git cherry-picks. `validateSelection`
- * alone is not enough: it accepts a run holding a merge, which the
- * cherry-pick then refuses.
+ * rebase assistant accepts. Compare every candidate with the assistant's
+ * Git-backed `validateSelection`, which checks contiguity and excludes merge
+ * and root commits. Every accepted range must pass the full isolated squash,
+ * including shorter ranges that fetch less history and start at a different base.
  *
  * - Sound: every run the menu offers passes the check.
  * - Complete: every top-N run of `git log` that passes it is offered when its
@@ -84,15 +83,19 @@ function allCommits(repo: string): Commit[] {
 }
 
 it("offers exactly the runs the rebase assistant accepts", async () => {
+  const empty = realpathSync(mkdtempSync(join(tmpdir(), "pwrgit-history-empty-")));
+  roots.push(empty);
+  git(empty, "init", "-q", "-b", "main", "--template=");
+  git(empty, "config", "user.name", "Test");
+  git(empty, "config", "user.email", "test@example.test");
+  git(empty, "config", "core.autocrlf", "false");
+  git(empty, "config", "gc.auto", "0");
+
   await fc.assert(
     fc.asyncProperty(fc.array(opArb, { minLength: 1, maxLength: 12 }), async (ops) => {
       const repo = realpathSync(mkdtempSync(join(tmpdir(), "pwrgit-history-range-")));
       roots.push(repo);
-      git(repo, "init", "-q", "-b", "main");
-      git(repo, "config", "user.name", "Test");
-      git(repo, "config", "user.email", "test@example.test");
-      git(repo, "config", "core.autocrlf", "false");
-      git(repo, "config", "gc.auto", "0");
+      cpSync(join(empty, ".git"), join(repo, ".git"), { recursive: true });
       let n = 0;
       const commit = (): void => {
         n += 1;
@@ -149,52 +152,42 @@ it("offers exactly the runs the rebase assistant accepts", async () => {
       const unpushedResult = await readUnpushedCommits(systemGit, repo, head, 500);
       expect(unpushedResult.ok).toBe(true);
       const unpushed = new Set(unpushedResult.ok ? unpushedResult.value : []);
-      const onRemote = (hash: string): boolean =>
-        git(repo, "for-each-ref", "--contains", hash, "--format=%(refname)", "refs/remotes") !== "";
 
-      const checked = new Map<string, boolean>();
-      const accepts = async (hashes: string[]): Promise<boolean> => {
-        const key = hashes.join(",");
-        const known = checked.get(key);
-        if (known !== undefined) return known;
-        const result = await dryRunRebase(
-          systemGit,
-          repo,
-          hashes.map((hash) => ({ hash, subject: hash })),
-          "squash",
-          { email: "test@example.test", name: "Test" }
-        );
-        checked.set(key, result.ok);
-        return result.ok;
-      };
-
-      // Sound: whatever is offered, the assistant can rewrite.
-      for (const start of commits) {
-        const range = historyRangeFrom(commits, head, start.hash, unpushed);
-        if (range?.kind !== "range") continue;
-        expect(range.pushed, `pushed count from ${start.hash}`).toBe(
-          range.hashes.filter(onRemote).length
-        );
-        expect(range.hashes.length).toBeGreaterThanOrEqual(2);
-        expect(range.hashes[0]).toBe(head);
-        expect(range.hashes.at(-1)).toBe(start.hash);
-        expect(await accepts(range.hashes), `offered ${range.hashes.join(",")}`).toBe(true);
+      const order = git(repo, "log", "--format=%H").split("\n");
+      const accepted = new Map<string, string[]>();
+      let longest: string[] = [];
+      for (let count = 2; count <= order.length; count += 1) {
+        const hashes = order.slice(0, count);
+        const selection = hashes.map((hash) => ({ hash, subject: hash }));
+        if ((await validateSelection(systemGit, repo, selection)).ok) {
+          const replay = await dryRunRebase(
+            systemGit, repo, selection, "squash", { email: "test@example.test", name: "Test" }
+          );
+          expect(replay.ok, replay.ok ? undefined : `range of ${count}: ${replay.error.message}`).toBe(true);
+          accepted.set(hashes.at(-1)!, hashes);
+          longest = hashes;
+        }
       }
 
-      // Complete: every run the assistant can rewrite is offered.
-      const order = git(repo, "log", "--format=%H").split("\n");
-      for (let count = 2; count <= order.length; count += 1) {
-        const top = order.slice(0, count);
-        if (!(await accepts(top))) continue;
-        const range = historyRangeFrom(commits, head, top[count - 1] ?? "");
-        expect(range?.kind, `top ${count} accepted but not offered`).toBe("range");
-        if (range?.kind === "range") expect(new Set(range.hashes)).toEqual(new Set(top));
+      const remoteHashes = new Set(longest.filter((hash) =>
+        git(repo, "for-each-ref", "--contains", hash, "--format=%(refname)", "refs/remotes") !== ""
+      ));
+      for (const start of commits) {
+        const range = historyRangeFrom(commits, head, start.hash, unpushed);
+        const hashes = accepted.get(start.hash);
+        expect(range?.kind === "range", `range offered at ${start.hash}`).toBe(hashes !== undefined);
+        if (range?.kind === "range") {
+          expect(range.hashes).toEqual(hashes);
+          expect(range.pushed, `pushed count from ${start.hash}`).toBe(
+            range.hashes.filter((hash) => remoteHashes.has(hash)).length
+          );
+        }
       }
     }),
     {
-      numRuns: 15,
-      // A branch that diverged and merged back, with work on top: the run
-      // from below the merge holds it, and only the cherry-pick refuses it.
+      // Every accepted prefix starts an isolated Git replay, so bound the number of histories.
+      numRuns: 10,
+      // A branch that diverged and merged back, with work above the merge.
       examples: [
         [
           [

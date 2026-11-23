@@ -3,8 +3,7 @@ import {
   mkdirSync,
   mkdtempSync,
   realpathSync,
-  rmSync,
-  writeFileSync
+  rmSync
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -31,19 +30,18 @@ const DAY_MS = 24 * 60 * 60 * 1000;
 const scratch = mkdtempSync(join(tmpdir(), "pwrgit-root-discovery-"));
 afterAll(() => rmSync(scratch, { recursive: true, force: true }));
 
-function git(dir: string, args: string[]): void {
-  execFileSync("git", args, { cwd: dir, stdio: "ignore" });
+function git(dir: string, ...args: string[]): void {
+  // Fixtures use PATH Git and keep the process cwd outside the checkout.
+  execFileSync("git", ["-C", dir, ...args], { cwd: tmpdir(), stdio: ["ignore", "pipe", "pipe"] });
 }
 
 function initRepo(dir: string): void {
   mkdirSync(dir, { recursive: true });
-  git(dir, ["init", "-q", "-b", "main"]);
-  git(dir, ["config", "user.email", "t@t.com"]);
-  git(dir, ["config", "user.name", "Tester"]);
-  git(dir, ["config", "maintenance.auto", "false"]);
-  writeFileSync(join(dir, "README.md"), "# repo\n");
-  git(dir, ["add", "."]);
-  git(dir, ["commit", "-q", "-m", "init"]);
+  git(dir, "init", "-q", "-b", "main", "--template=");
+  // Discovery needs a real HEAD for linked worktrees. The tree can be empty.
+  git(dir, "-c", "user.email=t@t.com", "-c", "user.name=Tester",
+    "-c", "maintenance.auto=false", "-c", "commit.gpgSign=false",
+    "-c", `core.hooksPath=${join(dir, ".git", "no-hooks")}`, "commit", "--allow-empty", "-qm", "init");
 }
 
 type Op =
@@ -146,7 +144,7 @@ async function runScenario(ops: Op[]): Promise<void> {
         made += 1;
         const of = primaries[op.of % primaries.length]!;
         const dir = join(root, `wt-${made}`);
-        git(of, ["worktree", "add", "-q", dir, "-b", `wt-${made}`]);
+        git(of, "worktree", "add", "-q", dir, "-b", `wt-${made}`);
         checkouts.push(dir);
         newSinceLastTick = true;
         break;
@@ -189,7 +187,7 @@ describe("root discovery while the app runs", () => {
       fc.asyncProperty(fc.array(opArb, { minLength: 1, maxLength: 8 }), (ops) =>
         runScenario([...ops, { kind: "tick" }])
       ),
-      { numRuns: 12 }
+      { numRuns: 12, examples: [[[{ kind: "worktree", of: 0 }]]] }
     );
   }, 120_000);
 

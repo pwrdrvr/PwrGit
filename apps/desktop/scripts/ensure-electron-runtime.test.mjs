@@ -313,30 +313,26 @@ function optionsFor(setup, electronDir = join(setup.root, "package"), overrides 
   };
 }
 
-it("property: cache entries partition every target dimension and archive identity", async () => {
+it("partitions the cache across every platform and architecture combination", async () => {
   const setup = fixture("44.10.1", randomBytes(8192));
-  await fc.assert(fc.asyncProperty(
-    fc.uniqueArray(fc.tuple(fc.constantFrom("darwin", "mas", "linux", "win32"), fc.constantFrom("arm64", "x64")), {
-      minLength: 2, maxLength: 8, selector: JSON.stringify,
-    }),
-    async (targets) => {
-      const cacheRoot = mkdtempSync(join(setup.root, "partition-"));
-      for (const [platform, arch] of targets) {
-        const opts = optionsFor(setup, join(cacheRoot, `package-${platform}-${arch}`), { cacheRoot, platform, arch });
-        await ensureRuntime(opts);
-        expect(readFileSync(join(opts.electronDir, "dist", platformPath(platform)))).toEqual(setup.bytes);
-      }
-      const manifests = readdirSync(cacheRoot).filter((name) => /^[a-f0-9]{64}$/.test(name))
-        .map((name) => {
-          const manifest = JSON.parse(readFileSync(join(cacheRoot, name, "runtime.json"), "utf8"));
-          expect(Object.keys(manifest.identity)).toEqual(["format", "version", "platform", "arch", "checksum"]);
-          expect(manifest.identity.format).toBe(1);
-          expect(name).toBe(hash(JSON.stringify(manifest.identity)));
-          return manifest;
-        });
-      expect(manifests.map(({ identity }) => [identity.platform, identity.arch]).sort()).toEqual([...targets].sort());
-    },
-  ), { numRuns: 6 });
+  const targets = ["darwin", "mas", "linux", "win32"].flatMap((platform) =>
+    ["arm64", "x64"].map((arch) => [platform, arch])
+  );
+  const cacheRoot = join(setup.root, "cache");
+  for (const [platform, arch] of targets) {
+    const opts = optionsFor(setup, join(setup.root, `package-${platform}-${arch}`), { cacheRoot, platform, arch });
+    await ensureRuntime(opts);
+    expect(readFileSync(join(opts.electronDir, "dist", platformPath(platform)))).toEqual(setup.bytes);
+  }
+  const manifests = readdirSync(cacheRoot).filter((name) => /^[a-f0-9]{64}$/.test(name))
+    .map((name) => {
+      const manifest = JSON.parse(readFileSync(join(cacheRoot, name, "runtime.json"), "utf8"));
+      expect(Object.keys(manifest.identity)).toEqual(["format", "version", "platform", "arch", "checksum"]);
+      expect(manifest.identity.format).toBe(1);
+      expect(name).toBe(hash(JSON.stringify(manifest.identity)));
+      return manifest;
+    });
+  expect(manifests.map(({ identity }) => [identity.platform, identity.arch]).sort()).toEqual([...targets].sort());
 }, 60_000);
 
 it("recovers an OS-confirmed dead installer while concurrent successors preserve the new owner", async () => {
@@ -379,11 +375,16 @@ it("recovers an OS-confirmed dead installer while concurrent successors preserve
 it("property: any changed cached payload is rejected and rebuilt from the verified archive", async () => {
   const setup = fixture("44.10.1", randomBytes(8192));
   const mutations = process.platform === "win32" ? ["bytes", "add", "remove"] : ["bytes", "mode", "add", "remove", "link"];
+  const original = optionsFor(setup);
+  await ensureRuntime(original);
+  const keys = readdirSync(original.cacheRoot).filter((name) => /^[a-f0-9]{64}$/.test(name));
+  expect(keys).toHaveLength(1);
+  const [key] = keys;
+  const originalEntry = join(original.cacheRoot, key);
+  const expected = await inventory(join(original.electronDir, "dist"));
   await fc.assert(fc.asyncProperty(fc.constantFrom(...mutations), fc.uint8Array({ minLength: 1, maxLength: 1024 }), async (kind, data) => {
     const cacheRoot = mkdtempSync(join(setup.root, "tamper-"));
-    const a = optionsFor(setup, join(cacheRoot, "a"), { cacheRoot });
-    await ensureRuntime(a);
-    const key = readdirSync(cacheRoot).find((name) => /^[a-f0-9]{64}$/.test(name));
+    cpSync(originalEntry, join(cacheRoot, key), { recursive: true });
     const dist = join(cacheRoot, key, "dist");
     const file = join(dist, "Electron.app/Contents/MacOS/Electron");
     if (kind === "bytes") writeFileSync(file, data);
@@ -392,11 +393,11 @@ it("property: any changed cached payload is rejected and rebuilt from the verifi
     if (kind === "remove") rmSync(file);
     if (kind === "link") { rmSync(file); symlinkSync("../../../electron", file); }
     const corrupted = await inventory(dist);
-    const b = optionsFor(setup, join(cacheRoot, "b"), { cacheRoot });
-    await ensureRuntime(b);
-    expect(await inventory(join(b.electronDir, "dist"))).toEqual(await inventory(join(a.electronDir, "dist")));
+    const repaired = optionsFor(setup, join(cacheRoot, "package"), { cacheRoot });
+    await ensureRuntime(repaired);
+    expect(await inventory(join(repaired.electronDir, "dist"))).toEqual(expected);
     expect(await inventory(dist)).toEqual(corrupted); // Preserve corrupt cache for diagnosis.
-    expect(lstatSync(join(b.electronDir, "dist/Electron.app/Contents/MacOS/Electron")).isFile()).toBe(true);
+    expect(lstatSync(join(repaired.electronDir, "dist/Electron.app/Contents/MacOS/Electron")).isFile()).toBe(true);
   }), { numRuns: 12 });
 }, 60_000);
 
