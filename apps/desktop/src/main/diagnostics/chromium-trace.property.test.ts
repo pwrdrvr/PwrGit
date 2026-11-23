@@ -206,6 +206,80 @@ it("bounds a missing start acknowledgement and an export that never completes", 
   }
 });
 
+it("keeps an export that acknowledges after four seconds and before the native deadline", async () => {
+  vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "performance"] });
+  try {
+    await fc.assert(fc.asyncProperty(fc.integer({ min: 4_001, max: 6_000 }), async (stopMs) => {
+      const directory = await mkdtemp(join(tmpdir(), "pwrgit-trace-slow-stop-"));
+      let startStop!: () => void;
+      const stopping = new Promise<void>((resolve) => { startStop = resolve; });
+      let rawPath: string | undefined;
+      const trace = new ChromiumTrace(() => ({
+        async startRecording() {},
+        async stopRecording(file = "") {
+          rawPath = file;
+          const delay = new Promise<void>((resolve) => { setTimeout(resolve, stopMs); });
+          startStop();
+          await delay;
+          await writeFile(file, emptyTrace);
+          return file;
+        }
+      }), () => {}, {
+        filterTrace: async (raw, output) => writeFile(output, await readFile(raw))
+      });
+      try {
+        await trace.setArmed(true);
+        await vi.advanceTimersByTimeAsync(1);
+        const output = join(directory, "trace.json");
+        const capture = trace.capture(output, performance.now()).catch((error: unknown) => error);
+        await stopping;
+        await vi.advanceTimersByTimeAsync(stopMs);
+        expect(await capture).toMatchObject({ status: "written", nativeStopElapsedMs: stopMs });
+        await expect(readFile(output, "utf8")).resolves.toBe(emptyTrace);
+        await expect(stat(rawPath!)).rejects.toMatchObject({ code: "ENOENT" });
+      } finally {
+        await rm(directory, { recursive: true, force: true });
+      }
+    }), { numRuns: 6 });
+  } finally {
+    vi.useRealTimers();
+  }
+});
+
+it.each(["disarm", "hurried shutdown"] as const)("cleans up a pending native stop on %s", async (operation) => {
+  const directory = await mkdtemp(join(tmpdir(), "pwrgit-trace-cancel-native-stop-"));
+  let reportPartial!: (path: string) => void;
+  const partial = new Promise<string>((resolve) => { reportPartial = resolve; });
+  const stopRecording = vi.fn(async (file = "") => {
+    if (stopRecording.mock.calls.length > 1) throw new Error("Failed to stop tracing - no trace in progress");
+    await writeFile(file, '{"traceEvents":[');
+    reportPartial(file);
+    return new Promise<string>(() => {});
+  });
+  const trace = new ChromiumTrace(() => ({ async startRecording() {}, stopRecording }), () => {});
+  try {
+    await trace.setArmed(true);
+    const output = join(directory, "trace.json");
+    const capture = trace.capture(output, performance.now()).catch((error: unknown) => error);
+    const rawPath = await partial;
+    if (operation === "disarm") {
+      await trace.setArmed(false);
+      expect(await capture).toEqual({ status: "skipped", reason: "canceled" });
+      expect(stopRecording).toHaveBeenCalledTimes(2);
+    } else {
+      trace.beginShutdown(0);
+      expect(await capture).toMatchObject({ message: "Chromium trace timed out during shutdown" });
+      expect(stopRecording).toHaveBeenCalledOnce();
+    }
+    await expect(stat(rawPath)).rejects.toMatchObject({ code: "ENOENT" });
+    expect(await readdir(directory)).toEqual([]);
+  } finally {
+    await trace.setArmed(false);
+    trace.clearShutdownTimer();
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
 
 it("streams the allowlisted projection at the full 288 MiB export limit", async () => {
   const directory = await mkdtemp(join(tmpdir(), "pwrgit-large-trace-oracle-"));

@@ -10,7 +10,11 @@ const TRACE_CATEGORIES = ["devtools.timeline", "blink.user_timing", "cc", "viz"]
 // 44.10.2. Allow at least twice that decoded size without resizing the ring.
 const MAX_RAW_TRACE_BYTES = 288 * 1024 * 1024;
 const START_TIMEOUT_MS = 1_000;
-const STOP_TIMEOUT_MS = 4_000;
+// The pinned Electron oracle took about 4.6 seconds with a full ring and a
+// busy browser process. Allow twice that time for a capture, with a shorter
+// bound for discard and the separate quit drain deadline.
+const CAPTURE_STOP_TIMEOUT_MS = 10_000;
+const DISCARD_STOP_TIMEOUT_MS = 4_000;
 // Allow the configured CPU follow-up plus time for snapshots and profile I/O.
 const PROFILE_SETTLEMENT_GRACE_MS = 15_000;
 // Full-size exports exceeded five seconds on both Linux and Windows CI.
@@ -27,9 +31,21 @@ type TraceBackend = Pick<ContentTracing, "stopRecording"> & {
   startRecording: (config: ChromiumTraceConfig) => Promise<void>;
 };
 
+type NativeStopTiming = {
+  recordingStoppedAtMs: number;
+  nativeStopElapsedMs: number;
+  nativeStopTimeoutMs: number;
+};
+
 type ChromiumTraceCapture =
-  | { status: "written"; recordingStartedAtMs: number; recordingStoppedAtMs: number; rawBytes: number; rawLimitBytes: number }
+  | (NativeStopTiming & { status: "written"; recordingStartedAtMs: number; rawBytes: number; rawLimitBytes: number })
   | { status: "skipped"; reason: "not-recording" | "trigger-predates-recording" | "canceled" };
+
+export class ChromiumTraceStopError extends Error {
+  constructor(cause: unknown, readonly timing: NativeStopTiming) {
+    super(cause instanceof Error ? cause.message : String(cause), { cause });
+  }
+}
 
 type TraceOptions = {
   wallNow?: () => number;
@@ -65,7 +81,8 @@ async function withDeadline<T>(
 export class ChromiumTrace {
   private queue: Promise<unknown> = Promise.resolve();
   private recording: { wallMs: number; monotonicMs: number } | null = null;
-  private pendingCapture: { controller: AbortController; done: Promise<ChromiumTraceCapture> } | null = null;
+  private pendingCapture: Promise<ChromiumTraceCapture> | null = null;
+  private disarm = new AbortController();
   private readonly shutdown = new AbortController();
   private shutdownDeadlineMs = Infinity;
   private shutdownTimer: ReturnType<typeof setTimeout> | undefined;
@@ -95,13 +112,13 @@ export class ChromiumTrace {
   }
 
   setArmed(armed: boolean): Promise<void> {
+    if (!armed) {
+      this.disarm.abort(TRACE_DISARMED);
+      this.disarm = new AbortController();
+    }
     return this.enqueue(async () => {
       if (armed && (this.recording !== null || this.pendingCapture !== null)) return;
-      const pending = this.pendingCapture;
-      if (pending !== null) {
-        pending.controller.abort(TRACE_DISARMED);
-        await pending.done.catch(() => undefined);
-      }
+      if (this.pendingCapture !== null) await this.pendingCapture.catch(() => undefined);
       if (this.nativeMayBeRecording) await this.discard();
       if (armed && !this.nativeMayBeRecording) await this.start();
     });
@@ -115,6 +132,7 @@ export class ChromiumTrace {
     canPublish: () => boolean | Promise<boolean> = () => true,
     profileDurationMs = 0
   ): Promise<ChromiumTraceCapture> {
+    const signal = AbortSignal.any([this.disarm.signal, this.shutdown.signal]);
     const capture: Promise<ChromiumTraceCapture> = this.enqueue(async () => {
       const recording = this.recording;
       if (recording === null) return { status: "skipped", reason: "not-recording" } as const;
@@ -122,16 +140,12 @@ export class ChromiumTrace {
         return { status: "skipped", reason: "trigger-predates-recording" } as const;
       }
 
-      // Keep one scratch export. Once the native stop releases the queue,
-      // disarming can cancel either the profile wait or the worker.
-      const controller = new AbortController();
-      this.pendingCapture = { controller, done: capture };
-      const signal = AbortSignal.any([controller.signal, this.shutdown.signal]);
-      const recordingStoppedAtMs = this.options.wallNow?.() ?? Date.now();
-      return { recording, recordingStoppedAtMs, signal, ...await this.freeze() };
+      // Keep one scratch export across the native stop, profile wait and worker.
+      this.pendingCapture = capture;
+      const frozen = await this.freeze(this.options.stopTimeoutMs ?? CAPTURE_STOP_TIMEOUT_MS, signal);
+      return { recording, ...frozen };
     }).then(async (frozen): Promise<ChromiumTraceCapture> => {
       if (frozen.status === "skipped") return frozen;
-      const { signal } = frozen;
       try {
         signal.throwIfAborted();
         const { size: rawBytes } = await fs.stat(frozen.rawPath);
@@ -145,16 +159,16 @@ export class ChromiumTrace {
         await this.publish(frozen.rawPath, filePath, budget, signal);
         return {
           status: "written", recordingStartedAtMs: frozen.recording.wallMs,
-          recordingStoppedAtMs: frozen.recordingStoppedAtMs, rawBytes, rawLimitBytes: MAX_RAW_TRACE_BYTES
+          ...frozen.timing, rawBytes, rawLimitBytes: MAX_RAW_TRACE_BYTES
         };
-      } catch (error) {
-        if (error === TRACE_DISARMED) return { status: "skipped", reason: "canceled" };
-        throw error;
       } finally {
         await frozen.cleanup();
       }
+    }).catch((error: unknown) => {
+      if (error === TRACE_DISARMED) return { status: "skipped", reason: "canceled" } as const;
+      throw error;
     }).finally(() => {
-      if (this.pendingCapture?.done === capture) this.pendingCapture = null;
+      if (this.pendingCapture === capture) this.pendingCapture = null;
     });
     return capture;
   }
@@ -185,7 +199,7 @@ export class ChromiumTrace {
 
   private async discard(): Promise<void> {
     try {
-      const frozen = await this.freeze();
+      const frozen = await this.freeze(this.options.stopTimeoutMs ?? DISCARD_STOP_TIMEOUT_MS, this.shutdown.signal);
       await frozen.cleanup();
     } catch (error) {
       if (error instanceof Error && error.message === "Failed to stop tracing - no trace in progress") {
@@ -246,8 +260,11 @@ export class ChromiumTrace {
     }
   }
 
-  private async freeze(): Promise<{ rawPath: string; cleanup: () => Promise<void> }> {
+  private async freeze(timeoutMs: number, signal: AbortSignal): Promise<{
+    rawPath: string; cleanup: () => Promise<void>; timing: NativeStopTiming
+  }> {
     this.recording = null;
+    signal.throwIfAborted();
     // The native endpoint writes its temporary file beside the destination.
     // Keep both outside the published capture directory, even on a late flush.
     const scratch = await fs.mkdtemp(path.join(os.tmpdir(), "pwrgit-chromium-trace-"));
@@ -256,11 +273,22 @@ export class ChromiumTrace {
       this.warn("Could not remove private trace staging directory", error);
     });
     try {
-      this.shutdown.signal.throwIfAborted();
-      await withDeadline(this.backend().stopRecording(rawPath),
-        this.options.stopTimeoutMs ?? STOP_TIMEOUT_MS, "Stopping Chromium trace", this.shutdown.signal);
+      signal.throwIfAborted();
+      const recordingStoppedAtMs = this.options.wallNow?.() ?? Date.now();
+      const startedAt = performance.now();
+      const timing = (): NativeStopTiming => ({
+        recordingStoppedAtMs,
+        nativeStopElapsedMs: Math.round(performance.now() - startedAt),
+        nativeStopTimeoutMs: timeoutMs
+      });
+      try {
+        await withDeadline(this.backend().stopRecording(rawPath), timeoutMs, "Stopping Chromium trace", signal);
+      } catch (error) {
+        if (error === TRACE_DISARMED) throw error;
+        throw new ChromiumTraceStopError(error, timing());
+      }
       this.nativeMayBeRecording = false;
-      return { rawPath, cleanup };
+      return { rawPath, cleanup, timing: timing() };
     } catch (error) {
       await cleanup();
       throw error;

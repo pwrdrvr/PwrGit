@@ -28,7 +28,7 @@ import {
 } from "./hot-cpu-profile-config";
 import { createHotCpuProfileSession, type HotCpuProfileSession } from "./hot-cpu-profile-session";
 import { HotCpuProfiler } from "./hot-cpu-profiler";
-import { ChromiumTrace } from "./chromium-trace";
+import { ChromiumTrace, ChromiumTraceStopError } from "./chromium-trace";
 import { createMainProcessHotCpuTarget } from "./main-process-hot-cpu-target";
 import { resolveStartupCpuProfileConfig } from "./startup-cpu-profile-config";
 import {
@@ -581,8 +581,9 @@ export class DiagnosticsManager {
       profileDurationMs
     ).catch((error: unknown) => {
       const message = error instanceof Error ? error.message : String(error);
-      log.warn("Could not save Chromium trace", message);
-      return { status: "failed" as const, error: message };
+      const timing = error instanceof ChromiumTraceStopError ? error.timing : undefined;
+      log.warn("Could not save Chromium trace", { error: message, ...timing });
+      return { status: "failed" as const, error: message, ...timing };
     }).finally(() => {
       // A timed-out trace must release the slot even if its renderer never
       // finishes the CPU profile and never calls onProfileFinished.

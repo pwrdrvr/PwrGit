@@ -108,7 +108,7 @@ describe("Chromium trace follows the renderer capture lifecycle", () => {
     }
   });
 
-  it.each(["disarm", "trace-off", "heap", "exhaust", "close", "timeout", "profile-failed"] as const)(
+  it.each(["disarm", "trace-off", "heap", "exhaust", "close", "timeout", "slow-stop", "profile-failed"] as const)(
     "preserves triggered captures and releases the trace when renderers %s",
     async (transition) => {
       const directory = await mkdtemp(join(tmpdir(), "pwrgit-trace-lifecycle-"));
@@ -123,7 +123,7 @@ describe("Chromium trace follows the renderer capture lifecycle", () => {
       vi.stubEnv("PWRGIT_HOT_CPU_PROFILING_TRIGGER_MODE", "spike");
       vi.stubEnv("PWRGIT_HOT_CPU_PROFILING_MAX_PROFILES", transition === "timeout" ? "2" : "1");
       vi.stubEnv("PWRGIT_HOT_CPU_PROFILING_DURATION_MS",
-        transition === "exhaust" || transition === "timeout" || transition === "profile-failed" ? "50" : "60000");
+        transition === "exhaust" || transition === "timeout" || transition === "slow-stop" || transition === "profile-failed" ? "50" : "60000");
 
       let cpu = transition === "close" ? 0 : 90;
       let destroyed = false;
@@ -132,6 +132,8 @@ describe("Chromium trace follows the renderer capture lifecycle", () => {
       let exports = 0;
       let rawPath: string | undefined;
       const hangs = transition === "timeout";
+      let releaseStop!: () => void;
+      const slowStop = new Promise<void>((resolve) => { releaseStop = resolve; });
       started.mockImplementation(async () => {
         expect(nativeRecording).toBe(false);
         nativeRecording = true;
@@ -142,6 +144,7 @@ describe("Chromium trace follows the renderer capture lifecycle", () => {
         exports++;
         rawPath = file;
         if (hangs && exports === 1) await new Promise<never>(() => {});
+        if (transition === "slow-stop") await slowStop;
         if (file) await writeFile(file, JSON.stringify({ traceEvents: [] }));
         return file ?? join(directory, "discarded.json");
       });
@@ -214,18 +217,36 @@ describe("Chromium trace follows the renderer capture lifecycle", () => {
             await manager.shutdown();
             expect(notify).not.toHaveBeenCalled();
           } else {
-            await vi.waitFor(() => expect(notify).toHaveBeenCalledOnce(), { timeout: 6_000 });
+            await vi.waitFor(() => expect(notify).toHaveBeenCalledOnce(), { timeout: 1_500 });
           }
-          const artifacts = JSON.parse(await readFile(join(rendererDirectory, "session.json"), "utf8")).artifacts;
-          expect(artifacts).toEqual(transition === "profile-failed" ? [] : hangs || transition === "trace-off"
-            ? ["renderer-hot-0001.cpuprofile"]
-            : ["renderer-hot-0001.cpuprofile", "renderer-hot-0001.trace.json"]);
+          if (transition === "slow-stop") {
+            const artifacts = JSON.parse(await readFile(join(rendererDirectory, "session.json"), "utf8")).artifacts;
+            expect(artifacts).toEqual(["renderer-hot-0001.cpuprofile"]);
+            releaseStop();
+          }
+          await vi.waitFor(async () => {
+            const artifacts = JSON.parse(await readFile(join(rendererDirectory, "session.json"), "utf8")).artifacts;
+            expect(artifacts).toEqual(transition === "profile-failed" ? [] : hangs || transition === "trace-off"
+              ? ["renderer-hot-0001.cpuprofile"]
+              : ["renderer-hot-0001.cpuprofile", "renderer-hot-0001.trace.json"]);
+          });
           if (transition === "trace-off" || transition === "profile-failed") {
             expect(exports).toBe(1);
             await expect(readFile(rawPath!)).rejects.toMatchObject({ code: "ENOENT" });
           }
           if (hangs) {
-            // CPU sampling continues even though native trace export never acknowledged.
+            const failure = await vi.waitFor(async () => {
+              const events = (await readFile(join(rendererDirectory, "events.ndjson"), "utf8"))
+                .trim().split("\n").map((line) => JSON.parse(line));
+              const failure = events.find((event) => event.type === "chromium-trace-failed");
+              expect(failure?.detail).toMatchObject({
+                error: "Stopping Chromium trace timed out",
+                recordingStoppedAtMs: expect.any(Number)
+              });
+              return failure.detail;
+            }, { timeout: 12_000 });
+            expect(failure.nativeStopElapsedMs).toBeGreaterThanOrEqual(failure.nativeStopTimeoutMs - 1);
+            // CPU sampling recovers even though native trace export never acknowledged.
             const readCount = reads.mock.calls.length;
             await vi.waitFor(() => expect(reads.mock.calls.length).toBeGreaterThan(readCount));
             settings = { ...settings, hotCpuProfilingEnabled: false };
@@ -244,10 +265,11 @@ describe("Chromium trace follows the renderer capture lifecycle", () => {
           expect(nativeRecording).toBe(true);
         }
       } finally {
+        releaseStop();
         await manager.shutdown();
         await rm(directory, { recursive: true, force: true });
       }
-    }, 9_000
+    }, 15_000
   );
 
   it("lets another renderer capture while the first renderer's Profiler.stop is stalled", async () => {
@@ -315,8 +337,10 @@ describe("Chromium trace follows the renderer capture lifecycle", () => {
       hotPid = 43;
       await vi.waitFor(() => expect(notify).toHaveBeenCalledExactlyOnceWith(expect.anything(), "43"), { timeout: 3_000 });
       const event = notify.mock.calls[0]![0];
-      const manifest = JSON.parse(await readFile(join(event.sessionDirectory, "session.json"), "utf8"));
-      expect(manifest.artifacts).toEqual(["renderer-hot-0001.cpuprofile", "renderer-hot-0001.trace.json"]);
+      await vi.waitFor(async () => {
+        const manifest = JSON.parse(await readFile(join(event.sessionDirectory, "session.json"), "utf8"));
+        expect(manifest.artifacts).toEqual(["renderer-hot-0001.cpuprofile", "renderer-hot-0001.trace.json"]);
+      });
     } finally {
       releaseStop();
       await manager.shutdown();

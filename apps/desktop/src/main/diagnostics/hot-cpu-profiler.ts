@@ -643,6 +643,7 @@ export class HotCpuProfiler {
     const profilePath = this.session.createProfilePath(index);
     const profileFilename = artifactFilename(profilePath);
     const activeProfileTrigger = this.activeProfileTrigger;
+    let profileWritten = false;
     try {
       if (!activeProfileTrigger) throw new Error("CPU profile has no trigger");
       const current = await this.finishRecording();
@@ -664,7 +665,7 @@ export class HotCpuProfiler {
         },
       });
 
-      await this.finishProfileCompanion(true);
+      profileWritten = true;
 
       if (
         !this.stopped &&
@@ -697,7 +698,9 @@ export class HotCpuProfiler {
       });
       this.logger.error("CPU profile failed to stop", error);
     } finally {
-      await this.finishProfileCompanion(false);
+      // Deliver the CPU notice and finish its manifest writes before the trace
+      // can publish. Keep the trigger eligible until the companion settles.
+      await this.finishProfileCompanion(profileWritten);
       this.activeProfileTrigger = null;
       this.activeProfileHeapSnapshots = [];
       this.activeProfileHeapSnapshotCaptures.clear();
