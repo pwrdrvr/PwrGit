@@ -372,10 +372,25 @@ if (photos !== undefined) {
     await waitForLayout("sidebar");
     await page.locator(CASES.sidebar.row).screenshot({ path: join(photos, "sidebar-live.png") });
     await mount("lineage");
-    await resize("lineage", 390);
+    await resize("lineage", 540);
     await page.locator(".graph-branches").press("Enter");
     await expect(page.getByRole("menu")).toBeVisible();
-    await page.locator(".toolbar-case").screenshot({ path: join(photos, "lineage-menu.png") });
+    const capture = page.locator(".toolbar-case");
+    const insets = await capture.evaluate((frame) => {
+      const menu = frame.querySelector(".branch-pop")!.getBoundingClientRect();
+      const frameRect = frame.getBoundingClientRect();
+      const left = frameRect.left + frame.clientLeft;
+      const top = frameRect.top + frame.clientTop;
+      return [
+        menu.left - left,
+        menu.top - top,
+        left + frame.clientWidth - menu.right,
+        top + frame.clientHeight - menu.bottom
+      ];
+    });
+    expect(Math.min(...insets), `Branch menu insets (left, top, right, bottom): ${insets.join(", ")}`)
+      .toBeGreaterThanOrEqual(0);
+    await capture.screenshot({ path: join(photos, "lineage-menu.png") });
   });
 }
 
