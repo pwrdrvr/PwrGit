@@ -77,35 +77,38 @@ type ReportProgress = (update: RepoProgressUpdate) => void;
 
 /** Each interruptible Git invocation gets a clock after its queue lock is held.
  * Output from another repository/checkout cannot keep a wedged command alive. */
-function watchedGit(git: GitExec, signal: AbortSignal | undefined): GitExec {
+export function watchedGit(git: GitExec, signal: AbortSignal | undefined): GitExec {
   return async (args, cwd, options) => {
     if (signal?.aborted) {
       return err({ kind: "remote", code: "aborted", message: "Repository synchronization was cancelled." });
     }
-    const command = sanitizeGitLogDetail(`git ${args.join(" ")} (${cwd})`);
+    const commandLabel = () => sanitizeGitLogDetail(`git ${args.join(" ")} (${cwd})`);
     let processState: GitProcessEvent | undefined;
+    let interruptionReported = false;
     let pendingOutput = "";
     let droppingOutput = false;
     const tail: string[] = [];
-    const context = (): string => {
-      const state = processState === undefined ? "spawn not observed" :
+    const processContext = (): string =>
+      processState === undefined ? "spawn not observed" :
         `pid=${processState.pid ?? "unknown"} event=${processState.event} exit=${processState.exitCode ?? "none"} signal=${processState.signalCode ?? "none"}`;
+    const stallContext = (): string => {
       // An unfinished URL can contain credentials whose trailing @ has not
       // arrived yet. Describe partial output without logging those bytes.
       const pending = pendingOutput === "" ? "" :
         `; ${pendingOutput.length} chars of unfinished stderr withheld${/password|passphrase|username|continue connecting/i.test(pendingOutput) ? " (possible authentication or host-key prompt)" : ""}`;
-      return `${state}; stderr tail: ${tail.join(" | ") || "(no complete stderr lines)"}${pending}`;
+      return `${processContext()}; stderr tail: ${tail.join(" | ") || "(no complete stderr lines)"}${pending}`;
     };
     let timeout: PwrGitError | undefined;
     const watchdog = new PullWatchdog({
       operationName: "Repository synchronization",
       onStallWarning: (snapshot) => logMain(
         "warn", "remote",
-        `bulk sync still waiting: ${command}; ${formatPullDuration(snapshot.elapsedMs)} elapsed; no Git output for ${formatPullDuration(snapshot.idleMs)}; ${context()}`
+        `bulk sync still waiting: ${commandLabel()}; ${formatPullDuration(snapshot.elapsedMs)} elapsed; no Git output for ${formatPullDuration(snapshot.idleMs)}; ${stallContext()}`
       ),
       onTimeout: (error) => {
         timeout = error;
-        logMain("error", "remote", `bulk sync timeout: ${command}; ${error.code}; ${error.message}; ${context()}; direct Git termination requested`);
+        interruptionReported = true;
+        logMain("error", "remote", `bulk sync timeout: ${commandLabel()}; ${error.code}; ${error.message}; ${stallContext()}; direct Git termination requested`);
       }
     });
     watchdog.setPhase(args[0] === "fetch" ? "fetch" : args[0] === "merge" ? "fast_forward" : "prepare");
@@ -113,9 +116,10 @@ function watchedGit(git: GitExec, signal: AbortSignal | undefined): GitExec {
     if (signal !== undefined) signals.push(signal);
     if (options?.signal !== undefined) signals.push(options.signal);
     try {
+      const commandSignal = AbortSignal.any(signals);
       const result = await git(args, cwd, {
         ...options,
-        signal: AbortSignal.any(signals),
+        signal: commandSignal,
         killSignal: "SIGKILL",
         onActivity: () => {
           watchdog.noteActivity();
@@ -123,7 +127,10 @@ function watchedGit(git: GitExec, signal: AbortSignal | undefined): GitExec {
         },
         onProcess: (event) => {
           processState = event;
-          logMain("debug", "remote", `bulk sync Git ${event.event}: ${command}; pid=${event.pid ?? "unknown"} exit=${event.exitCode ?? "none"} signal=${event.signalCode ?? "none"}`);
+          // GitExec can settle on abort before the child closes its pipes.
+          if (interruptionReported && event.event === "close") {
+            logMain("debug", "remote", `bulk sync Git closed after interruption: ${commandLabel()}; ${processContext()}`);
+          }
           options?.onProcess?.(event);
         },
         onStderr: (chunk) => {
@@ -152,7 +159,16 @@ function watchedGit(git: GitExec, signal: AbortSignal | undefined): GitExec {
       });
       // A timeout is a failure, even if the process reports a generic abort or
       // exits successfully as the deadline fires. It does not cancel the batch.
-      return timeout === undefined ? result : err(timeout);
+      if (timeout !== undefined) return err(timeout);
+      // execGit already reports nonzero exits and spawn failures. Record
+      // process state here. Git stderr can contain custom HTTP credentials.
+      const aborted = commandSignal.aborted;
+      if (aborted || processState?.signalCode != null) {
+        interruptionReported = true;
+        const reason = aborted ? "aborted" : "Git stopped by signal";
+        logMain(aborted ? "debug" : "warn", "remote", `bulk sync ${reason}: ${commandLabel()}; ${processContext()}`);
+      }
+      return result;
     } finally {
       watchdog.finish();
     }
