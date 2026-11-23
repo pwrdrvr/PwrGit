@@ -6,6 +6,10 @@ import { planE2eRetry, verifyE2eRetry } from "./retry-failures.mjs";
 
 const canDenyDirectoryWrites = process.platform !== "win32" && process.getuid?.() !== 0;
 
+// Each scenario starts a real Playwright process. The serial launches can
+// exceed 30 seconds on a busy Windows unit shard.
+const ORACLE_TIMEOUT_MS = 60_000;
+
 describe("Playwright retry identity oracle", () => {
   it("selects the same test for an assertion or command exit and refuses unsafe runs", () => {
     const desktop = path.resolve("apps/desktop");
@@ -113,5 +117,5 @@ describe("Playwright retry identity oracle", () => {
     } finally {
       rmSync(directory, { recursive: true, force: true });
     }
-  }, 30_000);
+  }, ORACLE_TIMEOUT_MS);
 });
