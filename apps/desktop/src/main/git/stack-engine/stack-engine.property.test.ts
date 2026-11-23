@@ -5,7 +5,9 @@ import { writeFile } from "node:fs/promises";
 import { StackEngine } from ".";
 import { commit, git, memoryStore, repository, runner, withRepo, withStack } from "./fixture.test-support";
 
-test.each([1, 2, 3])("Git agrees with the stack model through commits, amends, adoption, removal and undo (batch %i)", async () => {
+// Keep 12 generated histories in smaller batches because Git process startup
+// on Windows can put four histories close to Vitest's 20-second deadline.
+test.each([1, 2, 3, 4, 5, 6])("Git agrees with the stack model through commits, amends, adoption, removal and undo (batch %i)", async () => {
   await fc.assert(fc.asyncProperty(fc.array(fc.constantFrom("commit", "amend", "restack", "adopt", "remove", "undo"), { minLength: 3, maxLength: 8 }),
     async operations => withStack(async ({ cwd, commonDir, initial, store, engine }) => {
       let tracked = ["bottom", "top"];
@@ -71,7 +73,7 @@ test.each([1, 2, 3])("Git agrees with the stack model through commits, amends, a
         for (const layer of result.catalog.stacks.flatMap(stack => stack.branches)) anchors.set(layer.branch, layer.base);
         expect(result.catalog.stacks.flatMap(stack => stack.branches.map(layer => layer.branch))).toEqual(tracked);
       }
-    })), { numRuns: 4 });
+    })), { numRuns: 2 });
 });
 
 test.each([1, 2, 3])("replay forecasts agree with rebase conflict files, and clean forecasts apply (batch %i)", async () => {
