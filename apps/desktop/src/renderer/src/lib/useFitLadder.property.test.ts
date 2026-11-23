@@ -263,3 +263,95 @@ it("fits the current refs when any one of the stepped row, box or end is replace
     }
   ), { numRuns: 20 });
 });
+
+it("fits in-flow changes while ignoring overlay and same-column updates, even in mixed batches", async () => {
+  function Toolbar() {
+    const row = useRef<HTMLDivElement>(null);
+    const end = useRef<HTMLSpanElement>(null);
+    useFitLadder(row, row, end, STEPS);
+    return createElement("div", { ref: row },
+      createElement("span", { "data-fit-text-columns": 1 }, "1"),
+      createElement("span", { ref: end }));
+  }
+
+  const operations = fc.array(fc.tuple(
+    fc.constantFrom(
+      "overlay", "overlay-child", "same-columns", "columns", "in-flow",
+      "mixed", "mixed-nodes", "remove-in-flow"
+    ),
+    fc.integer({ min: 1, max: 3 })
+  ), { minLength: 4, maxLength: 16 });
+  let key = 0;
+  await fc.assert(fc.asyncProperty(operations, async (sequence) => {
+    await act(() => root.render(createElement(Toolbar, { key: key++ })));
+    const row = host.firstElementChild!;
+    const count = row.firstElementChild!;
+    const end = row.lastElementChild!;
+    const overlay = document.createElement("span");
+    overlay.setAttribute("data-fit-overlay", "");
+    const segment = overlay.appendChild(document.createElement("i"));
+    let columns = 1;
+    let offset = 0;
+    let reads = 0;
+    row.getBoundingClientRect = () => new DOMRect(0, 0, 100, 0);
+    end.getBoundingClientRect = () => {
+      reads++;
+      return new DOMRect(0, 0, 100 + 10 * (columns + offset - depths()[0]!), 0);
+    };
+    await act(() => TestResizeObserver.deliver(row));
+    for (const [operation, value] of sequence) {
+      const inFlow = document.createElement("i");
+      if (operation === "remove-in-flow") {
+        await act(() => {
+          offset++;
+          row.insertBefore(inFlow, end);
+        });
+      }
+      reads = 0;
+      const changesFit = operation !== "overlay" && operation !== "overlay-child" && operation !== "same-columns";
+      await act(() => {
+        if (operation === "overlay" || operation === "mixed") {
+          if (overlay.parentElement === null) row.insertBefore(overlay, end);
+          else if (segment.dataset["value"] === String(value)) overlay.remove();
+          segment.setAttribute("style", `flex-grow: ${value}`);
+          segment.dataset["value"] = String(value);
+        }
+        if (operation === "overlay-child") {
+          if (overlay.parentElement === null) row.insertBefore(overlay, end);
+          const child = overlay.appendChild(document.createElement("i"));
+          child.style.flexGrow = String(value);
+          child.remove();
+        }
+        if (operation === "same-columns") {
+          count.firstChild!.nodeValue = String(value).repeat(columns);
+        }
+        if (operation === "columns") {
+          columns = columns % 3 + 1;
+          count.setAttribute("data-fit-text-columns", String(columns));
+          count.firstChild!.nodeValue = String(value).repeat(columns);
+        }
+        if (operation === "in-flow" || operation === "mixed") {
+          offset = (offset + value) % 3;
+          end.setAttribute("width", String(offset));
+        }
+        if (operation === "mixed-nodes") {
+          const fragment = document.createDocumentFragment();
+          fragment.append(overlay.cloneNode(), inFlow);
+          offset++;
+          row.insertBefore(fragment, end);
+        }
+        if (operation === "remove-in-flow") {
+          offset--;
+          inFlow.remove();
+        }
+      });
+      if (changesFit) {
+        expect(reads).toBeGreaterThan(0);
+      } else {
+        expect(reads).toBe(0);
+      }
+      expect(depths()).toEqual([Math.min(STEPS.length, columns + offset)]);
+    }
+    await act(() => root.render(null));
+  }), { numRuns: 20 });
+});

@@ -6,6 +6,24 @@ import {
   type RefObject
 } from "react";
 
+const FIT_OVERLAY = "data-fit-overlay";
+const FIT_TEXT_COLUMNS = "data-fit-text-columns";
+
+function affectsFit({ type, target, addedNodes, removedNodes }: MutationRecord): boolean {
+  const element = target instanceof Element ? target : target.parentElement;
+  // These roots stay out of flow. Their contents can still lay out and paint,
+  // and any resulting scrollbar-width change is delivered by ResizeObserver.
+  if (element?.closest(`[${FIT_OVERLAY}]`)) return false;
+  if (type === "childList") {
+    return [...addedNodes, ...removedNodes].some(
+      (node) => !(node instanceof Element && node.hasAttribute(FIT_OVERLAY))
+    );
+  }
+  // Only character edits are covered. The owner supplies a different column
+  // count whenever the text width changes, and the attribute triggers a fit.
+  return type !== "characterData" || !element?.hasAttribute(FIT_TEXT_COLUMNS);
+}
+
 /**
  * Step a row down by what fits, instead of by fixed breakpoints.
  *
@@ -78,8 +96,16 @@ export function useFitLadder(
       // Watch the actual controls, including child state changes and text
       // hidden by a step. data-mid and data-short supply CSS-generated text.
       // The toolbars' ARIA states change paint and accessible names only.
-      observer = new MutationObserver(refit);
-      const attributes = ["class", "style", "hidden", "width", "height", "data-mid", "data-short"];
+      observer = new MutationObserver((changes) => {
+        // Subtree records survive removal. The childList record on the
+        // remaining parent accounts for any change to in-flow content.
+        const documentRoot = document.documentElement;
+        if (changes.some((change) =>
+          (change.target === row || change.target === documentRoot || box.contains(change.target)) &&
+          affectsFit(change)
+        )) refit();
+      });
+      const attributes = ["class", "style", "hidden", "width", "height", "data-mid", "data-short", FIT_TEXT_COLUMNS];
       observer.observe(box, {
         subtree: true,
         childList: true,

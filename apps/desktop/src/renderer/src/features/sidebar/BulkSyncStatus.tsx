@@ -257,15 +257,18 @@ export function OutcomeBar({
   className,
   counts,
   inFlight,
-  queued
+  queued,
+  fitOverlay = false
 }: {
   className: string;
   counts: BulkSyncOutcomeCounts;
   inFlight: number;
   queued: number;
+  /** Set for the absolutely positioned bar inside the measured toolbar. */
+  fitOverlay?: boolean;
 }): ReactElement {
   return (
-    <span className={`bulk-sync__bar ${className}`} aria-hidden="true">
+    <span className={`bulk-sync__bar ${className}`} aria-hidden="true" data-fit-overlay={fitOverlay ? "" : undefined}>
       {BULK_SYNC_OUTCOMES.map((outcome) => (
         <i
           key={outcome}
