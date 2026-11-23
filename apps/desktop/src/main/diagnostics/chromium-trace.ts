@@ -82,6 +82,8 @@ export class ChromiumTrace {
   private queue: Promise<unknown> = Promise.resolve();
   private recording: { wallMs: number; monotonicMs: number } | null = null;
   private pendingCapture: Promise<ChromiumTraceCapture> | null = null;
+  private abandonedCleanup: Promise<void> | null = null;
+  private armedRequested = false;
   private disarm = new AbortController();
   private readonly shutdown = new AbortController();
   private shutdownDeadlineMs = Infinity;
@@ -112,16 +114,12 @@ export class ChromiumTrace {
   }
 
   setArmed(armed: boolean): Promise<void> {
+    this.armedRequested = armed;
     if (!armed) {
       this.disarm.abort(TRACE_DISARMED);
       this.disarm = new AbortController();
     }
-    return this.enqueue(async () => {
-      if (armed && (this.recording !== null || this.pendingCapture !== null)) return;
-      if (this.pendingCapture !== null) await this.pendingCapture.catch(() => undefined);
-      if (this.nativeMayBeRecording) await this.discard();
-      if (armed && !this.nativeMayBeRecording) await this.start();
-    });
+    return this.enqueue(() => this.reconcileArmed(armed));
   }
 
   /** Stop the rolling trace at detection. Give the CPU profiler its full
@@ -177,6 +175,17 @@ export class ChromiumTrace {
     const result = this.queue.then(operation);
     this.queue = result.catch(() => undefined);
     return result;
+  }
+
+  private async reconcileArmed(armed: boolean): Promise<void> {
+    if (armed && (this.shutdownDeadlineMs !== Infinity || this.recording !== null || this.pendingCapture !== null)) return;
+    if (this.pendingCapture !== null) await this.pendingCapture.catch(() => undefined);
+    if (this.abandonedCleanup !== null) {
+      if (this.shutdownDeadlineMs === Infinity) return;
+      await this.abandonedCleanup;
+    }
+    if (this.nativeMayBeRecording) await this.discard();
+    if (armed && this.shutdownDeadlineMs === Infinity && !this.nativeMayBeRecording) await this.start();
   }
 
   private async start(): Promise<void> {
@@ -272,17 +281,21 @@ export class ChromiumTrace {
     const cleanup = () => fs.rm(scratch, { recursive: true, force: true }).catch((error) => {
       this.warn("Could not remove private trace staging directory", error);
     });
+    let nativeStop: Promise<string> | undefined;
+    let nativeSettled = false;
+    let startedAt = 0;
     try {
       signal.throwIfAborted();
       const recordingStoppedAtMs = this.options.wallNow?.() ?? Date.now();
-      const startedAt = performance.now();
+      startedAt = performance.now();
       const timing = (): NativeStopTiming => ({
         recordingStoppedAtMs,
         nativeStopElapsedMs: Math.round(performance.now() - startedAt),
         nativeStopTimeoutMs: timeoutMs
       });
       try {
-        await withDeadline(this.backend().stopRecording(rawPath), timeoutMs, "Stopping Chromium trace", signal);
+        nativeStop = this.backend().stopRecording(rawPath).finally(() => { nativeSettled = true; });
+        await withDeadline(nativeStop, timeoutMs, "Stopping Chromium trace", signal);
       } catch (error) {
         if (error === TRACE_DISARMED) throw error;
         throw new ChromiumTraceStopError(error, timing());
@@ -290,8 +303,46 @@ export class ChromiumTrace {
       this.nativeMayBeRecording = false;
       return { rawPath, cleanup, timing: timing() };
     } catch (error) {
-      await cleanup();
+      if (nativeStop && !nativeSettled) {
+        const remainingMs = error === TRACE_DISARMED ? timeoutMs - (performance.now() - startedAt) : 0;
+        const done = this.cleanAbandonedStop(nativeStop, () => nativeSettled, remainingMs, cleanup);
+        if (error !== TRACE_DISARMED) await done;
+      } else {
+        await cleanup();
+      }
       throw error;
     }
+  }
+
+  private cleanAbandonedStop(
+    nativeStop: Promise<string>, nativeSettled: () => boolean, remainingMs: number, cleanup: () => Promise<void>
+  ): Promise<void> {
+    const rearmIfRequested = () => this.enqueue(async () => {
+      if (this.armedRequested) await this.reconcileArmed(true);
+    });
+    let removedDuringDrain = false;
+    const removeScratch = () => {
+      removedDuringDrain = !nativeSettled();
+      return cleanup();
+    };
+    // Keep the path usable through the original stop deadline. Unlinking
+    // Chromium's temp file mid-drain can prevent its final rename and callback.
+    const done = remainingMs > 0
+      ? withDeadline(nativeStop, remainingMs, "Draining canceled Chromium trace", this.shutdown.signal)
+        .catch(() => undefined).then(removeScratch)
+      : removeScratch();
+    this.abandonedCleanup = done;
+    void done.then(() => {
+      this.abandonedCleanup = null;
+      if (remainingMs > 0) return rearmIfRequested();
+    }).catch((error) => this.warn("Could not finish canceled Chromium trace", error));
+    // Windows may have refused deletion while the native writer held the file.
+    void nativeStop.catch(() => undefined).then(async () => {
+      await done;
+      if (!removedDuringDrain) return;
+      await cleanup();
+      await rearmIfRequested();
+    }).catch((error) => this.warn("Could not settle abandoned Chromium trace", error));
+    return done;
   }
 }

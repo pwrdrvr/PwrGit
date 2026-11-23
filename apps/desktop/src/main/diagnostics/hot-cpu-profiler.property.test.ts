@@ -1,7 +1,8 @@
 import { EventEmitter } from "node:events";
+import fs from "node:fs/promises";
 import { mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import type { Profiler } from "node:inspector";
 import { app, contentTracing, type BrowserWindow, type ProcessMetric } from "electron";
 import fc from "fast-check";
@@ -77,6 +78,35 @@ afterEach(() => {
   vi.mocked(app.getAppMetrics).mockReset().mockReturnValue([]);
   vi.mocked(contentTracing.startRecording).mockReset();
   vi.mocked(contentTracing.stopRecording).mockReset();
+});
+
+it("serializes manifest writes when trace and snapshot artifacts register together", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "pwrgit-trace-manifest-order-"));
+  let releaseFirst!: () => void;
+  const firstWrite = new Promise<void>((resolve) => { releaseFirst = resolve; });
+  let reportFirst!: () => void;
+  const firstStarted = new Promise<void>((resolve) => { reportFirst = resolve; });
+  const persisted: string[][] = [];
+  try {
+    const captureSession = await session(directory);
+    vi.spyOn(fs, "writeFile").mockImplementation(async (_file, data) => {
+      const { artifacts } = JSON.parse(String(data)) as { artifacts: string[] };
+      if (artifacts.length === 1) {
+        reportFirst();
+        await firstWrite;
+      }
+      persisted.push(artifacts);
+    });
+    const trace = captureSession.registerArtifact("capture.trace.json");
+    await firstStarted;
+    const heap = captureSession.registerArtifact("capture.heapsnapshot");
+    releaseFirst();
+    await Promise.all([trace, heap]);
+    expect(persisted).toEqual([["capture.trace.json"], ["capture.trace.json", "capture.heapsnapshot"]]);
+  } finally {
+    releaseFirst();
+    await rm(directory, { recursive: true, force: true });
+  }
 });
 
 describe("Chromium trace follows the renderer capture lifecycle", () => {
@@ -271,6 +301,83 @@ describe("Chromium trace follows the renderer capture lifecycle", () => {
       }
     }, 15_000
   );
+
+  it.each([16_000, 30_000])("publishes a saved profile's trace during a %i ms stop snapshot", async (snapshotDelayMs) => {
+    const directory = await mkdtemp(join(tmpdir(), "pwrgit-trace-slow-snapshot-"));
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date", "performance"] });
+    vi.stubEnv("PWRGIT_HOT_CPU_PROFILING_START_DELAY_MS", "20");
+    vi.stubEnv("PWRGIT_HOT_CPU_PROFILING_INTERVAL_MS", "100");
+    vi.stubEnv("PWRGIT_HOT_CPU_PROFILING_TRIGGER_MODE", "spike");
+    vi.stubEnv("PWRGIT_HOT_CPU_PROFILING_DURATION_MS", "100");
+    vi.stubEnv("PWRGIT_HOT_CPU_PROFILING_MAX_PROFILES", "1");
+    vi.mocked(app.getAppMetrics).mockReturnValue([{
+      pid: 42,
+      cpu: { percentCPUUsage: 90, idleWakeupsPerSecond: 0 },
+      memory: { workingSetSize: 1, peakWorkingSetSize: 1 }
+    }] as ProcessMetric[]);
+    vi.mocked(contentTracing.startRecording).mockResolvedValue(undefined);
+    const nativeExport = vi.fn();
+    vi.mocked(contentTracing.stopRecording).mockImplementation(async (file = "") => {
+      await writeFile(file, '{"traceEvents":[]}');
+      nativeExport();
+      return file;
+    });
+    let finishSnapshot!: () => void;
+    const snapshot = new Promise<void>((resolve) => { finishSnapshot = resolve; });
+    const takeHeapSnapshot = vi.fn(async (file: string) => {
+      if (file.endsWith("-stop.heapsnapshot")) await snapshot;
+      await writeFile(file, "{}");
+    });
+    const notify = vi.fn();
+    const manager = new DiagnosticsManager({
+      outputRoot: directory,
+      getDiagnostics: () => ({
+        ...DIAGNOSTICS_DEFAULTS,
+        hotCpuProfilingEnabled: true,
+        hotCpuProfilingRules: readHotCpuRules(undefined, "spike"),
+        hotCpuProfilingCaptureChromiumTrace: true,
+        hotCpuProfilingCaptureHeapSnapshot: true,
+        hotCpuProfilingHeapSnapshotLimit: 2
+      }),
+      onHotCpuHeapSnapshotLimitReached: () => {},
+      onHotCpuProfileCaptured: notify
+    });
+    const window = Object.assign(new EventEmitter(), {
+      isDestroyed: () => false,
+      webContents: {
+        id: 1, getOSProcessId: () => 42, isDestroyed: () => false,
+        debugger: recorder().debugger, takeHeapSnapshot
+      }
+    });
+    try {
+      manager.attachWindow(window as unknown as BrowserWindow);
+      await manager.sync();
+      await vi.waitFor(() => {
+        expect(nativeExport).toHaveBeenCalledOnce();
+        expect(takeHeapSnapshot).toHaveBeenLastCalledWith(expect.stringMatching(/-stop\.heapsnapshot$/));
+      }, { timeout: 5_000 });
+      const sessionDirectory = dirname(takeHeapSnapshot.mock.calls.at(-1)![0]);
+      await vi.waitFor(async () => {
+        const events = await readFile(join(sessionDirectory, "events.ndjson"), "utf8");
+        expect(events).toContain('"type":"chromium-trace-written"');
+      }, { timeout: 5_000 });
+      await vi.advanceTimersByTimeAsync(snapshotDelayMs);
+      expect(notify).not.toHaveBeenCalled();
+
+      finishSnapshot();
+      await vi.waitFor(() => expect(notify).toHaveBeenCalledOnce(), { timeout: 5_000 });
+      const manifest = JSON.parse(await readFile(join(sessionDirectory, "session.json"), "utf8"));
+      expect(manifest.artifacts).toEqual([
+        "renderer-hot-0001-start.heapsnapshot", "renderer-hot-0001.cpuprofile",
+        "renderer-hot-0001.trace.json", "renderer-hot-0001-stop.heapsnapshot"
+      ]);
+    } finally {
+      finishSnapshot();
+      await manager.shutdown();
+      vi.useRealTimers();
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
 
   it("lets another renderer capture while the first renderer's Profiler.stop is stalled", async () => {
     const directory = await mkdtemp(join(tmpdir(), "pwrgit-trace-stalled-renderer-"));
