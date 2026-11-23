@@ -36,15 +36,6 @@ export type RefChipMeasure = {
  *  avatar. */
 const SLACK_PX = 0.5;
 
-/** A row with no branch chips: nothing to measure. */
-const NO_STRIP: RefChipMeasure = {
-  available: 0,
-  slotRights: [],
-  pill: 0,
-  gap: 0,
-  total: 0
-};
-
 /** The most chips that fit whole, leaving room for "+N" whenever one folds.
  *  The tag chip is measured whole: it gives way only after every branch chip
  *  has folded, so it starts whole whenever the row has one. */
@@ -93,17 +84,15 @@ function measure(strip: HTMLElement, total: number): RefChipMeasure {
   };
 }
 
-/** Whether anything in the strip runs past its clipped edge. A squeezed group
- *  can shrink below its chip's floor, so this looks one level in as well. */
-function stripOverflows(strip: HTMLElement): boolean {
+/** Rigid slots contain their children, so the last slot bounds their extent.
+ *  The squeezed slot can shrink below its contents' floor, even if the pill
+ *  after it fits. Check its rightmost child as well. */
+function stripOverflows(strip: HTMLElement, squeeze: boolean): boolean {
   const edge = strip.getBoundingClientRect().right + SLACK_PX;
-  for (const slot of strip.children) {
-    if (slot.getBoundingClientRect().right > edge) return true;
-    for (const part of slot.children) {
-      if (part.getBoundingClientRect().right > edge) return true;
-    }
-  }
-  return false;
+  const last = strip.lastElementChild;
+  if (last !== null && last.getBoundingClientRect().right > edge) return true;
+  const squeezedEnd = squeeze ? strip.firstElementChild?.lastElementChild : undefined;
+  return squeezedEnd != null && squeezedEnd.getBoundingClientRect().right > edge;
 }
 
 /** Whether the meta line's last item, the byline, is pushed past the line's
@@ -163,9 +152,9 @@ function watchWidth(line: Element, refit: () => void): () => void {
 /**
  * Fits a row's ref chips — its branch-chip strip and its tag chip — to the
  * width its meta line leaves them, so neither ever draws part of a chip.
- * Returns null while measuring: the caller then renders the tag chip whole and
- * every capped branch chip plus the "+N" pill, and this settles on a fit in
- * the same commit, before anything paints.
+ * An initial null fit renders the tag chip whole and every capped branch chip
+ * plus the "+N" pill. The fit settles before paint. A tag-only row can keep
+ * its initial render when the whole tag fits.
  *
  * `content` identifies the parts of the meta line that can affect its fit.
  * A new value re-measures. Width changes and font loads re-measure on their
@@ -200,13 +189,18 @@ export function useRefChipFit(
     if (!fits || line === null) return;
     const strip = stripRef.current;
     if (fit === null) {
-      const measured = strip === null ? NO_STRIP : measure(strip, total);
-      setSettled({ fit: fitRefChips(measured, hasTag), content, epoch });
+      if (strip !== null) {
+        setSettled({ fit: fitRefChips(measure(strip, total), hasTag), content, epoch });
+      } else if (hasTag && lineOverflows(line)) {
+        // A tag-only row already rendered its whole tag in the measure pass.
+        setSettled({ fit: { shown: 0, squeeze: false, tag: "squeezed" }, content, epoch });
+      }
       return;
     }
+    if (fit.shown === 0 && (fit.tag === null || fit.tag === "glyph")) return;
     // The measure pass predicts the strip; this checks it, and walks the tag
     // chip down once the strip has nothing left to give.
-    if (!(strip !== null && stripOverflows(strip)) && !lineOverflows(line)) return;
+    if (!(strip !== null && stripOverflows(strip, fit.squeeze)) && !lineOverflows(line)) return;
     const next = shedRefChip(fit);
     if (next !== null) setSettled({ fit: next, content, epoch });
   }, [lineRef, stripRef, fits, fit, total, hasTag, content, epoch]);

@@ -11,14 +11,14 @@ const HERE = dirname(fileURLToPath(import.meta.url));
  * components and stylesheets, with the page supplying a fake preload bridge. Relative
  * `base`, so the output loads from `file://`. Returns the built HTML's path.
  */
-export async function buildHarness(name: string, outDir: string): Promise<string> {
+export async function buildHarness(name: string, outDir: string, minify = false): Promise<string> {
   await build({
     configFile: false,
     root: join(HERE, name),
     base: "./",
     logLevel: "warn",
     plugins: [react()],
-    build: { outDir, emptyOutDir: true, minify: false, sourcemap: false }
+    build: { outDir, emptyOutDir: true, minify: minify ? "esbuild" : false, sourcemap: false }
   });
   return join(outDir, "index.html");
 }

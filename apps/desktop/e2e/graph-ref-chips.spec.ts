@@ -1,7 +1,8 @@
-import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
+import { createHash } from "node:crypto";
+import { mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { _electron as electron, expect, test, type ElectronApplication, type Page } from "@playwright/test";
 import { cleanEnv } from "./fixtures/electron-app";
 import { buildHarness } from "./harness/build";
@@ -14,15 +15,19 @@ declare global {
 }
 
 let out: string;
+let html: string;
 let app: ElectronApplication;
 let page: Page;
 const shots = process.env["PWRGIT_HARNESS_SHOTS"];
+const benchmark = process.env.PWRGIT_GRAPH_REF_CHIPS_BENCH === "1";
+const baselineHtml = process.env.PWRGIT_GRAPH_REF_CHIPS_BASELINE_HTML;
 
 test.beforeAll(async () => {
   out = mkdtempSync(join(tmpdir(), "pwrgit-ref-chips-"));
-  const html = await buildHarness("graph-ref-chips", join(out, "dist"));
+  html = await buildHarness("graph-ref-chips", join(out, "dist"), benchmark);
   app = await electron.launch({
     args: [
+      `--user-data-dir=${join(out, "user")}`,
       "--disable-accelerated-video-decode",
       "--disable-accelerated-video-encode",
       join(dirname(fileURLToPath(import.meta.url)), "harness", "electron-main.cjs")
@@ -50,26 +55,8 @@ async function settle() {
   ));
 }
 
-async function readRows() {
-  return page.locator(".graph-row").evaluateAll((rows) => rows.map((row) => {
-    const strip = row.querySelector(".ref-chips");
-    const edge = strip?.getBoundingClientRect().right ?? Infinity;
-    const tag = row.querySelector(".commit-tag--tag");
-    return {
-      chips: [...row.querySelectorAll(".ref-chip__name")].map((name) => ({
-        text: name.textContent,
-        truncated: name.scrollWidth > name.clientWidth,
-        squeezed: name.parentElement!.classList.contains("is-squeezed")
-      })),
-      folded: Number(strip?.querySelector(".ref-chip--more")?.textContent?.slice(1) ?? "0"),
-      clipped: [...row.querySelectorAll(".ref-chips > *, .ref-chips > * > *")].some(
-        (part) => part.getBoundingClientRect().right > edge + 0.5
-      ),
-      tag: tag?.classList.contains("is-glyph") ? "glyph"
-        : tag?.classList.contains("is-squeezed") ? "squeezed"
-        : tag === null ? "none" : "whole"
-    };
-  }));
+function readRows() {
+  return page.evaluate(() => window.graphRefHarness.readRows());
 }
 
 test("only measures strips whose content changed in a graph refresh", async () => {
@@ -187,6 +174,113 @@ test("a late font refits the row at an unchanged width", async () => {
   await settle();
   expect(loaded).toEqual(await readRows());
 });
+
+test("first fit bounds rigid slots and checks squeezed adornments before paint", async () => {
+  for (const width of [800, 525.125, 490.5, 420, 382.625, 344.375, 311.125, 250.5, 175]) {
+    const { rigidInteriorReads, rows } = await page.evaluate((width) => {
+      window.graphRefHarness.prepareDeepScene(width);
+      const original = Element.prototype.getBoundingClientRect;
+      let reads = 0;
+      Element.prototype.getBoundingClientRect = function () {
+        if (this.matches(".ref-chips > :not(.is-squeezed) > *")) reads++;
+        return original.call(this);
+      };
+      try {
+        window.graphRefHarness.remount();
+      } finally {
+        Element.prototype.getBoundingClientRect = original;
+      }
+      // The exhaustive walk is the oracle. Read it in the same turn as mount.
+      return { rigidInteriorReads: reads, rows: window.graphRefHarness.readRows() };
+    }, width);
+    expect(rows.every((row) => !row.clipped)).toBe(true);
+    for (const [i, row] of rows.entries()) {
+      const total = [10, 2, 2, 2, 0, 12, 11, 2, 2, 0][i % 10];
+      expect(row.chips.length + row.folded).toBe(total);
+      if (i % 10 === 6) expect(row.chips.length).toBeLessThanOrEqual(1);
+    }
+    expect(rigidInteriorReads).toBe(0);
+  }
+});
+
+if (benchmark) {
+  test("benchmarks first fit on a production-rendered deep graph", async () => {
+    test.setTimeout(120_000);
+    const versions = [{ name: "current", html }];
+    if (baselineHtml !== undefined) versions.unshift({ name: "baseline", html: baselineHtml });
+    for (const version of versions) {
+      const assets = join(dirname(version.html), "assets");
+      const client = readdirSync(assets).filter((name) => name.endsWith(".js"))
+        .map((name) => readFileSync(join(assets, name), "utf8")).join("");
+      expect(client).not.toContain("The current testing environment is not configured to support act");
+    }
+    await page.setViewportSize({ width: 900, height: 1620 });
+    const cdp = await page.context().newCDPSession(page);
+    await cdp.send("Performance.enable", { timeDomain: "threadTicks" });
+    const metrics = async () => Object.fromEntries(
+      (await cdp.send("Performance.getMetrics")).metrics.map(({ name, value }) => [name, value])
+    );
+    const cases = [24, 120].flatMap((count) => [800, 420].map((width) => ({ count, width })));
+    const fits = new Map<string, string>();
+    for (let sample = 0; sample < 13; sample++) {
+      for (const { count, width } of sample % 2 === 0 ? cases : [...cases].reverse()) {
+        for (const version of sample % 2 === 0 ? versions : [...versions].reverse()) {
+          await page.goto(pathToFileURL(version.html).href);
+          const production = await page.evaluate(async ({ width, count }) => {
+            await window.graphRefHarness.ready;
+            window.graphRefHarness.prepareDeepScene(width, count);
+            return window.graphRefHarness.production;
+          }, { width, count });
+          expect(production).toBe(true);
+          const before = await metrics();
+          const wallMs = await page.evaluate(() => {
+            const start = performance.now();
+            window.graphRefHarness.remount();
+            // Include final layout even when the last commit needed no fit read.
+            document.querySelector(".graph-row:last-child")!.getBoundingClientRect();
+            return performance.now() - start;
+          });
+          const after = await metrics();
+          const rows = await readRows();
+          expect(rows).toHaveLength(count);
+          expect(rows.filter((row) => row.chips.length > 0 || row.folded > 0 || row.tag !== "none"))
+            .toHaveLength(count - Math.floor(count / 10));
+          expect(rows.every((row) => !row.clipped)).toBe(true);
+          const visible = await page.locator(".graph-row").nth(23).evaluate((row) => (
+            row.getBoundingClientRect().bottom <= row.closest(".graph-scroll")!.getBoundingClientRect().bottom
+          ));
+          expect(visible).toBe(true);
+          const fit = createHash("sha256").update(JSON.stringify(rows)).digest("hex").slice(0, 12);
+          const key = `${count}:${width}`;
+          if (!fits.has(key)) fits.set(key, fit);
+          expect(fit).toBe(fits.get(key));
+          const geometryReads = await page.evaluate(() => {
+            const original = Element.prototype.getBoundingClientRect;
+            let reads = 0;
+            Element.prototype.getBoundingClientRect = function () {
+              if (this.closest(".commit-meta")) reads++;
+              return original.call(this);
+            };
+            try {
+              window.graphRefHarness.remount();
+              return reads;
+            } finally {
+              Element.prototype.getBoundingClientRect = original;
+            }
+          });
+          // The first pass warms up the browser. Each sample still mounts into a new document.
+          if (sample === 0) continue;
+          console.log(JSON.stringify({
+            version: version.name, sample, count, width, fit, wallMs, geometryReads,
+            layouts: after.LayoutCount! - before.LayoutCount!,
+            layoutMs: (after.LayoutDuration! - before.LayoutDuration!) * 1000,
+            taskMs: (after.TaskDuration! - before.TaskDuration!) * 1000
+          }));
+        }
+      }
+    }
+  });
+}
 
 if (shots) {
   test("captures wide, squeezed and folded chip layouts", async () => {

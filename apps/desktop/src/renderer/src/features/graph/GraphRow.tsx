@@ -1,4 +1,4 @@
-import { memo, useMemo, useRef, type MouseEvent } from "react";
+import { memo, useMemo, useRef, type MouseEvent, type ReactNode, type RefObject } from "react";
 import type { Commit, LaneBranchInfo, MovedTag, PrSummary, RepositoryStack, StackPosition } from "@pwrgit/shared";
 import { BranchGlyph } from "../../lib/BranchGlyph";
 import { CheckoutGlyph } from "../../lib/CheckoutGlyph";
@@ -12,7 +12,7 @@ import type { LaneRow, LaneSeg } from "./lane-layout";
 import type { PrLandingSeg } from "./pr-landings";
 import type { BranchChipTarget } from "./BranchChipMenu";
 import { shortWhen } from "./graph-view";
-import { useRefChipFit } from "./ref-chip-fit";
+import { useRefChipFit, type RefChipFit } from "./ref-chip-fit";
 import {
   hoverTooltip,
   useViewportTooltip
@@ -195,8 +195,6 @@ export function GraphRow({
   const publishedTags = canTakeTag ? vm.publishedTags : undefined;
   // The strip shows only chips that fit whole; the rest fold into "+N". The
   // tag chip keeps its name until they have all folded.
-  const lineRef = useRef<HTMLDivElement>(null);
-  const stripRef = useRef<HTMLSpanElement>(null);
   const { localChips, remoteChips, chipContent } = useMemo(() => {
     const localChips = orderedRefs.slice(0, bracket ? 1 : MAX_REF_CHIPS).map((name, index) => {
       const info = branchInfo?.[name];
@@ -233,19 +231,6 @@ export function GraphRow({
     orderedRefs, bracket, remoteRefs, branchInfo, pullRequest, isTip, chipCount, vm.tag, movedTag, oldStackBase, stackPositions,
     publishedTags, isHead, commit.isMerge, isMine, commit.authorName, hasPersonButton
   ]);
-  const chipFit = useRefChipFit(
-    lineRef,
-    stripRef,
-    chipCount,
-    vm.tag !== undefined,
-    chipContent
-  );
-  // While measuring (null), the tag and every capped chip render rigid, plus
-  // the pill.
-  const shownChips = chipFit?.shown ?? localChips.length + remoteChips.length;
-  const squeezeClass = chipFit?.squeeze === true ? " is-squeezed" : "";
-  const tagFit = chipFit?.tag ?? "whole";
-  const foldedChips = chipNames.slice(shownChips);
   const x = cx(row.lane);
 
   const showContextFor = (target: HTMLElement): void => {
@@ -301,6 +286,241 @@ export function GraphRow({
       </span>
     </>
   );
+
+  function renderMeta(
+    chipFit: RefChipFit | null,
+    stripRef: RefObject<HTMLSpanElement | null>
+  ): ReactNode {
+    // The initial render keeps the tag whole and measures every capped chip
+    // plus the widest pill.
+    const shownChips = chipFit?.shown ?? localChips.length + remoteChips.length;
+    const squeezeClass = chipFit?.squeeze === true ? " is-squeezed" : "";
+    const tagFit = chipFit?.tag ?? "whole";
+    const foldedChips = chipNames.slice(shownChips);
+    return (
+      <>
+        {pullRequest !== undefined && (
+          // Hovering a PR chip shows the PR, here as everywhere else. It
+          // used to open this row's commit card instead, which made the same
+          // chip mean two different things depending on where it sat.
+          <PrChip pr={pullRequest} hoverIntent={hoverIntent} />
+        )}
+        {/* Fitted with the branch chips, and last to give way: its name
+            ellipsizes to a floor, then leaves the mark alone. The tooltip
+            and the hidden name still say which tag it is. */}
+        {vm.tag !== undefined && movedTag !== undefined && onTakeTag !== undefined ? (
+          // Moved on the publisher: the chip says so and is the way to fix it.
+          <button
+            type="button"
+            className={`commit-tag commit-tag--tag is-moved${
+              tagFit === "whole" ? "" : ` is-${tagFit}`
+            }`}
+            aria-label={`${vm.tag.kind === "annotated" ? "Annotated tag" : "Tag"} ${vm.tag.name}, moved on ${movedTag.published.remote} to ${movedTag.published.targetId.slice(0, 7)}. Take ${movedTag.published.remote}'s…`}
+            {...hoverTooltip(
+              tip,
+              `${movedTag.published.remote}'s ${vm.tag.name} is at ${movedTag.published.targetId.slice(0, 12)}\n` +
+                `Click to take ${movedTag.published.remote}'s.`
+            )}
+            onClick={(event) => {
+              event.stopPropagation();
+              tip.hide();
+              onTakeTag(movedTag);
+            }}
+          >
+            <TagGlyph />
+            <span
+              className={`commit-tag__name${
+                tagFit === "glyph" ? " a11y-sr-only" : ""
+              }`}
+            >
+              {vm.tag.name}
+            </span>
+            <span className="commit-tag__moved" aria-hidden="true">· moved</span>
+          </button>
+        ) : vm.tag !== undefined && (
+          <span
+            className={`commit-tag commit-tag--tag${
+              tagFit === "whole" ? "" : ` is-${tagFit}`
+            }`}
+            {...hoverTooltip(
+              tip,
+              `${vm.tag.kind === "annotated" ? "Annotated tag" : "Tag"} ${vm.tag.name}`
+            )}
+          >
+            <TagGlyph />
+            {/* The mark is decorative, so without this the chip announces as
+                a bare version string among the branch names beside it. */}
+            <span className="a11y-sr-only">
+              {vm.tag.kind === "annotated" ? "Annotated tag " : "Tag "}
+            </span>
+            <span
+              className={`commit-tag__name${
+                tagFit === "glyph" ? " a11y-sr-only" : ""
+              }`}
+            >
+              {vm.tag.name}
+            </span>
+          </span>
+        )}
+        {onTakeTag !== undefined &&
+          publishedTags?.map((moved) => (
+            // Where the publisher's value of a local tag now points.
+            <button
+              type="button"
+              key={`published:${moved.name}`}
+              className="commit-tag commit-tag--tag is-published"
+              aria-label={`${moved.published.remote}'s ${moved.name} points here; local ${moved.name} is at ${moved.local.targetId.slice(0, 7)}. Take ${moved.published.remote}'s…`}
+              {...hoverTooltip(
+                tip,
+                `${moved.published.remote}'s ${moved.name} points here\n` +
+                  `Local ${moved.name} is at ${moved.local.targetId.slice(0, 12)}\n` +
+                  `Click to take ${moved.published.remote}'s.`
+              )}
+              onClick={(event) => {
+                event.stopPropagation();
+                tip.hide();
+                onTakeTag(moved);
+              }}
+            >
+              <TagGlyph />
+              <span className="commit-tag__remote">{moved.published.remote}</span>
+              <span className="commit-tag__name">{moved.name}</span>
+            </button>
+          ))}
+        {isHead && <span className="commit-tag commit-tag--head">HEAD</span>}
+        {oldStackBase && <span className="commit-tag" {...hoverTooltip(tip, `Recorded parent tip of ${oldStackBase.layer.branch}`)}>
+          Old parent tip
+        </span>}
+        {/* Chips are capped — a commit tipped by dozens of stale branches
+            must not flood the row — and fitted: a chip the row has no room
+            for folds into the +N pill whole rather than being clipped
+            mid-pill. The strip's tooltip lists every name either way. */}
+        {chipCount > 0 && (
+          <span
+            ref={stripRef}
+            className={`ref-chips${chipFit?.shown === 0 ? " is-folded" : ""}`}
+            {...hoverTooltip(tip, chipNames.join("\n"))}
+          >
+            {localChips.slice(0, shownChips).map(({ name, pr, worktreeId, position }) => (
+              <span key={name} className={`ref-group${squeezeClass}`}>
+                <button
+                  type="button"
+                  className={`ref-chip${squeezeClass}`}
+                  aria-label={`Actions for branch ${name}`}
+                  style={{
+                    color,
+                    borderColor: `color-mix(in srgb, ${color} 45%, transparent)`,
+                    background: `color-mix(in srgb, ${color} 13%, transparent)`
+                  }}
+                  {...branchMenu(name, false)}
+                >
+                  <BranchGlyph size={8} strokeWidth={2.6} />
+                  <span className="ref-chip__name">{name}</span>
+                </button>
+                {position && onOpenStack && <StackPositionChip position={position} onSelect={() => onOpenStack(position.stack)} />}
+                {pr !== undefined && <PrChip pr={pr} />}
+                {worktreeId !== undefined && (
+                  <button
+                    className="ref-wt"
+                    {...hoverTooltip(tip, "Checked out in a worktree — click to open it")}
+                    aria-label={`Open the ${name} worktree`}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onRevealWorktree?.(worktreeId);
+                    }}
+                  >
+                    <CheckoutGlyph size={10} />
+                  </button>
+                )}
+              </span>
+            ))}
+            {remoteChips
+              .slice(0, Math.max(0, shownChips - localChips.length))
+              .map((name) =>
+                // A collapsed chip names the remote alone ("origin", drawn
+                // when it sits on the local branch): its branch actions are
+                // the local chip's, so it stays a label.
+                name.includes("/") ? (
+                  <button
+                    type="button"
+                    key={`r:${name}`}
+                    className={`ref-chip ref-chip--remote${squeezeClass}`}
+                    aria-label={`Actions for branch ${name}`}
+                    style={{
+                      color,
+                      borderColor: `color-mix(in srgb, ${color} 45%, transparent)`
+                    }}
+                    {...branchMenu(name, true)}
+                  >
+                    <BranchGlyph size={8} strokeWidth={2.6} />
+                    <span className="ref-chip__name">{name}</span>
+                  </button>
+                ) : (
+                  <span
+                    key={`r:${name}`}
+                    className={`ref-chip ref-chip--remote${squeezeClass}`}
+                    style={{
+                      color,
+                      borderColor: `color-mix(in srgb, ${color} 45%, transparent)`
+                    }}
+                  >
+                    <BranchGlyph size={8} strokeWidth={2.6} />
+                    <span className="ref-chip__name">{name}</span>
+                  </span>
+                )
+              )}
+            {/* Measuring renders the pill at its widest count, so the fit
+                knows what room "+N" takes before anything folds. */}
+            {(chipFit === null || foldedChips.length > 0) && (
+              <span className="ref-chip ref-chip--more">
+                +{chipFit === null ? chipCount : foldedChips.length}
+              </span>
+            )}
+          </span>
+        )}
+        {/* Folded chips leave the DOM, so name them for assistive tech
+            here, outside the strip the fit measures. */}
+        {chipFit !== null && foldedChips.length > 0 && (
+          <span className="a11y-sr-only">
+            {`${foldedChips.length} more ${
+              foldedChips.length === 1 ? "branch" : "branches"
+            }: ${foldedChips.join(", ")}`}
+          </span>
+        )}
+        {commit.isMerge && <span className="commit-tag">merge</span>}
+        {/* Last on the line, so the room a name leaves when it drops out
+            (app.css `.commit-byline`) trails off the end instead of opening
+            a gap before the next chip. It gives way before anything else
+            here and can go entirely, leaving the avatar — so the full name
+            is on the person card it opens, from either of them. */}
+        {onShowPerson === undefined ? (
+          <span className="commit-byline">{byline}</span>
+        ) : (
+          <button
+            type="button"
+            className={`commit-byline${personOpen ? " is-open" : ""}`}
+            aria-label={`Show author ${isMine ? "(you) " : ""}${commit.authorName}`}
+            aria-expanded={personOpen}
+            onMouseEnter={(e) => personCard.onMouseEnter(e.currentTarget)}
+            onMouseLeave={personCard.onMouseLeave}
+            onFocus={(e) => personCard.onFocus(e.currentTarget)}
+            onBlur={personCard.onBlur}
+            onKeyDown={(e) => {
+              if (e.key === "Tab" && !e.shiftKey && onFocusPerson?.() === true) {
+                e.preventDefault();
+              }
+            }}
+            onClick={(e) => {
+              e.stopPropagation();
+              personCard.showNow(e.currentTarget);
+            }}
+          >
+            {byline}
+          </button>
+        )}
+      </>
+    );
+  }
 
   return (
     <div
@@ -393,231 +613,31 @@ export function GraphRow({
           </span>
           <span className="commit-time">{shortWhen(commit.committedAt, now)}</span>
         </div>
-        <div ref={lineRef} className="commit-meta">
-          {pullRequest !== undefined && (
-            // Hovering a PR chip shows the PR, here as everywhere else. It
-            // used to open this row's commit card instead, which made the same
-            // chip mean two different things depending on where it sat.
-            <PrChip pr={pullRequest} hoverIntent={hoverIntent} />
-          )}
-          {/* Fitted with the branch chips, and last to give way: its name
-              ellipsizes to a floor, then leaves the mark alone. The tooltip
-              and the hidden name still say which tag it is. */}
-          {vm.tag !== undefined && movedTag !== undefined && onTakeTag !== undefined ? (
-            // Moved on the publisher: the chip says so and is the way to fix it.
-            <button
-              type="button"
-              className={`commit-tag commit-tag--tag is-moved${
-                tagFit === "whole" ? "" : ` is-${tagFit}`
-              }`}
-              aria-label={`${vm.tag.kind === "annotated" ? "Annotated tag" : "Tag"} ${vm.tag.name}, moved on ${movedTag.published.remote} to ${movedTag.published.targetId.slice(0, 7)}. Take ${movedTag.published.remote}'s…`}
-              {...hoverTooltip(
-                tip,
-                `${movedTag.published.remote}'s ${vm.tag.name} is at ${movedTag.published.targetId.slice(0, 12)}\n` +
-                  `Click to take ${movedTag.published.remote}'s.`
-              )}
-              onClick={(event) => {
-                event.stopPropagation();
-                tip.hide();
-                onTakeTag(movedTag);
-              }}
-            >
-              <TagGlyph />
-              <span
-                className={`commit-tag__name${
-                  tagFit === "glyph" ? " a11y-sr-only" : ""
-                }`}
-              >
-                {vm.tag.name}
-              </span>
-              <span className="commit-tag__moved" aria-hidden="true">· moved</span>
-            </button>
-          ) : vm.tag !== undefined && (
-            <span
-              className={`commit-tag commit-tag--tag${
-                tagFit === "whole" ? "" : ` is-${tagFit}`
-              }`}
-              {...hoverTooltip(
-                tip,
-                `${vm.tag.kind === "annotated" ? "Annotated tag" : "Tag"} ${vm.tag.name}`
-              )}
-            >
-              <TagGlyph />
-              {/* The mark is decorative, so without this the chip announces as
-                  a bare version string among the branch names beside it. */}
-              <span className="a11y-sr-only">
-                {vm.tag.kind === "annotated" ? "Annotated tag " : "Tag "}
-              </span>
-              <span
-                className={`commit-tag__name${
-                  tagFit === "glyph" ? " a11y-sr-only" : ""
-                }`}
-              >
-                {vm.tag.name}
-              </span>
-            </span>
-          )}
-          {onTakeTag !== undefined &&
-            publishedTags?.map((moved) => (
-              // Where the publisher's value of a local tag now points.
-              <button
-                type="button"
-                key={`published:${moved.name}`}
-                className="commit-tag commit-tag--tag is-published"
-                aria-label={`${moved.published.remote}'s ${moved.name} points here; local ${moved.name} is at ${moved.local.targetId.slice(0, 7)}. Take ${moved.published.remote}'s…`}
-                {...hoverTooltip(
-                  tip,
-                  `${moved.published.remote}'s ${moved.name} points here\n` +
-                    `Local ${moved.name} is at ${moved.local.targetId.slice(0, 12)}\n` +
-                    `Click to take ${moved.published.remote}'s.`
-                )}
-                onClick={(event) => {
-                  event.stopPropagation();
-                  tip.hide();
-                  onTakeTag(moved);
-                }}
-              >
-                <TagGlyph />
-                <span className="commit-tag__remote">{moved.published.remote}</span>
-                <span className="commit-tag__name">{moved.name}</span>
-              </button>
-            ))}
-          {isHead && <span className="commit-tag commit-tag--head">HEAD</span>}
-          {oldStackBase && <span className="commit-tag" {...hoverTooltip(tip, `Recorded parent tip of ${oldStackBase.layer.branch}`)}>
-            Old parent tip
-          </span>}
-          {/* Chips are capped — a commit tipped by dozens of stale branches
-              must not flood the row — and fitted: a chip the row has no room
-              for folds into the +N pill whole rather than being clipped
-              mid-pill. The strip's tooltip lists every name either way. */}
-          {chipCount > 0 && (
-            <span
-              ref={stripRef}
-              className={`ref-chips${chipFit?.shown === 0 ? " is-folded" : ""}`}
-              {...hoverTooltip(tip, chipNames.join("\n"))}
-            >
-              {localChips.slice(0, shownChips).map(({ name, pr, worktreeId, position }) => (
-                <span key={name} className={`ref-group${squeezeClass}`}>
-                  <button
-                    type="button"
-                    className={`ref-chip${squeezeClass}`}
-                    aria-label={`Actions for branch ${name}`}
-                    style={{
-                      color,
-                      borderColor: `color-mix(in srgb, ${color} 45%, transparent)`,
-                      background: `color-mix(in srgb, ${color} 13%, transparent)`
-                    }}
-                    {...branchMenu(name, false)}
-                  >
-                    <BranchGlyph size={8} strokeWidth={2.6} />
-                    <span className="ref-chip__name">{name}</span>
-                  </button>
-                  {position && onOpenStack && <StackPositionChip position={position} onSelect={() => onOpenStack(position.stack)} />}
-                  {pr !== undefined && <PrChip pr={pr} />}
-                  {worktreeId !== undefined && (
-                    <button
-                      className="ref-wt"
-                      {...hoverTooltip(tip, "Checked out in a worktree — click to open it")}
-                      aria-label={`Open the ${name} worktree`}
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        onRevealWorktree?.(worktreeId);
-                      }}
-                    >
-                      <CheckoutGlyph size={10} />
-                    </button>
-                  )}
-                </span>
-              ))}
-              {remoteChips
-                .slice(0, Math.max(0, shownChips - localChips.length))
-                .map((name) =>
-                  // A collapsed chip names the remote alone ("origin", drawn
-                  // when it sits on the local branch): its branch actions are
-                  // the local chip's, so it stays a label.
-                  name.includes("/") ? (
-                    <button
-                      type="button"
-                      key={`r:${name}`}
-                      className={`ref-chip ref-chip--remote${squeezeClass}`}
-                      aria-label={`Actions for branch ${name}`}
-                      style={{
-                        color,
-                        borderColor: `color-mix(in srgb, ${color} 45%, transparent)`
-                      }}
-                      {...branchMenu(name, true)}
-                    >
-                      <BranchGlyph size={8} strokeWidth={2.6} />
-                      <span className="ref-chip__name">{name}</span>
-                    </button>
-                  ) : (
-                    <span
-                      key={`r:${name}`}
-                      className={`ref-chip ref-chip--remote${squeezeClass}`}
-                      style={{
-                        color,
-                        borderColor: `color-mix(in srgb, ${color} 45%, transparent)`
-                      }}
-                    >
-                      <BranchGlyph size={8} strokeWidth={2.6} />
-                      <span className="ref-chip__name">{name}</span>
-                    </span>
-                  )
-                )}
-              {/* Measuring renders the pill at its widest count, so the fit
-                  knows what room "+N" takes before anything folds. */}
-              {(chipFit === null || foldedChips.length > 0) && (
-                <span className="ref-chip ref-chip--more">
-                  +{chipFit === null ? chipCount : foldedChips.length}
-                </span>
-              )}
-            </span>
-          )}
-          {/* Folded chips leave the DOM, so name them for assistive tech
-              here, outside the strip the fit measures. */}
-          {chipFit !== null && foldedChips.length > 0 && (
-            <span className="a11y-sr-only">
-              {`${foldedChips.length} more ${
-                foldedChips.length === 1 ? "branch" : "branches"
-              }: ${foldedChips.join(", ")}`}
-            </span>
-          )}
-          {commit.isMerge && <span className="commit-tag">merge</span>}
-          {/* Last on the line, so the room a name leaves when it drops out
-              (app.css `.commit-byline`) trails off the end instead of opening
-              a gap before the next chip. It gives way before anything else
-              here and can go entirely, leaving the avatar — so the full name
-              is on the person card it opens, from either of them. */}
-          {onShowPerson === undefined ? (
-            <span className="commit-byline">{byline}</span>
-          ) : (
-            <button
-              type="button"
-              className={`commit-byline${personOpen ? " is-open" : ""}`}
-              aria-label={`Show author ${isMine ? "(you) " : ""}${commit.authorName}`}
-              aria-expanded={personOpen}
-              onMouseEnter={(e) => personCard.onMouseEnter(e.currentTarget)}
-              onMouseLeave={personCard.onMouseLeave}
-              onFocus={(e) => personCard.onFocus(e.currentTarget)}
-              onBlur={personCard.onBlur}
-              onKeyDown={(e) => {
-                if (e.key === "Tab" && !e.shiftKey && onFocusPerson?.() === true) {
-                  e.preventDefault();
-                }
-              }}
-              onClick={(e) => {
-                e.stopPropagation();
-                personCard.showNow(e.currentTarget);
-              }}
-            >
-              {byline}
-            </button>
-          )}
-        </div>
+        <CommitMetaLine
+          total={chipCount}
+          hasTag={vm.tag !== undefined}
+          content={chipContent}
+          render={renderMeta}
+        />
       </div>
       {tip.tooltipNode}
     </div>
   );
+}
+
+/** Keep the pre-paint fit updates local to the line whose children change. */
+function CommitMetaLine({
+  total, hasTag, content, render
+}: {
+  total: number;
+  hasTag: boolean;
+  content: string;
+  render: (fit: RefChipFit | null, stripRef: RefObject<HTMLSpanElement | null>) => ReactNode;
+}) {
+  const lineRef = useRef<HTMLDivElement>(null);
+  const stripRef = useRef<HTMLSpanElement>(null);
+  const fit = useRefChipFit(lineRef, stripRef, total, hasTag, content);
+  return <div ref={lineRef} className="commit-meta">{render(fit, stripRef)}</div>;
 }
 
 type GraphLaneSegmentsProps = {

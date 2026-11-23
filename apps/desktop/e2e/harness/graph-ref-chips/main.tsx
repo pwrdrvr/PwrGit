@@ -1,4 +1,4 @@
-import type { LaneBranchInfo, PrSummary } from "@pwrgit/shared";
+import type { LaneBranchInfo, PrSummary, StackPosition } from "@pwrgit/shared";
 import wideFont from "@fontsource/geist-sans/files/geist-sans-latin-600-normal.woff2?url";
 import type { CSSProperties } from "react";
 import { flushSync } from "react-dom";
@@ -19,27 +19,42 @@ const samplePr: PrSummary = {
 };
 const firstRef = (i: number) => `feature/WWWW-widget-preview-${i}`;
 
-function makeScene(count: number) {
+function makeScene(count: number, deep = false) {
+  const laneCount = deep ? 24 : 3;
   const branches: Record<string, LaneBranchInfo> = {};
+  const stackPositions = new Map<string, StackPosition>();
+  const lanes = Array.from({ length: deep ? laneCount : 1 }, (_, lane) => ({ from: lane, to: lane }));
   const rows = Array.from({ length: count }, (_, i): GraphRowVM => {
     const hash = i.toString(16).padStart(7, "0");
     const kind = i % 10;
     const name = firstRef(i);
-    if (kind <= 2) {
+    if (deep && kind === 6) {
+      const layer = {
+        branch: name, parent: "main",
+        health: { inSync: true, needsRestack: false, parentMerged: false, needsPush: false, drift: false, remoteAhead: false }
+      };
+      stackPositions.set(name, {
+        layer, index: 1,
+        stack: { id: `widget-stack-${i}`, catalogRepository: "widgets", source: "tracked", trunk: { branch: "main" }, layers: [layer] }
+      });
+    }
+    if (kind <= 2 || stackPositions.has(name)) {
       branches[name] = {
-        ...(kind === 1 ? { pr: samplePr } : {}),
-        ...(kind === 2 ? { worktreeId: "widget-checkout" } : {})
+        ...(kind === 1 || kind === 6 ? { pr: samplePr } : {}),
+        ...(kind === 2 || kind === 6 ? { worktreeId: "widget-checkout" } : {})
       };
     }
+    const hasLocal = kind <= 2 || (deep && kind >= 5 && kind <= 8);
+    const extraRefs = kind === 0 ? 8 : kind === 5 ? 10 : kind === 6 ? 9 : 0;
     return {
       commit: {
         hash, shortHash: hash, parents: [], subject: `Widget history entry ${i}`,
         authorName: "Avery Chen", authorEmail: "avery@example.test",
         committedAt: "2026-11-18T14:00:00Z", isMerge: kind === 2
       },
-      row: { lane: kind % 3, top: [{ from: 0, to: 0 }], bottom: [{ from: 0, to: 0 }] },
-      refs: kind <= 2
-        ? [name, `widget-${i}`, ...Array.from({ length: kind === 0 ? 8 : 0 }, (_, j) => `archive/${i}-${j}`)]
+      row: { lane: deep ? i % laneCount : kind % 3, top: lanes, bottom: lanes },
+      refs: hasLocal
+        ? [name, `widget-${i}`, ...Array.from({ length: extraRefs }, (_, j) => `archive/${i}-${j}`)]
         : [],
       remoteRefs: kind === 3 ? [`origin/widget-${i}`, "upstream"] : [],
       ...(kind === 0 || kind === 4 ? { tag: { name: `preview/WWWW-widgets-${i}`, kind: "annotated" } } : {}),
@@ -47,12 +62,10 @@ function makeScene(count: number) {
       isHead: false, isHeadOnly: false, isMine: false, defaultBranch: "main"
     };
   });
-  return { rows, branches };
+  return { rows, branches, laneCount, stackPositions, deep };
 }
 
-function Graph({
-  scene, width, lateFont
-}: {
+function Graph({ scene, width, lateFont }: {
   scene: ReturnType<typeof makeScene>;
   width: number;
   lateFont: boolean;
@@ -62,7 +75,10 @@ function Graph({
     <div className="graph-harness" style={{ width }}>
       <div
         className="graph-scroll"
-        style={lateFont ? { "--font-mono": '"Graph Fit Late", "Geist Mono", monospace' } as CSSProperties : undefined}
+        style={{
+          ...(lateFont ? { "--font-mono": '"Graph Fit Late", "Geist Mono", monospace' } as CSSProperties : {}),
+          ...(scene.deep ? { maxHeight: "calc(100vh - 16px)" } : {})
+        }}
       >
         <div className="graph-card">
           {scene.rows.map((vm) => (
@@ -70,7 +86,9 @@ function Graph({
               key={vm.commit.hash}
               vm={vm}
               branchInfo={scene.branches}
-              laneCount={3}
+              laneCount={scene.laneCount}
+              stackPositions={scene.stackPositions}
+              onOpenStack={noop}
               now={now}
               selected={false}
               focused={false}
@@ -102,7 +120,34 @@ function render() {
   flushSync(() => root.render(<Graph key={key} scene={scene} width={width} lateFont={lateFont} />));
 }
 
+function readRows() {
+  return [...document.querySelectorAll(".graph-row")].map((row) => {
+    const strip = row.querySelector(".ref-chips");
+    const edge = strip?.getBoundingClientRect().right ?? Infinity;
+    const tag = row.querySelector(".commit-tag--tag");
+    const byline = row.querySelector(".commit-byline")!.getBoundingClientRect();
+    const author = row.querySelector(".commit-author")!.getBoundingClientRect();
+    return {
+      chips: [...row.querySelectorAll(".ref-chip__name")].map((name) => ({
+        text: name.textContent,
+        truncated: name.scrollWidth > name.clientWidth,
+        squeezed: name.parentElement!.classList.contains("is-squeezed")
+      })),
+      folded: Number(strip?.querySelector(".ref-chip--more")?.textContent?.slice(1) ?? "0"),
+      clipped: [...row.querySelectorAll(".ref-chips > *, .ref-chips > * > *")].some(
+        (part) => part.getBoundingClientRect().right > edge + 0.5
+      ),
+      tag: tag?.classList.contains("is-glyph") ? "glyph"
+        : tag?.classList.contains("is-squeezed") ? "squeezed"
+        : tag === null ? "none" : "whole",
+      byline: { width: byline.width, authorVisible: author.top < byline.bottom }
+    };
+  });
+}
+
 export const harness = {
+  production: import.meta.env.PROD,
+  readRows,
   ready: Promise.all([
     document.fonts.load('600 9.5px "Geist Mono"'),
     document.fonts.load('600 12.5px "Geist Sans"'),
@@ -115,6 +160,11 @@ export const harness = {
     lateFont = withLateFont;
     key++;
     render();
+  },
+  prepareDeepScene(nextWidth: number, count = 24) {
+    scene = makeScene(count, true);
+    width = nextWidth;
+    lateFont = false;
   },
   remount() {
     key++;
@@ -130,6 +180,7 @@ export const harness = {
   },
   changeBranch(pr: boolean, worktree: boolean) {
     scene = {
+      ...scene,
       rows: scene.rows.map((row) => ({ ...row })),
       branches: {
         ...scene.branches,
