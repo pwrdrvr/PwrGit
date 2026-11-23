@@ -1,7 +1,7 @@
 import { StackPlanRail } from "./features/stacks/StackPlanRail";
 import { StackToolbar } from "./features/stacks/StackToolbar";
 import { useStackOperation } from "./features/stacks/useStackOperation";
-import { StackNavigationContext, type StackPick, useStackSnapshot } from "./features/stacks/stack-navigation";
+import { StackNavigationContext, type StackLaneColors, type StackPick, useStackSnapshot } from "./features/stacks/stack-navigation";
 import { StackRail, StackView } from "./features/stacks/StackViews";
 import { stackPosition } from "@pwrgit/shared";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
@@ -192,7 +192,12 @@ export function App() {
     setStackPick(pick);
     setStackSelectedBranch(pick.branch);
   }, []);
-  const stackNavigation = useMemo(() => ({ pick: stackPick, select: selectStack }), [stackPick, selectStack]);
+  const [stackLaneColors, setStackLaneColors] = useState<StackLaneColors>();
+  const updateStackLaneColors = useCallback((next: StackLaneColors) => {
+    setStackLaneColors(previous => previous?.repoId === next.repoId && previous.worktreeId === next.worktreeId &&
+      previous.byBranch.size === next.byBranch.size &&
+      [...next.byBranch].every(([branch, color]) => previous.byBranch.get(branch) === color) ? previous : next);
+  }, []);
   const restoredSelectionForProfileRef = useRef<string | null>(null);
   const worktreePrMonitorIdRef = useRef(crypto.randomUUID());
   // A queued "jump to this repo (and optionally this worktree)" — from ⌘F
@@ -839,6 +844,10 @@ export function App() {
   const stackWorktreeId = selectedWorktree?.repoId === stackRepo?.id ? selectedWorktree?.id : undefined;
   const stackRunningBranch = stackOperation.pending === "run" && stackStage.phase === "plan" ? stackStage.plan.moves[0]?.branch : undefined;
   const stackFresh = stackStage.phase === "done" ? new Set(stackStage.applied.plan.moves.map(move => move.branch)) : undefined;
+  const visibleStackLanes = stackLaneColors?.worktreeId === selectedWorktree?.id &&
+    stackLaneColors?.repoId === selectedRepo?.id ? stackLaneColors : undefined;
+  const stackNavigation = useMemo(() => ({ pick: stackPick, select: selectStack, lanes: visibleStackLanes }),
+    [stackPick, selectStack, visibleStackLanes]);
   const { snapshot: lineageStacks } = useStackSnapshot(selectedRepo?.id, selectedRepo?.profileId);
   const { snapshot: changeRequestStacks } = useStackSnapshot(changeRequestRepo?.id, changeRequestRepo?.profileId);
   const changeRequestStackPosition = shownChangeRequest && stackPosition(changeRequestStacks?.stacks ?? [],
@@ -1320,6 +1329,7 @@ export function App() {
                 <LineageGraph
                   repoId={selectedRepo.id}
                   {...(lineageStacks ? { stacks: lineageStacks.stacks } : {})}
+                  onStackLaneColors={updateStackLaneColors}
                   stackWritable={!!lineageStacks && !lineageStacks.readOnly && !lineageStacks.busy}
                   repoName={selectedRepo.name}
                   worktreeId={selectedWorktree.id}
@@ -1499,12 +1509,12 @@ export function App() {
           />
         )}
 
-        {!railCollapsed && stack && (stackStage.phase !== "idle" || stackOperation.pending || stackOperation.error
+        {!railCollapsed && stack && stackRepo && (stackStage.phase !== "idle" || stackOperation.pending || stackOperation.error
           ? <StackPlanRail controls={stackOperation} {...(stackWorktreeId ? { worktreeId: stackWorktreeId } : {})}
               onCollapse={() => setRailCollapsed(true)} onOpenWorktree={worktreeId => {
                 if (stackRepo) setPendingReveal({ repoId: stackRepo.id, worktreeId, branch: null });
               }} />
-          : <StackRail stack={stack} branch={stackSelectedBranch} writable={stackWritable} onCollapse={() => setRailCollapsed(true)} />)}
+          : <StackRail stack={stack} worktrees={stackRepo.worktrees} branch={stackSelectedBranch} writable={stackWritable} onCollapse={() => setRailCollapsed(true)} />)}
         {!railCollapsed && shownChangeRequest === null && stack === null && (
           <Rail
             worktree={selectedWorktree}

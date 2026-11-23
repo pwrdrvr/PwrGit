@@ -159,6 +159,11 @@ export type ViewportTooltip = {
   tooltipNode: ReactNode;
 };
 
+/** Close transient tooltips when a click opens a foreground surface. */
+export function dismissHoverTooltips(): void {
+  window.dispatchEvent(new Event("pwrgit:dismiss-hover-tooltips"));
+}
+
 /**
  * The handlers that make any element open a card on hover AND on focus.
  *
@@ -759,11 +764,14 @@ export function useViewportTooltip(
       if (trigger !== null && !trigger.isConnected) hide();
     });
     observer.observe(document, { childList: true, subtree: true });
+    const onDismissHover = () => { if (!stickyRef.current) hide(); };
+    window.addEventListener("pwrgit:dismiss-hover-tooltips", onDismissHover);
     window.addEventListener("blur", hide);
     window.addEventListener("scroll", onScroll, { capture: true });
     window.addEventListener("keydown", onKeyDown);
     return () => {
       observer.disconnect();
+      window.removeEventListener("pwrgit:dismiss-hover-tooltips", onDismissHover);
       window.removeEventListener("blur", hide);
       window.removeEventListener("scroll", onScroll, { capture: true });
       window.removeEventListener("keydown", onKeyDown);

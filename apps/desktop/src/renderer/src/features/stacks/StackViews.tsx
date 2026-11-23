@@ -1,5 +1,5 @@
 import { useLayoutEffect, useRef, useState, type ReactNode } from "react";
-import type { ChangeRequestEntry, Repo, RepositoryStack, StackAction, StackLayer, StackPosition } from "@pwrgit/shared";
+import type { ChangeRequestEntry, Repo, RepositoryStack, StackAction, StackLayer, StackPosition, Worktree } from "@pwrgit/shared";
 import { dispatch } from "../../lib/pwrgit";
 import { showErrorToast, showInfoToast } from "../../lib/toast";
 import { hoverTooltip, useViewportTooltip } from "../../lib/useViewportTooltip";
@@ -8,25 +8,26 @@ import { SectionChevron } from "../sidebar/SectionChevron";
 import { prefersReducedMotion } from "../../lib/reducedMotion";
 import { StackBranchActions } from "./StackToolbar";
 import { PrChip } from "../sidebar/PrChip";
+import { lastSegment } from "../sidebar/repo-view";
 import type { ChangeRequestRow } from "../sidebar/change-request-groups";
 import { StackNode, StackPopoverTrigger } from "./StackPopover";
 import {
   stackActionAt, stackDestination, stackLayerKey, stackMembers, stackName, stackNextAction,
-  stackPositionLabel, stackSource, stackStateLabel, type StackListItem
+  stackPositionLabel, stackSource, stackState, stackStateLabel, type StackListItem
 } from "./stack-presentation";
-import { useStackNavigation } from "./stack-navigation";
+import { useStackLaneStyle, useStackNavigation } from "./stack-navigation";
 import "./stacks.css";
 
 function branchHealthLabels(layer: StackLayer, action?: ReturnType<typeof stackActionAt>): string[] {
   const { health } = layer;
   return [
     ...(action?.label === "Restack" ? ["Needs restack"] : []),
-    ...(health.needsRestack && !action ? ["Parent tip moved"] : []),
+    ...(health.needsRestack && !action && !layer.behindParent ? ["Parent tip moved"] : []),
     ...(health.needsPush ? ["Needs push"] : []),
     ...(health.parentMerged ? ["Parent merged"] : []),
     ...(health.drift ? ["PR base differs"] : []),
     ...(health.remoteAhead ? ["Remote ahead"] : []),
-    ...(health.inSync ? ["In sync"] : []),
+    ...(health.inSync && layer.pr?.state !== "merged" ? ["In sync"] : []),
   ];
 }
 
@@ -36,9 +37,10 @@ export function StackListGroup({ item, repoId, entries, writable, renderRow }: {
 }) {
   const { stack, rows } = item;
   const next = stackNextAction(stack, writable);
-  return <div className="stack-group">
+  const laneStyle = useStackLaneStyle(repoId, stack);
+  return <div className="stack-group" style={laneStyle}>
     <StackPopoverTrigger repoId={repoId} stack={stack} entries={entries} writable={writable} className="stack-group__caption">
-      <SectionGlyph kind="stacks" /><strong>{stackName(stack)}</strong><small>{stackDestination(stack)}</small>
+      <SectionGlyph kind="stacks" /><strong>{stackName(stack)}</strong><small>· {stack.layers.length} into {stack.trunk.branch}</small>
       {next && <span className="stack-health-badge stack-health-badge--stale">{next.label}</span>}
     </StackPopoverTrigger>
     {stackMembers(stack).map(position => {
@@ -48,13 +50,14 @@ export function StackListGroup({ item, repoId, entries, writable, renderRow }: {
         className={`stack-group__member stack-track${stackActionAt(position, writable) ? " has-action" : ""}`}>
         <StackNode position={position} />
         {row ? renderRow(row, position) : <StackPopoverTrigger repoId={repoId} stack={stack} entries={entries} writable={writable}
-          branch={layer.branch} className="stack-group__ghost" label={stackPositionLabel(position)}>
+          branch={layer.branch} className="stack-group__ghost"
+          label={layer.pr ? `${stackPositionLabel(position)}, ${layer.pr.title}` : stackPositionLabel(position)}>
           {layer.pr && <span>#{layer.pr.number}</span>}
-          <span className="stack-group__ghost-branch">{layer.branch}</span><small>{stackStateLabel(layer)}</small>
+          <span className={layer.pr ? "stack-group__ghost-title is-pr" : "stack-group__ghost-title"}>{layer.pr?.title ?? layer.branch}</span><small>{stackStateLabel(layer)}</small>
         </StackPopoverTrigger>}
       </div>;
     })}
-    <div className="stack-group__trunk stack-track"><StackNode /><span>{stack.trunk.branch}</span><small>Trunk</small></div>
+    <div className="stack-group__trunk stack-track"><StackNode /><span>{stack.trunk.branch}</span></div>
   </div>;
 }
 
@@ -64,6 +67,12 @@ export function StackLadder({ position, repoId, writable }: { position: StackPos
     {stackMembers(position.stack).map(member => <StackNode key={member.layer.branch} position={member} current={member.index === position.index} />)}
     <StackNode />
   </StackPopoverTrigger>;
+}
+
+function StackTrain({ repoId, stack }: { repoId: string; stack: RepositoryStack }) {
+  const laneStyle = useStackLaneStyle(repoId, stack);
+  return <span className="stack-train" style={laneStyle}><StackNode />{stackMembers(stack).reverse().map(position =>
+    <StackNode key={position.layer.branch} position={position} showPosition />)}</span>;
 }
 
 export function StacksSidebar({ repo, stacks, shownStacks, writable = false, recoverEmpty }: {
@@ -114,8 +123,7 @@ export function StacksSidebar({ repo, stacks, shownStacks, writable = false, rec
         aria-label={`Open stack view for ${stackName(stack)}. ${members.map(stackPositionLabel).join("; ")}; trunk ${stack.trunk.branch}`}
         onClick={event => { event.stopPropagation(); tip.hide(); navigation.select({ repoId: repo.id, stack }); }}>
         <strong>{stackName(stack)}</strong>
-        <span className="stack-train"><StackNode />{members.reverse().map(position =>
-          <StackNode key={position.layer.branch} position={position} showPosition />)}</span>
+        <StackTrain repoId={repo.id} stack={stack} />
         <small>{stack.layers.length}</small>
         {next && <span className="stack-health-badge stack-health-badge--stale">{next.label}</span>}
       </button>;
@@ -134,6 +142,7 @@ export function StackView({ stack, repoId, onClose, onShowRail, toolbar, onPlan,
   selectedBranch?: string | undefined;
   onSelectBranch?: (branch: string) => void;
 }) {
+  const laneStyle = useStackLaneStyle(repoId, stack);
   const cards = useRef<HTMLOListElement>(null);
   const positions = useRef(new Map<string, number>());
   useLayoutEffect(() => {
@@ -152,7 +161,7 @@ export function StackView({ stack, repoId, onClose, onShowRail, toolbar, onPlan,
     positions.current = next;
   }, [stack]);
   const members = stackMembers(stack);
-  return <section className="stack-view" aria-label="Stack" onKeyDown={event => {
+  return <section className="stack-view" style={laneStyle} aria-label="Stack" onKeyDown={event => {
     if (event.key === "Escape") { event.stopPropagation(); onClose(); }
   }}>
     <header className="stack-view__header">
@@ -163,7 +172,7 @@ export function StackView({ stack, repoId, onClose, onShowRail, toolbar, onPlan,
       {onShowRail && <button type="button" className="stack-button" onClick={onShowRail}>Show panel</button>}
       {toolbar}
     </header>
-    {stack.source !== "tracked" && <p className="stack-view__provenance">
+    {stack.source !== "tracked" && <p className="stack-view__provenance prov">
       {stack.githubNumber !== undefined
         ? `GitHub links these pull requests as ${stackName(stack)}. `
         : "These pull requests target one another. "}
@@ -189,7 +198,9 @@ export function StackView({ stack, repoId, onClose, onShowRail, toolbar, onPlan,
           <div className="stack-card__line stack-card__detail">
             <span className="stack-card__ordinal">{index}/{members.length}</span>
             {layer.pr && <code>{layer.branch}</code>}
-            <span>{stackStateLabel(layer)}</span>
+            <span className="stack-health-badge" data-stack-state={stackState(layer)}>{stackStateLabel(layer)}</span>
+            {layer.behindParent !== undefined && layer.behindParent > 0 &&
+              <span className="stack-health-badge stack-card__distance">{index === 1 ? layer.parent : "parent"} +{layer.behindParent}</span>}
             {health.map(label => <span key={label} className={`stack-health-badge${label === "Needs restack" ? " stack-health-badge--stale" : ""}`}>{label}</span>)}
           </div>
         </li>;
@@ -199,13 +210,20 @@ export function StackView({ stack, repoId, onClose, onShowRail, toolbar, onPlan,
   </section>;
 }
 
-export function StackRail({ stack, branch, writable = false, onCollapse }: {
-  stack: RepositoryStack; branch?: string | undefined; writable?: boolean; onCollapse: () => void;
+export function StackRail({ stack, branch, worktrees, writable = false, onCollapse }: {
+  stack: RepositoryStack; branch?: string | undefined; worktrees: readonly Worktree[]; writable?: boolean; onCollapse: () => void;
 }) {
   const members = stackMembers(stack);
   const position = members.find(({ layer }) => layer.branch === branch) ?? members[0];
   const layer = position?.layer;
   const action = position && stackActionAt(position, writable);
+  const pr = layer?.pr;
+  const basePr = stack.layers.find(member => member.branch === (pr?.baseRefName ?? layer?.parent))?.pr;
+  const worktree = worktrees.find(item => !item.missing && item.branch === layer?.branch);
+  const checks = pr?.checkState === "passing" ? "Passing" : pr?.checkState === "failing" ? "Failing"
+    : pr?.checkState === "pending" ? "Running" : "Not reported";
+  const merge = pr?.state === "merged" ? "Merged" : pr?.state === "closed" ? "Closed without merge"
+    : pr?.mergeState === "conflicting" ? "Conflicts with its base" : pr?.mergeState === "mergeable" ? "Mergeable" : "Not reported";
   return <aside className="pane pane--rail stack-rail" aria-label="Stack member">
     <div className="rail__bar">
       <strong>Stack member</strong>
@@ -215,14 +233,20 @@ export function StackRail({ stack, branch, writable = false, onCollapse }: {
       <strong>{layer.pr ? `#${layer.pr.number} · ` : ""}{position.index} of {members.length}</strong>
       <dl>
         <dt>Head branch</dt><dd><code className="selectable">{layer.branch}</code></dd>
-        <dt>Parent</dt><dd><code className="selectable">{layer.parent}</code></dd>
-        <dt>Status</dt><dd>{[stackStateLabel(layer), ...branchHealthLabels(layer, action)].join(" · ")}</dd>
+        <dt>Base</dt><dd><code className="selectable">{pr?.baseRefName ?? layer.parent}</code>{basePr && <> (#{basePr.number})</>}</dd>
+        {pr && <>
+          <dt>Checks</dt><dd data-status={pr.checkState}>{checks}{pr.checksStillRunning && pr.checkState !== "pending" ? " · still running" : ""}</dd>
+          {pr.state === "open" && <><dt>Review</dt><dd>{pr.isDraft ? "Draft" : "Ready for review"}</dd></>}
+          <dt>Merge</dt><dd data-status={pr.mergeState}>{merge}</dd>
+        </>}
+        <dt>Worktree</dt><dd>{worktree ? lastSegment(worktree.path) : "No local worktree"}</dd>
         {stack.source === "tracked" && layer.base && <><dt>Recorded parent tip</dt><dd><code className="selectable">{layer.base.slice(0, 8)}</code></dd></>}
         {(layer.behindParent ?? 0) > 0 && <><dt>Behind {layer.parent}</dt><dd>{layer.behindParent} commits</dd></>}
       </dl>
       {action && <p>{action.label === "Sync"
         ? "The parent merged. Sync moves this branch and the branches above it onto trunk."
         : "The parent moved. Restack replays this branch and the branches above it onto the updated parent."}</p>}
+      {pr && <button type="button" className="stack-button" onClick={() => void dispatch("shell:openExternal", { url: pr.url })}>Open PR #{pr.number}</button>}
     </div>}
   </aside>;
 }

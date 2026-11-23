@@ -85,10 +85,18 @@ async function render(stack: RepositoryStack, { writable = true, initial = false
 const click = (el: Element | null) => act(() => (el as HTMLElement | null)?.click());
 const order = (el: Element, selector: string) =>
   Array.from(el.querySelectorAll(selector), member => Number(member.getAttribute("data-stack-position")));
-const showPopover = (el: Element | null) => {
+const showPopover = (el: Element | null, via: "click" | "space" = "click") => {
   if (!el) throw new Error("The stack popover trigger is missing");
   vi.spyOn(el, "getBoundingClientRect").mockReturnValue(new DOMRect(8, 8, 100, 20));
-  click(el);
+  if (via === "click") click(el);
+  else act(() => {
+    const button = el as HTMLButtonElement;
+    button.focus();
+    const pressed = button.dispatchEvent(new KeyboardEvent("keydown", { key: " ", bubbles: true, cancelable: true }));
+    const released = button.dispatchEvent(new KeyboardEvent("keyup", { key: " ", bubbles: true, cancelable: true }));
+    // jsdom dispatches the keys but leaves native button activation to the caller.
+    if (pressed && released) button.click();
+  });
 };
 
 test("R1 orders positions top-first with trunk immediately below position 1", async () => {
@@ -114,10 +122,10 @@ test("R1 orders positions top-first with trunk immediately below position 1", as
 });
 
 test("R2 opens the stack view only after explicit stack navigation", async () => {
-  const gesture = fc.constantFrom("gutter", "commit", "hover", "focus", "arrow", "refresh", "repo", "back", "index", "popover");
+  const gesture = fc.constantFrom("gutter", "commit", "hover", "focus", "arrow", "refresh", "repo", "back", "index", "popover", "caption click", "caption Space", "ghost click", "index hover");
   await fc.assert(fc.asyncProperty(fc.array(gesture, { minLength: 1, maxLength: 9 }), async gestures => {
-    const stack = makeStack(2);
-    const withPr = { ...stack, layers: stack.layers.map((layer, index) => ({ ...layer, pr: makePr(index) })) };
+    const stack = makeStack(3);
+    const withPr = { ...stack, layers: stack.layers.map((layer, index) => index === 2 ? layer : { ...layer, pr: makePr(index) }) };
     let el = await render(withPr);
     let open = false;
     for (const gesture of gestures) {
@@ -134,6 +142,19 @@ test("R2 opens the stack view only after explicit stack navigation", async () =>
         click(el.querySelector("[data-index] [data-nav-anchor^='stack:']"));
         open = true;
       }
+      if (gesture === "index hover") {
+        const row = el.querySelector("[data-index] [data-nav-anchor^='stack:']")!;
+        const popover = el.querySelector(".stack-popover");
+        act(() => row.dispatchEvent(new MouseEvent("mouseover", { bubbles: true })));
+        expect(el.querySelector(".stack-popover")).toBe(popover);
+      }
+      if (gesture === "caption click" || gesture === "caption Space" || gesture === "ghost click") {
+        if (el.querySelector(".stack-popover")) click(el.querySelector('[aria-label="Close stack popover"]'));
+        const trigger = el.querySelector(gesture === "ghost click" ? ".stack-group__ghost" : ".stack-group__caption");
+        showPopover(trigger, gesture === "caption Space" ? "space" : "click");
+        expect(Boolean(el.querySelector(".stack-view")), gesture).toBe(open);
+        expect(el.querySelector(".stack-popover"), gesture).not.toBeNull();
+      }
       if (gesture === "popover") {
         const chip = graph?.querySelector(".stack-position") ?? null;
         if (el.querySelector(".stack-popover")) click(el.querySelector('[aria-label="Close stack popover"]'));
@@ -146,7 +167,7 @@ test("R2 opens the stack view only after explicit stack navigation", async () =>
       }
       expect(Boolean(el.querySelector(".stack-view")), gesture).toBe(open);
     }
-  }), { numRuns: 24, examples: [[["gutter"]], [["focus", "arrow", "hover", "refresh", "popover", "back", "repo", "index"]]] });
+  }), { numRuns: 24, examples: [[["gutter"]], [["caption click"]], [["caption Space", "ghost click", "index hover"]], [["focus", "arrow", "hover", "refresh", "popover", "back", "repo", "index"]]] });
 });
 
 test("R3 uses one PR state for the card chip and stack nodes", async () => {

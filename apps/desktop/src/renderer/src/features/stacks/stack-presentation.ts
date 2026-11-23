@@ -37,7 +37,7 @@ export function stackPositionLabel({ stack, layer, index }: StackPosition) {
 
 export function stackActionAt({ stack, layer, index }: StackPosition, writable: boolean):
   { label: "Sync" | "Restack"; action: StackAction } | undefined {
-  if (!writable || stack.source !== "tracked" || !layer.base ||
+  if (!writable || stack.source !== "tracked" || (layer.pr && layer.pr.state !== "open") || !layer.base ||
       !stack.layers.slice(index - 1).every(member => member.local !== false && member.head)) return;
   const lower = stack.layers[index - 2];
   if (index === 2 && layer.health.parentMerged && layer.syncReady && stack.trunk.local !== false && stack.trunk.head) {

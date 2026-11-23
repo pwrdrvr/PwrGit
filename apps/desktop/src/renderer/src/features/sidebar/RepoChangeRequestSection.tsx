@@ -378,7 +378,7 @@ export function RepoChangeRequestSection({
         {ladder && position && <StackLadder position={position} repoId={repo.id} writable={writable} />}
         <div className="ref-cr-row__line">
           <PrChip pr={pr} repoId={repo.id} stacked={position !== undefined} />
-          {ladder && position && <span className="stack-card__ordinal">{position.index}/{position.stack.layers.length}</span>}
+          {ladder && position && <span className="stack-ladder__position">{position.index}/{position.stack.layers.length}</span>}
           <span className="ref-cr-row__title" {...hoverTooltip(tip, pr.title)}>
             {pr.title}
           </span>

@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { createRoot } from "react-dom/client";
-import { err, ok, type ChangeRequestList, type ChangeRequestEntry, type PrSummary, type Repo, type RepositoryStack, type StackAction, type StackPlanPreview, type StackPosition, stackPosition } from "@pwrgit/shared";
+import { err, ok, type ChangeRequestList, type ChangeRequestEntry, type PrSummary, type Repo, type RepositoryStack, type StackAction, type StackPlanPreview, type StackPosition, type Worktree, stackPosition } from "@pwrgit/shared";
 import "@fontsource/geist-sans/400.css";
 import "@fontsource/geist-sans/600.css";
 import "@fontsource/geist-mono/500.css";
@@ -8,7 +8,7 @@ import "../../../src/renderer/src/styles/app.css";
 import { ChangeRequestView } from "../../../src/renderer/src/features/change-request/ChangeRequestView";
 import { ChangeRequestSelectionContext, changeRequestPickKey, type ChangeRequestPick } from "../../../src/renderer/src/features/change-request/change-request-selection";
 import { RepoChangeRequestSection } from "../../../src/renderer/src/features/sidebar/RepoChangeRequestSection";
-import { GraphRow } from "../../../src/renderer/src/features/graph/GraphRow";
+import { GraphRow, laneColor } from "../../../src/renderer/src/features/graph/GraphRow";
 import { StackPlanRail } from "../../../src/renderer/src/features/stacks/StackPlanRail";
 import { StackToolbar } from "../../../src/renderer/src/features/stacks/StackToolbar";
 import { useStackOperation } from "../../../src/renderer/src/features/stacks/useStackOperation";
@@ -56,7 +56,7 @@ const releaseStack: RepositoryStack = {
       ...layer, branch, parent, ...(index === 0 ? { behindParent: 14 } : {}),
       pr: { ...layer.pr!, number: index === 0 ? 790 : 798, headRefName: branch, baseRefName: parent,
         title: index === 0 ? "Define release policy rules" : "Enforce approval rules",
-        checkState: index === 0 ? "passing" : "failing", author: "avery", additions: 84, deletions: 12,
+        checkState: index === 0 ? "passing" : "failing", mergeState: "mergeable", author: "avery", additions: 84, deletions: 12,
         changedFiles: 3, updatedAt: index === 0 ? 1000 : 3000 },
       health: { ...layer.health, inSync: index === 1, needsRestack: index === 0, needsPush: false },
     };
@@ -104,6 +104,15 @@ const reviewPulls = {
 const graphStack = review ? releaseStack : stack;
 const positions = new Map<string, StackPosition>(graphStack.layers.map((layer, index) =>
   [layer.branch, { stack: graphStack, layer, index: index + 1 }]));
+
+const graphLane = new URLSearchParams(location.search).has("alt-lane") ? 2 : 0;
+const lanes = { repoId: repo.id, worktreeId: "fixture", byBranch: new Map(graphStack.layers.map(layer =>
+  [layer.branch, laneColor(graphLane)])) };
+const railWorktrees: Worktree[] = [{
+  id: "review-wt", repoId: repo.id, branch: "release/enforce", path: "/example/orbit.release", dirty: 0,
+  ahead: 0, behind: 0, behindDefault: 0, defaultBranch: "main", mergedIntoDefault: false,
+  divergedFromDefault: false, isDefaultBranch: false, pinned: false, isPrimary: false,
+}];
 
 let currentStack = stack;
 let mockedPlan: StackPlanPreview;
@@ -167,7 +176,7 @@ function Harness() {
   const hoverIntent = useHoverIntent();
   const controls = useStackOperation(operations ? repo : undefined, pick?.stack.id, (repoId, updated) => select({ repoId, stack: updated }), noop);
   Object.assign(window, { showStacks: () => setEnabled(true), showOperations: () => setOperations(true) });
-  return <StackNavigationContext.Provider value={enabled ? { pick, select: chooseStack } : null}>
+  return <StackNavigationContext.Provider value={enabled ? { pick, select: chooseStack, lanes } : null}>
     <ChangeRequestSelectionContext.Provider value={{
       selectedKey: prPick ? changeRequestPickKey(repo.id, prPick.entry) : null,
       select: next => { select(null); setPr(next); }, clear: () => setPr(null),
@@ -198,9 +207,9 @@ function Harness() {
                   commit: { hash: layer.head!, shortHash: layer.head!.slice(0, 7), parents: [], subject: layer.pr!.title,
                     authorName: "Avery Chen", authorEmail: "avery@example.invalid",
                     committedAt: "2026-11-20T14:00:00Z", isMerge: false },
-                  row: { lane: 0, top: [{ from: 0, to: 0 }], bottom: [{ from: 0, to: 0 }] },
+                  row: { lane: graphLane, top: [{ from: graphLane, to: graphLane }], bottom: [{ from: graphLane, to: graphLane }] },
                   refs: [layer.branch], remoteRefs: ["origin"], isHead: index === 0, isHeadOnly: true, isMine: true, defaultBranch: "main",
-                }} laneCount={1} now={Date.parse("2026-11-22T00:00:00Z")}
+                }} laneCount={graphLane + 1} now={Date.parse("2026-11-22T00:00:00Z")}
                 selected={false} focused={false} contextOpen={false} flashing={false} hoverIntent={hoverIntent}
                 onOpen={noop} onShowContext={noop} onHideContext={noop} onFocusContext={() => false} onOpenContextMenu={noop}
                 {...(enabled ? { stackPositions: positions, stackRepoId: repo.id, stackWritable: true } : {})}
@@ -209,7 +218,7 @@ function Harness() {
         </main>
         {displayedStack && (operations && (controls.stage.phase !== "idle" || controls.pending)
           ? <StackPlanRail controls={controls} onCollapse={() => select(null)} onOpenWorktree={noop} /> :
-            <StackRail stack={displayedStack} branch={selectedBranch} writable onCollapse={() => select(null)} />)}
+            <StackRail stack={displayedStack} worktrees={railWorktrees} branch={selectedBranch} writable onCollapse={() => select(null)} />)}
       </div>
       {operations && <ToastHost profileId={profileId} repos={[repo]} onReveal={noop} />}
     </div>

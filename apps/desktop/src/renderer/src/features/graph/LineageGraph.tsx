@@ -1,8 +1,10 @@
+import type { StackLaneColors } from "../stacks/stack-navigation";
 import { LocateGlyph } from "../../lib/LocateGlyph";
 import {
   type ReactNode,
   useCallback,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState
@@ -263,11 +265,13 @@ export function LineageGraph({
   onRevealWorktree,
   onRevealCreatedWorktree,
   stacks,
+  onStackLaneColors,
   stackWritable = false
 }: {
   repoId: string;
   stacks?: RepositoryStack[];
   stackWritable?: boolean;
+  onStackLaneColors?: (colors: StackLaneColors) => void;
   /** Repository name, shown when a dialog needs to name what it acts on. */
   repoName: string;
   worktreeId: string;
@@ -687,6 +691,27 @@ export function LineageGraph({
       };
     });
   }, [commitPullRequests, data, layout, email, head, revealCommit]);
+
+  useLayoutEffect(() => {
+    if (!onStackLaneColors) return;
+    const byBranch = new Map<string, string>();
+    const remoteColors = new Map<string, string>();
+    if (stackAnnotations) {
+      for (const vm of vms) {
+        for (const ref of vm.refs) {
+          if (stackAnnotations.positions.has(ref)) byBranch.set(ref, laneColor(vm.row.lane));
+        }
+        for (const ref of vm.remoteRefs) {
+          const slash = ref.indexOf("/");
+          if (slash < 0) continue;
+          const branch = ref.slice(slash + 1);
+          if (stackAnnotations.positions.has(branch) && !remoteColors.has(branch)) remoteColors.set(branch, laneColor(vm.row.lane));
+        }
+      }
+    }
+    for (const [branch, color] of remoteColors) if (!byBranch.has(branch)) byBranch.set(branch, color);
+    onStackLaneColors({ repoId, worktreeId, byBranch });
+  }, [onStackLaneColors, repoId, worktreeId, stackAnnotations, vms]);
 
   const graphCommitKey = useMemo(
     () => (data?.commits ?? []).map((commit) => commit.hash).join("\n"),

@@ -1,6 +1,7 @@
 import { useId, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import type { ChangeRequestEntry, RepositoryStack, StackPosition } from "@pwrgit/shared";
+import { dismissHoverTooltips } from "../../lib/useViewportTooltip";
 import { dispatch } from "../../lib/pwrgit";
 import { shortWhen } from "../graph/graph-view";
 import { changeRequestPickKey, useChangeRequestSelection } from "../change-request/change-request-selection";
@@ -8,7 +9,7 @@ import {
   stackActionAt, stackDestination, stackEntry, stackMembers, stackName, stackNextAction,
   stackPositionLabel, stackSource, stackState, stackStateLabel
 } from "./stack-presentation";
-import { useStackNavigation } from "./stack-navigation";
+import { useStackLaneStyle, useStackNavigation } from "./stack-navigation";
 
 export function StackNode({ position, current, showPosition }: { position?: StackPosition; current?: boolean; showPosition?: boolean }) {
   const state = position ? stackState(position.layer) : "trunk";
@@ -24,6 +25,7 @@ export function StackPopoverTrigger({
   branch?: string | undefined; current?: string | undefined; className: string; label?: string; children: ReactNode;
 }) {
   const navigation = useStackNavigation();
+  const laneStyle = useStackLaneStyle(repoId, stack);
   const selection = useChangeRequestSelection();
   const id = useId();
   const anchor = useRef<HTMLButtonElement>(null);
@@ -68,9 +70,13 @@ export function StackPopoverTrigger({
       aria-haspopup="dialog" aria-expanded={open} aria-controls={open ? id : undefined}
       onKeyDown={event => { if (event.key === "Enter" || event.key === " ") event.stopPropagation(); }}
       onDoubleClick={event => event.stopPropagation()}
-      onClick={event => { event.stopPropagation(); setOpen(value => !value); }}>{children}</button>
-    {open && host && createPortal(<div className="stack-popover" ref={panel} role="dialog" aria-label={stackName(stack)}
-      id={id} tabIndex={-1} onClick={event => event.stopPropagation()} onKeyDown={event => {
+      onClick={event => {
+        event.stopPropagation();
+        if (!open) dismissHoverTooltips();
+        setOpen(!open);
+      }}>{children}</button>
+    {open && host && createPortal(<div className="stack-popover" style={laneStyle} ref={panel} role="dialog" aria-label={stackName(stack)}
+      id={id} tabIndex={-1} onFocus={event => event.stopPropagation()} onClick={event => event.stopPropagation()} onKeyDown={event => {
         if (event.key === "Escape") { event.stopPropagation(); event.preventDefault(); close(); }
         if (event.key !== "ArrowDown" && event.key !== "ArrowUp") return;
         const buttons = Array.from(panel.current!.querySelectorAll<HTMLButtonElement>(".stack-popover__member button"));
