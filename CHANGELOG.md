@@ -1,5 +1,12 @@
 # Changelog
 
+## v0.62.1 - 2026-11-23
+
+- Stacks - Improved stacked pull request views with a clearer status rail in Stack order and clickable position badges in Recent. The badges open a stack overview that highlights the current pull request. This release also improves pull request navigation and fixes stack sync safety checks.
+- CPU diagnostics - Fixed captures losing the Chromium trace when the browser takes longer to stop recording. Captures allow up to ten seconds for the browser to finish, and canceled traces clean up when the browser finishes stopping.
+- Lineage - Reduced layout work for branch and tag previews while keeping their actions accessible in narrow rows.
+- Git performance - Reused the sanitized PATH for installed Git launches and reduced routine Git lifecycle logging during bulk sync while retaining interruption diagnostics.
+
 ## v0.62.0 - 2026-11-23
 
 - Stacks - Added local branch-stack views with tracked and inferred stacks, branch health, and read-only MCP tools for inspecting them. Adopt an inferred stack, preview and run a restack, add a branch on top, or detach or forget a branch. Local operations include conflict resolution in a worktree, interrupted-operation recovery and guarded undo.
