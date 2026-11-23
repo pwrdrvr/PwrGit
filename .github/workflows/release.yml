@@ -111,6 +111,14 @@ jobs:
       - name: Prepare release stage
         run: node apps/desktop/scripts/release.mjs --prepare-only
 
+      - name: Verify macOS startup with retained Agent Access settings
+        timeout-minutes: 4
+        env:
+          PWRGIT_E2E_DISABLE_GPU: "1"
+        run: >-
+          pnpm --filter @pwrgit/desktop exec playwright test app-mcp.spec.ts
+          --grep 'desktop startup with Agent Access enabled' --retries=0
+
       - name: Archive signing input
         id: archive
         run: |
@@ -301,6 +309,7 @@ jobs:
           mkdir -p apps/desktop/linux-smoke
           xvfb-run -a python3 apps/desktop/scripts/verify-linux-launcher.py apps/desktop/linux-smoke/launcher.png
           xvfb-run -a node apps/desktop/scripts/linux-installed-smoke.mjs "$version" apps/desktop/linux-smoke
+          xvfb-run -a node apps/desktop/scripts/linux-installed-smoke.mjs "$version" apps/desktop/linux-smoke/upgrade --upgrade
           sudo apt-get remove -y pwrgit
 
       - name: Upload Linux package validation evidence

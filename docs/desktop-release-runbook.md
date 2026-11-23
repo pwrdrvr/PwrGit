@@ -129,15 +129,19 @@ follow-up, not republishing. Signing and publication keep their existing credent
 
 1. The macOS prepare job checks metadata, typechecks, selects an Xcode with
    actool 26 for the icon compile (`.github/actions/select-xcode-for-actool`),
-   tests, checks license notices, builds, and creates a deploy stage.
+   tests, checks license notices, builds, and creates a deploy stage. Before
+   signing, it requires the built app to open a visible profile window with
+   Agent Access enabled and a retained v0.61.3 policy. It also checks that an
+   unreadable policy leaves the desktop usable and reports a policy error.
 2. `apple-signing` signs, notarizes, and packages the universal and arm64 apps, then
    stages both DMGs, updater ZIPs, blockmaps, and one `latest-mac.yml`.
 3. Linux builds on native Ubuntu x64 and arm64 runners. Each format gets a
    separate electron-builder pass so its `resources/package-type` marker is
    correct and archives have none. Package validation checks package metadata,
    unpacked payloads, ELF architecture, notices and updater configuration. The
-   installed DEB launches under Xvfb without disabling the sandbox, exercises
-   SQLite-backed profile reads and bundled Git/LFS, then quits normally.
+   installed DEB launches under Xvfb with the sandbox enabled, exercises
+   SQLite-backed profile reads and bundled Git/LFS, then quits normally. It
+   runs with both fresh data and retained Agent Access settings from v0.61.3.
 4. Windows prepares a self-contained x64 stage without credentials.
 5. `windows-signing` uses Azure Artifact Signing during NSIS packaging and
    verifies Authenticode on both the app executable and installer, then copies

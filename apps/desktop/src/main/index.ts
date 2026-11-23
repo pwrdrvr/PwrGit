@@ -181,7 +181,7 @@ import { repaintWindowChrome } from "./window-chrome";
 import { openSettingsWindow } from "./settings-window";
 import { createAuxiliaryWindowPlacer } from "./auxiliary-window-placement";
 import { createNativeThemeController } from "./native-theme";
-import { McpPolicyStore } from "@pwrgit/mcp-server/access-policy";
+import { McpAccessError, McpPolicyStore } from "@pwrgit/mcp-server/access-policy";
 import { registerLocalAgentHandlers } from "./local-agents/local-agent-handlers";
 import { AcpModelCache } from "./ai/acp-model-cache";
 import { registerAiProviderHandlers } from "./ai/ai-provider-handlers";
@@ -1607,7 +1607,14 @@ if (!gotSingleInstanceLock) {
       saveEnabled: (enabled) => settings.update({ localAgentAccessEnabled: enabled }),
       onChanged: () => {
         emitEvent("agentAccess:changed", agentAccess.status());
-        emitEvent("localAgents:changed", mcpPolicy.snapshot());
+        try {
+          emitEvent("localAgents:changed", mcpPolicy.snapshot());
+        } catch (cause) {
+          // An unreadable policy must still deny agent requests. A status
+          // broadcast should never let that failure prevent desktop startup.
+          if (!(cause instanceof McpAccessError)) throw cause;
+          logMain("warn", "agent-access", "Unable to read local agent policy", cause.message);
+        }
       }
     });
     app.on("will-quit", () => void agentAccess.dispose());
