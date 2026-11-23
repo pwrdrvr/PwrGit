@@ -13,7 +13,40 @@ export function stackSource(stack: RepositoryStack) {
 export function stackDestination(stack: RepositoryStack) {
   const count = stack.layers.length;
   const noun = stack.layers.every(layer => layer.pr) ? "PR" : "branch";
-  return `${count} ${noun}${count === 1 ? "" : noun === "branch" ? "es" : "s"} into ${stack.trunk.branch}`;
+  const counted = `${count} ${noun}${count === 1 ? "" : noun === "branch" ? "es" : "s"}`;
+  return stack.closed === "merged" ? `${counted} merged into ${stack.trunk.branch}`
+    : stack.closed === "closed" ? `${counted} into ${stack.trunk.branch}, closed` : `${counted} into ${stack.trunk.branch}`;
+}
+
+/** The Stacks row counts members by state, worst first (board turn 8c): what
+ * needs someone comes before what is done. */
+export const STACK_BUCKETS = [
+  "failing", "failing-running", "conflicting", "pending", "passing", "open", "draft", "no-pr", "closed", "merged",
+] as const;
+export type StackBucket = typeof STACK_BUCKETS[number];
+
+export const STACK_BUCKET_LABELS: Record<StackBucket, string> = {
+  failing: "checks failing", "failing-running": "failing, checks still running", conflicting: "merge conflict",
+  pending: "checks running", passing: "checks passing", open: "open", draft: "draft", "no-pr": "no PR yet",
+  closed: "closed", merged: "merged",
+};
+
+/** One bucket per member, from the same state the rail and chip draw (R3);
+ * a failing PR whose checks are still going is told apart, as its chip is. */
+export function stackBucket(layer: StackPosition["layer"]): StackBucket {
+  const state = stackState(layer);
+  if (state === "failing" && layer.pr && prPresentation(layer.pr).running) return "failing-running";
+  return isStackBucket(state) ? state : "open";
+}
+
+function isStackBucket(state: string): state is StackBucket {
+  return (STACK_BUCKETS as readonly string[]).includes(state);
+}
+
+export function stackTally(stack: RepositoryStack): { bucket: StackBucket; count: number }[] {
+  const counts = new Map<StackBucket, number>();
+  for (const layer of stack.layers) counts.set(stackBucket(layer), (counts.get(stackBucket(layer)) ?? 0) + 1);
+  return STACK_BUCKETS.flatMap(bucket => counts.has(bucket) ? [{ bucket, count: counts.get(bucket)! }] : []);
 }
 
 export function stackMembers(stack: RepositoryStack): StackPosition[] {

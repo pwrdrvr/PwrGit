@@ -5,12 +5,14 @@ import {
   changeRequestSigil,
   forgeCapabilities,
   mergeQueueNoun,
-  type PrSummary
+  type PrSummary,
+  type StackPosition
 } from "@pwrgit/shared";
 import { dispatch } from "../../lib/pwrgit";
 import { prPresentation } from "./pr-status";
 import { DiffStat } from "../diff/DiffStat";
 import { longWhen } from "../graph/graph-view";
+import { StackCardSection } from "../stacks/StackPopover";
 
 /**
  * The PR chip's hover card.
@@ -29,11 +31,15 @@ import { longWhen } from "../graph/graph-view";
 export function PrStatusCard({
   pr,
   repoId,
+  stackPosition,
   now = Date.now()
 }: {
   pr: PrSummary;
   /** Present where the card may act: "Add to merge queue". */
   repoId?: string | undefined;
+  /** The stack this PR is in, open or closed: the next question after its
+   *  own state, so its section comes right after the status. */
+  stackPosition?: StackPosition | undefined;
   /** Injected by tests so age rows are deterministic. */
   now?: number;
 }) {
@@ -85,6 +91,7 @@ export function PrStatusCard({
           method={status.queue.kind === "ready_to_queue" ? status.queue.method : pr.mergeQueue?.method}
         />
       ) : null}
+      {stackPosition !== undefined ? <StackCardSection position={stackPosition} /> : null}
       {changes !== undefined ? (
         <div className="pr-status-card__section">
           <span className="pr-status-card__section-title">Changes</span>

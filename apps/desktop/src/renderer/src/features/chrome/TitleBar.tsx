@@ -143,7 +143,7 @@ export function TitleBar({
               ›
             </span>
             <span className="titlebar__cr">
-              <PrChip pr={changeRequest.pr} />
+              <PrChip pr={changeRequest.pr} stackTag={false} />
               <span
                 className="titlebar__cr-title"
                 {...truncatedTooltip(tip, changeRequest.pr.title)}

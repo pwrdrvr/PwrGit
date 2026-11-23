@@ -31,9 +31,11 @@ export function useStackLaneStyle(repoId: string, stack: RepositoryStack): CSSPr
  * stack from here instead of loading a snapshot of its own. */
 const known = new Map<string, StackSnapshot>();
 const listeners = new Set<() => void>();
+let knownVersion = 0;
 function remember(repoId: string, snapshot: StackSnapshot) {
   if (known.get(repoId) === snapshot) return;
   known.set(repoId, snapshot);
+  knownVersion += 1;
   for (const listener of listeners) listener();
 }
 function subscribeKnown(listener: () => void) {
@@ -41,13 +43,26 @@ function subscribeKnown(listener: () => void) {
   return () => { listeners.delete(listener); };
 }
 
-/** The stack this PR is in, open or closed, from snapshots already loaded. */
+/** The stack this PR is in, open or closed, from snapshots already loaded.
+ * Without a repository (a Lineage row, the PR view) any loaded snapshot can
+ * answer, but only for a PR that names its forge repository: a bare number
+ * would match the wrong repo's PR. */
 export function useStackPositionForPr(repoId: string | undefined, pr: Pick<PrSummary, "number" | "repoPath">):
   StackPosition | undefined {
-  const snapshot = useSyncExternalStore(subscribeKnown, () => repoId === undefined ? undefined : known.get(repoId));
-  return useMemo(() => snapshot ? stackPositionForPr(snapshot.stacks, pr) : undefined,
-    // A PR is the same PR while its number and repository are; its other fields refresh.
-    [snapshot, pr.number, pr.repoPath]);
+  const version = useSyncExternalStore(subscribeKnown, () => knownVersion, () => knownVersion);
+  return useMemo(() => {
+    if (repoId !== undefined) {
+      const snapshot = known.get(repoId);
+      if (snapshot) return stackPositionForPr(snapshot.stacks, pr);
+    }
+    if (!pr.repoPath) return undefined;
+    for (const snapshot of known.values()) {
+      const position = stackPositionForPr(snapshot.stacks, pr);
+      if (position) return position;
+    }
+    return undefined;
+  // A PR is the same PR while its number and repository are; its other fields refresh.
+  }, [version, repoId, pr.number, pr.repoPath]);
 }
 
 type Read = ReturnType<typeof loadSnapshot>;
