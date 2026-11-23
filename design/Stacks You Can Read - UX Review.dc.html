@@ -1,0 +1,567 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Stacks You Can Read - UX Review</title>
+    <script src="./support.js"></script>
+  </head>
+  <body>
+    <x-dc>
+      <helmet data-dc-atomics>
+        <meta name="design_doc_mode" content="canvas" />
+        <link href="https://fonts.googleapis.com/css2?family=Geist:wght@400..700&amp;family=Geist+Mono:wght@400..700&amp;display=swap" rel="stylesheet" />
+        <style>
+          /* Layout: review turns top to bottom; each turn shows the app at its real size beside the reason. Dark only, like the app's default. */
+          :root {
+            color-scheme: dark;
+            --rv-bg: #050505; --rv-line: rgba(247, 243, 235, 0.1);
+            --rv-t1: #f7f3eb; --rv-t2: #b8b0a5; --rv-t3: #8c857a; --rv-tsub: rgba(247, 243, 235, 0.54);
+            --rv-acc: #ff8a1f; --rv-accb: #ffb35c; --rv-accon: #160a00;
+            --rv-bad: #b94232; --rv-ok: #5fa969;
+            --font-sans: "Geist", "SF Pro Text", "Inter", system-ui, sans-serif;
+            --font-mono: "Geist Mono", "SF Mono", "JetBrains Mono", Consolas, monospace;
+            /* The app's own dark tokens (styles/tokens.css). */
+            --bg-stage: #000000; --bg-sidebar: #050505; --bg-panel: #0a0a0a; --bg-panel-elevated: #101010;
+            --bg-panel-hover: #14110d; --bg-hover-strong: #1f1a12; --bg-row-active: #120800;
+            --border-faint: rgba(247, 243, 235, 0.06); --border-subtle: rgba(247, 243, 235, 0.1); --border-default: rgba(247, 243, 235, 0.14); --border-strong: rgba(247, 243, 235, 0.2);
+            --text-primary: #f7f3eb; --text-secondary: #b8b0a5; --text-muted: #8c857a; --text-subtle: rgba(247, 243, 235, 0.54);
+            --accent: #ff8a1f; --accent-bright: #ffb35c; --accent-on: #160a00; --accent-border: rgba(255, 138, 31, 0.42);
+            --status-ok: #5fa969; --status-warning: #d99a3d; --status-error: #c45a3a; --status-suspended: #6b6660;
+            --success-text: #9ce5b3; --danger-text: #ffb0a1; --info-text: #9fc8ff;
+            --brand-purple: #8a6dc4; --lane-1: #ff8a1f;
+            --shadow-popover: 0 14px 36px rgba(0, 0, 0, 0.55);
+          }
+          *, *::before, *::after { box-sizing: border-box; }
+          html { background: var(--rv-bg); }
+          body { margin: 0; background: var(--rv-bg); font-family: var(--font-sans); color: var(--rv-t1); }
+          a { color: var(--rv-accb); text-decoration: none; } a:hover { color: var(--rv-acc); }
+          button { font-family: inherit; cursor: pointer; }
+
+          /* ---- review chrome (house convention) ---- */
+          .dv-turn { padding: 40px 44px 36px; background: var(--rv-bg); border-bottom: 1px solid var(--rv-line); }
+          .dv-thd { display: flex; align-items: baseline; gap: 10px; margin: 0 0 6px; }
+          .dv-tid { font: 600 10px var(--font-mono); padding: 3px 7px; background: var(--rv-t1); color: var(--rv-bg); border-radius: 4px; }
+          .dv-tname { margin: 0; font: 600 13px/1.2 var(--font-sans); color: var(--rv-t1); }
+          .dv-sub { margin: 0 0 22px; font: 400 11.5px/1.55 var(--font-sans); color: var(--rv-t3); max-width: 920px; text-wrap: pretty; }
+          .dv-sub b { color: var(--rv-t2); font-weight: 600; }
+          .dv-sub code, .note code, .fitem code, .tr code, .quote code { font: 500 10px/1.4 var(--font-mono); color: var(--rv-t2); }
+          .dv-opts { display: flex; flex-wrap: wrap; gap: 32px; align-items: flex-start; }
+          .dv-opt { flex: 0 1 auto; min-width: 0; display: flex; flex-direction: column; gap: 9px; }
+          .dv-oid { font: 600 10.5px var(--font-mono); padding: 3px 7px; background: rgba(247, 243, 235, 0.08); color: var(--rv-t1); border-radius: 5px; }
+          .dv-olabel { display: flex; align-items: baseline; gap: 8px; font: 400 11px/1.35 var(--font-sans); color: var(--rv-tsub); max-width: 560px; }
+          .dv-olabel b { color: var(--rv-accb); font-weight: 600; }
+          .dv-olabel .rec { color: var(--rv-ok); font-weight: 600; }
+          .dv-olabel .rej { color: var(--rv-bad); font-weight: 600; }
+          .dv-next { margin: 26px 0 0; font: 400 11px/1.6 var(--font-sans); color: var(--rv-t3); max-width: 920px; }
+          .dv-next b { color: var(--rv-t2); }
+          .note { margin: 0; font: 400 10.5px/1.5 var(--font-sans); color: var(--rv-t3); text-wrap: pretty; max-width: 470px; }
+          .note b { color: var(--rv-t2); font-weight: 600; }
+          .quote { margin: 0 0 18px; padding: 12px 14px; max-width: 920px; border: 1px solid var(--rv-line); border-radius: 8px; background: #0a0a0a; font: 400 12px/1.55 var(--font-sans); color: var(--rv-t2); }
+          .quote cite { display: block; margin-top: 6px; font: 500 10px/1 var(--font-mono); font-style: normal; color: var(--rv-t3); }
+          .pin { display: inline-flex; align-items: center; justify-content: center; flex: none; width: 15px; height: 15px; border-radius: 999px; background: var(--rv-bad); color: #fff; font: 700 9px/1 var(--font-mono); }
+          .pin.ok { background: var(--rv-ok); color: #06130a; }
+          .pin.acc { background: var(--rv-acc); color: var(--rv-accon); }
+          .find { width: 600px; max-width: 100%; display: flex; flex-direction: column; gap: 14px; padding: 16px; border: 1px solid var(--rv-line); border-radius: 9px; background: #0a0a0a; }
+          .find.wide { width: 920px; }
+          .fitem { display: grid; grid-template-columns: 15px minmax(0, 1fr); gap: 9px; align-items: start; }
+          .fitem h4 { margin: 0 0 3px; font: 650 11.5px/1.3 var(--font-sans); color: var(--rv-t1); }
+          .fitem p { margin: 0; font: 400 10.5px/1.55 var(--font-sans); color: var(--rv-t3); text-wrap: pretty; }
+          .fitem b { color: var(--rv-t2); font-weight: 600; }
+          .shot { display: block; border: 1px solid var(--rv-line); border-radius: 8px; max-width: 100%; height: auto; }
+          .stage { position: relative; padding: 18px; border-radius: 10px; background: var(--bg-stage); border: 1px solid var(--rv-line); }
+
+          .tbl { width: 100%; max-width: 1180px; border: 1px solid var(--rv-line); border-radius: 9px; background: #0a0a0a; overflow: hidden; }
+          .tr { display: grid; grid-template-columns: 200px 170px minmax(0, 1fr); gap: 12px; align-items: center; padding: 8px 12px; border-bottom: 1px solid var(--rv-line); font: 500 10.5px/1.5 var(--font-sans); color: var(--rv-t2); }
+          .tr:last-child { border-bottom: 0; }
+          .tr.head { font: 600 9.5px/1.3 var(--font-sans); letter-spacing: 0.04em; text-transform: uppercase; color: var(--rv-t3); background: rgba(247, 243, 235, 0.03); }
+          .tr b { color: var(--rv-t1); font-weight: 600; }
+          .tr.r4 { grid-template-columns: 54px 260px minmax(0, 1fr) 220px; align-items: start; }
+          .tr .mn { font: 600 10.5px/1.5 var(--font-mono); color: var(--rv-t1); }
+          .glyphcell { display: flex; align-items: center; gap: 8px; }
+
+          /* ---- app atoms ---- */
+          .mono { font-family: var(--font-mono); }
+          .prc { flex: none; display: inline-flex; align-items: center; gap: 5px; height: 18px; padding: 0 7px; border-radius: 999px; border: 1px solid var(--border-subtle); background: var(--bg-panel); color: var(--text-secondary); font: 600 10px/1 var(--font-mono); white-space: nowrap; }
+          .prc .d { width: 7px; height: 7px; flex: none; border-radius: 50%; background: var(--status-suspended); }
+          .prc.passing .d { background: var(--status-ok); } .prc.failing .d { background: var(--status-error); }
+          .prc.pending .d { background: var(--status-warning); }
+          .prc.draft .d { background: transparent; border: 1px dashed var(--text-muted); }
+          .prc.merged { border-color: rgba(138, 109, 196, 0.5); color: #c9b6f0; } .prc.merged .d { background: var(--brand-purple); }
+          .bdg { flex: none; display: inline-flex; align-items: center; gap: 4px; height: 17px; padding: 0 6px; border-radius: 5px; font: 600 9.5px/1 var(--font-mono); white-space: nowrap; border: 1px solid transparent; }
+          .bdg.warn { color: var(--status-warning); background: rgba(217, 154, 61, 0.1); border-color: rgba(217, 154, 61, 0.3); }
+          .bdg.bad { color: var(--danger-text); background: rgba(185, 66, 50, 0.16); border-color: rgba(185, 66, 50, 0.4); }
+          .bdg.ok { color: var(--success-text); background: rgba(74, 148, 92, 0.16); border-color: rgba(95, 169, 105, 0.32); }
+          .bdg.mute { color: var(--text-muted); border-color: var(--border-subtle); }
+          .bdg.merged { color: #c9b6f0; background: rgba(138, 109, 196, 0.16); border-color: rgba(138, 109, 196, 0.4); }
+          .bdg.info { color: var(--info-text); background: rgba(86, 137, 196, 0.14); border-color: rgba(86, 137, 196, 0.32); }
+
+          /* Stack nodes: colour AND shape, so state never rides on hue alone. */
+          .nd { display: inline-block; flex: none; width: 9px; height: 9px; border-radius: 50%; background: var(--bg-sidebar); border: 1.5px solid var(--text-muted); }
+          .nd.ok { background: var(--status-ok); border-color: var(--status-ok); }
+          .nd.fail { background: var(--bg-sidebar); border: 2.5px solid var(--status-error); }
+          .nd.pend { background: var(--bg-sidebar); border: 1.5px solid var(--status-warning); }
+          .nd.draft { background: transparent; border: 1.5px dashed var(--text-muted); }
+          .nd.merged { background: var(--brand-purple); border-color: var(--brand-purple); border-radius: 2px; transform: rotate(45deg) scale(.85); }
+          .nd.closed { background: var(--status-suspended); border-color: var(--status-suspended); }
+          .nd.nopr { background: transparent; border: 1.5px dashed var(--text-muted); border-radius: 2px; }
+          .nd.trunk { background: var(--text-muted); border-color: var(--text-muted); border-radius: 2px; }
+          .nd.me { box-shadow: 0 0 0 2px var(--bg-sidebar), 0 0 0 3.5px var(--accent); }
+
+          /* ---- sidebar mock ---- */
+          .sb { position: relative; width: 340px; padding: 6px 6px 8px; border: 1px solid var(--border-subtle); border-radius: 9px; background: var(--bg-sidebar); }
+          .sh { display: flex; align-items: center; gap: 7px; height: 30px; padding: 0 6px 0 4px; color: var(--text-muted); }
+          .sh .c { flex: none; width: 0; height: 0; border-top: 3px solid transparent; border-bottom: 3px solid transparent; border-left: 4px solid currentColor; transform: rotate(90deg); opacity: .82; }
+          .slabel { font: 600 10px/1 var(--font-sans); letter-spacing: 0.08em; text-transform: uppercase; color: var(--text-subtle); }
+          .scount { font: 600 10px/1 var(--font-mono); color: var(--text-subtle); }
+          .sp { flex: 1; min-width: 0; }
+          .cr { display: flex; flex-direction: column; gap: 3px; min-width: 0; padding: 4px 3px 4px 6px; border: 1px solid transparent; border-radius: 6px; }
+          .cr.sel { border-color: var(--accent); background: var(--bg-row-active); }
+          .cr .ln, .cr .wh { display: flex; align-items: center; gap: 6px; min-width: 0; }
+          .cr .ti { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-primary); font: 500 11.5px/1.2 var(--font-sans); }
+          .cr .age { flex: none; font: 600 8.5px/1 var(--font-mono); color: var(--text-muted); }
+          .cr .act { flex: none; width: 18px; height: 18px; display: inline-flex; align-items: center; justify-content: center; border: 0; border-radius: 4px; background: transparent; color: var(--text-muted); font: 500 13px/1 var(--font-sans); padding: 0; }
+          .cr .wh { padding-left: 2px; }
+          .cr .hd { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-muted); font: 500 10.5px/1 var(--font-mono); }
+
+          /* 3a: a stack group. The rail column is 18px; cards keep their own padding. */
+          .sg { position: relative; margin: 2px 0 6px; }
+          .sg-cap { display: flex; align-items: center; gap: 6px; height: 20px; padding: 0 4px 0 18px; border: 0; background: transparent; width: 100%; color: var(--text-muted); font: 600 9.5px/1 var(--font-mono); text-align: left; border-radius: 5px; }
+          .sg-cap:hover { background: var(--bg-panel-hover); color: var(--text-secondary); }
+          .sg-cap .sk { flex: none; display: inline-flex; width: 11px; height: 11px; }
+          .sg-cap .nm { color: var(--text-secondary); }
+          .sg-cap .sp { flex: 1; }
+          .sc { position: relative; padding-left: 18px; }
+          .sc .rl { position: absolute; left: 8px; top: 0; bottom: 0; border-left: 1.5px solid var(--lane-1); opacity: .75; }
+          .sc.first .rl { top: 13px; }
+          .sc.stale .rl.lo { top: 13px; border-left: 1.5px dashed var(--status-warning); opacity: 1; }
+          .sc .rl.hi { bottom: auto; height: 13px; }
+          .sc > .nd { position: absolute; left: 4px; top: 9px; z-index: 1; }
+          .ghost { display: flex; align-items: center; gap: 6px; height: 22px; padding: 0 4px 0 7px; color: var(--text-muted); font: 500 10.5px/1 var(--font-mono); }
+          .ghost .gt { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+          .sc.g > .nd { top: 6.5px; }
+          .sc.g.first .rl { top: 11px; }
+          .trunk { position: relative; display: flex; align-items: center; gap: 6px; height: 18px; padding-left: 25px; color: var(--text-muted); font: 500 10px/1 var(--font-mono); }
+          .trunk::before { content: ""; position: absolute; left: 8px; top: 0; height: 9px; border-left: 1.5px solid var(--lane-1); opacity: .75; }
+          .trunk .nd { position: absolute; left: 4px; top: 4.5px; }
+
+          /* 3b: the ladder on a lone card */
+          .lad { flex: none; display: flex; flex-direction: column; align-items: center; gap: 2px; width: 12px; padding-top: 2px; }
+          .lad .p { width: 6px; height: 6px; border-radius: 50%; background: var(--status-suspended); }
+          .lad .p.ok { background: var(--status-ok); } .lad .p.fail { background: var(--status-error); }
+          .lad .p.merged { background: var(--brand-purple); border-radius: 1px; transform: rotate(45deg) scale(.85); }
+          .lad .p.draft, .lad .p.nopr { background: transparent; border: 1px dashed var(--text-muted); }
+          .lad .p.me { width: 8px; height: 8px; box-shadow: 0 0 0 1.5px var(--bg-sidebar), 0 0 0 3px var(--accent); }
+          .lad .t { width: 6px; height: 3px; border-radius: 1px; background: var(--text-muted); margin-top: 1px; }
+          .cr.lone { flex-direction: row; gap: 6px; }
+          .cr.lone .body { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 3px; }
+          .pos { flex: none; font: 600 9.5px/1 var(--font-mono); color: var(--text-muted); }
+
+          /* 4: popover */
+          .pop { width: 420px; max-width: 100%; border: 1px solid var(--border-default); border-radius: 10px; background: var(--bg-panel-elevated); box-shadow: var(--shadow-popover); overflow: hidden; }
+          .pop-h { display: flex; align-items: center; gap: 8px; padding: 10px 12px; border-bottom: 1px solid var(--border-subtle); }
+          .pop-h .t { font: 650 12px/1.2 var(--font-sans); color: var(--text-primary); }
+          .pop-h .s { font: 500 10.5px/1 var(--font-mono); color: var(--text-muted); }
+          .pop-h .x { margin-left: auto; width: 22px; height: 22px; border: 0; border-radius: 5px; background: transparent; color: var(--text-muted); font: 500 14px/1 var(--font-sans); }
+          .pop-l { list-style: none; margin: 0; padding: 6px; }
+          .pop-r { position: relative; display: grid; grid-template-columns: 18px minmax(0, 1fr); gap: 6px; padding: 7px 8px 7px 4px; border-radius: 7px; }
+          .pop-r.cur { background: var(--bg-hover-strong); }
+          .pop-r .rail { position: relative; }
+          .pop-r .rail .nd { position: absolute; left: 4px; top: 3px; z-index: 1; }
+          .pop-r .rail::after { content: ""; position: absolute; left: 8px; top: 10px; bottom: -18px; border-left: 1.5px solid var(--lane-1); opacity: .75; }
+          .pop-r.stale-lo .rail::after { border-left: 1.5px dashed var(--status-warning); opacity: 1; }
+          .pop-r.trunk-r .rail::after { display: none; }
+          .pop-r .t1 { display: flex; align-items: center; gap: 6px; min-width: 0; font: 600 11.5px/1.3 var(--font-sans); color: var(--text-primary); }
+          .pop-r .t1 span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+          .pop-r .t2 { display: flex; flex-wrap: wrap; align-items: center; gap: 5px 8px; margin-top: 4px; font: 500 10px/1.3 var(--font-mono); color: var(--text-muted); }
+          .pop-r .here { flex: none; font: 600 8.5px/1 var(--font-sans); letter-spacing: .06em; text-transform: uppercase; color: var(--accent-bright); }
+          .pop-f { display: flex; align-items: center; gap: 10px; padding: 8px 12px; border-top: 1px solid var(--border-subtle); font: 500 10px/1 var(--font-sans); color: var(--text-muted); }
+          .kbd { display: inline-flex; align-items: center; height: 16px; padding: 0 4px; border: 1px solid var(--border-default); border-radius: 4px; font: 600 9px/1 var(--font-mono); color: var(--text-secondary); }
+          .btn { display: inline-flex; align-items: center; gap: 6px; height: 26px; padding: 0 10px; border: 1px solid var(--border-default); border-radius: 6px; background: var(--bg-panel); color: var(--text-primary); font: 600 11px/1 var(--font-sans); white-space: nowrap; }
+          .btn.pri { background: var(--accent); border-color: var(--accent); color: var(--accent-on); }
+          .btn.ghostb { border-color: transparent; background: transparent; color: var(--accent-bright); }
+          .btn:disabled { opacity: .45; cursor: not-allowed; }
+
+          /* 4b: PR view head */
+          .crv { width: 760px; max-width: 100%; padding: 16px 18px; border: 1px solid var(--border-subtle); border-radius: 9px; background: var(--bg-panel); }
+          .crv h3 { margin: 0 0 8px; font: 650 16px/1.3 var(--font-sans); color: var(--text-primary); }
+          .crv h3 span { color: var(--text-muted); font-weight: 500; }
+          .crv .meta { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; font: 500 11px/1.4 var(--font-sans); color: var(--text-secondary); }
+          .state { display: inline-flex; align-items: center; gap: 5px; height: 22px; padding: 0 9px; border-radius: 999px; background: rgba(95, 169, 105, 0.18); color: var(--success-text); font: 650 11px/1 var(--font-sans); }
+          .stk { display: inline-flex; align-items: center; gap: 6px; height: 22px; padding: 0 8px; border: 1px solid var(--accent-border); border-radius: 999px; background: var(--bg-hover-strong); color: var(--accent-bright); font: 650 10.5px/1 var(--font-mono); }
+          .ref { padding: 2px 6px; border-radius: 4px; background: rgba(86, 137, 196, 0.14); color: var(--info-text); font: 500 10.5px/1.3 var(--font-mono); }
+
+          /* 5: Stacks section rows (one per stack) and graph chip */
+          .ssr { display: flex; align-items: center; gap: 8px; height: 26px; padding: 0 6px 0 8px; border: 1px solid transparent; border-radius: 6px; }
+          .ssr:hover { background: var(--bg-panel-hover); }
+          .ssr .nm { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: 500 11.5px/1.2 var(--font-sans); color: var(--text-primary); }
+          .train { flex: none; display: inline-flex; align-items: center; }
+          .train .nd { width: 8px; height: 8px; }
+          .train .w { width: 8px; border-top: 1.5px solid var(--lane-1); opacity: .75; }
+          .train .w.stale { border-top: 1.5px dashed var(--status-warning); opacity: 1; }
+          .graphrow { display: flex; align-items: center; gap: 8px; height: 40px; padding: 0 12px; border: 1px solid var(--border-subtle); border-radius: 8px; background: var(--bg-panel); width: 620px; max-width: 100%; }
+          .refchip { display: inline-flex; align-items: center; gap: 5px; height: 20px; padding: 0 7px; border-radius: 999px; border: 1px solid var(--accent-border); color: var(--accent-bright); font: 600 10.5px/1 var(--font-mono); }
+          .poschip { display: inline-flex; align-items: center; gap: 4px; height: 18px; padding: 0 6px; border-radius: 5px; border: 1px solid var(--border-default); background: var(--bg-panel-elevated); color: var(--text-secondary); font: 600 9.5px/1 var(--font-mono); }
+
+          /* 6: stack view */
+          .sv { width: 1120px; max-width: 100%; display: grid; grid-template-columns: minmax(0, 1fr) 300px; border: 1px solid var(--border-subtle); border-radius: 10px; background: var(--bg-stage); overflow: hidden; }
+          .sv-main { min-width: 0; }
+          .sv-h { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 10px; padding: 12px 16px; border-bottom: 1px solid var(--border-subtle); }
+          .sv-h h3 { margin: 0; font: 650 14px/1.2 var(--font-sans); color: var(--text-primary); }
+          .sv-h .sub { font: 500 11px/1 var(--font-sans); color: var(--text-muted); }
+          .sv-h .tools { margin-left: auto; display: flex; gap: 6px; }
+          .prov { display: flex; align-items: flex-start; gap: 10px; margin: 12px 16px 0; padding: 9px 11px; border: 1px solid var(--border-subtle); border-radius: 8px; background: var(--bg-panel); font: 400 11px/1.5 var(--font-sans); color: var(--text-secondary); }
+          .prov b { color: var(--text-primary); font-weight: 600; }
+          .sv-cards { list-style: none; margin: 0; padding: 14px 16px 18px; display: flex; flex-direction: column; gap: 10px; }
+          .svc { position: relative; padding-left: 26px; }
+          .svc .rl { position: absolute; left: 10px; top: 0; bottom: -10px; border-left: 1.5px solid var(--lane-1); opacity: .75; }
+          .svc.first .rl { top: 18px; }
+          .svc.stale .rl { border-left: 1.5px dashed var(--status-warning); opacity: 1; }
+          .svc > .nd { position: absolute; left: 6px; top: 14px; z-index: 1; }
+          .svc.trunk-c .rl { bottom: auto; height: 18px; }
+          .card { display: flex; flex-direction: column; gap: 6px; padding: 10px 12px; border: 1px solid var(--border-subtle); border-radius: 8px; background: var(--bg-panel); }
+          .card.sel { border-color: var(--accent); background: var(--bg-row-active); }
+          .card .l1 { display: flex; align-items: center; gap: 8px; min-width: 0; }
+          .card .l1 .ti { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: 600 12.5px/1.3 var(--font-sans); color: var(--text-primary); }
+          .card .l1 .ps { flex: none; font: 600 10px/1 var(--font-mono); color: var(--text-muted); }
+          .card .l2 { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; font: 500 10.5px/1.3 var(--font-mono); color: var(--text-muted); }
+          .card .l3 { font: 400 11px/1.45 var(--font-sans); color: var(--text-secondary); }
+          .card .l3 b { color: var(--status-warning); font-weight: 600; }
+          .card.trunkcard { flex-direction: row; align-items: center; gap: 8px; padding: 7px 12px; font: 600 11.5px/1 var(--font-mono); color: var(--text-secondary); }
+          .card.trunkcard small { font: 500 10px/1 var(--font-sans); color: var(--text-muted); }
+          .sv-rail { border-left: 1px solid var(--border-subtle); background: var(--bg-panel); padding: 14px; display: flex; flex-direction: column; gap: 12px; }
+          .sv-rail h4 { margin: 0; font: 600 10px/1 var(--font-sans); letter-spacing: .08em; text-transform: uppercase; color: var(--text-subtle); }
+          .kv { display: grid; grid-template-columns: 74px minmax(0, 1fr); gap: 6px 10px; font: 500 11px/1.4 var(--font-sans); color: var(--text-secondary); }
+          .kv dt { color: var(--text-muted); } .kv dd { margin: 0; min-width: 0; }
+          .why { padding: 9px 10px; border: 1px solid rgba(217, 154, 61, 0.3); border-radius: 7px; background: rgba(217, 154, 61, 0.06); font: 400 11px/1.5 var(--font-sans); color: var(--text-secondary); }
+          .why b { color: var(--warn-text, #e8c890); font-weight: 600; }
+
+          .twocol { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px 22px; }
+          @media (max-width: 760px) { .twocol { grid-template-columns: 1fr; } .sv { grid-template-columns: 1fr; } .sv-rail { border-left: 0; border-top: 1px solid var(--border-subtle); } }
+        </style>
+      </helmet>
+
+      <!-- ============================== TURN 0 ============================== -->
+      <section class="dv-turn">
+        <div class="dv-thd"><span class="dv-tid">0</span><h2 class="dv-tname">Brief: the stack UI shipped, and a person still can't tell a stack is there</h2></div>
+        <blockquote class="quote">“It opened automatically while I was looking at the tree. It shouldn’t do that. … It shows main as the one closest to 1/2 … as the furthest away from main. Like the lineage is backwards. … What this was supposed to do was give us a UX to understand that a stack exists. Kind of like the GitHub screenshot I sent. I would think … on the PR cards … we might have added a lane on the left or right of the card that show the stack and the position of that PR in the stack and status of the other PRs in the stack.”<cite>Harold, 2026-11-23, after #649 and #651 shipped</cite></blockquote>
+        <p class="dv-sub">The first round, <b>Stacked PRs - UX Review</b>, spent five of its six turns on the engine: the catalog, replay, locks, undo and MCP. It gave people one picture, a Stacks section listing branch names. The build followed that picture and then drew it upside down. This round is about the person. You look at a pull request and see that it sits in a stack, where it sits, and how the other PRs in the stack are doing. You get there without leaving the list and without a view taking over the main pane.</p>
+        <p class="dv-sub"><b>Decisions for review:</b> the stack rail on PR cards (<b>3a</b>, recommended), one popover shared by the rail, the PR view and the graph (<b>4</b>), and shrinking the Stacks section to one row per stack (<b>5a</b>). <b>Assumptions to check:</b> position numbers keep GitHub’s meaning, so 1 is the PR on trunk. Every list of a stack reads top of stack first, with trunk last, like GitHub. <b>Data:</b> the trust stack’s PR numbers, titles, branches, states and diff size are from Harold’s PwrAgnt screenshots. Its check counts, file names, worktree name and behind-main count are invented, and so are the ledger stack and the other PR titles.</p>
+      </section>
+
+      <!-- ============================== TURN 1 ============================== -->
+      <section class="dv-turn">
+        <div class="dv-thd"><span class="dv-tid">1</span><h2 class="dv-tname">As built: what the screenshots show</h2></div>
+        <p class="dv-sub">PwrAgnt has four two-PR stacks open. The sidebar spends 16 rows on them. The stack view replaced the Lineage pane without being asked. GitHub shows the same stack as one pill and a three-line popover.</p>
+        <div class="dv-opts">
+          <div class="dv-opt">
+            <div class="dv-olabel"><span class="dv-oid">1a</span>Sidebar Stacks section, as shipped</div>
+            <img class="shot" src="./assets/stacks-as-built/sidebar-stacks.png" alt="Sidebar Stacks section: four stacks, each a title row, two truncated branch rows and a main Trunk row" width="288" height="470" />
+          </div>
+          <div class="dv-opt">
+            <div class="dv-olabel"><span class="dv-oid">1b</span>Stack view, opened in place of Lineage</div>
+            <img class="shot" src="./assets/stacks-as-built/stack-view.png" alt="Stack view with 1/2 at the top, 2/2 below and main at the bottom" width="540" height="440" />
+          </div>
+          <div class="dv-opt">
+            <div class="dv-olabel"><span class="dv-oid">1c</span>GitHub, the same stack (reference)</div>
+            <img class="shot" src="./assets/stacks-as-built/github-stack-popover.png" alt="GitHub stack popover: #4206 on top, #4199 below it, then main" width="370" height="250" />
+          </div>
+        </div>
+        <div class="find wide" style="margin-top: 22px">
+          <div class="twocol">
+            <div class="fitem"><span class="pin">1</span><div><h4>It opens by itself</h4><p>The stack view takes over the main pane after a click that wasn’t asking for it. The prime suspect is <code>.stack-graph-bracket</code>. It’s a 9px button in the lane gutter of every stack-tip row in Lineage, right where people click commits. Next are the sidebar stack title rows, which sit in the tree and open the view on a plain click. Opening a whole pane needs an explicit command.</p></div></div>
+            <div class="fitem"><span class="pin">2</span><div><h4>The lineage is upside down</h4><p>Every list renders <code>layers[0]</code> first and then trunk. So 1/2, the PR on main, prints at the top, and main prints two rows below it. Main ends up beside the branch furthest from it. The first round asked for the opposite: “rows read top to bottom as GitHub’s UI, with trunk last.” GitHub draws #4206, then #4199, then main.</p></div></div>
+            <div class="fitem"><span class="pin">3</span><div><h4>Four rows per two-PR stack</h4><p>Each stack gets a title that repeats its bottom branch name. Then come branch rows that truncate to the same prefix (<code>codex/2071-agent-trus…</code>), then a <code>main · Trunk</code> row repeated in every stack. Four stacks take 16 rows and push Pull requests off screen.</p></div></div>
+            <div class="fitem"><span class="pin">4</span><div><h4>PR cards don’t show the stack</h4><p>A stacked PR card gets a small <code>1/2</code> button and nothing more. It doesn’t show the other PR, whether that PR is merged or failing, or that the two cards belong together. Clicking <code>1/2</code> swaps the whole main pane.</p></div></div>
+            <div class="fitem"><span class="pin">5</span><div><h4>Branches where people think in PRs</h4><p>The sidebar and the cards in the view lead with branch names and bury the PR number and title. People recognize <b>#4206 enforce per-Agent invocation trust</b>, not <code>codex/2071-agent-trust-runtime</code>.</p></div></div>
+            <div class="fitem"><span class="pin">6</span><div><h4>“Inferred” for a stack GitHub already links</h4><p>GitHub calls this <b>Stack #4235</b>, so it’s a linked stack. PwrGit labels it Inferred and makes <b>Adopt stack</b> the orange primary button without saying what adopting does. Provenance has to come from GitHub’s stack when one exists.</p></div></div>
+            <div class="fitem"><span class="pin">7</span><div><h4>The rail repeats the list in plumbing words</h4><p>“Stack health” lists the same branches again with “Recorded parent tip 9b40b575” and “Health unknown”. An inferred stack has no record, and “unknown” isn’t a state anyone can act on.</p></div></div>
+            <div class="fitem"><span class="pin">8</span><div><h4>Amber for something you can’t do</h4><p>“4 to restack” and a ⟳ on every 1/2 fire because main moved. Restack is disabled on these stacks, so the header sounds an alarm with no action behind it. Being behind main is a quiet fact about the bottom PR. Amber is for a tracked stack you can actually restack.</p></div></div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ============================== TURN 2 ============================== -->
+      <section class="dv-turn">
+        <div class="dv-thd"><span class="dv-tid">2</span><h2 class="dv-tname">One rule for every drawing of a stack: top of stack first, trunk last, trunk touching 1</h2></div>
+        <p class="dv-sub">A stack is a tower standing on trunk. Wherever PwrGit lists one, in the sidebar group, the popover, the stack view or a tooltip, rows run from the highest position down to 1. Trunk comes immediately after 1, with the spine joining them. Position numbers keep GitHub’s meaning: <code>n/N</code> counts up from trunk, so the number on the top row is <code>N/N</code>. Lineage already draws commits newest first, so this order also matches the graph beside it.</p>
+        <div class="dv-opts">
+          <div class="dv-opt">
+            <div class="dv-olabel"><span class="dv-oid">2a</span><span class="rej">Shipped</span> main is two rows from the PR it’s under</div>
+            <div class="sb" style="width: 300px">
+              <div class="sc first"><span class="rl"></span><span class="nd ok"></span><div class="ghost"><span class="pos">1/2</span><span class="gt">#4199 define Agent invocation trust…</span></div></div>
+              <div class="sc"><span class="rl"></span><span class="nd fail"></span><div class="ghost"><span class="pos">2/2</span><span class="gt">#4206 enforce per-Agent invocation…</span></div></div>
+              <div class="trunk"><span class="nd trunk"></span>main</div>
+            </div>
+          </div>
+          <div class="dv-opt">
+            <div class="dv-olabel"><span class="dv-oid">2b</span><span class="rec">Rule</span> the order GitHub uses, with main under 1/2</div>
+            <div class="sb" style="width: 300px">
+              <div class="sc first"><span class="rl"></span><span class="nd fail"></span><div class="ghost"><span class="pos">2/2</span><span class="gt">#4206 enforce per-Agent invocation…</span></div></div>
+              <div class="sc"><span class="rl"></span><span class="nd ok"></span><div class="ghost"><span class="pos">1/2</span><span class="gt">#4199 define Agent invocation trust…</span></div></div>
+              <div class="trunk"><span class="nd trunk"></span>main</div>
+            </div>
+          </div>
+          <p class="note" style="align-self: center">State this as a property test, not an example. For any stack of any height, every renderer emits positions in strictly descending order, ending with trunk. The row before trunk is position 1. Today’s tests check the order they were written against, which is how the inverted list passed.</p>
+        </div>
+      </section>
+
+      <!-- ============================== TURN 3 ============================== -->
+      <section class="dv-turn">
+        <div class="dv-thd"><span class="dv-tid">3</span><h2 class="dv-tname">The stack where you already look: a rail on the PR cards</h2></div>
+        <p class="dv-sub">Pull requests is where a person meets a stack, so that is where the stack shows. Stacked PRs sit together in stack order. A rail on the card’s left edge joins them and runs down into trunk. Each card’s node carries its own PR state, so the rail reads as the stack’s health from top to bottom. Members that aren’t open PRs still keep their place as one-line ghosts: a merged parent, or the top branch that has no PR yet. The tower never loses a floor. A card is still a PR card, with the same chip, title, age and actions, the same click to open the PR, and nothing that swaps the main pane.</p>
+        <div class="dv-opts">
+          <div class="dv-opt">
+            <div class="dv-olabel"><span class="dv-oid">3a</span><span class="rec">Recommended</span> Grouped cards on a rail, at 340px</div>
+            <div class="sb">
+              <div class="sh"><span class="c"></span><span class="slabel">Pull requests</span><span class="scount">7</span><span class="sp"></span></div>
+
+              <div class="sg">
+                <button type="button" class="sg-cap" aria-label="Stack #4235, 2 pull requests into main. Show stack"><svg class="sk" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m12.83 2.18a2 2 0 0 0-1.66 0L2.6 6.08a1 1 0 0 0 0 1.83l8.58 3.91a2 2 0 0 0 1.66 0l8.58-3.9a1 1 0 0 0 0-1.83Z"></path><path d="m22 17.65-9.17 4.16a2 2 0 0 1-1.66 0L2 17.65"></path><path d="m22 12.65-9.17 4.16a2 2 0 0 1-1.66 0L2 12.65"></path></svg><span class="nm">Stack #4235</span><span>· 2 into main</span><span class="sp"></span></button>
+                <div class="sc first"><span class="rl"></span><span class="nd fail"></span>
+                  <div class="cr sel">
+                    <div class="ln"><span class="prc failing"><span class="d"></span>#4206</span><span class="ti">feat(messaging): enforce per-Agent invocation trust</span><span class="age">15h</span><button type="button" class="act" aria-label="New worktree for #4206">+</button></div>
+                    <div class="wh"><span class="hd">codex/2071-agent-trust-runtime</span><span class="bdg bad">conflicts</span></div>
+                  </div>
+                </div>
+                <div class="sc"><span class="rl"></span><span class="nd ok"></span>
+                  <div class="cr">
+                    <div class="ln"><span class="prc passing"><span class="d"></span>#4199</span><span class="ti">feat(messaging): define Agent invocation trust policies</span><span class="age">1d</span><button type="button" class="act" aria-label="New worktree for #4199">+</button></div>
+                    <div class="wh"><span class="hd">codex/2071-agent-trust-schema</span><span class="bdg mute">main +14</span></div>
+                  </div>
+                </div>
+                <div class="trunk"><span class="nd trunk"></span>main</div>
+              </div>
+
+              <div class="sg">
+                <button type="button" class="sg-cap" aria-label="Stack ledger, 3 branches into main. Show stack"><svg class="sk" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m12.83 2.18a2 2 0 0 0-1.66 0L2.6 6.08a1 1 0 0 0 0 1.83l8.58 3.91a2 2 0 0 0 1.66 0l8.58-3.9a1 1 0 0 0 0-1.83Z"></path><path d="m22 17.65-9.17 4.16a2 2 0 0 1-1.66 0L2 17.65"></path><path d="m22 12.65-9.17 4.16a2 2 0 0 1-1.66 0L2 12.65"></path></svg><span class="nm">ledger</span><span>· 3 into main</span><span class="sp"></span><span class="bdg warn">sync</span></button>
+                <div class="sc g first"><span class="rl"></span><span class="nd nopr"></span><div class="ghost"><span class="gt">feat/ledger-ui</span><span>no PR yet</span></div></div>
+                <div class="sc stale"><span class="rl hi"></span><span class="rl lo"></span><span class="nd draft"></span>
+                  <div class="cr">
+                    <div class="ln"><span class="prc draft"><span class="d"></span>#4212</span><span class="ti">feat(ledger): persist approvals across restarts</span><span class="age">3h</span><button type="button" class="act" aria-label="New worktree for #4212">+</button></div>
+                    <div class="wh"><span class="hd">feat/ledger-store</span><span class="bdg warn">parent merged</span></div>
+                  </div>
+                </div>
+                <div class="sc g"><span class="rl"></span><span class="nd merged"></span><div class="ghost"><span class="gt">#4207 approval schema</span><span>merged</span></div></div>
+                <div class="trunk"><span class="nd trunk"></span>main</div>
+              </div>
+
+              <div class="cr">
+                <div class="ln"><span class="prc passing"><span class="d"></span>#4233</span><span class="ti">fix(desktop): recover stalled to-do launches</span><span class="age">9h</span><button type="button" class="act" aria-label="New worktree for #4233">+</button></div>
+                <div class="wh"><span class="hd">fix/stalled-todos</span></div>
+              </div>
+              <div class="cr">
+                <div class="ln"><span class="prc pending"><span class="d"></span>#4229</span><span class="ti">chore(agent-core): update agent-kit transport</span><span class="age">9h</span><button type="button" class="act" aria-label="New worktree for #4229">+</button></div>
+                <div class="wh"><span class="hd">chore/agent-kit-transport</span></div>
+              </div>
+            </div>
+          </div>
+
+          <div class="dv-opt" style="max-width: 470px">
+            <div class="dv-olabel"><span class="dv-oid">3a</span>What each part means</div>
+            <div class="find" style="width: 470px">
+              <div class="fitem"><span class="pin acc">a</span><div><h4>Caption row: one per stack</h4><p>It shows the name (GitHub’s <code>Stack #4235</code>, gh stack’s name, or the bottom branch for a stack found from PR bases) and how many PRs go into which trunk. It also carries one stack-level badge when there’s something to do, such as <b>sync</b> after a parent merged. Click it or press Space to get the popover (turn 4). It never opens a pane.</p></div></div>
+              <div class="fitem"><span class="pin acc">b</span><div><h4>The rail</h4><p>The lane colour runs from the top member down into trunk. A <b>dashed amber</b> segment under a card means that card isn’t on its parent’s tip: it needs a restack or, after a merge, a sync. That’s the one place amber appears.</p></div></div>
+              <div class="fitem"><span class="pin acc">c</span><div><h4>Nodes are PR states</h4><p>Each node is drawn from the same state as the card’s PR chip, so the two never disagree. Shapes differ as well as colours (table below).</p></div></div>
+              <div class="fitem"><span class="pin acc">d</span><div><h4>Ghost rows keep the tower whole</h4><p>A merged or closed member, or a branch with no PR yet, takes one 22px line in its slot. Click a ghost for its popover row. Without ghosts, a merged bottom PR would leave #4212 looking as if it sat on main.</p></div></div>
+              <div class="fitem"><span class="pin acc">e</span><div><h4>Behind trunk is a quiet fact</h4><p><code>main +14</code> on the bottom card is muted, not amber. It tells you main moved, and it asks nothing until the stack is tracked and a restack exists.</p></div></div>
+              <div class="fitem"><span class="pin acc">f</span><div><h4>Keyboard</h4><p>Arrow keys still move card to card and skip the caption and ghost rows. The rail doesn’t change the tree’s <code>aria-level</code>s. The caption is a button inside the group.</p></div></div>
+            </div>
+          </div>
+
+          <div class="dv-opt">
+            <div class="dv-olabel"><span class="dv-oid">3b</span>Fallback: when a stack can’t sit together, each card carries a ladder</div>
+            <div class="sb">
+              <div class="sh"><span class="c"></span><span class="slabel">Pull requests</span><span class="scount">· sorted by Recent</span></div>
+              <div class="cr lone">
+                <span class="lad" aria-label="Position 2 of 2: this PR failing, #4199 passing, then main"><span class="p fail me"></span><span class="p ok"></span><span class="t"></span></span>
+                <div class="body">
+                  <div class="ln"><span class="prc failing"><span class="d"></span>#4206</span><span class="ti">feat(messaging): enforce per-Agent invocation trust</span><span class="pos">2/2</span></div>
+                  <div class="wh"><span class="hd">codex/2071-agent-trust-runtime</span></div>
+                </div>
+              </div>
+              <div class="cr">
+                <div class="ln"><span class="prc passing"><span class="d"></span>#4233</span><span class="ti">fix(desktop): recover stalled to-do launches</span><span class="age">9h</span></div>
+                <div class="wh"><span class="hd">fix/stalled-todos</span></div>
+              </div>
+              <div class="cr lone">
+                <span class="lad" aria-label="Position 1 of 2: #4206 failing above, this PR passing, then main"><span class="p fail"></span><span class="p ok me"></span><span class="t"></span></span>
+                <div class="body">
+                  <div class="ln"><span class="prc passing"><span class="d"></span>#4199</span><span class="ti">feat(messaging): define Agent invocation trust policies</span><span class="pos">1/2</span></div>
+                  <div class="wh"><span class="hd">codex/2071-agent-trust-schema</span></div>
+                </div>
+              </div>
+            </div>
+            <p class="note" style="max-width: 340px">Use it only when the list order isn’t stack order: a sort by Recent, or a filter that hides some members. The ladder is the rail shrunk to one card. One pip per member, top of stack first, then a trunk bar. The ringed pip is this PR. Grouping (3a) is the default.</p>
+          </div>
+        </div>
+
+        <div class="tbl" style="margin-top: 26px">
+          <div class="tr r4 head"><span>Node</span><span>PR state</span><span>Comes from</span><span>Popover words</span></div>
+          <div class="tr r4"><span class="glyphcell"><span class="nd ok"></span></span><span><b>Open, checks passing</b></span><span><code>PrSummary</code> state open and the rollup the PR chip already uses</span><span>checks passing</span></div>
+          <div class="tr r4"><span class="glyphcell"><span class="nd fail"></span></span><span><b>Open, checks failing</b> (thick ring)</span><span>Same rollup, failing</span><span>checks failing</span></div>
+          <div class="tr r4"><span class="glyphcell"><span class="nd pend"></span></span><span><b>Open, checks running</b> (thin amber ring)</span><span>Same rollup, pending</span><span>checks running</span></div>
+          <div class="tr r4"><span class="glyphcell"><span class="nd draft"></span></span><span><b>Draft</b> (dashed ring)</span><span><code>isDraft</code></span><span>draft</span></div>
+          <div class="tr r4"><span class="glyphcell"><span class="nd merged"></span></span><span><b>Merged</b> (purple diamond)</span><span>PR state merged; a ghost row</span><span>merged 2h ago</span></div>
+          <div class="tr r4"><span class="glyphcell"><span class="nd closed"></span></span><span><b>Closed, not merged</b></span><span>PR state closed; a ghost row</span><span>closed</span></div>
+          <div class="tr r4"><span class="glyphcell"><span class="nd nopr"></span></span><span><b>Branch, no PR yet</b> (dashed square)</span><span>A stack layer with no <code>pr</code>; a ghost row</span><span>no PR yet</span></div>
+          <div class="tr r4"><span class="glyphcell"><span class="nd trunk"></span></span><span><b>Trunk</b></span><span><code>stack.trunk</code></span><span>main</span></div>
+          <div class="tr r4"><span class="glyphcell"><span style="display: inline-block; width: 1.5px; height: 18px; border-left: 1.5px dashed var(--status-warning)"></span></span><span><b>Not on parent’s tip</b> (dashed amber segment)</span><span><code>needsRestack</code> or <code>parentMerged</code> on the card above the segment</span><span>needs restack · parent merged, sync</span></div>
+        </div>
+      </section>
+
+      <!-- ============================== TURN 4 ============================== -->
+      <section class="dv-turn">
+        <div class="dv-thd"><span class="dv-tid">4</span><h2 class="dv-tname">One popover, three doors: the rail, the PR view’s stack pill, and the graph’s n/N chip</h2></div>
+        <p class="dv-sub">GitHub’s answer to “is this stacked?” is a pill and a popover, and that’s right. PwrGit keeps the shape and adds what PwrGit knows on top of it: each member’s checks, conflicts and distance from its parent. Rows run top of stack first and end at trunk (turn 2). The current PR is marked. Clicking a row opens that PR, the same as clicking its card. The full stack view is a link in the footer, and that link is the only way into it from here.</p>
+        <div class="dv-opts">
+          <div class="dv-opt">
+            <div class="dv-olabel"><span class="dv-oid">4a</span><span class="rec">Recommended</span> The stack popover</div>
+            <div class="pop" role="dialog" aria-label="Stack #4235">
+              <div class="pop-h"><span class="t">Stack #4235</span><span class="s">2 PRs into main · linked on GitHub</span><button type="button" class="x" aria-label="Close">×</button></div>
+              <ol class="pop-l">
+                <li class="pop-r cur"><span class="rail"><span class="nd fail me"></span></span><div><div class="t1"><span>feat(messaging): enforce per-Agent invocation trust</span><span class="here">This PR</span></div><div class="t2"><span>#4206 · 2/2</span><span>codex/2071-agent-trust-runtime</span><span class="bdg bad">checks failing</span><span class="bdg bad">conflicts</span></div></div></li>
+                <li class="pop-r"><span class="rail"><span class="nd ok"></span></span><div><div class="t1"><span>feat(messaging): define Agent invocation trust policies</span></div><div class="t2"><span>#4199 · 1/2</span><span>codex/2071-agent-trust-schema</span><span class="bdg ok">checks passing</span><span class="bdg mute">main +14</span></div></div></li>
+                <li class="pop-r trunk-r"><span class="rail"><span class="nd trunk"></span></span><div><div class="t1"><span class="mono" style="font-weight: 600; color: var(--text-secondary)">main</span></div></div></li>
+              </ol>
+              <div class="pop-f"><button type="button" class="btn">Open stack view</button><a href="#">View on GitHub</a><span class="sp" style="flex: 1"></span><span class="kbd">↑</span><span class="kbd">↓</span> move <span class="kbd">↵</span> open PR</div>
+            </div>
+          </div>
+          <div class="dv-opt">
+            <div class="dv-olabel"><span class="dv-oid">4b</span>The same popover in the ledger stack, with a merged parent</div>
+            <div class="pop" role="dialog" aria-label="Stack ledger">
+              <div class="pop-h"><span class="t">ledger</span><span class="s">3 branches into main · gh stack</span><button type="button" class="x" aria-label="Close">×</button></div>
+              <ol class="pop-l">
+                <li class="pop-r"><span class="rail"><span class="nd nopr"></span></span><div><div class="t1"><span class="mono" style="font-weight: 600">feat/ledger-ui</span></div><div class="t2"><span>3/3</span><span>no PR yet · 2 commits</span></div></div></li>
+                <li class="pop-r cur stale-lo"><span class="rail"><span class="nd draft me"></span></span><div><div class="t1"><span>feat(ledger): persist approvals across restarts</span><span class="here">This PR</span></div><div class="t2"><span>#4212 · 2/3</span><span>draft</span><span class="bdg warn">parent merged · sync</span></div></div></li>
+                <li class="pop-r"><span class="rail"><span class="nd merged"></span></span><div><div class="t1"><span style="color: var(--text-secondary)">feat(ledger): approval schema</span></div><div class="t2"><span>#4207 · 1/3</span><span class="bdg merged">merged 2h ago</span></div></div></li>
+                <li class="pop-r trunk-r"><span class="rail"><span class="nd trunk"></span></span><div><div class="t1"><span class="mono" style="font-weight: 600; color: var(--text-secondary)">main</span></div></div></li>
+              </ol>
+              <div class="pop-f"><button type="button" class="btn pri">Sync stack…</button><button type="button" class="btn">Open stack view</button><span class="sp" style="flex: 1"></span><span class="kbd">↵</span> open PR</div>
+            </div>
+            <p class="note">An action button appears in the footer only when there is one to take, the stack is tracked, and the snapshot is writable. It opens the plan in the stack view (the first round’s turn 3). It never runs from the popover.</p>
+          </div>
+        </div>
+
+        <div class="dv-opts" style="margin-top: 28px">
+          <div class="dv-opt">
+            <div class="dv-olabel"><span class="dv-oid">4c</span>The PR view’s head: a stack pill beside the state, like GitHub’s</div>
+            <div class="crv">
+              <h3>feat(messaging): enforce per-Agent invocation trust <span>#4206</span></h3>
+              <div class="meta">
+                <span class="state">Open</span>
+                <button type="button" class="stk" aria-label="Stack #4235, position 2 of 2. Show stack"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m12.83 2.18a2 2 0 0 0-1.66 0L2.6 6.08a1 1 0 0 0 0 1.83l8.58 3.91a2 2 0 0 0 1.66 0l8.58-3.9a1 1 0 0 0 0-1.83Z"></path><path d="m22 17.65-9.17 4.16a2 2 0 0 1-1.66 0L2 17.65"></path><path d="m22 12.65-9.17 4.16a2 2 0 0 1-1.66 0L2 12.65"></path></svg>2/2</button>
+                <span>huntharo wants to merge 8 commits into</span><span class="ref">codex/2071-agent-trust-schema</span><a href="#" class="mono" style="font-size: 10.5px">#4199</a><span>from</span><span class="ref">codex/2071-agent-trust-runtime</span>
+              </div>
+            </div>
+            <p class="note" style="max-width: 760px">The base ref gains its PR number when the base is another PR in the stack. “Into codex/2071-agent-trust-schema” on its own is the sentence that confuses people about stacks.</p>
+          </div>
+          <div class="dv-opt">
+            <div class="dv-olabel"><span class="dv-oid">4d</span>Lineage: the n/N chip opens the popover, and the gutter bracket goes</div>
+            <div class="graphrow"><span class="nd ok" style="width: 11px; height: 11px"></span><span class="mono" style="font-size: 10.5px; color: var(--text-muted)">b41e7a0</span><span style="font: 500 11.5px var(--font-sans); color: var(--text-primary); flex: 1; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis">feat(messaging): define Agent invocation trust policies</span><span class="refchip">codex/2071-agent-trust-schema</span><span class="poschip">1/2</span></div>
+            <p class="note" style="max-width: 620px">Remove <code>.stack-graph-bracket</code>. A 9px button over the lanes is a trap, and the rail in 3a now carries the meaning. The chip keeps its place in the branch-chip budget. A click opens the popover anchored to the chip. It doesn’t open the view, select the stack, or move the graph.</p>
+          </div>
+        </div>
+      </section>
+
+      <!-- ============================== TURN 5 ============================== -->
+      <section class="dv-turn">
+        <div class="dv-thd"><span class="dv-tid">5</span><h2 class="dv-tname">The Stacks section: one row per stack, after Pull requests</h2></div>
+        <p class="dv-sub">Once Pull requests shows each stack’s shape, the Stacks section is an index, not a second copy of the tree. Each stack gets one row: name, a small train read left to right from trunk to top, the count, and one badge when there’s something to do. The section moves below Pull requests and starts collapsed when every stack in it already shows there. A stack whose branches have no PRs yet appears only here, and the section stays open whenever it holds one.</p>
+        <div class="dv-opts">
+          <div class="dv-opt">
+            <div class="dv-olabel"><span class="dv-oid">5a</span><span class="rec">Recommended</span> One row per stack</div>
+            <div class="sb">
+              <div class="sh"><span class="c"></span><span class="slabel">Stacks</span><span class="scount">5</span><span class="sp"></span></div>
+              <div class="ssr"><span class="nm">Stack #4235</span><span class="train" aria-label="main, then #4199 passing, then #4206 failing"><span class="nd trunk"></span><span class="w"></span><span class="nd ok"></span><span class="w"></span><span class="nd fail"></span></span><span class="scount">2</span></div>
+              <div class="ssr"><span class="nm">ledger</span><span class="train" aria-label="main, then #4207 merged, then #4212 draft needs sync, then feat/ledger-ui with no PR"><span class="nd trunk"></span><span class="w"></span><span class="nd merged"></span><span class="w stale"></span><span class="nd draft"></span><span class="w"></span><span class="nd nopr"></span></span><span class="scount">3</span><span class="bdg warn">sync</span></div>
+              <div class="ssr"><span class="nm">experiment/federation-window-view</span><span class="train"><span class="nd trunk"></span><span class="w"></span><span class="nd ok"></span><span class="w"></span><span class="nd pend"></span></span><span class="scount">2</span></div>
+              <div class="ssr"><span class="nm">feat/agent-capability-schema-2070</span><span class="train"><span class="nd trunk"></span><span class="w"></span><span class="nd ok"></span><span class="w"></span><span class="nd ok"></span></span><span class="scount">2</span></div>
+              <div class="ssr"><span class="nm">feat/block-agent-messages-to-higher-access</span><span class="train"><span class="nd trunk"></span><span class="w"></span><span class="nd ok"></span><span class="w"></span><span class="nd draft"></span></span><span class="scount">2</span></div>
+            </div>
+            <p class="note" style="max-width: 340px">Five stacks take five rows. The shipped section took 16 rows for four. A row is a navigation row like a PR row. A click or Enter opens the stack view, and that’s the one sidebar control that does. Hover shows the popover’s contents as a tooltip.</p>
+          </div>
+          <div class="dv-opt" style="max-width: 520px">
+            <div class="dv-olabel"><span class="dv-oid">5b</span>Provenance in words, with the right source</div>
+            <div class="tbl" style="width: 520px">
+              <div class="tr head" style="grid-template-columns: 150px minmax(0, 1fr)"><span>Label</span><span>When</span></div>
+              <div class="tr" style="grid-template-columns: 150px minmax(0, 1fr)"><span><b>linked on GitHub</b></span><span>GitHub has a stack object for these PRs, like <code>Stack #4235</code>. Name the stack by its number. This is what PwrGit currently calls Inferred.</span></div>
+              <div class="tr" style="grid-template-columns: 150px minmax(0, 1fr)"><span><b>gh stack</b></span><span>gh stack’s local catalog tracks it. Restack, Sync and Submit are available.</span></div>
+              <div class="tr" style="grid-template-columns: 150px minmax(0, 1fr)"><span><b>from PR bases</b></span><span>Neither tracks it. PwrGit chained PR bases. Name it by its bottom branch. Actions are off, and the stack view explains Track with gh stack.</span></div>
+            </div>
+            <p class="note">“Inferred” goes away as a word. People don’t need to know the method. They need to know who keeps the stack, because that decides what they can do to it.</p>
+          </div>
+        </div>
+      </section>
+
+      <!-- ============================== TURN 6 ============================== -->
+      <section class="dv-turn">
+        <div class="dv-thd"><span class="dv-tid">6</span><h2 class="dv-tname">The stack view, when someone asks for it</h2></div>
+        <p class="dv-sub">The view opens only from <b>Open stack view</b> in the popover, a Stacks-section row, or an agent or command that names it. It keeps the first round’s job: the plan, the run and undo. But it reads like the popover at full size, top of stack first, PR title first, with the spine running from 1 straight into trunk. The right rail stops repeating the list. It shows the selected card’s facts and says, in words, what the dashed segment means.</p>
+        <div class="sv">
+          <div class="sv-main">
+            <div class="sv-h">
+              <button type="button" class="btn" aria-label="Back to Lineage">←</button>
+              <h3>Stack #4235</h3><span class="sub">2 PRs into main</span><span class="bdg info">linked on GitHub</span>
+              <div class="tools"><button type="button" class="btn" disabled="">Restack</button><button type="button" class="btn" disabled="">Submit</button><button type="button" class="btn ghostb">Track with gh stack…</button></div>
+            </div>
+            <div class="prov"><span class="nd" style="margin-top: 4px; border-color: var(--info-text)"></span><div>GitHub links these PRs as <b>Stack #4235</b>, but gh stack in this clone doesn’t track it, so PwrGit can show it and can’t restack it. <b>Track with gh stack</b> writes it to the local catalog and adds nothing on GitHub.</div></div>
+            <ol class="sv-cards">
+              <li class="svc first"><span class="rl"></span><span class="nd fail"></span>
+                <div class="card sel">
+                  <div class="l1"><span class="ps">2/2</span><span class="ti">feat(messaging): enforce per-Agent invocation trust</span><span class="prc failing"><span class="d"></span>#4206</span></div>
+                  <div class="l2"><span>codex/2071-agent-trust-runtime</span><span>8 commits · +1451 −116</span><span class="bdg bad">checks failing</span><span class="bdg bad">conflicts</span><span>⌂ PwrAgent.trust-runtime</span></div>
+                </div>
+              </li>
+              <li class="svc"><span class="rl"></span><span class="nd ok"></span>
+                <div class="card">
+                  <div class="l1"><span class="ps">1/2</span><span class="ti">feat(messaging): define Agent invocation trust policies</span><span class="prc passing"><span class="d"></span>#4199</span></div>
+                  <div class="l2"><span>codex/2071-agent-trust-schema</span><span>5 commits · +612 −40</span><span class="bdg ok">checks passing</span><span class="bdg mute">main +14</span></div>
+                </div>
+              </li>
+              <li class="svc trunk-c"><span class="rl"></span><span class="nd trunk"></span>
+                <div class="card trunkcard">main <span class="mono" style="font-weight: 500; color: var(--text-muted)">39d8ec9</span><small>trunk</small></div>
+              </li>
+            </ol>
+          </div>
+          <aside class="sv-rail" aria-label="Selected pull request">
+            <h4>#4206 · 2 of 2</h4>
+            <dl class="kv">
+              <dt>Base</dt><dd>codex/2071-agent-trust-schema (#4199)</dd>
+              <dt>Checks</dt><dd style="color: var(--danger-text)">2 failing of 9</dd>
+              <dt>Review</dt><dd>No reviews</dd>
+              <dt>Merge</dt><dd style="color: var(--danger-text)">Conflicts with its base</dd>
+              <dt>Worktree</dt><dd>⌂ PwrAgent.trust-runtime</dd>
+            </dl>
+            <div class="why"><b>Why it conflicts.</b> #4199 changed <code class="mono" style="font-size: 10px">src/agent/trust.ts</code> after #4206 was built on it. Restacking #4206 onto #4199’s tip would replay its 8 commits there. PwrGit can plan that once the stack is tracked.</div>
+            <button type="button" class="btn">Open PR #4206</button>
+          </aside>
+        </div>
+        <p class="dv-next"><b>Gone from the view:</b> the branch name as the card title, “on main 407334a1”, the duplicate health list, “Recorded parent tip” for stacks that have no record, “Health unknown”, and Adopt stack as an unexplained primary button. <b>Kept:</b> the run scanner, the re-seat animation, the plan rail and undo from #651.</p>
+      </section>
+
+      <!-- ============================== TURN 7 ============================== -->
+      <section class="dv-turn">
+        <div class="dv-thd"><span class="dv-tid">7</span><h2 class="dv-tname">What “built right” means: the rules the review will check</h2></div>
+        <p class="dv-sub">These are the acceptance rules for the fix. Each rule that broke gets a property or model test that fails on today’s code (AGENTS.md rule 7). The UX review looks at real renders of the cases at the bottom, at 340px and in the light theme too, before anything merges.</p>
+        <div class="tbl">
+          <div class="tr head"><span>Rule</span><span>Test kind</span><span>Statement</span></div>
+          <div class="tr"><span><b>R1 Order</b></span><span>Property</span><span>For any stack of height 1–8, the sidebar group, popover, stack view, Stacks-section train (reversed) and accessible names all list positions strictly descending, and trunk comes right after position 1.</span></div>
+          <div class="tr"><span><b>R2 Nothing opens the view by itself</b></span><span>Model</span><span>Over random sequences of commit-row clicks, gutter clicks, hovers, focus moves, arrow keys in the sidebar, snapshot refreshes, repo switches and Back, the stack view opens only after <i>Open stack view</i>, a Stacks-section row activation, or a named command.</span></div>
+          <div class="tr"><span><b>R3 Node = chip</b></span><span>Property</span><span>For any PR summary, the rail node, ladder pip, popover badge and PR chip all derive from one state function and never disagree. Each state differs in shape, not only hue.</span></div>
+          <div class="tr"><span><b>R4 Whole tower</b></span><span>Property</span><span>Every stack layer appears exactly once in the PR list group, as a card or a ghost. Grouped cards are contiguous, and no non-stack PR sits inside a group.</span></div>
+          <div class="tr"><span><b>R5 Provenance</b></span><span>Example + oracle</span><span>A stack GitHub links is labelled <i>linked on GitHub</i> and named by its number. It’s never called Inferred, and it’s never offered Adopt as a primary action.</span></div>
+          <div class="tr"><span><b>R6 Amber means actionable</b></span><span>Property</span><span>An amber badge or dashed segment appears only when the matching action (restack or sync) could be planned for that stack. Behind-trunk on an untracked stack is muted.</span></div>
+        </div>
+        <p class="dv-next"><b>Screenshots the review needs</b> (harness renders, contrived data): 3a at 340px with a two-PR stack, a three-member stack with a merged bottom and a no-PR top, and two unstacked PRs · 3b sorted by Recent · 4a and 4b popovers · 4c PR view head · 5a section · 6 stack view, untracked and tracked with a dashed segment · light theme for 3a and 4a · before/after of the gutter with the bracket gone.</p>
+      </section>
+    </x-dc>
+    <script type="text/x-dc" data-dc-script data-props='{}'>
+class Component extends DCLogic {
+  renderVals() {
+    return {};
+  }
+}
+    </script>
+  </body>
+</html>
