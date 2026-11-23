@@ -1,7 +1,8 @@
 import { EventEmitter } from "node:events";
+import fs from "node:fs/promises";
 import { mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import type { Profiler } from "node:inspector";
 import { app, contentTracing, type BrowserWindow, type ProcessMetric } from "electron";
 import fc from "fast-check";
@@ -79,6 +80,35 @@ afterEach(() => {
   vi.mocked(contentTracing.stopRecording).mockReset();
 });
 
+it("serializes manifest writes when trace and snapshot artifacts register together", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "pwrgit-trace-manifest-order-"));
+  let releaseFirst!: () => void;
+  const firstWrite = new Promise<void>((resolve) => { releaseFirst = resolve; });
+  let reportFirst!: () => void;
+  const firstStarted = new Promise<void>((resolve) => { reportFirst = resolve; });
+  const persisted: string[][] = [];
+  try {
+    const captureSession = await session(directory);
+    vi.spyOn(fs, "writeFile").mockImplementation(async (_file, data) => {
+      const { artifacts } = JSON.parse(String(data)) as { artifacts: string[] };
+      if (artifacts.length === 1) {
+        reportFirst();
+        await firstWrite;
+      }
+      persisted.push(artifacts);
+    });
+    const trace = captureSession.registerArtifact("capture.trace.json");
+    await firstStarted;
+    const heap = captureSession.registerArtifact("capture.heapsnapshot");
+    releaseFirst();
+    await Promise.all([trace, heap]);
+    expect(persisted).toEqual([["capture.trace.json"], ["capture.trace.json", "capture.heapsnapshot"]]);
+  } finally {
+    releaseFirst();
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
 describe("Chromium trace follows the renderer capture lifecycle", () => {
   it("lets the first window proceed if native trace start never acknowledges", async () => {
     vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
@@ -108,7 +138,7 @@ describe("Chromium trace follows the renderer capture lifecycle", () => {
     }
   });
 
-  it.each(["disarm", "trace-off", "heap", "exhaust", "close", "timeout", "profile-failed"] as const)(
+  it.each(["disarm", "trace-off", "heap", "exhaust", "close", "timeout", "slow-stop", "profile-failed"] as const)(
     "preserves triggered captures and releases the trace when renderers %s",
     async (transition) => {
       const directory = await mkdtemp(join(tmpdir(), "pwrgit-trace-lifecycle-"));
@@ -123,7 +153,7 @@ describe("Chromium trace follows the renderer capture lifecycle", () => {
       vi.stubEnv("PWRGIT_HOT_CPU_PROFILING_TRIGGER_MODE", "spike");
       vi.stubEnv("PWRGIT_HOT_CPU_PROFILING_MAX_PROFILES", transition === "timeout" ? "2" : "1");
       vi.stubEnv("PWRGIT_HOT_CPU_PROFILING_DURATION_MS",
-        transition === "exhaust" || transition === "timeout" || transition === "profile-failed" ? "50" : "60000");
+        transition === "exhaust" || transition === "timeout" || transition === "slow-stop" || transition === "profile-failed" ? "50" : "60000");
 
       let cpu = transition === "close" ? 0 : 90;
       let destroyed = false;
@@ -132,6 +162,8 @@ describe("Chromium trace follows the renderer capture lifecycle", () => {
       let exports = 0;
       let rawPath: string | undefined;
       const hangs = transition === "timeout";
+      let releaseStop!: () => void;
+      const slowStop = new Promise<void>((resolve) => { releaseStop = resolve; });
       started.mockImplementation(async () => {
         expect(nativeRecording).toBe(false);
         nativeRecording = true;
@@ -142,6 +174,7 @@ describe("Chromium trace follows the renderer capture lifecycle", () => {
         exports++;
         rawPath = file;
         if (hangs && exports === 1) await new Promise<never>(() => {});
+        if (transition === "slow-stop") await slowStop;
         if (file) await writeFile(file, JSON.stringify({ traceEvents: [] }));
         return file ?? join(directory, "discarded.json");
       });
@@ -214,18 +247,36 @@ describe("Chromium trace follows the renderer capture lifecycle", () => {
             await manager.shutdown();
             expect(notify).not.toHaveBeenCalled();
           } else {
-            await vi.waitFor(() => expect(notify).toHaveBeenCalledOnce(), { timeout: 6_000 });
+            await vi.waitFor(() => expect(notify).toHaveBeenCalledOnce(), { timeout: 1_500 });
           }
-          const artifacts = JSON.parse(await readFile(join(rendererDirectory, "session.json"), "utf8")).artifacts;
-          expect(artifacts).toEqual(transition === "profile-failed" ? [] : hangs || transition === "trace-off"
-            ? ["renderer-hot-0001.cpuprofile"]
-            : ["renderer-hot-0001.cpuprofile", "renderer-hot-0001.trace.json"]);
+          if (transition === "slow-stop") {
+            const artifacts = JSON.parse(await readFile(join(rendererDirectory, "session.json"), "utf8")).artifacts;
+            expect(artifacts).toEqual(["renderer-hot-0001.cpuprofile"]);
+            releaseStop();
+          }
+          await vi.waitFor(async () => {
+            const artifacts = JSON.parse(await readFile(join(rendererDirectory, "session.json"), "utf8")).artifacts;
+            expect(artifacts).toEqual(transition === "profile-failed" ? [] : hangs || transition === "trace-off"
+              ? ["renderer-hot-0001.cpuprofile"]
+              : ["renderer-hot-0001.cpuprofile", "renderer-hot-0001.trace.json"]);
+          });
           if (transition === "trace-off" || transition === "profile-failed") {
             expect(exports).toBe(1);
             await expect(readFile(rawPath!)).rejects.toMatchObject({ code: "ENOENT" });
           }
           if (hangs) {
-            // CPU sampling continues even though native trace export never acknowledged.
+            const failure = await vi.waitFor(async () => {
+              const events = (await readFile(join(rendererDirectory, "events.ndjson"), "utf8"))
+                .trim().split("\n").map((line) => JSON.parse(line));
+              const failure = events.find((event) => event.type === "chromium-trace-failed");
+              expect(failure?.detail).toMatchObject({
+                error: "Stopping Chromium trace timed out",
+                recordingStoppedAtMs: expect.any(Number)
+              });
+              return failure.detail;
+            }, { timeout: 12_000 });
+            expect(failure.nativeStopElapsedMs).toBeGreaterThanOrEqual(failure.nativeStopTimeoutMs - 1);
+            // CPU sampling recovers even though native trace export never acknowledged.
             const readCount = reads.mock.calls.length;
             await vi.waitFor(() => expect(reads.mock.calls.length).toBeGreaterThan(readCount));
             settings = { ...settings, hotCpuProfilingEnabled: false };
@@ -244,11 +295,89 @@ describe("Chromium trace follows the renderer capture lifecycle", () => {
           expect(nativeRecording).toBe(true);
         }
       } finally {
+        releaseStop();
         await manager.shutdown();
         await rm(directory, { recursive: true, force: true });
       }
-    }, 9_000
+    }, 15_000
   );
+
+  it.each([16_000, 30_000])("publishes a saved profile's trace during a %i ms stop snapshot", async (snapshotDelayMs) => {
+    const directory = await mkdtemp(join(tmpdir(), "pwrgit-trace-slow-snapshot-"));
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date", "performance"] });
+    vi.stubEnv("PWRGIT_HOT_CPU_PROFILING_START_DELAY_MS", "20");
+    vi.stubEnv("PWRGIT_HOT_CPU_PROFILING_INTERVAL_MS", "100");
+    vi.stubEnv("PWRGIT_HOT_CPU_PROFILING_TRIGGER_MODE", "spike");
+    vi.stubEnv("PWRGIT_HOT_CPU_PROFILING_DURATION_MS", "100");
+    vi.stubEnv("PWRGIT_HOT_CPU_PROFILING_MAX_PROFILES", "1");
+    vi.mocked(app.getAppMetrics).mockReturnValue([{
+      pid: 42,
+      cpu: { percentCPUUsage: 90, idleWakeupsPerSecond: 0 },
+      memory: { workingSetSize: 1, peakWorkingSetSize: 1 }
+    }] as ProcessMetric[]);
+    vi.mocked(contentTracing.startRecording).mockResolvedValue(undefined);
+    const nativeExport = vi.fn();
+    vi.mocked(contentTracing.stopRecording).mockImplementation(async (file = "") => {
+      await writeFile(file, '{"traceEvents":[]}');
+      nativeExport();
+      return file;
+    });
+    let finishSnapshot!: () => void;
+    const snapshot = new Promise<void>((resolve) => { finishSnapshot = resolve; });
+    const takeHeapSnapshot = vi.fn(async (file: string) => {
+      if (file.endsWith("-stop.heapsnapshot")) await snapshot;
+      await writeFile(file, "{}");
+    });
+    const notify = vi.fn();
+    const manager = new DiagnosticsManager({
+      outputRoot: directory,
+      getDiagnostics: () => ({
+        ...DIAGNOSTICS_DEFAULTS,
+        hotCpuProfilingEnabled: true,
+        hotCpuProfilingRules: readHotCpuRules(undefined, "spike"),
+        hotCpuProfilingCaptureChromiumTrace: true,
+        hotCpuProfilingCaptureHeapSnapshot: true,
+        hotCpuProfilingHeapSnapshotLimit: 2
+      }),
+      onHotCpuHeapSnapshotLimitReached: () => {},
+      onHotCpuProfileCaptured: notify
+    });
+    const window = Object.assign(new EventEmitter(), {
+      isDestroyed: () => false,
+      webContents: {
+        id: 1, getOSProcessId: () => 42, isDestroyed: () => false,
+        debugger: recorder().debugger, takeHeapSnapshot
+      }
+    });
+    try {
+      manager.attachWindow(window as unknown as BrowserWindow);
+      await manager.sync();
+      await vi.waitFor(() => {
+        expect(nativeExport).toHaveBeenCalledOnce();
+        expect(takeHeapSnapshot).toHaveBeenLastCalledWith(expect.stringMatching(/-stop\.heapsnapshot$/));
+      }, { timeout: 5_000 });
+      const sessionDirectory = dirname(takeHeapSnapshot.mock.calls.at(-1)![0]);
+      await vi.waitFor(async () => {
+        const events = await readFile(join(sessionDirectory, "events.ndjson"), "utf8");
+        expect(events).toContain('"type":"chromium-trace-written"');
+      }, { timeout: 5_000 });
+      await vi.advanceTimersByTimeAsync(snapshotDelayMs);
+      expect(notify).not.toHaveBeenCalled();
+
+      finishSnapshot();
+      await vi.waitFor(() => expect(notify).toHaveBeenCalledOnce(), { timeout: 5_000 });
+      const manifest = JSON.parse(await readFile(join(sessionDirectory, "session.json"), "utf8"));
+      expect(manifest.artifacts).toEqual([
+        "renderer-hot-0001-start.heapsnapshot", "renderer-hot-0001.cpuprofile",
+        "renderer-hot-0001.trace.json", "renderer-hot-0001-stop.heapsnapshot"
+      ]);
+    } finally {
+      finishSnapshot();
+      await manager.shutdown();
+      vi.useRealTimers();
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
 
   it("lets another renderer capture while the first renderer's Profiler.stop is stalled", async () => {
     const directory = await mkdtemp(join(tmpdir(), "pwrgit-trace-stalled-renderer-"));
@@ -315,8 +444,10 @@ describe("Chromium trace follows the renderer capture lifecycle", () => {
       hotPid = 43;
       await vi.waitFor(() => expect(notify).toHaveBeenCalledExactlyOnceWith(expect.anything(), "43"), { timeout: 3_000 });
       const event = notify.mock.calls[0]![0];
-      const manifest = JSON.parse(await readFile(join(event.sessionDirectory, "session.json"), "utf8"));
-      expect(manifest.artifacts).toEqual(["renderer-hot-0001.cpuprofile", "renderer-hot-0001.trace.json"]);
+      await vi.waitFor(async () => {
+        const manifest = JSON.parse(await readFile(join(event.sessionDirectory, "session.json"), "utf8"));
+        expect(manifest.artifacts).toEqual(["renderer-hot-0001.cpuprofile", "renderer-hot-0001.trace.json"]);
+      });
     } finally {
       releaseStop();
       await manager.shutdown();

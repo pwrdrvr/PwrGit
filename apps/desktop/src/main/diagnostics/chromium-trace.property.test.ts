@@ -1,8 +1,9 @@
 import { createHash } from "node:crypto";
 import { createReadStream } from "node:fs";
+import fs from "node:fs/promises";
 import { mkdtemp, open, readdir, readFile, rename, rm, stat, truncate, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import fc from "fast-check";
 import { expect, it, vi } from "vitest";
 import { markRetryableTestBody } from "../../../../../scripts/ci/vitest-test-body.ts";
@@ -203,6 +204,199 @@ it("bounds a missing start acknowledgement and an export that never completes", 
     expect(JSON.parse(await readFile(output, "utf8"))).toEqual({ traceEvents: [] });
   } finally {
     await rm(directory, { recursive: true, force: true });
+  }
+});
+
+it("keeps an export that acknowledges after four seconds and before the native deadline", async () => {
+  vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "performance"] });
+  try {
+    await fc.assert(fc.asyncProperty(fc.integer({ min: 4_001, max: 6_000 }), async (stopMs) => {
+      const directory = await mkdtemp(join(tmpdir(), "pwrgit-trace-slow-stop-"));
+      let startStop!: () => void;
+      const stopping = new Promise<void>((resolve) => { startStop = resolve; });
+      let rawPath: string | undefined;
+      const trace = new ChromiumTrace(() => ({
+        async startRecording() {},
+        async stopRecording(file = "") {
+          rawPath = file;
+          const delay = new Promise<void>((resolve) => { setTimeout(resolve, stopMs); });
+          startStop();
+          await delay;
+          await writeFile(file, emptyTrace);
+          return file;
+        }
+      }), () => {}, {
+        filterTrace: async (raw, output) => writeFile(output, await readFile(raw))
+      });
+      try {
+        await trace.setArmed(true);
+        await vi.advanceTimersByTimeAsync(1);
+        const output = join(directory, "trace.json");
+        const capture = trace.capture(output, performance.now()).catch((error: unknown) => error);
+        await stopping;
+        await vi.advanceTimersByTimeAsync(stopMs);
+        expect(await capture).toMatchObject({ status: "written", nativeStopElapsedMs: stopMs });
+        await expect(readFile(output, "utf8")).resolves.toBe(emptyTrace);
+        await expect(stat(rawPath!)).rejects.toMatchObject({ code: "ENOENT" });
+      } finally {
+        await rm(directory, { recursive: true, force: true });
+      }
+    }), { numRuns: 6 });
+  } finally {
+    vi.useRealTimers();
+  }
+});
+
+it.each(["disarm", "hurried shutdown", "disarm then shutdown"] as const)("cleans up a pending native stop on %s", async (operation) => {
+  const directory = await mkdtemp(join(tmpdir(), "pwrgit-trace-cancel-native-stop-"));
+  let reportPartial!: (path: string) => void;
+  const partial = new Promise<string>((resolve) => { reportPartial = resolve; });
+  const stopRecording = vi.fn(async (file = "") => {
+    if (stopRecording.mock.calls.length > 1) throw new Error("Failed to stop tracing - no trace in progress");
+    await writeFile(file, '{"traceEvents":[');
+    reportPartial(file);
+    return new Promise<string>(() => {});
+  });
+  const trace = new ChromiumTrace(() => ({ async startRecording() {}, stopRecording }), () => {}, { stopTimeoutMs: 500 });
+  try {
+    await trace.setArmed(true);
+    const output = join(directory, "trace.json");
+    const capture = trace.capture(output, performance.now()).catch((error: unknown) => error);
+    const rawPath = await partial;
+    if (operation !== "hurried shutdown") {
+      await trace.setArmed(false);
+      expect(await capture).toEqual({ status: "skipped", reason: "canceled" });
+      expect(stopRecording).toHaveBeenCalledOnce();
+      if (operation === "disarm then shutdown") {
+        trace.beginShutdown(0);
+        await trace.setArmed(false);
+      }
+    } else {
+      trace.beginShutdown(0);
+      expect(await capture).toMatchObject({ message: "Chromium trace timed out during shutdown" });
+      expect(stopRecording).toHaveBeenCalledOnce();
+    }
+    await vi.waitFor(async () => {
+      await expect(stat(rawPath)).rejects.toMatchObject({ code: "ENOENT" });
+    });
+    expect(await readdir(directory)).toEqual([]);
+  } finally {
+    await trace.setArmed(false);
+    trace.clearShutdownTimer();
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+it("rearms after an abandoned stop drains despite Chromium rejecting stops in flight", async () => {
+  await fc.assert(fc.asyncProperty(fc.array(fc.boolean(), { maxLength: 5 }), async (toggles) => {
+    const directory = await mkdtemp(join(tmpdir(), "pwrgit-trace-rearm-after-drain-"));
+    let finishDrain!: () => void;
+    const drain = new Promise<void>((resolve) => { finishDrain = resolve; });
+    let startedDrain!: () => void;
+    const draining = new Promise<void>((resolve) => { startedDrain = resolve; });
+    let state: "idle" | "recording" | "draining" = "idle";
+    const startRecording = vi.fn(async () => {
+      expect(state).toBe("idle");
+      state = "recording";
+    });
+    const trace = new ChromiumTrace(() => ({
+      startRecording,
+      async stopRecording(file = "") {
+        const activeState = state;
+        if (activeState === "draining") throw new Error("Failed to stop tracing");
+        if (activeState === "idle") throw new Error("Failed to stop tracing - no trace in progress");
+        state = "draining";
+        if (startRecording.mock.calls.length === 1) {
+          const temp = `${file}.tmp`;
+          await writeFile(temp, emptyTrace);
+          startedDrain();
+          await drain;
+          await rename(temp, file);
+        } else {
+          await writeFile(file, emptyTrace);
+        }
+        state = "idle";
+        return file;
+      }
+    }), () => {}, { filterTrace: async (raw, output) => writeFile(output, await readFile(raw)) });
+    try {
+      await trace.setArmed(true);
+      const canceled = trace.capture(join(directory, "canceled.json"), performance.now());
+      await draining;
+      await trace.setArmed(false);
+      for (const armed of [...toggles, true]) await trace.setArmed(armed);
+      expect(await canceled).toEqual({ status: "skipped", reason: "canceled" });
+      expect(startRecording).toHaveBeenCalledTimes(1);
+
+      finishDrain();
+      await vi.waitFor(() => expect(startRecording).toHaveBeenCalledTimes(2));
+      await expect(trace.capture(join(directory, "next.json"), performance.now())).resolves.toMatchObject({ status: "written" });
+      expect(await readdir(directory)).toEqual(["next.json"]);
+    } finally {
+      finishDrain();
+      await trace.setArmed(false);
+      await rm(directory, { recursive: true, force: true });
+    }
+  }), { numRuns: 6 });
+});
+
+it.each(["disarm", "shutdown"] as const)("cleans raw scratch after a writer locked against deletion closes on %s", async (operation) => {
+  const directory = await mkdtemp(join(tmpdir(), "pwrgit-trace-locked-writer-"));
+  let closeWriter!: () => void;
+  const writer = new Promise<void>((resolve) => { closeWriter = resolve; });
+  let reportScratch!: (scratch: string) => void;
+  const opened = new Promise<string>((resolve) => { reportScratch = resolve; });
+  let scratch: string | undefined;
+  let locked = false;
+  const remove = fs.rm;
+  // Model a Windows handle opened without delete sharing. The native endpoint
+  // closes its temp file and renames it to the raw path before acknowledging.
+  const removeSpy = vi.spyOn(fs, "rm").mockImplementation(async (file, options) => {
+    if (file === scratch && locked) throw Object.assign(new Error("sharing violation"), { code: "EPERM" });
+    await remove(file, options);
+  });
+  const startRecording = vi.fn(async () => {});
+  const trace = new ChromiumTrace(() => ({
+    startRecording,
+    async stopRecording(file = "") {
+      if (scratch) throw new Error(locked ? "Failed to stop tracing" : "Failed to stop tracing - no trace in progress");
+      scratch = dirname(file);
+      const temp = `${file}.tmp`;
+      const handle = await open(temp, "w");
+      await handle.writeFile(emptyTrace);
+      locked = true;
+      reportScratch(scratch);
+      await writer;
+      await handle.close();
+      locked = false;
+      await rename(temp, file);
+      return file;
+    }
+  }), () => {});
+  try {
+    await trace.setArmed(true);
+    const capture = trace.capture(join(directory, "trace.json"), performance.now()).catch((error: unknown) => error);
+    const rawScratch = await opened;
+    if (operation === "disarm") {
+      await trace.setArmed(false);
+      expect(await capture).toEqual({ status: "skipped", reason: "canceled" });
+    } else {
+      trace.beginShutdown(0);
+      expect(await capture).toMatchObject({ message: "Chromium trace timed out during shutdown" });
+    }
+    await expect(stat(rawScratch)).resolves.toBeDefined();
+    closeWriter();
+    await vi.waitFor(async () => {
+      await expect(stat(rawScratch)).rejects.toMatchObject({ code: "ENOENT" });
+    });
+    expect(startRecording).toHaveBeenCalledOnce();
+    expect(await readdir(directory)).toEqual([]);
+  } finally {
+    closeWriter();
+    trace.clearShutdownTimer();
+    removeSpy.mockRestore();
+    if (scratch) await remove(scratch, { recursive: true, force: true });
+    await remove(directory, { recursive: true, force: true });
   }
 });
 

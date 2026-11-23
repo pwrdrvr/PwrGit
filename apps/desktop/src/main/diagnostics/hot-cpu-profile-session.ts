@@ -123,6 +123,7 @@ export async function createHotCpuProfileSession(options: {
   const samplesPath = path.join(directoryPath, "samples.ndjson");
   const eventsPath = path.join(directoryPath, "events.ndjson");
   const artifacts: string[] = [];
+  let manifestWrites = Promise.resolve();
 
   const manifest: HotCpuProfileSessionManifest = {
     target,
@@ -170,9 +171,13 @@ export async function createHotCpuProfileSession(options: {
     await fs.appendFile(targetPath, serializeNdjsonRecord(record), "utf8");
   }
 
-  async function registerArtifact(filename: string): Promise<void> {
-    artifacts.push(filename);
-    await writeManifest(manifestPath, manifest);
+  function registerArtifact(filename: string): Promise<void> {
+    const write = manifestWrites.then(() => {
+      artifacts.push(filename);
+      return writeManifest(manifestPath, manifest);
+    });
+    manifestWrites = write.catch(() => undefined);
+    return write;
   }
 
   return {

@@ -9,7 +9,7 @@ import { cleanEnv } from "./fixtures/electron-app";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 
-test("one rolling Chromium trace retains both renderer rule matches under repaint pressure", async ({}, info) => {
+test("a rolling Chromium trace retains trigger context when export acknowledgement follows the CPU notice", async ({}, info) => {
   test.setTimeout(90_000);
   const html = info.outputPath("index.html");
   const controller = info.outputPath("diagnostics-manager.mjs");
@@ -86,17 +86,26 @@ test("one rolling Chromium trace retains both renderer rule matches under repain
       // Use a smaller native ring so real renderer activity forces eviction on
       // fast and slow CI hosts without needing a full 32 MiB of Perfetto data.
       contentTracing.startRecording = (config) => startRecording({ ...config, trace_buffer_size_in_kb: 1024 });
-      let raw = "";
-      contentTracing.stopRecording = async (file) => {
-        const written = await stopRecording(file);
-        // In-memory oracle from the native export, with synthetic data only.
-        raw = await fs.readFile(written, "utf8");
-        return written;
-      };
       let onHotCpuProfileCaptured!: (event: import("@pwrgit/shared").HotCpuProfileCapturedEvent) => void;
       const profileWritten = new Promise<import("@pwrgit/shared").HotCpuProfileCapturedEvent>((resolve) => {
         onHotCpuProfileCaptured = resolve;
       });
+      let raw = "";
+      let nativePromiseMs = 0;
+      let holdAcknowledgement = false;
+      contentTracing.stopRecording = async (file) => {
+        const hold = holdAcknowledgement;
+        holdAcknowledgement = false;
+        const requestedAt = performance.now();
+        const written = await stopRecording(file);
+        if (hold) nativePromiseMs = performance.now() - requestedAt;
+        // In-memory oracle from the native export, with synthetic data only.
+        raw = await fs.readFile(written, "utf8");
+        // Force the event ordering independently of platform export speed.
+        // A delayed acknowledgement must never delay delivery of the CPU notice.
+        if (hold) await profileWritten;
+        return written;
+      };
       let settings = args.settings;
       const manager = new DiagnosticsManager({
         outputRoot: args.outputRoot, chromiumTraceWorker: args.worker,
@@ -148,6 +157,7 @@ test("one rolling Chromium trace retains both renderer rule matches under repain
             document.body.getBoundingClientRect();
           })()
         `);
+        holdAcknowledgement = true;
         cpu = 90;
         const sessions = await Promise.all((await fs.readdir(args.outputRoot)).map(async (name) => {
           const directory = join(args.outputRoot, name);
@@ -172,6 +182,14 @@ test("one rolling Chromium trace retains both renderer rule matches under repain
         await wait(750);
         await execute("performance.mark('late-overflow-marker')");
         const profile = await profileWritten;
+        let capture;
+        for (let attempt = 0; attempt < 300 && !capture; attempt++) {
+          capture = (await readEvents()).find((event) => event.type.startsWith("chromium-trace-"));
+          if (!capture) await wait(50);
+        }
+        if (capture?.type !== "chromium-trace-written") {
+          throw new Error(`Expected a saved Chromium trace: ${JSON.stringify(capture)}`);
+        }
         const cpuProfile = JSON.parse(await fs.readFile(profile.profilePath, "utf8"));
         const triggerUs = cpuProfile.startTime + started.detail.preTriggerDurationMs * 1000;
         const events: { name: string; pid: number; tid: number; ts: number; args?: { name?: string } }[] = JSON.parse(raw).traceEvents;
@@ -180,7 +198,6 @@ test("one rolling Chromium trace retains both renderer rule matches under repain
           const marker = events.find((event) => event.pid === pid && event.name === name);
           return marker ? (marker.ts - triggerUs) / 1000 : null;
         };
-        const capture = (await readEvents()).find((event) => event.type === "chromium-trace-written");
         return {
           capture: capture?.detail,
           matches: profile.matchedRules,
@@ -191,6 +208,7 @@ test("one rolling Chromium trace retains both renderer rule matches under repain
           early: events.some((event) => event.name === "early-overflow-marker"),
           late: events.some((event) => event.name === "late-overflow-marker"),
           hadPrivateUrl: raw.includes(args.url),
+          nativePromiseMs,
           profilePostTriggerMs: (cpuProfile.endTime - triggerUs) / 1000,
           profiledRepaint: cpuProfile.nodes.some((node: { callFrame: { functionName: string } }) => node.callFrame.functionName === "postTriggerRepaint")
         };
@@ -220,6 +238,8 @@ test("one rolling Chromium trace retains both renderer rule matches under repain
     console.log("Chromium trace oracle", {
       rawBytes: result.capture.rawBytes,
       nativeStopAfterTriggerMs: result.capture.recordingStoppedAtMs - result.capture.triggerAtMs,
+      nativeStopElapsedMs: result.capture.nativeStopElapsedMs,
+      nativePromiseMs: Math.round(result.nativePromiseMs),
       leadInMs: result.leadInMs, triggerMarkerMs: result.triggerMarkerMs, lateMarker: result.late,
       layoutsInTriggerWindow: triggerEvents.filter(({ name }) => name === "Layout").length,
       profilePostTriggerMs: result.profilePostTriggerMs
