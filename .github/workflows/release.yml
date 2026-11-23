@@ -70,6 +70,20 @@ jobs:
           RELEASE_TAG: ${{ github.event.inputs.tag || github.ref_name }}
         run: pnpm release:check
 
+      - &retained-agent-access-smoke
+        name: Check whether the release source predates retained Agent Access smoke tests
+        id: retained-agent-access-smoke
+        run: |
+          node <<'NODE'
+          const { appendFileSync } = require("node:fs");
+          const { version } = require("./apps/desktop/package.json");
+          const [major, minor] = version.split(".").map(Number);
+          // Manual dispatch can check out a tag older than this workflow.
+          const skip = process.env.GITHUB_EVENT_NAME === "workflow_dispatch" && major === 0 && minor < 62;
+          if (skip) console.log(`Skipping retained Agent Access smoke tests for v${version}; they were introduced in v0.62.0.`);
+          appendFileSync(process.env.GITHUB_OUTPUT, `skip=${skip}\n`);
+          NODE
+
       - name: Typecheck
         run: pnpm typecheck
 
@@ -110,6 +124,15 @@ jobs:
 
       - name: Prepare release stage
         run: node apps/desktop/scripts/release.mjs --prepare-only
+
+      - name: Verify macOS startup with retained Agent Access settings
+        if: steps.retained-agent-access-smoke.outputs.skip != 'true'
+        timeout-minutes: 4
+        env:
+          PWRGIT_E2E_DISABLE_GPU: "1"
+        run: >-
+          pnpm --filter @pwrgit/desktop exec playwright test app-mcp.spec.ts
+          --grep 'desktop startup with Agent Access enabled' --retries=0
 
       - name: Archive signing input
         id: archive
@@ -281,6 +304,8 @@ jobs:
           RELEASE_TAG: ${{ github.event.inputs.tag || github.ref_name }}
         run: pnpm release:check
 
+      - *retained-agent-access-smoke
+
       - name: Package native Linux formats
         run: pnpm --filter @pwrgit/desktop package:linux
 
@@ -301,7 +326,15 @@ jobs:
           mkdir -p apps/desktop/linux-smoke
           xvfb-run -a python3 apps/desktop/scripts/verify-linux-launcher.py apps/desktop/linux-smoke/launcher.png
           xvfb-run -a node apps/desktop/scripts/linux-installed-smoke.mjs "$version" apps/desktop/linux-smoke
-          sudo apt-get remove -y pwrgit
+
+      - name: Smoke test installed DEB with retained Agent Access settings
+        if: steps.retained-agent-access-smoke.outputs.skip != 'true'
+        run: |
+          version=$(node -p "require('./apps/desktop/package.json').version")
+          xvfb-run -a node apps/desktop/scripts/linux-installed-smoke.mjs "$version" apps/desktop/linux-smoke/upgrade --upgrade
+
+      - name: Remove installed DEB
+        run: sudo apt-get remove -y pwrgit
 
       - name: Upload Linux package validation evidence
         if: always()

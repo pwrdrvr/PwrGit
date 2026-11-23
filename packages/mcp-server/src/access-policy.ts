@@ -171,6 +171,35 @@ export class McpAccessError extends Error {
   }
 }
 
+// Built-in roles are persisted grants. A new entry in the capability registry
+// must not change what a saved role id grants on the next relay connection.
+const LIVE_STATUS_PERMISSIONS = [
+  "repository.roots.read",
+  "repository.checkout.locate",
+  "repository.metadata.read",
+  "repository.stack.read",
+  "forge.status.read",
+  "status.subscribe"
+] as const satisfies readonly McpAgentCapability[];
+
+const LIVE_STATUS_ROLE: McpAgentRole = {
+  id: "builtin.live-status",
+  name: "Live Forge Status",
+  description: "Read local metadata plus PR, MR, CI, review, and live status updates.",
+  builtIn: true,
+  permissions: [...LIVE_STATUS_PERMISSIONS],
+  repositoryRoots: null
+};
+
+const APP_OPERATOR_ROLE: McpAgentRole = {
+  id: "builtin.app-operator",
+  name: "PwrGit Workspace Control",
+  description: "Read app repositories and status, and open authorized repositories in PwrGit. Does not grant Git mutations.",
+  builtIn: true,
+  permissions: [...LIVE_STATUS_PERMISSIONS, "app.navigate"],
+  repositoryRoots: null
+};
+
 export const BUILT_IN_MCP_ROLES = [
   {
     id: "builtin.discovery",
@@ -192,20 +221,28 @@ export const BUILT_IN_MCP_ROLES = [
     ],
     repositoryRoots: null
   },
-  {
-    id: "builtin.live-status",
-    name: "Live Forge Status",
-    description: "Read local metadata plus PR, MR, CI, review, and live status updates.",
-    builtIn: true,
-    permissions: MCP_AGENT_CAPABILITIES.filter(capability => capability !== "app.navigate"),
-    repositoryRoots: null
-  },
-  {
-    id: "builtin.app-operator", name: "PwrGit Workspace Control",
-    description: "Read app repositories and status, and open authorized repositories in PwrGit. Does not grant Git mutations.",
-    builtIn: true, permissions: [...MCP_AGENT_CAPABILITIES], repositoryRoots: null
-  }
+  LIVE_STATUS_ROLE,
+  APP_OPERATOR_ROLE
 ] as const satisfies readonly McpAgentRole[];
+
+// A relay can reconnect by role id without a prompt. Keep the exact built-ins
+// shipped before stack reads so reopening a saved policy preserves that grant.
+const PRE_STACK_LIVE_STATUS_PERMISSIONS: readonly McpAgentCapability[] = [
+  "repository.roots.read",
+  "repository.checkout.locate",
+  "repository.metadata.read",
+  "forge.status.read",
+  "status.subscribe"
+];
+const PRE_STACK_APP_OPERATOR_ROLE: McpAgentRole = {
+  ...APP_OPERATOR_ROLE,
+  permissions: [...PRE_STACK_LIVE_STATUS_PERMISSIONS, "app.navigate"]
+};
+const ACCEPTED_BUILT_IN_ROLES: readonly McpAgentRole[] = [
+  ...BUILT_IN_MCP_ROLES,
+  { ...LIVE_STATUS_ROLE, permissions: [...PRE_STACK_LIVE_STATUS_PERMISSIONS] },
+  PRE_STACK_APP_OPERATOR_ROLE
+];
 
 const MAX_ROLES = 128;
 const MAX_SESSIONS = 256;
@@ -336,14 +373,9 @@ function cloneRole(role: McpAgentRole): McpAgentRole {
   };
 }
 
-function canonicalBuiltIn(role: McpAgentRole): McpAgentRole | undefined {
-  return BUILT_IN_MCP_ROLES.find((candidate) => candidate.id === role.id);
-}
-
 function roleMatchesCanonical(role: McpAgentRole): boolean {
-  const canonical = canonicalBuiltIn(role);
-  return (
-    canonical !== undefined &&
+  return ACCEPTED_BUILT_IN_ROLES.some(canonical =>
+    role.id === canonical.id &&
     role.name === canonical.name &&
     role.description === canonical.description &&
     role.builtIn === canonical.builtIn &&
@@ -454,8 +486,11 @@ function parsePolicy(value: unknown): McpPolicyFile {
   for (const canonical of BUILT_IN_MCP_ROLES) {
     if (!roles.some((role) => role.id === canonical.id)) {
       // Older v1 policies predate app navigation. Add its opt-in role without
-      // changing any existing role, Session assignment or OAuth scope.
-      if (canonical.id === "builtin.app-operator") { roles.push(cloneRole(canonical)); continue; }
+      // adding stack access to the default relay grant on those installations.
+      if (canonical.id === "builtin.app-operator") {
+        roles.push(cloneRole(PRE_STACK_APP_OPERATOR_ROLE));
+        continue;
+      }
       throw new McpAccessError("invalid_policy", `MCP policy is missing ${canonical.id}`);
     }
   }

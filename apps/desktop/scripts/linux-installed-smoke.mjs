@@ -4,21 +4,31 @@
 // flags or disabling Electron's sandbox. All app data is temporary.
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
-import { mkdirSync, mkdtempSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { once } from "node:events";
 import { chromium } from "@playwright/test";
 
 if (process.platform !== "linux" || process.getuid?.() === 0) throw new Error("Smoke test requires an unprivileged Linux user");
-const [version, output = "linux-smoke"] = process.argv.slice(2);
-if (!version) throw new Error("Usage: linux-installed-smoke.mjs <version> [output-dir]");
+const [version, output = "linux-smoke", mode] = process.argv.slice(2);
+if (!version || (mode !== undefined && mode !== "--upgrade")) {
+  throw new Error("Usage: linux-installed-smoke.mjs <version> [output-dir] [--upgrade]");
+}
 const sandbox = statSync("/opt/PwrGit/chrome-sandbox");
 assert.equal(sandbox.uid, 0, "Installed sandbox must be owned by root");
 mkdirSync(resolve(output), { recursive: true });
 const root = mkdtempSync(join(tmpdir(), "pwrgit-installed-smoke-"));
+const retainedPolicy = mode === "--upgrade"
+  ? readFileSync(new URL("../e2e/fixtures/mcp-policy-v0.61.3.json", import.meta.url), "utf8")
+  : undefined;
+const policyFile = join(root, "mcp-policy.json");
+if (retainedPolicy !== undefined) {
+  writeFileSync(policyFile, retainedPolicy, { mode: 0o600 });
+  writeFileSync(join(root, "settings.json"), JSON.stringify({ localAgentAccessEnabled: true }));
+}
 const env = { ...process.env, PWRGIT_USER_DATA_DIR: root };
-for (const key of ["ELECTRON_EXEC_PATH", "ELECTRON_CLI_ARGS", "ELECTRON_MAJOR_VER", "ELECTRON_RUN_AS_NODE", "NODE_OPTIONS", "GH_TOKEN", "GITHUB_TOKEN"]) delete env[key];
+for (const key of ["ELECTRON_EXEC_PATH", "ELECTRON_CLI_ARGS", "ELECTRON_MAJOR_VER", "ELECTRON_RUN_AS_NODE", "ELECTRON_RENDERER_URL", "NODE_OPTIONS", "GH_TOKEN", "GITHUB_TOKEN"]) delete env[key];
 const child = spawn("/opt/PwrGit/pwrgit", ["--remote-debugging-port=0", "--remote-debugging-address=127.0.0.1"], { env, stdio: ["ignore", "pipe", "pipe"] });
 const exited = once(child, "exit");
 let logs = "";
@@ -63,6 +73,21 @@ try {
   const bundled = evidence.git.value.candidates.find(candidate => candidate.source === "bundled");
   assert.ok(bundled?.git && bundled?.lfs && bundled.problem === null, "Packaged Git/LFS did not execute");
   assert.notEqual(evidence.status.value?.status, "skipped", "Installed DEB backend was gated off");
+  if (retainedPolicy !== undefined) {
+    const { access, policy } = await page.evaluate(async () => {
+      const [access, policy] = await Promise.all([
+        window.pwrgit.dispatch("agentAccess:read"), window.pwrgit.dispatch("localAgents:read")
+      ]);
+      return { access, policy };
+    });
+    assert.equal(access.ok, true, "Agent Access status unavailable after upgrade");
+    assert.equal(access.value.enabled, true, "Agent Access setting was lost after upgrade");
+    assert.equal(access.value.listening, true, access.value.error ?? "Agent Access did not start");
+    assert.equal(policy.ok, true, JSON.stringify(policy.error));
+    assert.deepEqual(policy.value.roles, JSON.parse(retainedPolicy).roles);
+    assert.equal(readFileSync(policyFile, "utf8"), retainedPolicy);
+    evidence.agentAccess = access;
+  }
   writeFileSync(resolve(output, "runtime.json"), `${JSON.stringify(evidence, null, 2)}\n`);
   await page.screenshot({ path: resolve(output, "installed.png") });
   child.kill("SIGTERM");
@@ -70,7 +95,7 @@ try {
   const [code, signal] = await exited;
   clearTimeout(timeout);
   assert.equal(code, 0, `Installed app failed graceful shutdown (${signal}): ${logs}`);
-  console.log(`Installed Linux ${process.arch} app: renderer, SQLite, bundled Git/LFS, updater backend and graceful quit passed`);
+  console.log(`Installed Linux ${process.arch} app (${mode === "--upgrade" ? "retained Agent Access settings" : "fresh profile"}): runtime and graceful quit passed`);
 } finally {
   child.kill("SIGKILL");
   if (browser) await browser.close().catch(() => {});

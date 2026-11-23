@@ -1,0 +1,59 @@
+{
+  "protocol": "pwrgit.mcp-policy/v1",
+  "version": 1,
+  "roles": [
+    {
+      "id": "builtin.discovery",
+      "name": "Repository Discovery",
+      "description": "Find bounded repository roots and locate matching checkouts.",
+      "builtIn": true,
+      "permissions": [
+        "repository.roots.read",
+        "repository.checkout.locate"
+      ],
+      "repositoryRoots": null
+    },
+    {
+      "id": "builtin.local-reader",
+      "name": "Local Repository Reader",
+      "description": "Discover repositories and read safe local Git metadata and status.",
+      "builtIn": true,
+      "permissions": [
+        "repository.roots.read",
+        "repository.checkout.locate",
+        "repository.metadata.read"
+      ],
+      "repositoryRoots": null
+    },
+    {
+      "id": "builtin.live-status",
+      "name": "Live Forge Status",
+      "description": "Read local metadata plus PR, MR, CI, review, and live status updates.",
+      "builtIn": true,
+      "permissions": [
+        "repository.roots.read",
+        "repository.checkout.locate",
+        "repository.metadata.read",
+        "forge.status.read",
+        "status.subscribe"
+      ],
+      "repositoryRoots": null
+    },
+    {
+      "id": "builtin.app-operator",
+      "name": "PwrGit Workspace Control",
+      "description": "Read app repositories and status, and open authorized repositories in PwrGit. Does not grant Git mutations.",
+      "builtIn": true,
+      "permissions": [
+        "repository.roots.read",
+        "repository.checkout.locate",
+        "repository.metadata.read",
+        "forge.status.read",
+        "status.subscribe",
+        "app.navigate"
+      ],
+      "repositoryRoots": null
+    }
+  ],
+  "sessions": []
+}
