@@ -154,27 +154,20 @@ function exponentialMs(attempt: number): number {
   return clampRetryDelayMs(1000 * 2 ** (Math.max(1, attempt) - 1));
 }
 
-/** How long to wait before retrying, or null when a retry cannot help. */
-export function forgeRetryDelayMs({
+/** A server-directed cooldown, including windows too long for an inline retry. */
+export function forgeRetryWindow({
   kind,
   status,
-  header,
-  attempt
-}: ForgeRetryInput): number | null {
+  header
+}: Omit<ForgeRetryInput, "attempt">): { ms: number; explicit: boolean } | undefined {
   const dialect = RATE_LIMIT_DIALECT[kind];
 
   // An explicit Retry-After (in seconds, from both forges) outranks everything
   // else, on any status: the server has named its own number, and guessing a
   // smaller one only earns another refusal. Both spell this one the same way.
-  //
-  // Never clamped down to the ceiling: a retry inside the time the server
-  // asked for is a guaranteed refusal, the same reasoning that declines a
-  // spent window below. Clamped, `Retry-After: 3600` spent the whole budget
-  // inside the hour.
   const retryAfter = retryAfterSeconds(header);
   if (retryAfter !== undefined) {
-    const wait = retryAfter * 1000;
-    return wait > RETRY_DELAY_CEILING_MS ? null : wait;
+    return { ms: retryAfter * 1000, explicit: true };
   }
 
   // An exhausted window says exactly when it refills.
@@ -194,19 +187,29 @@ export function forgeRetryDelayMs({
     reset !== undefined &&
     spent
   ) {
-    const untilRefill = reset * 1000 - Date.now();
+    return { ms: reset * 1000 - Date.now(), explicit: false };
+  }
+  return undefined;
+}
+
+/** How long to wait before retrying, or null when a retry cannot help. */
+export function forgeRetryDelayMs(input: ForgeRetryInput): number | null {
+  const { status, attempt } = input;
+  const window = forgeRetryWindow(input);
+  if (window !== undefined) {
     // Past the ceiling the window cannot refill inside any budget a caller
     // would spend, so waiting it out is four guaranteed refusals — GitHub's
     // hourly GraphQL budget against a 60s ceiling is exactly that shape, and
     // GitHub warns that requests sent while limited risk a ban. Give up, and
     // let the next scheduled refresh find the window open.
-    if (untilRefill > RETRY_DELAY_CEILING_MS) return null;
+    if (window.ms > RETRY_DELAY_CEILING_MS) return null;
+    if (window.explicit) return window.ms;
     // Floored at the exponential wait, never at zero: a reset that reads as
     // past — a skewed clock, a cached header, a gateway sending the IETF
     // draft's delta-seconds instead of a Unix time — would otherwise spend the
     // whole budget in a few milliseconds against a server saying slow down,
     // which is the storm this file exists to prevent.
-    return Math.max(clampRetryDelayMs(untilRefill), exponentialMs(attempt));
+    return Math.max(clampRetryDelayMs(window.ms), exponentialMs(attempt));
   }
 
   // Transient by nature: a 429 that named no window, any 5xx, or no status at

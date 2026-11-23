@@ -132,6 +132,7 @@ import { ContributionService } from "./forge/contribution-service";
 import { registerContributionHandlers } from "./forge/contribution-handlers";
 import { createGonePrRefresh } from "./github/gone-pr-refresh";
 import { OpenPrService } from "./github/open-pr-service";
+import { StackHistoryService } from "./github/stack-history-service";
 import { registerChangeRequestHandlers } from "./github/change-request-handlers";
 import { PrService } from "./github/pr-service";
 import { emitEvent, emitEventToWindow, observeEvent, registerIpc } from "./ipc";
@@ -902,11 +903,14 @@ if (!gotSingleInstanceLock) {
     const openPrService = new OpenPrService(db, execGit, {
       resolveForge: (url) => resolveEnabledForge(url)
     });
+    const stackHistory = new StackHistoryService(
+      db, path => openPrService.forgeRemotes(path), scope => emitEvent("stack:changed", scope)
+    );
     const stackReader = new StackReader(
       stackRunner(execGit), new NativeStackLocks(mcpExecutablePath),
       repoId => openPrService.list(repoId),
       (repoId, branch) => prService.cachedBranchPrObservation(repoId, branch),
-      (repoId, forgeRepo) => openPrService.cachedGitHubStacks(repoId, forgeRepo),
+      repo => stackHistory.list(repo),
       (repoId, forgeRepo) => prService.cachedPrTitles(repoId, forgeRepo)
     );
     registerStackReadHandlers(bus, id => indexer.getRepo(id), stackReader);
@@ -1256,6 +1260,7 @@ if (!gotSingleInstanceLock) {
         profileScans.abort(deletedProfileId);
         prService.invalidatePendingWrites();
         openPrService.invalidatePendingWrites();
+        stackHistory.forgetProfile(deletedProfileId);
         activeWorktreeId = survivingActiveWorktreeId(db, activeWorktreeId);
         if (windows.close(deletedProfileId)) {
           openProfileWindow(activeProfileId);

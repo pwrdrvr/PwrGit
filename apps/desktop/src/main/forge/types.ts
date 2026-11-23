@@ -1,4 +1,3 @@
-import type { GitHubStack } from "@pwrgit/shared";
 import type {
   ForgeKind,
   OpenChangeRequest,
@@ -52,7 +51,6 @@ export function forgeOrigin(repo: Pick<ForgeRepo, "host" | "port">): string {
  */
 export type OpenPrList = {
   items: OpenChangeRequest[];
-  githubStacks?: GitHubStack[];
   truncated: boolean;
 };
 

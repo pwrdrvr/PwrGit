@@ -17,11 +17,25 @@ test("walks beyond five pages to find both old closed stacks and open stacks", a
   });
   vi.stubGlobal("fetch", fetch);
   try {
-    const stacks = await fetchGitHubStacks("fixture", "example", "orbit");
+    const { stacks } = await fetchGitHubStacks("fixture", "example", "orbit");
     expect(fetch).toHaveBeenCalledTimes(7);
-    expect(stacks?.map(({ number, closed }) => [number, closed])).toEqual([
+    expect(stacks.map(({ number, closed }) => [number, closed])).toEqual([
       [1, "merged"], [2, "merged"], [3, "merged"], [4, "merged"], [5, "merged"], [6, "merged"], [7, undefined],
     ]);
+  } finally {
+    vi.unstubAllGlobals();
+  }
+});
+
+test.each([
+  ["https://example.invalid/repos/example/orbit/stacks?page=2", "outside its API"],
+  ["https://api.github.com/repos/example/orbit/stacks?per_page=100&page=1", "repeated a page"],
+])("stops on an invalid next link %s", async (next, message) => {
+  const fetch = vi.fn(async () => Response.json([], { headers: { Link: `<${next}>; rel="next"` } }));
+  vi.stubGlobal("fetch", fetch);
+  try {
+    await expect(fetchGitHubStacks("fixture", "example", "orbit")).rejects.toThrow(message);
+    expect(fetch).toHaveBeenCalledTimes(1);
   } finally {
     vi.unstubAllGlobals();
   }

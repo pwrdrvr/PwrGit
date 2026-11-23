@@ -3,6 +3,7 @@ import {
   type PrSummary, type Repo, type RepositoryStack, type StackLayer, type StackSnapshot,
 } from "@pwrgit/shared";
 import type { GitExec } from "./dugite";
+import type { ScopedGitHubStack } from "../github/stack-history-service";
 import { GhStackCatalogStore, type NativeStackLocks } from "./stack-catalog-store";
 import type { GhStack, GhStackBranch, GitRunner } from "./stack-engine";
 import { isOid, StackGit } from "./stack-engine/git";
@@ -41,7 +42,7 @@ export class StackReader {
     private readonly locks: NativeStackLocks,
     private readonly readOpen: (repoId: string) => Promise<ChangeRequestList>,
     private readonly readBranchPr: (repoId: string, branch: string) => BranchPrObservation | null | undefined,
-    private readonly readGitHubStacks: (repoId: string, forgeRepo: string) => readonly GitHubStack[] = () => [],
+    private readonly readGitHubStacks: (repo: Repo) => readonly ScopedGitHubStack[] | Promise<readonly ScopedGitHubStack[]> = () => [],
     private readonly readPrTitles: (repoId: string, forgeRepo: string) => ReadonlyMap<number, string> = () => new Map(),
   ) {}
 
@@ -58,12 +59,10 @@ export class StackReader {
 
   async list(repo: Repo): Promise<StackSnapshot> {
     const { commonDir, store, tracked } = await this.location(repo);
-    const open = await this.readOpen(repo.id);
+    const [open, github] = await Promise.all([this.readOpen(repo.id), this.readGitHubStacks(repo)]);
     const { catalog } = tracked;
     const remotes = new Map(open.remotes.map(remote => [remote.forgeRepo, remote]));
-    const github = open.remotes.flatMap(remote => this.readGitHubStacks(repo.id, remote.forgeRepo).map(stack => ({
-      scope: remote.forgeRepo, stack,
-    })));
+    const githubRemotes = new Map(github.map(({ scope, remote }) => [scope, remote]));
     const linked = github.filter(({ stack }) => !stack.closed);
     const closed = github.filter(({ stack }) => stack.closed);
     const catalogScope = parsedCatalogKey(catalog.repository);
@@ -169,7 +168,7 @@ export class StackReader {
       const { stack, inferred, catalogRepository, linked } = source;
       if (!stack.branches.length) continue;
       const scope = parsedCatalogKey(catalogRepository);
-      const remote = remotes.get(scope)?.name ?? "origin";
+      const remote = remotes.get(scope)?.name ?? githubRemotes.get(scope) ?? "origin";
       const localTrunk = local(stack.trunk.branch);
       const trunkHead = localTrunk ?? stack.trunk.head;
       const layers: StackLayer[] = [];
