@@ -102,6 +102,8 @@ async function assertNoOnboardingWizard(window: Page): Promise<void> {
 export async function launchApp(
   opts: {
     agentAccess?: boolean;
+    /** Start with Agent Access enabled and these retained policy file bytes. */
+    agentAccessPolicy?: string;
     worktreeRoot?: string;
     agentUnavailable?: boolean;
     gitConfig?: string;
@@ -136,7 +138,8 @@ export async function launchApp(
   if (
     opts.worktreeRoot !== undefined ||
     opts.theme !== undefined ||
-    opts.searchAllProfiles !== undefined
+    opts.searchAllProfiles !== undefined ||
+    opts.agentAccessPolicy !== undefined
   ) {
     // One `general` object: settings.json is merged shallowly per group, so a
     // second one would replace the first rather than join it.
@@ -147,6 +150,7 @@ export async function launchApp(
         : {})
     };
     const seededSettings = {
+      ...(opts.agentAccessPolicy === undefined ? {} : { localAgentAccessEnabled: true }),
       ...(opts.worktreeRoot !== undefined
         ? { worktreeRoot: opts.worktreeRoot }
         : {}),
@@ -156,6 +160,9 @@ export async function launchApp(
       join(userData, "settings.json"),
       JSON.stringify(seededSettings)
     );
+  }
+  if (opts.agentAccessPolicy !== undefined) {
+    writeFileSync(join(userData, "mcp-policy.json"), opts.agentAccessPolicy, { mode: 0o600 });
   }
   // Pin the seeded profile identity to the sandbox's commit identity so
   // "mine" detection (authored-by-me) is deterministic — never the identity
@@ -184,7 +191,7 @@ export async function launchApp(
       MAIN
     ],
     env: cleanEnv({
-      ...(opts.agentAccess ? { PWRGIT_E2E_AGENT_ACCESS: "1" } : {}),
+      ...(opts.agentAccess || opts.agentAccessPolicy !== undefined ? { PWRGIT_E2E_AGENT_ACCESS: "1" } : {}),
       PWRGIT_USER_DATA_DIR: userData,
       PWRGIT_GITCONFIG: gitconfig,
       // Settings › Git checks GitHub for newer builds; here it is offline.

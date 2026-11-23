@@ -104,6 +104,39 @@ describe("macOS signing keychain behavior", () => {
 });
 
 describe("desktop release configuration", () => {
+  test("only manual dispatches of older release sources skip the retained Agent Access tests", () => {
+    const workflow = read(".github/workflows/release.yml");
+    const decision = workflow.match(/id: retained-agent-access-smoke\n\s+run: \|\n\s+node <<'NODE'\n([\s\S]*?)\n\s+NODE/);
+    expect(decision).not.toBeNull();
+    const condition = "if: steps.retained-agent-access-smoke.outputs.skip != 'true'";
+    for (const step of ["Verify macOS startup with retained Agent Access settings", "Smoke test installed DEB with retained Agent Access settings"]) {
+      expect(workflow).toContain(`- name: ${step}\n        ${condition}`);
+    }
+
+    for (const [event, version, skip] of [
+      ["workflow_dispatch", "0.61.3", true],
+      ["workflow_dispatch", "0.61.4-prerelease.1", true],
+      ["workflow_dispatch", "0.62.0", false],
+      ["workflow_dispatch", "0.62.1-prerelease.1", false],
+      ["workflow_dispatch", "0.100.0", false],
+      ["workflow_dispatch", "1.0.0", false],
+      ["push", "0.62.0", false],
+      ["pull_request", "0.61.3", false],
+    ]) {
+      const outputs = [];
+      runInNewContext(decision[1], {
+        process: { env: { GITHUB_EVENT_NAME: event, GITHUB_OUTPUT: "step-outputs" } },
+        require: name => {
+          if (name === "node:fs") return { appendFileSync: (...args) => outputs.push(args) };
+          expect(name).toBe("./apps/desktop/package.json");
+          return { version };
+        },
+        console: { log() {} },
+      });
+      expect(outputs, `${event} for ${version}`).toEqual([["step-outputs", `skip=${skip}\n`]]);
+    }
+  });
+
   test("packages both Mac architectures serially and assembles metadata before publication", () => {
     const config = read("apps/desktop/electron-builder.yml");
     const script = read("apps/desktop/scripts/release.mjs");
