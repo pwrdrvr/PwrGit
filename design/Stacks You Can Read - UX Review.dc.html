@@ -145,17 +145,9 @@
           .trunk::before { content: ""; position: absolute; left: 8px; top: 0; height: 9px; border-left: 1.5px solid var(--lane-1); opacity: .75; }
           .trunk .nd { position: absolute; left: 4px; top: 4.5px; }
 
-          /* 3b: the ladder on a lone card */
-          .lad { flex: none; display: flex; flex-direction: column; align-items: center; gap: 2px; width: 12px; padding-top: 2px; }
-          .lad .p { width: 6px; height: 6px; border-radius: 50%; background: var(--status-suspended); }
-          .lad .p.ok { background: var(--status-ok); } .lad .p.fail { background: var(--status-error); }
-          .lad .p.merged { background: var(--brand-purple); border-radius: 1px; transform: rotate(45deg) scale(.85); }
-          .lad .p.draft, .lad .p.nopr { background: transparent; border: 1px dashed var(--text-muted); }
-          .lad .p.me { width: 8px; height: 8px; box-shadow: 0 0 0 1.5px var(--bg-sidebar), 0 0 0 3px var(--accent); }
-          .lad .t { width: 6px; height: 3px; border-radius: 1px; background: var(--text-muted); margin-top: 1px; }
-          .cr.lone { flex-direction: row; gap: 6px; }
-          .cr.lone .body { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 3px; }
-          .pos { flex: none; font: 600 9.5px/1 var(--font-mono); color: var(--text-muted); }
+          /* 3b: position tag on an ordinary PR card */
+          .pos { flex: none; padding: 1px 4px; border: 0; border-radius: 3px; background: transparent; font: 600 9.5px/1 var(--font-mono); color: var(--text-muted); }
+          .pos:hover, .pos:focus-visible { color: var(--accent-bright); background: var(--bg-panel-hover); }
 
           /* 4: popover */
           .pop { width: 420px; max-width: 100%; border: 1px solid var(--border-default); border-radius: 10px; background: var(--bg-panel-elevated); box-shadow: var(--shadow-popover); overflow: hidden; }
@@ -370,29 +362,23 @@
           </div>
 
           <div class="dv-opt">
-            <div class="dv-olabel"><span class="dv-oid">3b</span>Fallback: when a stack can’t sit together, each card carries a ladder</div>
+            <div class="dv-olabel"><span class="dv-oid">3b</span>Fallback: stacked PRs carry a position tag</div>
             <div class="sb">
               <div class="sh"><span class="c"></span><span class="slabel">Pull requests</span><span class="scount">· sorted by Recent</span></div>
-              <div class="cr lone">
-                <span class="lad" aria-label="Position 2 of 2: this PR failing, #4199 passing, then main"><span class="p fail me"></span><span class="p ok"></span><span class="t"></span></span>
-                <div class="body">
-                  <div class="ln"><span class="prc">#4206</span><span class="ti">feat(messaging): enforce per-Agent invocation trust</span><span class="pos">2/2</span></div>
-                  <div class="wh"><span class="hd">codex/2071-agent-trust-runtime</span></div>
-                </div>
+              <div class="cr">
+                <div class="ln"><span class="prc failing"><span class="d"></span>#4206</span><button type="button" class="pos" aria-label="Position 2 of 2. Show stack">2/2</button><span class="ti">feat(messaging): enforce per-Agent invocation trust</span></div>
+                <div class="wh"><span class="hd">codex/2071-agent-trust-runtime</span></div>
               </div>
               <div class="cr">
                 <div class="ln"><span class="prc passing"><span class="d"></span>#4233</span><span class="ti">fix(desktop): recover stalled to-do launches</span><span class="age">9h</span></div>
                 <div class="wh"><span class="hd">fix/stalled-todos</span></div>
               </div>
-              <div class="cr lone">
-                <span class="lad" aria-label="Position 1 of 2: #4206 failing above, this PR passing, then main"><span class="p fail"></span><span class="p ok me"></span><span class="t"></span></span>
-                <div class="body">
-                  <div class="ln"><span class="prc">#4199</span><span class="ti">feat(messaging): define Agent invocation trust policies</span><span class="pos">1/2</span></div>
-                  <div class="wh"><span class="hd">codex/2071-agent-trust-schema</span></div>
-                </div>
+              <div class="cr">
+                <div class="ln"><span class="prc passing"><span class="d"></span>#4199</span><button type="button" class="pos" aria-label="Position 1 of 2. Show stack">1/2</button><span class="ti">feat(messaging): define Agent invocation trust policies</span></div>
+                <div class="wh"><span class="hd">codex/2071-agent-trust-schema</span></div>
               </div>
             </div>
-            <p class="note" style="max-width: 340px">Use it only when the list order isn’t stack order: a sort by Recent, or a filter that hides some members. The ladder is the rail shrunk to one card. One pip per member, top of stack first, then a trunk bar. The ringed pip is this PR. Grouping (3a) is the default.</p>
+            <p class="note" style="max-width: 340px">Recent sort and filters keep the ordinary PR chip and its status dot. The position tag after the chip opens the shared popover with that PR marked. Grouping (3a) is the default.</p>
           </div>
         </div>
 
@@ -412,7 +398,7 @@
 
       <!-- ============================== TURN 4 ============================== -->
       <section class="dv-turn">
-        <div class="dv-thd"><span class="dv-tid">4</span><h2 class="dv-tname">One popover, three doors: the rail, the PR view’s stack pill, and the graph’s n/N chip</h2></div>
+        <div class="dv-thd"><span class="dv-tid">4</span><h2 class="dv-tname">One popover from the sidebar, PR view and Lineage</h2></div>
         <p class="dv-sub">GitHub’s answer to “is this stacked?” is a pill and a popover, and that’s right. PwrGit keeps the shape and adds what PwrGit knows on top of it: each member’s checks, conflicts and distance from its parent. Rows run top of stack first and end at trunk (turn 2). The current PR is marked. Clicking a row opens that PR, the same as clicking its card. The full stack view is a link in the footer, and that link is the only way into it from here.</p>
         <div class="dv-opts">
           <div class="dv-opt">
@@ -548,12 +534,13 @@
           <div class="tr head"><span>Rule</span><span>Test kind</span><span>Statement</span></div>
           <div class="tr"><span><b>R1 Order</b></span><span>Property</span><span>For any stack of height 1–8, the sidebar group, popover, stack view, Stacks-section train (reversed) and accessible names all list positions strictly descending, and trunk comes right after position 1.</span></div>
           <div class="tr"><span><b>R2 Nothing opens the view by itself</b></span><span>Model</span><span>Over random sequences of commit-row clicks, gutter clicks, hovers, focus moves, arrow keys in the sidebar, snapshot refreshes, repo switches and Back, the stack view opens only after <i>Open stack view</i>, a Stacks-section row activation, or a named command.</span></div>
-          <div class="tr"><span><b>R3 Node = chip</b></span><span>Property</span><span>For any PR summary, the rail node, ladder pip, popover badge and PR chip all derive from one state function and never disagree. Each state differs in shape, not only hue.</span></div>
+          <div class="tr"><span><b>R3 Node = chip</b></span><span>Property</span><span>For any PR summary, the rail node, popover badge and PR chip all derive from one state function and never disagree. Each state differs in shape, not only hue.</span></div>
           <div class="tr"><span><b>R4 Whole tower</b></span><span>Property</span><span>Every stack layer appears exactly once in the PR list group, as a card or a ghost. Grouped cards are contiguous, and no non-stack PR sits inside a group.</span></div>
           <div class="tr"><span><b>R5 Provenance</b></span><span>Example + oracle</span><span>A stack GitHub links is labelled <i>linked on GitHub</i> and named by its number. It’s never called Inferred, and it’s never offered Adopt as a primary action.</span></div>
           <div class="tr"><span><b>R6 Amber means actionable</b></span><span>Property</span><span>An amber badge or dashed segment appears only when the matching action (restack or sync) could be planned for that stack. Behind-trunk on an untracked stack is muted.</span></div>
+          <div class="tr"><span><b>R7 Position outside the group</b></span><span>Property</span><span>A stacked PR outside its group keeps its status dot and shows its position after the chip. Activating the tag opens the shared popover with that PR marked.</span></div>
         </div>
-        <p class="dv-next"><b>Screenshots the review needs</b> (harness renders, contrived data): 3a at 340px with a two-PR stack, a three-member stack with a merged bottom and a no-PR top, and two unstacked PRs · 3b sorted by Recent · 4a and 4b popovers · 4c PR view head · 5a section · 6 stack view, untracked and tracked with a dashed segment · light theme for 3a and 4a · before/after of the gutter with the bracket gone.</p>
+        <p class="dv-next"><b>Screenshots the review needs</b> (harness renders, contrived data): 3a at 340px with a two-PR stack, a three-member stack with a merged bottom and a no-PR top, and two unstacked PRs · 3b Recent with 2/2, 1/2 and 2/3 tags · 3b-popover opened from 2/3 with that PR marked · 4a and 4b popovers · 4c PR view head · 5a section · 6 stack view, untracked and tracked with a dashed segment · light theme for 3a and 4a · before/after of the gutter with the bracket gone.</p>
       </section>
     </x-dc>
     <script type="text/x-dc" data-dc-script data-props='{}'>
