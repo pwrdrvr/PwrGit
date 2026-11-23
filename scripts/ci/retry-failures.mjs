@@ -2,9 +2,13 @@
 // Require the whole diagnostic so other command exits still fail closed.
 const missingWorktreeMetadata = /^TestCommandExitError: Command failed: git worktree list\r?\nfatal: Invalid path '(?:[^\r\n]+[/\\])?\.git[/\\]worktrees[/\\][^/\\\r\n]+': No such file or directory(?:\r?\n)?$/;
 
+// Vitest serializes test and hook timeouts as plain Errors. Match its full
+// test-body diagnostic because the report has no dedicated timeout status.
+const vitestTestTimeout = /^Test timed out in \d+(?:\.\d+)?(?:e[+-]\d+)?ms\.\r?\nIf this is a long-running test, pass a timeout value as the last argument or configure it globally with "testTimeout"\.$/;
+
 // A runner can attach OS and process failures to an individual test rather
 // than emitting a global error. Do not use those failures as retry candidates.
-export function unsafeFailure(errors, { allowCommandExit = false } = {}) {
+export function unsafeFailure(errors, { allowCommandExit = false, allowVitestTimeout = false } = {}) {
   if (!Array.isArray(errors) || errors.length === 0) return true;
   const infrastructure = /\b(?:EACCES|EPERM|ENOSPC|EMFILE|ENFILE|ENOMEM|EIO|EADDRINUSE|EADDRNOTAVAIL|ECONNREFUSED|ECONNRESET|EPIPE|ENOENT|ETIMEDOUT)\b|(?:browser|worker|process) (?:has )?(?:crashed|exited unexpectedly|closed unexpectedly)/i;
   return errors.some((error) => {
@@ -12,7 +16,8 @@ export function unsafeFailure(errors, { allowCommandExit = false } = {}) {
     const message = String(error.message ?? error.value ?? "").replace(/\x1b\[[0-9;]*m/g, "");
     const isAssertion = error.name === "AssertionError" || /^Error:\s*expect\(/.test(message);
     const isCommandExit = allowCommandExit && missingWorktreeMetadata.test(message);
-    return !(isAssertion || isCommandExit) || infrastructure.test(`${error.code ?? ""} ${message}`);
+    const isTestTimeout = allowVitestTimeout && error.name === "Error" && error.code === undefined && vitestTestTimeout.test(message);
+    return !(isAssertion || isCommandExit || isTestTimeout) || infrastructure.test(`${error.code ?? ""} ${message}`);
   });
 }
 

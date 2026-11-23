@@ -74,7 +74,8 @@ export default class CiRetryReporter {
         name: test.fullName,
         matchName: matchName(test),
         state: test.result().state,
-        unsafeFailure: test.result().state === "failed" ? unsafeFailure(test.result().errors) : false,
+        unsafeFailure: test.result().state === "failed"
+          ? unsafeFailure(test.result().errors, { allowVitestTimeout: true }) : false,
         mode: test.options.mode,
         started: this.startedTests.has(test.id),
         completed: this.finishedTests.has(test.id),
