@@ -19,7 +19,7 @@ export const useStackNavigation = () => useContext(StackNavigationContext);
 
 export function useStackLaneStyle(repoId: string, stack: RepositoryStack): CSSProperties | undefined {
   const lanes = useStackNavigation()?.lanes;
-  if (lanes?.repoId !== repoId) return;
+  if (stack.closed || lanes?.repoId !== repoId) return;
   // Prefer the lane nearest trunk that is drawn in the current Lineage scope.
   for (const layer of stack.layers) {
     const color = lanes.byBranch.get(layer.branch);

@@ -303,11 +303,14 @@ export function LineageGraph({
     if (!stacks?.length) return undefined;
     const positions = new Map<string, StackPosition>();
     const oldBases = new Map<string, StackPosition>();
-    for (const stack of stacks) stack.layers.forEach((layer, index) => {
-      const position = { stack, layer, index: index + 1 };
-      if (!positions.has(layer.branch)) positions.set(layer.branch, position);
-      if (stack.source === "tracked" && layer.base && layer.health.needsRestack && !oldBases.has(layer.base)) oldBases.set(layer.base, position);
-    });
+    for (const stack of stacks) {
+      if (stack.closed) continue;
+      stack.layers.forEach((layer, index) => {
+        const position = { stack, layer, index: index + 1 };
+        if (!positions.has(layer.branch)) positions.set(layer.branch, position);
+        if (stack.source === "tracked" && layer.base && layer.health.needsRestack && !oldBases.has(layer.base)) oldBases.set(layer.base, position);
+      });
+    }
     return { positions, oldBases };
   }, [stacks]);
   const [data, setData] = useState<LaneGraph | null>(null);

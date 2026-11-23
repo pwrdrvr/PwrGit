@@ -135,7 +135,7 @@ export function StackPopoverTrigger({
           close();
           navigation.select({ repoId, stack, action: next.action, branch: current ?? branch });
         }}>{next.label} stack…</button>}
-        {navigation && <button type="button" className="stack-button" onClick={() => {
+        {navigation && !stack.closed && <button type="button" className="stack-button" onClick={() => {
           close();
           navigation.select({ repoId, stack, branch: current ?? branch });
         }}>Open stack view</button>}

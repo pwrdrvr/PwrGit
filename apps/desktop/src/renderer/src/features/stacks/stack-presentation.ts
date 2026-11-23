@@ -1,4 +1,4 @@
-import type { ChangeRequestEntry, RepositoryStack, StackAction, StackPosition } from "@pwrgit/shared";
+import { openRepositoryStacks, stackPositionForPr, type ChangeRequestEntry, type RepositoryStack, type StackAction, type StackPosition } from "@pwrgit/shared";
 import { changeRequestKey, type ChangeRequestRow } from "../sidebar/change-request-groups";
 import { prPresentation } from "../sidebar/pr-status";
 
@@ -37,7 +37,7 @@ export function stackPositionLabel({ stack, layer, index }: StackPosition) {
 
 export function stackActionAt({ stack, layer, index }: StackPosition, writable: boolean):
   { label: "Sync" | "Restack"; action: StackAction } | undefined {
-  if (!writable || stack.source !== "tracked" || (layer.pr && layer.pr.state !== "open") || !layer.base ||
+  if (!writable || stack.closed || stack.source !== "tracked" || (layer.pr && layer.pr.state !== "open") || !layer.base ||
       !stack.layers.slice(index - 1).every(member => member.local !== false && member.head && member.baseIsAncestor !== false)) return;
   const lower = stack.layers[index - 2];
   if (index === 2 && layer.health.parentMerged && layer.syncReady && stack.trunk.local !== false && stack.trunk.head) {
@@ -74,8 +74,9 @@ export type StackListItem =
 /** Move a complete stack as one group at the first member's old slot. A
  * filtered or separately sorted list keeps its original order and gets position tags. */
 export function stackListItems(
-  local: readonly ChangeRequestRow[], remote: readonly ChangeRequestRow[], stacks: readonly RepositoryStack[], keepOrder = false
+  local: readonly ChangeRequestRow[], remote: readonly ChangeRequestRow[], allStacks: RepositoryStack[], keepOrder = false
 ): StackListItem[] {
+  const stacks = openRepositoryStacks(allStacks);
   const positions = new Map<string, StackPosition>();
 
   for (const stack of stacks) {
@@ -106,7 +107,8 @@ export function stackListItems(
   const emitted = new Set<string>();
   const items: StackListItem[] = [];
   for (const row of rows) {
-    const position = positions.get(changeRequestKey(row.entry));
+    const position = positions.get(changeRequestKey(row.entry)) ??
+      (keepOrder ? stackPositionForPr(allStacks, row.entry.pr) : undefined);
     if (!position || keepOrder || !complete.has(position.stack.id)) items.push({ kind: "row", row, position });
     else if (!emitted.has(position.stack.id)) {
       emitted.add(position.stack.id);

@@ -2,7 +2,7 @@ import { writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import fc from "fast-check";
 import { expect, test, vi } from "vitest";
-import type { ChangeRequestEntry, ChangeRequestList, PrSummary, Repo } from "@pwrgit/shared";
+import { stackPositionForPr, type ChangeRequestEntry, type ChangeRequestList, type PrSummary, type Repo } from "@pwrgit/shared";
 import { parseGitHubStacks } from "../github/stack-client";
 import { CommandBus } from "../command-bus";
 import { openDatabase } from "../persistence/db";
@@ -183,4 +183,61 @@ test("an externally rebased child exposes the same invalid boundary the planner 
     const snapshot = await reader.list(testRepo(cwd));
     expect(snapshot.stacks[0].layers[1]).toMatchObject({ baseIsAncestor: false, health: { needsRestack: true } });
     await expect(engine.plan({ kind: "restack", root: "bottom", from: "top" })).rejects.toThrow("outside its history");
+  }));
+
+test("R9 API membership, position and closure survive any missing branch refs", () =>
+  withStack(async ({ cwd, base, commonDir, initial }) => {
+    const presence = fc.record({ local: fc.boolean(), remote: fc.boolean() });
+    const stack = fc.record({
+      state: fc.constantFrom("open", "merged", "closed"),
+      members: fc.array(presence, { minLength: 2, maxLength: 4 }),
+    });
+    await fc.assert(fc.asyncProperty(fc.array(stack, { minLength: 1, maxLength: 4 }), async specs => {
+      const commands: string[] = [];
+      const rows = specs.map(({ state, members }, stackIndex) => ({
+        number: 4231 + stackIndex, open: state === "open", base: { ref: "main" },
+        pull_requests: members.map(({ local, remote }, index) => {
+          const branch = `history-${stackIndex}-${index}`;
+          for (const [ref, present] of [[`refs/heads/${branch}`, local], [`refs/remotes/origin/${branch}`, remote]] as const) {
+            commands.push(present ? `update ${ref} ${base}` : `delete ${ref}`);
+          }
+          return {
+            number: 4200 + stackIndex * 10 + index,
+            state: state === "open" && index === members.length - 1 ? "open" : "closed",
+            merged_at: state === "merged" || index === 0 ? "2026-11-12T10:00:00Z" : null,
+            head: { ref: branch, sha: base },
+          };
+        }),
+      }));
+      const update = await runner.run(cwd, ["update-ref", "--stdin"], { stdin: commands.join("\n") + "\n" });
+      expect(update.exitCode, update.stderr).toBe(0);
+      // A stale local catalog has only the bottom PR of the first stack.
+      const bottom = rows[0].pull_requests[0];
+      initial.stacks = [{
+        number: rows[0].number, trunk: { branch: "main" },
+        branches: [{ branch: bottom.head.ref, pullRequest: { number: bottom.number } }],
+      }];
+      await writeFile(join(commonDir, "gh-stack"), JSON.stringify(initial));
+      const reader = new StackReader(runner, locks, async () => ({
+        forge: "github", fetchedAt: 100, truncated: false, entries: [],
+        remotes: [listRemote(forgeRepo, false)],
+      }), () => undefined, () => parseGitHubStacks(rows, "example", "orbit-deploy"));
+      const snapshot = await reader.list(testRepo(cwd));
+      for (const [stackIndex, row] of rows.entries()) {
+        for (const [index, member] of row.pull_requests.entries()) {
+          const position = stackPositionForPr(snapshot.stacks, { number: member.number, repoPath: "example/orbit-deploy" });
+          expect(position?.index).toBe(index + 1);
+          expect(position?.stack.layers).toHaveLength(row.pull_requests.length);
+          expect(position?.stack.githubNumber).toBe(row.number);
+          expect(position?.stack.githubUrl).toBe(`https://github.com/example/orbit-deploy/stack/${row.number}`);
+          expect(position?.stack.closed).toBe(row.open ? undefined : specs[stackIndex].state);
+          if (!row.open) expect(Object.values(position!.layer.health)).not.toContain(true);
+          expect(stackPositionForPr(snapshot.stacks, { number: member.number, repoPath: "example/other" })).toBeUndefined();
+        }
+      }
+    }), { numRuns: 18, examples: [[[{
+      state: "merged", members: [{ local: false, remote: false }, { local: false, remote: false }],
+    }, {
+      state: "open", members: [{ local: false, remote: false }, { local: true, remote: true }],
+    }]]] });
   }));

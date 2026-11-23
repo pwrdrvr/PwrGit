@@ -44,7 +44,12 @@ export type GitHubStack = {
   url: string;
   trunk: string;
   members: PrSummary[];
+  closed?: RepositoryStack["closed"];
 };
+
+export function openRepositoryStacks(stacks: RepositoryStack[]): RepositoryStack[] {
+  return stacks.filter(stack => !stack.closed);
+}
 
 export type StackLayer = {
   branch: string;

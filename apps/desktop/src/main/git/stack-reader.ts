@@ -59,23 +59,36 @@ export class StackReader {
     const open = await this.readOpen(repo.id);
     const { catalog } = tracked;
     const remotes = new Map(open.remotes.map(remote => [remote.forgeRepo, remote]));
-    const linked = open.remotes.flatMap(remote => this.readGitHubStacks(repo.id, remote.forgeRepo).map(stack => ({
+    const github = open.remotes.flatMap(remote => this.readGitHubStacks(repo.id, remote.forgeRepo).map(stack => ({
       scope: remote.forgeRepo, stack,
     })));
+    const linked = github.filter(({ stack }) => !stack.closed);
+    const closed = github.filter(({ stack }) => stack.closed);
     const catalogScope = parsedCatalogKey(catalog.repository);
     const trackedBranches = new Set(catalog.stacks.flatMap(stack => stack.branches.map(branch => branch.branch)));
     const usedLinked = new Set<GitHubStack>();
-    const sources: StackSource[] = catalog.stacks.map(stack => {
+    const trackedSources: StackSource[] = catalog.stacks.flatMap(stack => {
       const match = linked.find(candidate => candidate.scope === catalogScope && (stack.number === candidate.stack.number ||
         candidate.stack.members.some(pr => stack.branches.some(branch => branch.pullRequest?.number === pr.number ||
           (!branch.pullRequest && branch.branch === pr.headRefName)))));
-      if (match) usedLinked.add(match.stack);
-      return {
+      if (!match && closed.some(candidate => candidate.scope === catalogScope && (
+        stack.number === candidate.stack.number || (stack.branches.length > 0 && stack.branches.every(branch =>
+          candidate.stack.members.some(pr => branch.pullRequest?.number === pr.number)))
+      ))) return [];
+      const sameMembers = match && match.stack.trunk === stack.trunk.branch &&
+        match.stack.members.length === stack.branches.length &&
+        match.stack.members.every((pr, index) => {
+          const branch = stack.branches[index];
+          return branch.pullRequest ? pr.number === branch.pullRequest.number : pr.headRefName === branch.branch;
+        });
+      if (sameMembers) usedLinked.add(match.stack);
+      return [{
         stack, catalogRepository: catalog.repository, inferred: false,
         open: open.entries.filter(entry => !catalog.repository || entry.forgeRepo === catalogScope),
-        ...(match ? { linked: match.stack } : {}),
-      };
+        ...(sameMembers ? { linked: match.stack } : {}),
+      }];
     });
+    const sources: StackSource[] = [];
     const linkedPrs = new Set(linked.flatMap(({ scope, stack }) => stack.members.map(pr => `${scope}#${pr.number}`)));
     for (const { scope, stack } of linked) {
       if (usedLinked.has(stack)) continue;
@@ -88,6 +101,9 @@ export class StackReader {
         })) },
       });
     }
+    // GitHub's ordered membership wins PR lookups when the local catalog
+    // differs. Keep the catalog's write model scoped to its local branches.
+    sources.push(...trackedSources);
     const completeEntries = open.entries.filter(entry => !(remotes.get(entry.forgeRepo)?.truncated ?? open.truncated));
     for (const entries of inferPullRequestStacks(completeEntries, trackedBranches)) {
       if (entries.some(entry => linkedPrs.has(`${entry.forgeRepo}#${entry.pr.number}`))) continue;
@@ -101,7 +117,19 @@ export class StackReader {
     }
     const busy = await store.journalBlocker(commonDir);
     const snapshot: StackSnapshot = {
-      schemaVersion: catalog.schemaVersion, readOnly: catalog.schemaVersion !== 1, stacks: [],
+      schemaVersion: catalog.schemaVersion, readOnly: catalog.schemaVersion !== 1,
+      stacks: closed.map(({ scope, stack }): RepositoryStack => ({
+        id: JSON.stringify(["github", scope, stack.number]),
+        source: "inferred", catalogRepository: scope.replace("/", ":"),
+        closed: stack.closed!,
+        githubNumber: stack.number, githubUrl: stack.url,
+        trunk: { branch: stack.trunk },
+        layers: stack.members.map((pr, index) => ({
+          branch: pr.headRefName!, parent: stack.members[index - 1]?.headRefName ?? stack.trunk,
+          pr, forgeRepo: scope, local: false,
+          health: { inSync: false, needsRestack: false, parentMerged: false, needsPush: false, drift: false, remoteAhead: false },
+        })),
+      })),
       ...(busy ? { busy } : {}),
     };
     if (busy && !snapshot.readOnly && !await store.journalBlocker(commonDir, true)) {
@@ -225,7 +253,7 @@ export class StackReader {
       }
       const stackSource: RepositoryStack["source"] = inferred ? "inferred" : "tracked";
       snapshot.stacks.push({
-        id: JSON.stringify([stackSource, catalogRepository, stack.id ?? stack.number ?? stack.branches[0].branch]),
+        id: JSON.stringify([stackSource, catalogRepository, stack.id ?? stack.number ?? linked?.number ?? stack.branches[0].branch]),
         source: stackSource, catalogRepository,
         ...(linked ? { githubNumber: linked.number, githubUrl: linked.url } : {}),
         ...(inferred ? { canTrack: Boolean(localTrunk && layers.every(layer => layer.local) &&

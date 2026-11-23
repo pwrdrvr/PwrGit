@@ -47,8 +47,8 @@ afterEach(() => {
   cleanup?.();
   vi.restoreAllMocks();
 });
-async function render(stack: RepositoryStack, { writable = true, initial = false, recent = false, extra = false, listed, selectedKey = null }:
-  { writable?: boolean; initial?: boolean; recent?: boolean; extra?: boolean; listed?: readonly PrSummary[]; selectedKey?: string | null } = {}) {
+async function render(stack: RepositoryStack, { writable = true, initial = false, recent = false, extra = false, listed, selectedKey = null, stacks = [stack] }:
+  { writable?: boolean; initial?: boolean; recent?: boolean; extra?: boolean; listed?: readonly PrSummary[]; selectedKey?: string | null; stacks?: RepositoryStack[] } = {}) {
   cleanup?.();
   const container = document.createElement("div");
   document.body.append(container);
@@ -61,7 +61,7 @@ async function render(stack: RepositoryStack, { writable = true, initial = false
   }));
   if (extra) entries.splice(1, 0, { pr: { ...makePr(99), title: "Unstacked" }, forgeRepo: scope, remote: "origin",
     location: { kind: "local", branch: "unstacked" } });
-  const snapshot = { stacks: [stack], schemaVersion: 1, readOnly: !writable };
+  const snapshot = { stacks, schemaVersion: 1, readOnly: !writable };
   localStorage.setItem("pwrgit.changeRequestsOpen.orbit", "1");
   localStorage.setItem("pwrgit.changeRequestsSort.orbit", recent ? "recent" : "stack");
   Object.assign(window, { pwrgit: {
@@ -124,6 +124,34 @@ test("R1 orders positions top-first with trunk immediately below position 1", as
     expect(Array.from(indexRow.getAttribute("aria-label")!.matchAll(/(\d+) of/g), match => Number(match[1]))).toEqual(descending);
     expect(indexRow.getAttribute("aria-label")).toMatch(/trunk main$/);
   }), { numRuns: 12 });
+});
+
+test("R10 closed stacks change neither the index count, rows nor auto-expansion", async () => {
+  await fc.assert(fc.asyncProperty(
+    fc.array(fc.constantFrom("open", "closed", "merged"), { minLength: 1, maxLength: 5 }),
+    async states => {
+      const stacks: RepositoryStack[] = states.map((state, index) => {
+        const stack = makeStack(1, "inferred");
+        const pr = { ...makePr(index), state, headRefName: `history-${index}` };
+        return { ...stack, id: String(index), githubNumber: 4000 + index,
+          ...(state === "open" ? {} : { closed: state }),
+          layers: [{ ...stack.layers[0], branch: pr.headRefName, pr }] };
+      });
+      const active = stacks.filter((_stack, index) => states[index] === "open");
+      const el = await render(stacks[0], { stacks, listed: active.map(stack => stack.layers[0].pr!) });
+      const index = el.querySelector("[data-list] .stack-sidebar");
+      if (!active.length) {
+        expect(index).toBeNull();
+        return;
+      }
+      const heading = index?.querySelector(".ref-section__head");
+      expect(heading?.querySelector(".ref-section__count")?.textContent).toBe(String(active.length));
+      expect(heading?.getAttribute("aria-expanded")).toBe("false");
+      await click(heading ?? null);
+      expect(Array.from(index!.querySelectorAll("button[aria-label^='Open stack view for']"), button =>
+        button.getAttribute("aria-label")?.split(".")[0])).toEqual(
+        active.map(stack => `Open stack view for Stack #${stack.githubNumber}`));
+    }), { numRuns: 20, examples: [[["merged"]], [["open", "closed"]]] });
 });
 
 test("R2 opens the stack view only after explicit stack navigation", async () => {
