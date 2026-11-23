@@ -134,6 +134,20 @@ it("resolves relative PATH entries again when the working directory changes", ()
   cwd.mockRestore();
 });
 
+it.skipIf(!windows)("resolves drive-rooted PATH entries again when the current drive changes", () => {
+  configureBundledGit("C:\\shipped");
+  const git = "C:\\installed\\bin\\git.exe";
+  const source = { PATH: "\\shipped\\bin" };
+  const cwd = vi.spyOn(process, "cwd").mockReturnValue("C:\\workspace");
+  try {
+    expect(installedGitEnvironment(source, git).PATH).toBe(dirname(git));
+    cwd.mockReturnValue("D:\\workspace");
+    expect(installedGitEnvironment(source, git).PATH).toBe([dirname(git), source.PATH].join(delimiter));
+  } finally {
+    cwd.mockRestore();
+  }
+});
+
 it.skipIf(!windows)("resolves drive-relative PATH entries again when that drive's directory changes", () => {
   const root = "Z:\\";
   const bundle = join(root, "shipped");
