@@ -381,10 +381,11 @@ in-process retry. A subsequent step retries at most 20 initially failed tests
 in that same job and prepared build. The selection and reports must prove that
 the first run completed, no collection, hook, fixture or runner error occurred,
 and every selected test passed on retry. Identifiable assertion failures are
-eligible for both runners. Desktop E2E also accepts test-body Git commands
-that report a confirmed nonzero exit. Infrastructure errors, unclassified
-errors and missing or ambiguous evidence fail the slice. Local Playwright
-retries retain their existing default.
+eligible for both runners. Desktop E2E also accepts a confirmed nonzero exit
+from `git worktree list` in the test body when Git reports a missing linked
+worktree metadata directory. Infrastructure errors, unclassified errors and
+missing or ambiguous evidence fail the slice. Local Playwright retries retain
+their existing default.
 
 The `ci-flake-report-<attempt>` artifact contains `flake-report.json` with
 per-platform, per-slice initial failures and observed retry outcomes. Missing
