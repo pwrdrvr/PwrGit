@@ -128,7 +128,18 @@ export async function* transformedModules(sourceRoot, { productionInput } = {}) 
     if (!environments?.ssr || !environments.client) throw new Error("Vitest's transform environments are missing");
     const devConfig = await resolveConfig({ root: desktopRoot }, "serve");
     // Keep Fast Refresh's hook instrumentation; disable only its transport.
-    devServer = await createServer({ ...devConfig.config.renderer, root: resolve(desktopRoot, "src/renderer"), configFile: false, server: { middlewareMode: true, watch: null, hmr: true, ws: false }, logLevel: "error" });
+    devServer = await createServer({
+      ...devConfig.config.renderer,
+      root: resolve(desktopRoot, "src/renderer"),
+      configFile: false,
+      // Plugins can still request prebundles. Keep them out of the app's cache.
+      cacheDir: resolve(desktopRoot, "node_modules/.cache/pwrgit/renderer-bytecode"),
+      // This server only requests transforms. Clear the renderer's prebundle
+      // list and skip discovery so shutdown has no dependency scan to cancel.
+      optimizeDeps: { noDiscovery: true, include: [] },
+      server: { middlewareMode: true, watch: null, hmr: true, ws: false },
+      logLevel: "error",
+    });
     for (const path of files) {
       const file = relative(repoRoot, path).replaceAll("\\", "/");
       for (const [name, environment] of [["Vitest-SSR", environments.ssr], ["Vitest-jsdom", environments.client]]) {
