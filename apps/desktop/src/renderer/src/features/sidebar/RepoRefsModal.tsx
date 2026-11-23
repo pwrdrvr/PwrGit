@@ -640,7 +640,7 @@ export function RepoRefsModal({
   const stackNavigation = useStackNavigation();
   const { snapshot: stackSnapshot } = useStackSnapshot(stackNavigation ? repo.id : undefined, repo.profileId);
   const trackedStacks = stackSnapshot?.readOnly === false && !stackSnapshot.busy
-    ? stackSnapshot.stacks.filter(stack => stack.source === "tracked") : [];
+    ? stackSnapshot.stacks.filter(stack => !stack.closed && stack.source === "tracked") : [];
   const tip = useViewportTooltip();
   const [tab, setTab] = useState<RefsTab>(initialTab);
   const [status, setStatus] = useState<BranchStatusFilter>(initialStatus);

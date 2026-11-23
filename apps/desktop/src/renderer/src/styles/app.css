@@ -11535,6 +11535,7 @@ button.ref-chip:focus-visible {
   min-width: calc-size(max-content, min(size, 100px));
 }
 .commit-meta > .pr-chip,
+.commit-meta > .stack-position,
 .ref-chips .pr-chip,
 .ref-chips .stack-position,
 .commit-meta > .commit-tag--old-parent,
@@ -11560,6 +11561,8 @@ button.ref-chip:focus-visible {
   }
 }
 @container lineage-meta (width < 345px) {
+  /* The row's PR chip keeps its dot; its stack tag goes with its label. */
+  .commit-meta > .pr-chip + .stack-position,
   .commit-meta > .pr-chip .pr-chip__label,
   .ref-chips .pr-chip__label,
   .commit-meta > .commit-tag--tag .commit-tag__moved,

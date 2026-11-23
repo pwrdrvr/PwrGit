@@ -1,7 +1,6 @@
 import type { GitHubStack, PrSummary } from "@pwrgit/shared";
 
 const PER_PAGE = 100;
-const MAX_PAGES = 5;
 const GITHUB_VERSION = "2026-03-10";
 
 function record(value: unknown): Record<string, unknown> {
@@ -15,7 +14,7 @@ export function parseGitHubStacks(value: unknown, owner: string, name: string): 
     const row = record(raw);
     const trunk = record(row.base).ref;
     const number = row.number;
-    if (row.open !== true || typeof number !== "number" || !Number.isSafeInteger(number)
+    if (typeof row.open !== "boolean" || typeof number !== "number" || !Number.isSafeInteger(number)
         || number <= 0 || typeof trunk !== "string" || !trunk || !Array.isArray(row.pull_requests)) return [];
     const members: PrSummary[] = [];
     for (const rawPr of row.pull_requests) {
@@ -38,16 +37,21 @@ export function parseGitHubStacks(value: unknown, owner: string, name: string): 
     }
     if (!members.length || new Set(members.map(pr => pr.headRefName)).size !== members.length ||
         new Set(members.map(pr => pr.number)).size !== members.length) return [];
-    return [{ number, trunk, url: `${repoUrl}/stack/${number}`, members }];
+    return [{
+      number, trunk, url: `${repoUrl}/stack/${number}`, members,
+      ...(row.open ? {} : { closed: members.every(member => member.state === "merged") ? "merged" : "closed" }),
+    }];
   });
 }
 
 /** GitHub's documented repository Stacks API. Failure leaves the PR list usable
  * and preserves the last verified stack result until the next list refresh. */
 export async function fetchGitHubStacks(token: string, owner: string, name: string): Promise<GitHubStack[] | undefined> {
-  const stacks: GitHubStack[] = [];
+  const stacks = new Map<number, GitHubStack>();
   try {
-    for (let page = 1; page <= MAX_PAGES; page += 1) {
+    // The list has no state filter or guaranteed ordering. A fixed page limit
+    // can hide open stacks as well as older closed ones.
+    for (let page = 1; ; page += 1) {
       const url = `https://api.github.com/repos/${encodeURIComponent(owner)}/${encodeURIComponent(name)}/stacks?per_page=${PER_PAGE}&page=${page}`;
       const response = await fetch(url, {
         headers: { Accept: "application/vnd.github+json", Authorization: `Bearer ${token}`, "X-GitHub-Api-Version": GITHUB_VERSION },
@@ -56,10 +60,10 @@ export async function fetchGitHubStacks(token: string, owner: string, name: stri
       if (!response.ok) return undefined;
       const body: unknown = await response.json();
       if (!Array.isArray(body)) return undefined;
-      stacks.push(...parseGitHubStacks(body, owner, name));
-      if (body.length < PER_PAGE) break;
+      for (const stack of parseGitHubStacks(body, owner, name)) stacks.set(stack.number, stack);
+      if (!response.headers.get("link")?.split(",").some(link => /;\s*rel="next"/.test(link))) break;
     }
-    return stacks;
+    return [...stacks.values()];
   } catch {
     return undefined;
   }

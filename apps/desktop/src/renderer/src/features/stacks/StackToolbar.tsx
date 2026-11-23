@@ -7,6 +7,7 @@ export function StackToolbar({ stack, disabled, onPlan }: {
 }) {
   const [adding, setAdding] = useState(false);
   const [branch, setBranch] = useState("");
+  if (stack.closed) return null;
   if (stack.source === "inferred") {
     return <button type="button" className="stack-button" disabled={disabled || stack.canTrack === false}
       onClick={() => onPlan({ kind: "adopt" })}>Track with gh stack…</button>;

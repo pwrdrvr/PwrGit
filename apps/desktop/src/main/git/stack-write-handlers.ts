@@ -60,7 +60,7 @@ function updatedStack(snapshot: StackSnapshot | null, id: string, operation: Sta
     operation.kind === "remove" && operation.branch === operation.root
       ? before.stacks.find(stack => stack.branches[0]?.branch === operation.root)?.branches[1]?.branch
       : operation.root;
-  return snapshot?.stacks.find(stack => stack.id === id) ??
+  return snapshot?.stacks.find(stack => !stack.closed && stack.id === id) ??
     snapshot?.stacks.find(stack => stack.source === "tracked" && stack.layers[0]?.branch === root);
 }
 
@@ -112,7 +112,7 @@ export function registerStackWriteHandlers(bus: CommandBus, options: Options) {
       const repo = scopedRepo(request);
       const snapshot = await list(repo);
       if (snapshot.readOnly || snapshot.busy) throw new Error(snapshot.busy ?? "This stack catalog is read-only");
-      const stack = snapshot.stacks.find(model => model.id === request.stackId);
+      const stack = snapshot.stacks.find(model => !model.closed && model.id === request.stackId);
       if (!stack) throw new Error("This stack changed. Select it again.");
       const { store, commonDir } = await location(repo);
       const engine = new StackEngine(runnerFor(repo), store, repo.path, commonDir);

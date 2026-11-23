@@ -1,3 +1,4 @@
+import { forgeRepoKey } from "./forge-product";
 import type { ChangeRequestEntry, PrSummary } from "./types";
 
 export type StackBranchHealth = {
@@ -44,7 +45,12 @@ export type GitHubStack = {
   url: string;
   trunk: string;
   members: PrSummary[];
+  closed?: RepositoryStack["closed"];
 };
+
+export function openRepositoryStacks(stacks: RepositoryStack[]): RepositoryStack[] {
+  return stacks.filter(stack => !stack.closed);
+}
 
 export type StackLayer = {
   branch: string;
@@ -72,6 +78,9 @@ export type RepositoryStack = {
   canTrack?: boolean;
   trunk: { branch: string; head?: string; local?: boolean };
   layers: StackLayer[];
+  /** Absent while the stack is open. GitHub closes a stack once its PRs merge
+   * or close; it stays in the snapshot so a member PR can still name it. */
+  closed?: "merged" | "closed";
 };
 
 export type StackSnapshot = {
@@ -90,6 +99,25 @@ export function stackPosition(stacks: readonly RepositoryStack[], predicate: (la
     if (index !== -1) return { stack, index: index + 1, layer: stack.layers[index] };
   }
   return undefined;
+}
+
+/** The stack a pull request belongs to, found by the PR rather than its
+ * branch: a merged PR's branch is usually deleted. An open stack wins over a
+ * closed one that still lists the same PR. */
+export function stackPositionForPr(stacks: readonly RepositoryStack[], pr: Pick<PrSummary, "number" | "repoPath" | "host">, forgeRepo?: string):
+  StackPosition | undefined {
+  const key = forgeRepo?.toLowerCase() ?? (pr.host && pr.repoPath ? forgeRepoKey(pr.host, pr.repoPath) : undefined);
+  const member = (layer: StackLayer) => {
+    const candidate = layer.pr;
+    if (candidate?.number !== pr.number) return false;
+    if (key) {
+      const scope = layer.forgeRepo ?? (candidate.host && candidate.repoPath
+        ? forgeRepoKey(candidate.host, candidate.repoPath) : undefined);
+      return scope?.toLowerCase() === key;
+    }
+    return !pr.repoPath || candidate.repoPath?.toLowerCase() === pr.repoPath.toLowerCase();
+  };
+  return stackPosition(stacks.filter(stack => !stack.closed), member) ?? stackPosition(stacks.filter(stack => stack.closed), member);
 }
 
 /** A fork, gap, cycle, or duplicate head never gets an arbitrary stacked order. */

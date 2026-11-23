@@ -12,6 +12,7 @@ import {
   stackPositionLabel, stackSource, stackState, stackStateLabel
 } from "./stack-presentation";
 import { useStackLaneStyle, useStackNavigation } from "./stack-navigation";
+import "./stacks.css";
 
 export function StackNode({ position, current, showPosition }: { position?: StackPosition; current?: boolean; showPosition?: boolean }) {
   const state = position ? stackState(position.layer) : "trunk";
@@ -36,7 +37,10 @@ export function StackPopoverTrigger({
   const initialFocus = useRef<HTMLButtonElement | null>(null);
   useFocusTrap({ open, containerRef: panel, initialFocusRef: initialFocus });
   useDismissable({ open, onDismiss: () => setOpen(false), triggerRef: anchor, surfaceRef: panel });
-  const next = open ? stackNextAction(stack, writable) : undefined;
+  // A closed stack is history, and a trigger with no repository (a PR chip in
+  // Lineage) can't route to a stack view: both show the stack and nothing more.
+  const navigable = repoId !== "" && !stack.closed;
+  const next = open && navigable ? stackNextAction(stack, writable) : undefined;
   const members = open ? stackMembers(stack) : [];
 
   useLayoutEffect(() => {
@@ -69,7 +73,7 @@ export function StackPopoverTrigger({
 
   const close = () => { restoreFocus(anchor, panel); setOpen(false); };
   // A trigger inside Lineage’s native ref browser belongs to its top layer.
-  const host = anchor.current?.closest("[popover]") ?? anchor.current?.closest(".app") ?? anchor.current?.parentElement;
+  const host = anchor.current?.closest("[popover], [data-viewport-tooltip]") ?? anchor.current?.closest(".app") ?? anchor.current?.parentElement;
   return <>
     <button type="button" className={className} ref={anchor} aria-label={label}
       aria-haspopup="dialog" aria-expanded={open} aria-controls={open ? id : undefined}
@@ -77,7 +81,7 @@ export function StackPopoverTrigger({
       onDoubleClick={event => event.stopPropagation()}
       onClick={event => {
         event.stopPropagation();
-        if (!open) dismissHoverTooltips();
+        if (!open) dismissHoverTooltips(event.currentTarget);
         setOpen(!open);
       }}>{children}</button>
     {open && host && createPortal(<div className="stack-popover" style={laneStyle} ref={panel} role="dialog" aria-modal="true" aria-label={stackName(stack)}
@@ -124,6 +128,10 @@ export function StackPopoverTrigger({
               aria-label={`${stackPositionLabel(position)}, ${entry.pr.title}${active ? ", this PR" : ""}`}
               onClick={() => {
                 close();
+                if (!repoId) {
+                  void dispatch("shell:openExternal", { url: entry.pr.url });
+                  return;
+                }
                 selection.select({ repoId, entry, via: "pointer", manyRemotes: new Set(entries.map(row => row.remote)).size > 1 });
               }}>{content}</button> : <div className="stack-popover__row" data-ghost={branch === layer.branch ? "" : undefined}>{content}</div>}
           </li>;
@@ -135,7 +143,7 @@ export function StackPopoverTrigger({
           close();
           navigation.select({ repoId, stack, action: next.action, branch: current ?? branch });
         }}>{next.label} stack…</button>}
-        {navigation && <button type="button" className="stack-button" onClick={() => {
+        {navigation && navigable && <button type="button" className="stack-button" onClick={() => {
           close();
           navigation.select({ repoId, stack, branch: current ?? branch });
         }}>Open stack view</button>}
@@ -146,13 +154,58 @@ export function StackPopoverTrigger({
   </>;
 }
 
-export function StackPositionChip({ position, repoId, writable }: { position: StackPosition; repoId: string; writable?: boolean | undefined }) {
+/** A PR's place in its stack (`2/3`), beside its chip wherever the chip is
+ * drawn; it opens the stack popover. */
+export function StackPositionChip({ position, repoId, writable }: {
+  position: StackPosition; repoId?: string | undefined; writable?: boolean | undefined;
+}) {
   const { stack, layer, index } = position;
-  return <StackPopoverTrigger stack={stack} repoId={repoId} writable={writable} current={layer.pr ? layer.branch : undefined}
-    className="stack-position" label={`${stackName(stack)}, position ${index} of ${stack.layers.length}. Show stack`}>
+  return <StackPopoverTrigger stack={stack} repoId={repoId ?? ""} writable={writable} current={layer.pr ? layer.branch : undefined}
+    className="stack-position"
+    label={`${stackName(stack)}, position ${index} of ${stack.layers.length}${stack.closed === "merged" ? ", merged" : ""}. Show stack`}>
     <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
       <path d="m12 2 10 5-10 5L2 7Zm10 10-10 5-10-5m20 5-10 5-10-5" />
     </svg>
     {index}/{stack.layers.length}
   </StackPopoverTrigger>;
+}
+
+/** The PR hover card's Stack section (board 9a): the stack top first with this
+ * PR marked, trunk last. A tall stack keeps this PR and two neighbours each
+ * side; the popover behind the `i/n` tag shows the rest. */
+export function StackCardSection({ position }: { position: StackPosition }) {
+  const { stack, index } = position;
+  const members = stackMembers(stack);
+  const at = members.findIndex(member => member.index === index);
+  const first = Math.max(0, Math.min(at - 2, members.length - 5));
+  const shown = members.slice(first, first + 5);
+  const above = first;
+  const below = members.length - first - shown.length;
+  return <div className="pr-status-card__section stack-card-section">
+    <span className="pr-status-card__section-title stack-card-section__title">
+      <span>{stackName(stack)}</span>
+      <span className="stack-card-section__where">{index}/{stack.layers.length} · {stackDestination(stack).replace(/^\d+ \w+ /, "")}</span>
+    </span>
+    <ol className="stack-card-section__list" aria-label={`${stackName(stack)}, ${stackDestination(stack)}`}>
+      {above > 0 && <li className="stack-card-section__more">{above} more above</li>}
+      {shown.map(member => {
+        const current = member.index === index;
+        return <li key={member.layer.branch} className={current ? "is-current" : undefined} aria-current={current ? "true" : undefined}>
+          <StackNode position={member} />
+          <span className="stack-card-section__n">{member.index}/{stack.layers.length}</span>
+          <span className="stack-card-section__t">
+            {member.layer.pr ? <>#{member.layer.pr.number} {plainTitle(member.layer.pr.title)}</> : member.layer.branch}
+          </span>
+        </li>;
+      })}
+      {below > 0 && <li className="stack-card-section__more">{below} more below</li>}
+      <li className="stack-card-section__trunk"><StackNode /><span /><span className="stack-card-section__t">{stack.trunk.branch}</span></li>
+    </ol>
+  </div>;
+}
+
+/** "feat(desktop): coordinate…" reads as "coordinate…" in a 272px card; the
+ * full title is on the PR's own chip and card. */
+function plainTitle(title: string) {
+  return title.replace(/^[a-z]+(\([^)]*\))?!?:\s+/i, "");
 }

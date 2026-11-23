@@ -8,6 +8,8 @@ import {
 } from "../../lib/hoverIntent";
 import { dispatch } from "../../lib/pwrgit";
 import { useViewportTooltip } from "../../lib/useViewportTooltip";
+import { StackPositionChip } from "../stacks/StackPopover";
+import { useStackPositionForPr } from "../stacks/stack-navigation";
 import { prChipLabel, prPresentation } from "./pr-status";
 import { PrStatusCard } from "./PrStatusCard";
 
@@ -18,18 +20,37 @@ import { PrStatusCard } from "./PrStatusCard";
  *  The card renders entirely from the `PrSummary` already in the tree. It
  *  issues no request of its own: hovering a chip must never reach a forge API,
  *  or a sweep across a commit list would fan out one call per chip. Fresh data
- *  arrives through main's `pr:changed` deltas like everything else. */
+ *  arrives through main's `pr:changed` deltas like everything else.
+ *
+ *  A PR in a stack, open or closed, says so wherever its chip is drawn: a
+ *  `2/3` tag follows the chip, and the card lists the stack. Membership is the
+ *  PR's, found by number, so a merged PR whose branch is gone keeps it. */
 export function PrChip({
   pr,
   repoId,
   stacked = false,
+  stackTag = true,
+  stackRepoId,
+  forgeRepo,
+  stackWritable,
   hoverIntent: sharedIntent
 }: {
   pr: PrSummary;
   /** The checkout this chip belongs to. Only with it can the card offer
    *  "Add to merge queue": main resolves the forge from its `origin`. */
   repoId?: string | undefined;
+  /** Beside a stack rail: the rail node is the status and the rail is the
+   *  stack, so the chip draws neither its dot nor a stack tag. */
   stacked?: boolean;
+  /** False where the caller already draws this PR's stack position. */
+  stackTag?: boolean;
+  /** The repository whose stacks to search when it isn't `repoId`'s checkout
+   *  (a Lineage row). Without either, any loaded snapshot that holds this PR
+   *  by forge repository answers. */
+  stackRepoId?: string | undefined;
+  forgeRepo?: string | undefined;
+  /** Whether the stack popover may offer Sync or Restack. */
+  stackWritable?: boolean | undefined;
   /** Callers rendering many chips (commit rows) pass their own gate; a lone
    *  sidebar chip falls back to its own. */
   hoverIntent?: HoverIntent;
@@ -57,7 +78,8 @@ export function PrChip({
   const status = prPresentation(pr);
   const isDraft = status.draft;
   const label = prChipLabel(pr);
-  const card = <PrStatusCard pr={pr} repoId={repoId} />;
+  const stackPosition = useStackPositionForPr(stackRepoId ?? repoId, pr, forgeRepo);
+  const card = <PrStatusCard pr={pr} repoId={repoId} stackPosition={stackPosition} />;
   const open = (): void => void dispatch("shell:openExternal", { url: pr.url });
   const activate = (altKey: boolean): void => {
     if (altKey) void copyText(pr.url);
@@ -94,8 +116,8 @@ export function PrChip({
   // Depends on `pr`, not the element: a new element every render would make an
   // open card re-render on every parent paint.
   useEffect(() => {
-    updateTooltip(<PrStatusCard pr={pr} repoId={repoId} />);
-  }, [pr, repoId, updateTooltip]);
+    updateTooltip(<PrStatusCard pr={pr} repoId={repoId} stackPosition={stackPosition} />);
+  }, [pr, repoId, stackPosition, updateTooltip]);
 
   return (
     <>
@@ -141,6 +163,8 @@ export function PrChip({
           <span className="pr-chip__draft-bar" aria-hidden="true" />
         )}
       </span>
+      {stackPosition && stackTag && !stacked &&
+        <StackPositionChip position={stackPosition} repoId={stackRepoId ?? repoId} writable={stackWritable} />}
       {tooltipNode}
     </>
   );

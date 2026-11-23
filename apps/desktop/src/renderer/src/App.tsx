@@ -3,7 +3,7 @@ import { StackToolbar } from "./features/stacks/StackToolbar";
 import { useStackOperation } from "./features/stacks/useStackOperation";
 import { StackNavigationContext, type StackLaneColors, type StackPick, useStackSnapshot } from "./features/stacks/stack-navigation";
 import { StackRail, StackView } from "./features/stacks/StackViews";
-import { stackPosition } from "@pwrgit/shared";
+import { stackPositionForPr } from "@pwrgit/shared";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type {
   ChangeRequestEntry,
@@ -187,6 +187,7 @@ export function App() {
   const [stackSelectedBranch, setStackSelectedBranch] = useState<string>();
   const closeStack = useCallback(() => setStackPick(null), []);
   const selectStack = useCallback((pick: StackPick) => {
+    if (pick.stack.closed) return;
     setChangeRequest(null);
     setContributionsOpen(false);
     setStackPick(pick);
@@ -825,7 +826,7 @@ export function App() {
     appliedStackPick.current?.previousSnapshot === shownStacks;
   const stack = stackPick && stackRepo
     ? shownStacks && !awaitingSnapshot
-      ? shownStacks.stacks.find(model => model.id === stackPick.stack.id) ??
+      ? shownStacks.stacks.find(model => !model.closed && model.id === stackPick.stack.id) ??
         (stackOperation.pending === "run" ? stackPick.stack : null)
       : stackPick.stack
     : null;
@@ -851,8 +852,7 @@ export function App() {
     [stackPick, selectStack, visibleStackLanes]);
   const { snapshot: lineageStacks } = useStackSnapshot(selectedRepo?.id, selectedRepo?.profileId);
   const { snapshot: changeRequestStacks } = useStackSnapshot(changeRequestRepo?.id, changeRequestRepo?.profileId);
-  const changeRequestStackPosition = shownChangeRequest && stackPosition(changeRequestStacks?.stacks ?? [],
-    layer => layer.forgeRepo === shownChangeRequest.entry.forgeRepo && layer.pr?.number === shownChangeRequest.entry.pr.number);
+  const changeRequestStackPosition = shownChangeRequest && stackPositionForPr(changeRequestStacks?.stacks ?? [], shownChangeRequest.entry.pr, shownChangeRequest.entry.forgeRepo);
   const lineageVisible = stack === null && shownChangeRequest === null && diffTarget === null && fileInsightTarget === null;
   const visibleLineageRepoId = lineageVisible && selectedWorktree !== null ? selectedWorktree.repoId : null;
   useLayoutEffect(() => {

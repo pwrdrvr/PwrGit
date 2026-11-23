@@ -160,8 +160,8 @@ export type ViewportTooltip = {
 };
 
 /** Close transient tooltips when a click opens a foreground surface. */
-export function dismissHoverTooltips(): void {
-  window.dispatchEvent(new Event("pwrgit:dismiss-hover-tooltips"));
+export function dismissHoverTooltips(inside?: HTMLElement): void {
+  window.dispatchEvent(new CustomEvent("pwrgit:dismiss-hover-tooltips", { detail: inside }));
 }
 
 /**
@@ -764,7 +764,10 @@ export function useViewportTooltip(
       if (trigger !== null && !trigger.isConnected) hide();
     });
     observer.observe(document, { childList: true, subtree: true });
-    const onDismissHover = () => { if (!stickyRef.current) hide(); };
+    const onDismissHover = (event: Event) => {
+      const inside = (event as CustomEvent<HTMLElement | undefined>).detail;
+      if (!stickyRef.current && !tooltipRef.current?.contains(inside ?? null)) hide();
+    };
     window.addEventListener("pwrgit:dismiss-hover-tooltips", onDismissHover);
     window.addEventListener("blur", hide);
     window.addEventListener("scroll", onScroll, { capture: true });
@@ -836,6 +839,7 @@ export function useViewportTooltip(
             role={interactive ? "dialog" : "tooltip"}
             aria-label={interactive ? label : undefined}
             className={className}
+            data-viewport-tooltip=""
             style={{
               position: "fixed",
               left: state.left,

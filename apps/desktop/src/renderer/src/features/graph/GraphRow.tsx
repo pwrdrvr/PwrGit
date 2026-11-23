@@ -1,5 +1,5 @@
 import { memo, useId, useLayoutEffect, useRef, useState, type CSSProperties, type MouseEvent, type ReactNode } from "react";
-import type { Commit, LaneBranchInfo, MovedTag, PrSummary, StackPosition } from "@pwrgit/shared";
+import { stackPositionForPr, type Commit, type LaneBranchInfo, type MovedTag, type PrSummary, type StackPosition } from "@pwrgit/shared";
 import { BranchGlyph } from "../../lib/BranchGlyph";
 import { ChevronGlyph } from "../../lib/ChevronGlyph";
 import { CheckoutGlyph } from "../../lib/CheckoutGlyph";
@@ -188,7 +188,15 @@ export function GraphRow({
   const chipCount = refs.length + remoteRefs.length;
   const oldStackBase = oldStackBases?.get(commit.hash);
   const isTip = chipCount > 0;
-  const firstStackRef = refs.find(ref => stackPositions?.has(ref));
+  // A branch's stack chip says what its PR chip's tag already says when that
+  // PR is drawn on this row (the row's PR, or the branch's own); keep one.
+  const refStackChip = (name: string) => {
+    const position = stackPositions?.get(name);
+    const branchPr = branchInfo?.[name]?.pr;
+    return position !== undefined && ![pullRequest, branchPr].some(pr =>
+      pr && stackPositionForPr([position.stack], pr)?.layer === position.layer);
+  };
+  const firstStackRef = refs.find(refStackChip);
   const orderedRefs = firstStackRef && firstStackRef !== refs[0]
     ? [firstStackRef, ...refs.filter(ref => ref !== firstStackRef)] : refs;
   const movedTag = onTakeTag === undefined ? undefined : vm.tagMoved;
@@ -343,9 +351,9 @@ export function GraphRow({
           <BranchGlyph size={8} strokeWidth={2.6} />
           <span className="ref-chip__name">{name}</span>
         </button>
-        {position && stackRepoId && <StackPositionChip position={position} repoId={stackRepoId} writable={stackWritable} />}
+        {position && stackRepoId && (browser !== undefined || refStackChip(name)) && <StackPositionChip position={position} repoId={stackRepoId} writable={stackWritable} />}
         {pr !== undefined && (browser === undefined
-          ? <PrChip pr={pr} hoverIntent={hoverIntent} />
+          ? <PrChip pr={pr} hoverIntent={hoverIntent} stackRepoId={stackRepoId} stackWritable={stackWritable} />
           : <span className="ref-list__pr">{prChipLabel(pr)}</span>)}
         {worktreeId !== undefined && (
           <button
@@ -387,7 +395,7 @@ export function GraphRow({
   function renderMeta() {
     return (
       <div className="commit-meta" style={{ "--ref-lane-color": color } as CSSProperties}>
-        {pullRequest !== undefined && <PrChip pr={pullRequest} hoverIntent={hoverIntent} />}
+        {pullRequest !== undefined && <PrChip pr={pullRequest} hoverIntent={hoverIntent} stackRepoId={stackRepoId} stackWritable={stackWritable} />}
         {vm.tag !== undefined && renderTag(vm.tag)}
         {publishedTags?.[0] !== undefined && renderPublishedTag(publishedTags[0])}
         {isHead && <span className="commit-tag commit-tag--head">HEAD</span>}

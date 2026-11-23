@@ -46,6 +46,8 @@ const pulls: ChangeRequestList = {
   entries: stack.layers.map(layer => ({ pr: layer.pr!, remote: "origin", forgeRepo, location: { kind: "local", branch: layer.branch } })),
 };
 const review = new URLSearchParams(location.search).has("review");
+// Board turn 9: a GitHub stack whose PRs all merged, closed, branches gone.
+const withClosed = review && new URLSearchParams(location.search).has("closed");
 const releaseStack: RepositoryStack = {
   ...stack, id: "release-policy", source: "inferred", githubNumber: 801,
   githubUrl: "https://example.invalid/stack/801",
@@ -56,7 +58,7 @@ const releaseStack: RepositoryStack = {
       ...layer, branch, parent, ...(index === 0 ? { behindParent: 14 } : {}),
       pr: { ...layer.pr!, number: index === 0 ? 790 : 798, headRefName: branch, baseRefName: parent,
         title: index === 0 ? "Define release policy rules" : "Enforce approval rules",
-        checkState: index === 0 ? "passing" : "failing", mergeState: "mergeable", author: "avery", additions: 84, deletions: 12,
+        checkState: index === 0 ? "passing" : "failing", checksStillRunning: index === 1, mergeState: "mergeable", author: "avery", additions: 84, deletions: 12,
         changedFiles: 3, updatedAt: index === 0 ? 1000 : 3000 },
       health: { ...layer.health, inSync: index === 1, needsRestack: index === 0, needsPush: false },
     };
@@ -83,6 +85,25 @@ const newStack: RepositoryStack = {
     health: { ...layer.health, needsRestack: false },
   })),
 };
+const auditTitles = ["feat(audit): record approval events", "feat(audit): import the audit engine and catalog",
+  "feat(audit): coordinate audit export operations"];
+const mergedStack: RepositoryStack = {
+  ...stack, id: "audit", source: "inferred", githubNumber: 812, githubUrl: "https://example.invalid/stack/812", closed: "merged",
+  layers: auditTitles.map((title, index) => {
+    const branch = ["audit/events", "audit/engine", "audit/export"][index]!;
+    return {
+      branch, parent: index ? ["audit/events", "audit/engine"][index - 1]! : "main", local: false,
+      health: { inSync: true, needsRestack: false, parentMerged: false, needsPush: false, remoteAhead: false, drift: false },
+      pr: { number: 809 + index, title, url: `https://example.invalid/pull/${809 + index}`, state: "merged", isDraft: false,
+        headRefName: branch, baseRefName: index ? ["audit/events", "audit/engine"][index - 1]! : "main", repoPath: "example/orbit-deploy",
+        mergedAt: Date.parse("2026-11-21T10:00:00Z"), createdAt: Date.parse("2026-11-20T18:00:00Z"),
+        additions: [212, 1150, 96][index], deletions: [4, 53, 11][index], changedFiles: [6, 37, 4][index], commits: 1 },
+    };
+  }),
+};
+const mergedLoner: PrSummary = { number: 807, title: "fix(core): handle broken stdio pipes", url: "https://example.invalid/pull/807",
+  state: "merged", isDraft: false, headRefName: "fix/stdio", baseRefName: "main", repoPath: "example/orbit-deploy",
+  mergedAt: Date.parse("2026-11-21T11:00:00Z") };
 const entry = (pr: PrSummary): ChangeRequestEntry => ({
   pr, forgeRepo, remote: "origin", location: { kind: "local", branch: pr.headRefName! },
 });
@@ -138,7 +159,7 @@ Object.assign(window, { pwrgit: {
   },
   dispatch: async (name: string, payload: unknown) => {
     if (name === "pr:openList") return ok(review ? reviewPulls : pulls);
-    if (name === "stack:list") return ok({ schemaVersion: 1, readOnly: false, stacks: review ? [releaseStack, ledgerStack, newStack] : [currentStack] });
+    if (name === "stack:list") return ok({ schemaVersion: 1, readOnly: false, stacks: review ? [releaseStack, ledgerStack, newStack, ...(withClosed ? [mergedStack] : [])] : [currentStack] });
     if (name === "stack:plan") {
       mockedPlan = makePlan((payload as { action: StackAction }).action);
       return ok(mockedPlan);
@@ -209,6 +230,17 @@ function Harness() {
                     committedAt: "2026-11-20T14:00:00Z", isMerge: false },
                   row: { lane: graphLane, top: [{ from: graphLane, to: graphLane }], bottom: [{ from: graphLane, to: graphLane }] },
                   refs: [layer.branch], remoteRefs: ["origin"], isHead: index === 0, isHeadOnly: true, isMine: true, defaultBranch: "main",
+                }} laneCount={graphLane + 1} now={Date.parse("2026-11-22T00:00:00Z")}
+                selected={false} focused={false} contextOpen={false} flashing={false} hoverIntent={hoverIntent}
+                onOpen={noop} onShowContext={noop} onHideContext={noop} onFocusContext={() => false} onOpenContextMenu={noop}
+                {...(enabled ? { stackPositions: positions, stackRepoId: repo.id, stackWritable: true } : {})}
+              />)}
+              {withClosed && [mergedLoner, ...[...mergedStack.layers].reverse().map(layer => layer.pr!)].map((pr, index) => <GraphRow key={pr.number}
+                vm={{
+                  commit: { hash: `${pr.number}`.padEnd(40, "a"), shortHash: `${pr.number}a1f2`, parents: [], subject: pr.title,
+                    authorName: "Avery Chen", authorEmail: "avery@example.invalid", committedAt: `2026-11-21T1${index}:00:00Z`, isMerge: false },
+                  row: { lane: graphLane, top: [{ from: graphLane, to: graphLane }], bottom: [{ from: graphLane, to: graphLane }] },
+                  refs: [], remoteRefs: [], isHead: false, isHeadOnly: false, isMine: true, defaultBranch: "main", pullRequest: pr,
                 }} laneCount={graphLane + 1} now={Date.parse("2026-11-22T00:00:00Z")}
                 selected={false} focused={false} contextOpen={false} flashing={false} hoverIntent={hoverIntent}
                 onOpen={noop} onShowContext={noop} onHideContext={noop} onFocusContext={() => false} onOpenContextMenu={noop}

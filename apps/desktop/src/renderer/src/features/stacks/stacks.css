@@ -1,4 +1,4 @@
-.stack-train, .stack-view, .stack-group, .stack-popover {
+.stack-view, .stack-group, .stack-popover {
   --stack-lane: var(--lane-1);
 }
 
@@ -83,6 +83,12 @@
 .stack-node[data-stack-state="draft"] { color: var(--text-muted); border-style: dashed; }
 .stack-node[data-stack-state="merged"] { color: var(--brand-purple); background: currentColor; border-radius: 1px; transform: rotate(45deg) scale(.82); }
 .stack-node[data-stack-state="closed"] { color: var(--status-suspended); background: currentColor; }
+/* Only the Stacks-row tally and its card tell this apart (board 8c): the
+   failing ring around the running amber, as the chip pulses for it. */
+.stack-node[data-stack-state="failing-running"] {
+  color: var(--status-error);
+  background: radial-gradient(circle, var(--status-warning) 0 42%, var(--stack-node-fill, var(--bg-panel)) 48%);
+}
 .stack-node[data-stack-state="no-pr"] { color: var(--text-muted); border-style: dashed; border-radius: 2px; }
 .stack-node[data-stack-state="trunk"] { color: var(--text-muted); background: currentColor; border-radius: 2px; }
 /* The current PR: an accent ring around its node, never a second colour. */
@@ -139,25 +145,47 @@
 .stack-sort { display: flex; justify-content: flex-end; margin: 2px 0; }
 .stack-sort select { color: var(--text-secondary); background: var(--bg-panel); border: 1px solid var(--border-subtle); border-radius: 4px; font: inherit; }
 
-/* 5a: trunk to top, left to right. */
-.stack-train { --stack-node-fill: var(--bg-sidebar); display: flex; align-items: center; position: relative; line-height: 1; }
-.stack-train::before { content: ""; position: absolute; inset-inline: 6px; border-top: 1.5px solid var(--stack-lane); }
-.stack-train .stack-node-wrap { position: relative; --stack-node-size: 7px; width: 13px; }
-
-/* 3b: when list order is not stack order there is no rail to draw, so a
-   stacked row shows only its position, e.g. 2/3. It opens the stack. */
-.stack-position-tag {
-  flex: none;
-  padding: 0 3px;
-  border: 0;
-  border-radius: 3px;
-  background: transparent;
-  color: var(--text-muted);
-  font: 600 9.5px/1.3 var(--font-mono);
-  cursor: pointer;
+/* 8a: a Stacks row counts its members by state, worst first; no train. */
+.stack-tally { --stack-node-fill: var(--bg-sidebar); flex: none; display: inline-flex; align-items: center; gap: 1px; }
+.stack-tally__count {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 1px 4px 1px 2px;
+  border-radius: 4px;
+  color: var(--text-secondary);
+  font: 600 10px/1.3 var(--font-mono);
 }
-.stack-position-tag:hover, .stack-position-tag[aria-expanded="true"] { color: var(--accent-bright); background: var(--bg-panel-hover); }
-.stack-position-tag:focus-visible { outline: 1.5px solid var(--accent); outline-offset: 1px; }
+.stack-tally__count:hover { background: var(--bg-hover-strong); color: var(--text-primary); }
+.stack-tally .stack-node-wrap { --stack-node-size: 8px; width: 10px; height: 10px; }
+
+/* 8b: the row's hover card, top first; a hovered count marks its members. */
+.stack-tally-card { --stack-node-fill: var(--bg-menu); width: 320px; max-width: 100%; }
+.stack-tally-card__head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 6px; margin: 0 0 6px; color: var(--text-muted); font: 500 10px/1.35 var(--font-mono); }
+.stack-tally-card__head strong { color: var(--text-primary); font: 600 11.5px/1.35 var(--font-sans); }
+.stack-tally-card__list { margin: 0; padding: 0; list-style: none; }
+.stack-tally-card__list li {
+  display: grid;
+  grid-template-columns: 11px 26px minmax(0, 1fr);
+  gap: 6px;
+  align-items: center;
+  min-height: 18px;
+  color: var(--text-secondary);
+  font: 500 11px/1.3 var(--font-sans);
+}
+.stack-tally-card__list .stack-node-wrap { --stack-node-size: 8px; width: 11px; height: 11px; }
+.stack-tally-card__n { color: var(--text-muted); font: 500 10px/1 var(--font-mono); }
+.stack-tally-card__t { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.stack-tally-card__trunk .stack-tally-card__t { color: var(--text-muted); font: 500 10.5px/1 var(--font-mono); }
+.stack-tally-card__list li[data-mark="on"] { color: var(--text-primary); font-weight: 650; }
+.stack-tally-card__list li[data-mark="on"] .stack-tally-card__n { color: var(--text-secondary); }
+.stack-tally-card__list li[data-mark="dim"] { color: var(--text-subtle); }
+.stack-tally-card__list li[data-mark="dim"] .stack-node-wrap { opacity: .45; }
+.stack-tally-card__foot { margin: 6px 0 0; padding-top: 6px; border-top: 1px solid var(--border-subtle); color: var(--text-muted); font: 500 10px/1.3 var(--font-sans); }
+
+/* 3b and 9b: wherever a stacked PR's chip is drawn without a rail beside it,
+   its position follows as a StackPositionChip (`.stack-position`), keyed by
+   the PR, so a merged PR whose branch is gone still shows 2/3. */
 
 .stack-popover {
   position: fixed;
@@ -351,3 +379,40 @@
 .stack-health-badge[data-stack-state="merged"] { color: var(--brand-purple); }
 .stack-sort select { font-size: 11px; }
 
+
+/* 9a: the PR hover card's Stack section. The card's own section rhythm, with
+   a short spine through the nodes; this PR's row is marked. */
+.stack-card-section { --stack-node-fill: var(--bg-menu); --stack-lane: var(--lane-1); }
+.stack-card-section__title { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; }
+.stack-card-section__where { flex: none; color: var(--text-muted); font: 500 10px/1 var(--font-mono); letter-spacing: 0; text-transform: none; }
+.stack-card-section__list { margin: 0; padding: 0; list-style: none; }
+.stack-card-section__list li {
+  position: relative;
+  display: grid;
+  grid-template-columns: 11px 24px minmax(0, 1fr);
+  gap: 5px;
+  align-items: center;
+  min-height: 18px;
+  padding-inline-end: 4px;
+  border-radius: 4px;
+  color: var(--text-secondary);
+  font: 500 10.5px/1.3 var(--font-sans);
+}
+.stack-card-section__list li::before {
+  content: "";
+  position: absolute;
+  inset-block: 0;
+  inset-inline-start: 4.75px;
+  border-inline-start: 1.5px solid var(--stack-lane);
+  opacity: .6;
+}
+.stack-card-section__list li:first-child::before { top: 50%; }
+.stack-card-section__list li.stack-card-section__trunk::before { bottom: 50%; }
+.stack-card-section__list .stack-node-wrap { --stack-node-size: 7px; position: relative; z-index: 1; width: 11px; height: 11px; }
+.stack-card-section__n { color: var(--text-muted); font: 500 9.5px/1 var(--font-mono); }
+.stack-card-section__t { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.stack-card-section__list li.is-current { background: var(--bg-hover-strong); color: var(--text-primary); font-weight: 600; }
+.stack-card-section__list li.is-current .stack-card-section__n { color: var(--accent-bright); }
+.stack-card-section__list li.stack-card-section__more { display: block; padding-inline-start: 16px; color: var(--text-muted); font: 500 10px/18px var(--font-sans); }
+.stack-card-section__list li.stack-card-section__more::before { border-inline-start-style: dotted; }
+.stack-card-section__list li.stack-card-section__trunk { color: var(--text-muted); font: 500 10px/1 var(--font-mono); }

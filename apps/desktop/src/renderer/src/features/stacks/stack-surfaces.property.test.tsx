@@ -4,14 +4,18 @@ import { act, useState } from "react";
 import { createRoot } from "react-dom/client";
 import fc from "fast-check";
 import { afterEach, expect, test, vi } from "vitest";
-import { ok, type ChangeRequestEntry, type PrSummary, type Repo, type RepositoryStack } from "@pwrgit/shared";
+import { ok, stackPositionForPr, type ChangeRequestEntry, type PrSummary, type Repo, type RepositoryStack, type StackLayer } from "@pwrgit/shared";
 import { useHoverIntent } from "../../lib/hoverIntent";
+import { useViewportTooltip } from "../../lib/useViewportTooltip";
 import { ChangeRequestSelectionContext } from "../change-request/change-request-selection";
 import { GraphRow } from "../graph/GraphRow";
+import { PrChip } from "../sidebar/PrChip";
+import { PrStatusCard } from "../sidebar/PrStatusCard";
+import { renderToStaticMarkup } from "react-dom/server";
 import { RepoChangeRequestSection } from "../sidebar/RepoChangeRequestSection";
 import { StackToolbar } from "./StackToolbar";
 import { StackView, StacksSidebar } from "./StackViews";
-import { StackNavigationContext, type StackPick } from "./stack-navigation";
+import { StackNavigationContext, useStackSnapshot, type StackPick } from "./stack-navigation";
 
 const repo: Repo = { id: "orbit", name: "Orbit", path: "/test/orbit", profileId: "test", pinned: false, worktrees: [] };
 const scope = "github.com/example/orbit";
@@ -47,8 +51,8 @@ afterEach(() => {
   cleanup?.();
   vi.restoreAllMocks();
 });
-async function render(stack: RepositoryStack, { writable = true, initial = false, recent = false, extra = false, listed, selectedKey = null }:
-  { writable?: boolean; initial?: boolean; recent?: boolean; extra?: boolean; listed?: readonly PrSummary[]; selectedKey?: string | null } = {}) {
+async function render(stack: RepositoryStack, { writable = true, initial = false, recent = false, extra = false, listed, selectedKey = null, stacks = [stack] }:
+  { writable?: boolean; initial?: boolean; recent?: boolean; extra?: boolean; listed?: readonly PrSummary[]; selectedKey?: string | null; stacks?: RepositoryStack[] } = {}) {
   cleanup?.();
   const container = document.createElement("div");
   document.body.append(container);
@@ -61,7 +65,7 @@ async function render(stack: RepositoryStack, { writable = true, initial = false
   }));
   if (extra) entries.splice(1, 0, { pr: { ...makePr(99), title: "Unstacked" }, forgeRepo: scope, remote: "origin",
     location: { kind: "local", branch: "unstacked" } });
-  const snapshot = { stacks: [stack], schemaVersion: 1, readOnly: !writable };
+  const snapshot = { stacks, schemaVersion: 1, readOnly: !writable };
   localStorage.setItem("pwrgit.changeRequestsOpen.orbit", "1");
   localStorage.setItem("pwrgit.changeRequestsSort.orbit", recent ? "recent" : "stack");
   Object.assign(window, { pwrgit: {
@@ -119,11 +123,39 @@ test("R1 orders positions top-first with trunk immediately below position 1", as
     expect(order(popover, "[data-stack-position]")).toEqual(descending);
     expect(popover.querySelector(".stack-popover__list > :last-child")?.textContent).toContain("main");
     const indexRow = el.querySelector("[data-index] [data-nav-anchor^='stack:']")!;
-    expect(order(indexRow, ".stack-train [data-stack-position]").reverse()).toEqual(descending);
-    expect(indexRow.querySelector(".stack-train .stack-node")?.getAttribute("data-stack-state")).toBe("trunk");
+    // The Stacks row counts states (R8); its order lives in its accessible name.
+    expect(indexRow.querySelector(".stack-train")).toBeNull();
     expect(Array.from(indexRow.getAttribute("aria-label")!.matchAll(/(\d+) of/g), match => Number(match[1]))).toEqual(descending);
     expect(indexRow.getAttribute("aria-label")).toMatch(/trunk main$/);
   }), { numRuns: 12 });
+});
+
+test("R10 closed stacks change neither the index count, rows nor auto-expansion", async () => {
+  await fc.assert(fc.asyncProperty(
+    fc.array(fc.constantFrom("open", "closed", "merged"), { minLength: 1, maxLength: 5 }),
+    async states => {
+      const stacks: RepositoryStack[] = states.map((state, index) => {
+        const stack = makeStack(1, "inferred");
+        const pr = { ...makePr(index), state, headRefName: `history-${index}` };
+        return { ...stack, id: String(index), githubNumber: 4000 + index,
+          ...(state === "open" ? {} : { closed: state }),
+          layers: [{ ...stack.layers[0], branch: pr.headRefName, pr }] };
+      });
+      const active = stacks.filter((_stack, index) => states[index] === "open");
+      const el = await render(stacks[0], { stacks, listed: active.map(stack => stack.layers[0].pr!) });
+      const index = el.querySelector("[data-list] .stack-sidebar");
+      if (!active.length) {
+        expect(index).toBeNull();
+        return;
+      }
+      const heading = index?.querySelector(".ref-section__head");
+      expect(heading?.querySelector(".ref-section__count")?.textContent).toBe(String(active.length));
+      expect(heading?.getAttribute("aria-expanded")).toBe("false");
+      await click(heading ?? null);
+      expect(Array.from(index!.querySelectorAll("button[data-nav-anchor^='stack:']"), button =>
+        button.getAttribute("data-nav-anchor"))).toEqual(
+        active.map(stack => `stack:${repo.id}:${stack.id}`));
+    }), { numRuns: 20, examples: [[["merged"]], [["open", "closed"]]] });
 });
 
 test("R2 opens the stack view only after explicit stack navigation", async () => {
@@ -206,9 +238,9 @@ test("R7 a stacked row outside its group shows only its position", async () => {
       const index = Number(/^#(\d+)/.exec(row.getAttribute("aria-label") ?? "")?.[1]);
       expect(row.querySelectorAll(".stack-node")).toHaveLength(0);
       expect(row.querySelectorAll(".pr-chip__dot")).toHaveLength(1);
-      expect(row.querySelector(".stack-position-tag")?.textContent).toBe(`${index}/${height}`);
+      expect(row.querySelector(".stack-position")?.textContent).toBe(`${index}/${height}`);
     }
-    const tag = rows.find(row => row.getAttribute("aria-label")?.startsWith(`#${opened} `))!.querySelector(".stack-position-tag");
+    const tag = rows.find(row => row.getAttribute("aria-label")?.startsWith(`#${opened} `))!.querySelector(".stack-position");
     showPopover(tag);
     const marked = Array.from(document.querySelectorAll(".stack-popover__member"))
       .filter(member => member.textContent?.includes("This PR"));
@@ -313,7 +345,7 @@ test("the tag's branch takes precedence over the selected PR and owns Escape", a
   const stack = makeStack(2);
   const layers = stack.layers.map((layer, index) => ({ ...layer, pr: makePr(index) }));
   const el = await render({ ...stack, layers }, { recent: true, selectedKey: `${repo.id}\n${scope}#2` });
-  const tag = [...el.querySelectorAll<HTMLButtonElement>(".stack-position-tag")].find(button => button.textContent === "1/2")!;
+  const tag = [...el.querySelectorAll<HTMLButtonElement>("[data-list] .stack-position")].find(button => button.textContent === "1/2")!;
   act(() => tag.focus());
   showPopover(tag);
   const current = el.querySelectorAll(".stack-popover [aria-current='true']");
@@ -344,4 +376,147 @@ test("an invalid recorded base anywhere in the replay range suppresses Restack",
     showPopover(el.querySelector(".stack-group__caption"));
     expect(el.querySelector(".stack-popover__footer")?.textContent).not.toContain("Restack");
   }), { numRuns: 8 });
+});
+
+// R8 (board turn 8): a Stacks row counts its members by state, worst first,
+// and pointing at a count marks exactly those members, top first. The oracle
+// reads the raw PR fields, not the presentation code under test.
+const BUCKET_ORDER = ["failing", "failing-running", "conflicting", "pending", "passing", "open", "draft", "no-pr", "closed", "merged"];
+const bucketOracle = (pr: PrSummary | undefined) => !pr ? "no-pr" : pr.state === "merged" ? "merged" : pr.state === "closed" ? "closed"
+  : pr.isDraft ? "draft" : pr.mergeState === "conflicting" ? "conflicting"
+  : pr.checkState === "failing" ? pr.checksStillRunning ? "failing-running" : "failing"
+  : pr.checkState === "pending" ? "pending" : pr.checkState === "passing" ? "passing" : "open";
+const hover = (el: Element) => act(() => { el.dispatchEvent(new MouseEvent("mouseover", { bubbles: true })); });
+
+test("R8 a Stacks row counts states worst first, and a count marks exactly its members", async () => {
+  const layerPr = fc.option(fc.record({
+    state: fc.constantFrom("open", "open", "open", "merged", "closed"), isDraft: fc.boolean(),
+    conflict: fc.boolean(), checkState: fc.constantFrom("passing", "pending", "failing", "unknown"), running: fc.boolean(),
+  }), { nil: undefined });
+  await fc.assert(fc.asyncProperty(fc.array(layerPr, { minLength: 1, maxLength: 7 }), fc.nat(), async (shapes, pick) => {
+    const stack = makeStack(shapes.length);
+    const layers: StackLayer[] = stack.layers.map((layer, index) => {
+      const shape = shapes[index];
+      return shape ? { ...layer, pr: { ...makePr(index), state: shape.state, isDraft: shape.isDraft,
+        mergeState: shape.conflict ? "conflicting" as const : "unknown" as const, checkState: shape.checkState,
+        checksStillRunning: shape.running } } : layer;
+    });
+    const el = await render({ ...stack, layers });
+    const row = el.querySelector("[data-index] [data-nav-anchor^='stack:']")!;
+    const counts = Array.from(row.querySelectorAll(".stack-tally__count"), count =>
+      [count.getAttribute("data-bucket")!, Number(count.textContent)] as const);
+    const expected = new Map<string, number>();
+    for (const layer of layers) expected.set(bucketOracle(layer.pr), (expected.get(bucketOracle(layer.pr)) ?? 0) + 1);
+    expect(counts).toEqual(BUCKET_ORDER.filter(bucket => expected.has(bucket)).map(bucket => [bucket, expected.get(bucket)]));
+    expect(counts.reduce((sum, [, count]) => sum + count, 0)).toBe(layers.length);
+    expect(row.querySelector(".stack-train, .stack-node[data-stack-state='trunk']")).toBeNull();
+
+    const [bucket] = counts[pick % counts.length];
+    hover(row.querySelectorAll(".stack-tally__count")[pick % counts.length]);
+    const card = document.querySelector(".stack-tally-card")!;
+    const marked = Array.from(card.querySelectorAll("li[data-mark='on'] .stack-tally-card__n"), n => n.textContent);
+    const members = layers.map((layer, index) => ({ layer, index: index + 1 })).reverse();
+    expect(marked).toEqual(members.filter(({ layer }) => bucketOracle(layer.pr) === bucket).map(({ index }) => `${index}/${layers.length}`));
+    expect(card.querySelector("li:last-child")?.textContent).toContain("main");
+  }), { numRuns: 30 });
+});
+
+// R9, UI half (board turn 9): membership belongs to the PR. A merged PR in a
+// closed stack, whose branch is gone, still shows its i/n beside its chip in
+// Lineage and in a chip that knows no repository, and its hover card lists
+// the stack with it marked. A PR in no stack shows neither.
+test("R9 a merged PR whose branch is gone still shows its stack beside its chip and in its card", async () => {
+  await fc.assert(fc.asyncProperty(fc.integer({ min: 1, max: 7 }).chain(height =>
+    fc.tuple(fc.constant(height), fc.integer({ min: 1, max: height }))), async ([height, at]) => {
+    const base = makeStack(height);
+    const layers = base.layers.map((layer, index) => ({ ...layer, local: false,
+      pr: { ...makePr(index), state: "merged" as const, repoPath: "example/orbit", host: "github.com" } }));
+    const stack: RepositoryStack = { ...base, githubNumber: 4231, closed: "merged", layers };
+    await render(stack, { listed: [] });
+    const member = layers[at - 1].pr;
+    const outsider = { ...makePr(200), state: "merged" as const, repoPath: "example/orbit", host: "github.com" };
+    const host = document.createElement("div");
+    document.body.append(host);
+    const root = createRoot(host);
+    function Lineage({ pr }: { pr: PrSummary }) {
+      const hoverIntent = useHoverIntent();
+      return <GraphRow vm={{
+        commit: { hash: "c".repeat(40), shortHash: "ccccccc", subject: pr.title, parents: [], authorName: "Avery",
+          authorEmail: "avery@example.invalid", committedAt: "2026-01-01T00:00:00Z", isMerge: false },
+        row: { lane: 0, top: [], bottom: [] }, refs: [], remoteRefs: [], isHead: false, isHeadOnly: false, isMine: true, defaultBranch: "main",
+        pullRequest: pr,
+      }} laneCount={1} now={0} selected={false} focused={false} contextOpen={false} flashing={false} hoverIntent={hoverIntent}
+        onOpen={noop} onShowContext={noop} onHideContext={noop} onFocusContext={() => false} onOpenContextMenu={noop}
+        stackRepoId={repo.id} stackPositions={new Map()} />;
+    }
+    await act(async () => root.render(<>
+      <div data-lineage=""><Lineage pr={member} /></div>
+      <div data-bare=""><PrChip pr={member} /></div>
+      <div data-outsider=""><Lineage pr={outsider} /><PrChip pr={outsider} /></div>
+    </>));
+    try {
+      expect(host.querySelector("[data-lineage] .pr-chip + .stack-position")?.textContent).toBe(`${at}/${height}`);
+      expect(host.querySelector("[data-bare] .pr-chip + .stack-position")?.textContent).toBe(`${at}/${height}`);
+      expect(host.querySelector("[data-outsider] .stack-position")).toBeNull();
+      const position = stackPositionForPr([stack], member)!;
+      const card = document.createElement("div");
+      card.innerHTML = renderToStaticMarkup(<PrStatusCard pr={member} stackPosition={position} />);
+      const rows = Array.from(card.querySelectorAll(".stack-card-section__list li:not(.stack-card-section__more)"));
+      expect(card.querySelector(".stack-card-section__title")?.textContent).toContain("Stack #4231");
+      expect(card.querySelector(".stack-card-section__title")?.textContent).toContain("merged into main");
+      expect(rows.at(-1)?.textContent).toContain("main");
+      const current = card.querySelectorAll("[aria-current='true']");
+      expect(current).toHaveLength(1);
+      expect(current[0].textContent).toContain(`${at}/${height}`);
+      expect(current[0].textContent).toContain(`#${member.number}`);
+      expect(rows.length - 1).toBe(Math.min(height, 5));
+    } finally {
+      act(() => root.unmount());
+      host.remove();
+    }
+  }), { numRuns: 14 });
+});
+
+test("a checkout-less chip prefers open membership and opens member URLs from a context card", async () => {
+  await fc.assert(fc.asyncProperty(fc.integer({ min: 2, max: 4 }), async height => {
+    const base = makeStack(height);
+    const pr = { ...makePr(900), repoPath: "Example/Orbit", host: "github.com" };
+    const old: RepositoryStack = {
+      ...base, githubNumber: 801, closed: "merged", layers: [{ ...base.layers[0], pr }],
+    };
+    const current: RepositoryStack = {
+      ...base, githubNumber: 802, layers: [...base.layers.slice(0, -1), { ...base.layers[height - 1], pr }],
+    };
+    await render(old, { listed: [] });
+    const dispatch = vi.fn(async (name: string) => ok(name === "stack:list"
+      ? { schemaVersion: 1, readOnly: false, stacks: [current] } : null));
+    Object.assign(window.pwrgit, { dispatch });
+    const container = document.createElement("div");
+    document.body.append(container);
+    const root = createRoot(container);
+    function ContextCard() {
+      useStackSnapshot("clone-2", repo.profileId);
+      const tip = useViewportTooltip("commit-context-card", { interactive: true });
+      return <div className="app"><button type="button" onClick={e =>
+        tip.show(e.currentTarget, <PrChip pr={pr} />)}>Show context</button>{tip.tooltipNode}</div>;
+    }
+    try {
+      await act(async () => root.render(<ContextCard />));
+      const trigger = container.querySelector("button")!;
+      vi.spyOn(trigger, "getBoundingClientRect").mockReturnValue(new DOMRect(8, 8, 100, 20));
+      await click(trigger);
+      const card = document.querySelector(".commit-context-card")!;
+      const tag = card.querySelector(".stack-position");
+      expect(tag?.textContent).toBe(`${height}/${height}`);
+      showPopover(tag);
+      const dialog = card.querySelector(".stack-popover");
+      expect(dialog?.getAttribute("aria-label")).toBe("Stack #802");
+      await click(dialog?.querySelector("button[aria-current='true']") ?? null);
+      expect(dispatch).toHaveBeenCalledWith("shell:openExternal", { url: pr.url });
+      expect(card.isConnected).toBe(true);
+    } finally {
+      act(() => root.unmount());
+      container.remove();
+    }
+  }), { numRuns: 4 });
 });

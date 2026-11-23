@@ -7,9 +7,11 @@ import {
 } from "react";
 import {
   forgeLabel,
+  openRepositoryStacks,
   type ChangeRequestEntry,
   type ChangeRequestList,
   type Repo,
+  type StackPosition,
   type Worktree
 } from "@pwrgit/shared";
 import { CheckoutGlyph } from "../../lib/CheckoutGlyph";
@@ -17,9 +19,8 @@ import {
   changeRequestPickKey,
   useChangeRequestSelection
 } from "../change-request/change-request-selection";
-import { StackListGroup, StackPositionTag, StacksSidebar } from "../stacks/StackViews";
+import { StackListGroup, StacksSidebar } from "../stacks/StackViews";
 import { stackItemRows, stackListItems, stackPositionLabel, type StackListItem } from "../stacks/stack-presentation";
-import type { StackPosition } from "@pwrgit/shared";
 import { useStackNavigation, useStackSnapshot } from "../stacks/stack-navigation";
 import { PlusGlyph } from "../../lib/PlusGlyph";
 import { RefreshGlyph } from "../../lib/RefreshGlyph";
@@ -135,7 +136,8 @@ export function RepoChangeRequestSection({
   });
   const stackNavigation = useStackNavigation();
   const { snapshot, refresh: refreshStacks } = useStackSnapshot(stackNavigation ? repo.id : undefined, repo.profileId);
-  const stacks = snapshot?.stacks ?? [];
+  const allStacks = snapshot?.stacks ?? [];
+  const stacks = openRepositoryStacks(allStacks);
   const writable = snapshot?.readOnly === false && !snapshot.busy;
   const tip = useViewportTooltip();
   const [open, setOpen] = usePersistedOpen(
@@ -200,7 +202,7 @@ export function RepoChangeRequestSection({
   const manyRemotes = shown.remotes.length > 1;
   const groups = groupChangeRequests(visible, { failingOnly });
   const keepOrder = sort === "recent" || failingOnly;
-  const items = stackListItems(groups.local, remoteOpen ? groups.remoteOnly : [], stacks, keepOrder);
+  const items = stackListItems(groups.local, remoteOpen ? groups.remoteOnly : [], sort === "recent" ? allStacks : stacks, keepOrder);
   const localItems = items.filter(item => stackItemRows(item).some(({ entry }) =>
     entry.location.kind === "local" || entry.location.kind === "worktree"));
   const localSet = new Set(localItems);
@@ -376,9 +378,9 @@ export function RepoChangeRequestSection({
         }}
       >
         <div className="ref-cr-row__line">
-          {/* Beside the rail the rail node is the status; on its own the chip is. */}
-          <PrChip pr={pr} repoId={repo.id} stacked={position !== undefined && !ungrouped} />
-          {ungrouped && position && <StackPositionTag position={position} repoId={repo.id} writable={writable} />}
+          {/* Beside the rail the rail node is the status and the rail the
+              stack; on its own the chip is both, with its 2/3 tag. */}
+          <PrChip pr={pr} repoId={repo.id} forgeRepo={entry.forgeRepo} stacked={position !== undefined && !ungrouped} stackWritable={writable} />
           <span className="ref-cr-row__title" {...hoverTooltip(tip, pr.title)}>
             {pr.title}
           </span>
@@ -432,7 +434,7 @@ export function RepoChangeRequestSection({
               key={changeRequestKey(other)}
               aria-label={`Also #${other.pr.number} on ${other.remote}`}
             >
-              <PrChip pr={other.pr} repoId={repo.id} />
+              <PrChip pr={other.pr} repoId={repo.id} forgeRepo={other.forgeRepo} />
               {manyRemotes && (
                 <span className="ref-cr-paired__remote">{other.remote}</span>
               )}
