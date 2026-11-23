@@ -7,7 +7,8 @@ export function stackActionLabel(action: StackAction): string {
   switch (action.kind) {
     case "restack": return action.from ? "Restack from here" : "Restack";
     case "add_branch": return "New branch on top";
-    case "adopt": return "Adopt stack";
+    case "adopt": return "Track with gh stack";
+    case "sync": return "Sync stack";
     case "remove": return action.mode === "detach" ? "Detach branch" : "Forget branch";
   }
 }

@@ -7,7 +7,6 @@ import {
 } from "react";
 import {
   forgeLabel,
-  stackPosition,
   type ChangeRequestEntry,
   type ChangeRequestList,
   type Repo,
@@ -18,7 +17,9 @@ import {
   changeRequestPickKey,
   useChangeRequestSelection
 } from "../change-request/change-request-selection";
-import { StackPositionChip, StacksSidebar } from "../stacks/StackViews";
+import { StackListGroup, StackLadder, StacksSidebar } from "../stacks/StackViews";
+import { stackItemRows, stackListItems, stackPositionLabel, type StackListItem } from "../stacks/stack-presentation";
+import type { StackPosition } from "@pwrgit/shared";
 import { useStackNavigation, useStackSnapshot } from "../stacks/stack-navigation";
 import { PlusGlyph } from "../../lib/PlusGlyph";
 import { RefreshGlyph } from "../../lib/RefreshGlyph";
@@ -135,8 +136,7 @@ export function RepoChangeRequestSection({
   const stackNavigation = useStackNavigation();
   const { snapshot, refresh: refreshStacks } = useStackSnapshot(stackNavigation ? repo.id : undefined, repo.profileId);
   const stacks = snapshot?.stacks ?? [];
-  const stackSection = <StacksSidebar repo={repo} stacks={stacks} writable={snapshot?.readOnly === false && !snapshot.busy}
-    {...(snapshot?.recoveryAvailable ? { recoverEmpty: refreshStacks } : {})} />;
+  const writable = snapshot?.readOnly === false && !snapshot.busy;
   const tip = useViewportTooltip();
   const [open, setOpen] = usePersistedOpen(
     `pwrgit.changeRequestsOpen.${repo.id}`
@@ -148,6 +148,7 @@ export function RepoChangeRequestSection({
   );
   const [lens, setLens] = usePersistedValue(`pwrgit.changeRequestsLens.${repo.id}`, "all");
   const [failingOnly, setFailingOnly] = useState(false);
+  const [sort, setSort] = usePersistedValue(`pwrgit.changeRequestsSort.${repo.id}`, "stack");
   const [refreshing, setRefreshing] = useState(false);
   const [fetching, setFetching] = useState<string | null>(null);
   const [cursor, setCursor] = useState(0);
@@ -169,7 +170,8 @@ export function RepoChangeRequestSection({
       : repo.identity.host;
   const loading = list == null;
   const forge = loading ? predicted : (list.forge ?? null);
-  if (forge === null) return stackSection;
+  if (forge === null) return <StacksSidebar repo={repo} stacks={stacks} writable={writable}
+    {...(snapshot?.recoveryAvailable ? { recoverEmpty: refreshStacks } : {})} />;
   const shown: ChangeRequestList = list ?? {
     forge,
     fetchedAt: null,
@@ -197,9 +199,17 @@ export function RepoChangeRequestSection({
   const remoteChips = lensOptions.length >= 2 && activeLens === "all";
   const manyRemotes = shown.remotes.length > 1;
   const groups = groupChangeRequests(visible, { failingOnly });
-  const rows = remoteOpen
-    ? [...groups.local, ...groups.remoteOnly]
-    : groups.local;
+  const keepOrder = sort === "recent" || failingOnly;
+  const items = stackListItems(groups.local, remoteOpen ? groups.remoteOnly : [], stacks, keepOrder);
+  const localItems = items.filter(item => stackItemRows(item).some(({ entry }) =>
+    entry.location.kind === "local" || entry.location.kind === "worktree"));
+  const localSet = new Set(localItems);
+  const remoteItems = items.filter(item => !localSet.has(item));
+  const rows = items.flatMap(stackItemRows);
+  const shownStacks = new Set(open ? [...localItems, ...remoteItems].flatMap(item => item.kind === "stack"
+    ? [item.stack.id]
+    : item.position ? [item.position.stack.id] : []) : []);
+  const rowIndices = new Map(rows.map((item, index) => [changeRequestKey(item.entry), index]));
   const defaultBranch = repo.worktrees.find((w) => w.isPrimary)?.defaultBranch;
   const worktreesById = new Map(repo.worktrees.map((w) => [w.id, w]));
   // Nothing cached yet: the repo sweep lists it shortly, or ⟳ does now. Not a
@@ -318,10 +328,10 @@ export function RepoChangeRequestSection({
     }
   };
 
-  const row = ({ entry, paired }: ChangeRequestRow, index: number): ReactElement => {
+  const row = ({ entry, paired }: ChangeRequestRow, position?: StackPosition, ladder = false): ReactElement => {
     const { pr, location } = entry;
     const key = changeRequestKey(entry);
-    const position = stackPosition(stacks, layer => layer.pr?.number === pr.number && layer.forgeRepo === entry.forgeRepo);
+    const index = rowIndices.get(key)!;
     const age = compactAge(pr.updatedAt ?? pr.createdAt, now);
     // Null only for a missing head the forge did not name either: nothing to
     // copy, so no copy target.
@@ -340,7 +350,7 @@ export function RepoChangeRequestSection({
       <div
         className={`ref-cr-row${location.kind === "worktree" ? " is-checked-out" : ""}${
           selected ? " is-selected" : ""
-        }`}
+        }${ladder && position ? " has-stack-ladder" : ""}`}
         key={key}
         // Back returns the sidebar to this row (sidebar-anchor.ts).
         data-nav-anchor={`cr:${repo.id}:${key}`}
@@ -349,7 +359,7 @@ export function RepoChangeRequestSection({
         aria-level={3}
         aria-posinset={index + 1}
         aria-setsize={rows.length}
-        aria-label={`#${pr.number} ${pr.title}${manyRemotes ? `, on ${entry.remote}` : ""}`}
+        aria-label={`#${pr.number} ${pr.title}${manyRemotes ? `, on ${entry.remote}` : ""}${position ? `, ${stackPositionLabel(position)}` : ""}`}
         tabIndex={index === cursorIndex ? 0 : -1}
         onFocus={(event) => {
           if (event.target === event.currentTarget) setCursor(index);
@@ -365,10 +375,10 @@ export function RepoChangeRequestSection({
           primary(entry);
         }}
       >
+        {ladder && position && <StackLadder position={position} repoId={repo.id} writable={writable} />}
         <div className="ref-cr-row__line">
-          <PrChip pr={pr} repoId={repo.id} />
-          {position && stackNavigation && <StackPositionChip position={position}
-            onSelect={() => stackNavigation.select({ repoId: repo.id, stack: position.stack })} />}
+          <PrChip pr={pr} repoId={repo.id} stacked={position !== undefined} />
+          {ladder && position && <span className="stack-card__ordinal">{position.index}/{position.stack.layers.length}</span>}
           <span className="ref-cr-row__title" {...hoverTooltip(tip, pr.title)}>
             {pr.title}
           </span>
@@ -473,15 +483,20 @@ export function RepoChangeRequestSection({
               <span className="refs-copyable-name__text">{head}</span>
             </CopyTarget>
           )}
-          {base !== null && <span className="ref-cr-row__base">→ {base}</span>}
+          {position?.index === 1 && (position.layer.behindParent ?? 0) > 0
+            ? <span className="ref-cr-row__base">{position.stack.trunk.branch} +{position.layer.behindParent}</span>
+            : base !== null && <span className="ref-cr-row__base">→ {base}</span>}
         </div>
       </div>
     );
   };
 
+  const renderItem = (item: StackListItem) => item.kind === "row"
+    ? row(item.row, item.position, true)
+    : <StackListGroup key={item.stack.id} item={item} repoId={repo.id} entries={shown.entries} writable={writable} renderRow={row} />;
+
   return (
     <>
-    {stackSection}
     <div className="ref-section ref-cr-section">
       <div className="ref-section__head-wrap">
         <button
@@ -626,6 +641,13 @@ export function RepoChangeRequestSection({
                 </select>
               </label>
             ))}
+          {stacks.length > 0 && visible.length > 1 && <label className="stack-sort" onClick={event => event.stopPropagation()}>
+            <span className="a11y-sr-only">Pull request order</span>
+            <select value={sort} onChange={event => setSort(event.target.value)}>
+              <option value="stack">Stack order</option>
+              <option value="recent">Recent</option>
+            </select>
+          </label>}
           {loading ? null : unlisted ? (
             <div className="ref-section__empty">
               Not listed yet — <RefreshGlyph size={11} />
@@ -643,7 +665,7 @@ export function RepoChangeRequestSection({
                 <span className="ref-cr-subhead__label">Local</span>
                 <span className="ref-section__count">{groups.local.length}</span>
               </div>
-              {groups.local.map((item, index) => row(item, index))}
+              {localItems.map(renderItem)}
               {groups.local.length === 0 && (
                 <div className="ref-section__empty">
                   {failingOnly
@@ -663,10 +685,7 @@ export function RepoChangeRequestSection({
                 <span className="ref-cr-subhead__label">Remote only</span>
                 <span className="ref-section__count">{groups.remoteOnly.length}</span>
               </button>
-              {remoteOpen &&
-                groups.remoteOnly.map((item, index) =>
-                  row(item, groups.local.length + index)
-                )}
+              {remoteItems.map(renderItem)}
             </div>
           )}
           {shown.truncated && (
@@ -687,6 +706,8 @@ export function RepoChangeRequestSection({
       )}
       {tip.tooltipNode}
     </div>
+    <StacksSidebar repo={repo} stacks={stacks} shownStacks={shownStacks} writable={writable}
+      {...(snapshot?.recoveryAvailable ? { recoverEmpty: refreshStacks } : {})} />
     </>
   );
 }

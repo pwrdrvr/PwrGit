@@ -1,3 +1,5 @@
+import type { StackPosition } from "@pwrgit/shared";
+import { StackPositionChip } from "../stacks/StackPopover";
 import { useMemo, type ReactElement, type RefObject } from "react";
 import {
   ASSUMED_FORGE_KIND,
@@ -34,6 +36,9 @@ import { PlusGlyph } from "../../lib/PlusGlyph";
  */
 export function ChangeRequestView({
   entry,
+  repoId,
+  stackPosition,
+  stackWritable,
   state,
   manyRemotes,
   worktreeId,
@@ -46,6 +51,9 @@ export function ChangeRequestView({
 }: {
   /** The list row it was picked from: the header paints from it at once. */
   entry: ChangeRequestEntry;
+  repoId?: string;
+  stackPosition?: StackPosition;
+  stackWritable?: boolean;
   state: ChangeRequestViewState;
   /** More than one remote lists change requests: say which one this is. */
   manyRemotes: boolean;
@@ -66,6 +74,7 @@ export function ChangeRequestView({
   // The answer's entry is newer than the list's (a fetch can move the head).
   const shown = view?.entry ?? entry;
   const { pr } = shown;
+  const basePr = stackPosition?.stack.layers.find(layer => layer.branch === pr.baseRefName)?.pr;
   const forge = pr.forge ?? ASSUMED_FORGE_KIND;
   const verb = primaryVerb(shown);
   const ready = view?.state === "ready" ? view : null;
@@ -119,7 +128,8 @@ export function ChangeRequestView({
     >
       <div className="cr-view__head">
         <div className="cr-view__row">
-          <PrChip pr={pr} />
+          <PrChip pr={pr} stacked={stackPosition !== undefined} />
+          {repoId && stackPosition && <StackPositionChip repoId={repoId} position={stackPosition} writable={stackWritable} />}
           <h2 className="cr-view__title" {...truncatedTooltip(tip, pr.title)}>
             {pr.title}
           </h2>
@@ -176,7 +186,7 @@ export function ChangeRequestView({
           {pr.baseRefName !== undefined && (
             <>
               <span aria-hidden="true">→</span>
-              <span className="cr-view__ref">{pr.baseRefName}</span>
+              <span className="cr-view__ref">{pr.baseRefName}{basePr && <> <b>#{basePr.number}</b></>}</span>
             </>
           )}
           {additions !== undefined && deletions !== undefined && (

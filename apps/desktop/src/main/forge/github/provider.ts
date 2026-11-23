@@ -7,6 +7,7 @@ import {
   fetchPrsForRepo,
   getGitHubToken
 } from "../../github/pr-client";
+import { fetchGitHubStacks } from "../../github/stack-client";
 import { ForgeResponseError } from "../repo-provider";
 import { githubOwnerAndName } from "../resolve";
 import {
@@ -70,10 +71,13 @@ export const githubProvider: TokenForgeProvider = {
     if (parts === null) {
       throw new ForgeResponseError("Not a GitHub owner/name repository path.");
     }
-    return stampOpenList(
-      await fetchOpenPrs(token, repo, parts.owner, parts.name),
-      repo
-    );
+    const [list, githubStacks] = await Promise.all([
+      fetchOpenPrs(token, repo, parts.owner, parts.name),
+      repo.host.toLowerCase() === "github.com" && repo.port === undefined
+        ? fetchGitHubStacks(token, parts.owner, parts.name)
+        : undefined,
+    ]);
+    return stampOpenList({ ...list, ...(githubStacks === undefined ? {} : { githubStacks }) }, repo);
   },
 
   enqueueChangeRequest: async (token, repo, number, expectedHeadOid) => {

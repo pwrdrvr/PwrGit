@@ -26,17 +26,22 @@ test("shows stack positions and navigates between the stack and lineage", async 
         await page.screenshot({ path: join(shots, "stack-before.png") });
       }
       await page.evaluate(() => (window as unknown as { showStacks(): void }).showStacks());
-      await expect(page.getByText("2 to restack")).toBeVisible();
-      const graphPosition = page.locator(".graph-row").getByRole("button", { name: "Open stack for windows/api, position 2 of 3" });
+      await expect(page.locator(".stack-group__caption").getByText("Restack")).toBeVisible();
+      await expect(page.locator(".stack-sidebar .ref-section__head")).toHaveAttribute("aria-expanded", "false");
+      const graphPosition = page.locator(".graph-row").getByRole("button", { name: "windows/scheduler, position 2 of 3. Show stack" });
       await expect(graphPosition).toBeVisible();
       if (shots) await page.screenshot({ path: join(shots, "stack-after-lineage.png") });
       await graphPosition.click();
+      await expect(page.getByRole("region", { name: "Stack", exact: true })).toHaveCount(0);
+      await page.getByRole("button", { name: "Open stack view" }).click();
       await expect(page.getByRole("region", { name: "Stack", exact: true })).toBeVisible();
-      await expect(page.getByRole("complementary", { name: "Stack health" })).toBeVisible();
+      await expect(page.getByRole("complementary", { name: "Stack member" })).toBeVisible();
       if (shots) await page.screenshot({ path: join(shots, "stack-after-view.png") });
       await page.getByRole("button", { name: "Back to worktree" }).click();
       await expect(graphPosition).toBeVisible();
       await graphPosition.click();
+      await expect(page.getByRole("region", { name: "Stack", exact: true })).toHaveCount(0);
+      await page.getByRole("button", { name: "Open stack view" }).click();
       await page.evaluate(() => (window as unknown as { showOperations(): void }).showOperations());
       await page.getByRole("button", { name: "Restack", exact: true }).click();
       await expect(page.getByRole("complementary", { name: "Stack operation plan" })).toBeVisible();
@@ -45,12 +50,12 @@ test("shows stack positions and navigates between the stack and lineage", async 
       await page.getByRole("button", { name: "Run locally" }).click();
       await expect(page.getByRole("complementary", { name: "Proof ledger" })).toBeVisible();
       await expect(page.getByText("2 patches preserved")).toBeVisible();
-      await expect(page.getByText("2 to restack")).toHaveCount(0);
+      await expect(page.locator(".stack-group__caption").getByText("Restack")).toHaveCount(0);
       const undo = page.getByRole("button", { name: "Undo", exact: true });
       await expect(undo).toBeVisible();
       if (shots) await page.screenshot({ path: join(shots, "stack-after-proof.png"), animations: "disabled" });
       await undo.click();
-      await expect(page.getByText("2 to restack")).toBeVisible();
+      await expect(page.locator(".stack-group__caption").getByText("Restack")).toBeVisible();
       await expect(page.getByRole("complementary", { name: "Proof ledger" })).toHaveCount(0);
       expect(errors).toEqual([]);
     } finally {

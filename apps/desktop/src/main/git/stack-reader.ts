@@ -1,5 +1,5 @@
 import {
-  forgeProductFor, forgeRepoKey, inferPullRequestStacks, stackBranchHealth, type ChangeRequestEntry, type ChangeRequestList,
+  forgeProductFor, forgeRepoKey, inferPullRequestStacks, stackBranchHealth, type ChangeRequestEntry, type ChangeRequestList, type GitHubStack,
   type PrSummary, type Repo, type RepositoryStack, type StackLayer, type StackSnapshot,
 } from "@pwrgit/shared";
 import type { GitExec } from "./dugite";
@@ -27,6 +27,7 @@ type StackSource = {
   inferred: boolean;
   catalogRepository: string;
   open: ChangeRequestEntry[];
+  linked?: GitHubStack;
 };
 
 function parsedCatalogKey(value: string): string {
@@ -39,6 +40,7 @@ export class StackReader {
     private readonly locks: NativeStackLocks,
     private readonly readOpen: (repoId: string) => Promise<ChangeRequestList>,
     private readonly readBranchPr: (repoId: string, branch: string) => BranchPrObservation | null | undefined,
+    private readonly readGitHubStacks: (repoId: string, forgeRepo: string) => readonly GitHubStack[] = () => [],
   ) {}
 
   async location(repo: Pick<Repo, "path" | "identity">) {
@@ -56,14 +58,39 @@ export class StackReader {
     const { commonDir, store, tracked } = await this.location(repo);
     const open = await this.readOpen(repo.id);
     const { catalog } = tracked;
-    const sources: StackSource[] = catalog.stacks.map(stack => ({
-      stack, catalogRepository: catalog.repository, inferred: false,
-      open: open.entries.filter(entry => !catalog.repository || entry.forgeRepo === parsedCatalogKey(catalog.repository)),
-    }));
-    const trackedBranches = new Set(catalog.stacks.flatMap(stack => stack.branches.map(branch => branch.branch)));
     const remotes = new Map(open.remotes.map(remote => [remote.forgeRepo, remote]));
+    const linked = open.remotes.flatMap(remote => this.readGitHubStacks(repo.id, remote.forgeRepo).map(stack => ({
+      scope: remote.forgeRepo, stack,
+    })));
+    const catalogScope = parsedCatalogKey(catalog.repository);
+    const trackedBranches = new Set(catalog.stacks.flatMap(stack => stack.branches.map(branch => branch.branch)));
+    const usedLinked = new Set<GitHubStack>();
+    const sources: StackSource[] = catalog.stacks.map(stack => {
+      const match = linked.find(candidate => candidate.scope === catalogScope && (stack.number === candidate.stack.number ||
+        candidate.stack.members.some(pr => stack.branches.some(branch => branch.pullRequest?.number === pr.number ||
+          (!branch.pullRequest && branch.branch === pr.headRefName)))));
+      if (match) usedLinked.add(match.stack);
+      return {
+        stack, catalogRepository: catalog.repository, inferred: false,
+        open: open.entries.filter(entry => !catalog.repository || entry.forgeRepo === catalogScope),
+        ...(match ? { linked: match.stack } : {}),
+      };
+    });
+    const linkedPrs = new Set(linked.flatMap(({ scope, stack }) => stack.members.map(pr => `${scope}#${pr.number}`)));
+    for (const { scope, stack } of linked) {
+      if (usedLinked.has(stack)) continue;
+      const separator = scope.indexOf("/");
+      sources.push({
+        inferred: true, open: open.entries.filter(entry => entry.forgeRepo === scope), linked: stack,
+        catalogRepository: `${scope.slice(0, separator)}:${scope.slice(separator + 1)}`,
+        stack: { trunk: { branch: stack.trunk }, branches: stack.members.map(pr => ({
+          branch: pr.headRefName!, pullRequest: { number: pr.number },
+        })) },
+      });
+    }
     const completeEntries = open.entries.filter(entry => !(remotes.get(entry.forgeRepo)?.truncated ?? open.truncated));
     for (const entries of inferPullRequestStacks(completeEntries, trackedBranches)) {
+      if (entries.some(entry => linkedPrs.has(`${entry.forgeRepo}#${entry.pr.number}`))) continue;
       const [{ forgeRepo, pr }] = entries;
       const separator = forgeRepo.indexOf("/");
       sources.push({
@@ -104,11 +131,12 @@ export class StackReader {
       return ancestors.get(key) ?? false;
     };
     for (const source of sources) {
-      const { stack, inferred, catalogRepository } = source;
+      const { stack, inferred, catalogRepository, linked } = source;
       if (!stack.branches.length) continue;
       const scope = parsedCatalogKey(catalogRepository);
       const remote = remotes.get(scope)?.name ?? "origin";
-      const trunkHead = local(stack.trunk.branch) ?? stack.trunk.head;
+      const localTrunk = local(stack.trunk.branch);
+      const trunkHead = localTrunk ?? stack.trunk.head;
       const layers: StackLayer[] = [];
       const lookupPr = (branch: GhStackBranch) => {
         const number = branch.pullRequest?.number;
@@ -122,7 +150,15 @@ export class StackReader {
             (!entry || (cached.pr.number === entry.pr.number && cached.fetchedAt >= (listFetchedAt ?? 0)))) {
           return cached.pr;
         }
-        return entry?.pr;
+        const member = linked?.members.find(pr => number !== undefined ? pr.number === number : pr.headRefName === branch.branch);
+        if (member && member.state !== "open") return member;
+        if (entry) return entry.pr;
+        if (member) return member;
+        const recorded = branch.pullRequest;
+        return recorded?.merged && recorded.url ? {
+          number: recorded.number, url: recorded.url, title: branch.branch, state: "merged" as const, isDraft: false,
+          headRefName: branch.branch, ...(recorded.mergedHead ? { headOid: recorded.mergedHead } : {}),
+        } : undefined;
       };
       for (const [index, branch] of stack.branches.entries()) {
         const parent = stack.branches[index - 1] ?? stack.trunk;
@@ -157,16 +193,47 @@ export class StackReader {
             (localHead !== pr?.headOid && await isAncestor(localHead, pr?.headOid))
           )),
         });
+        let syncReady = false;
+        if (!inferred && index === 1 && parentMerged && localTrunk) {
+          // A remote merge does not make stale local trunk safe to replay onto.
+          const mergedHead = parent.pullRequest?.mergedHead ?? (parentPr?.state === "merged" ? parentPr.headOid : undefined);
+          if (mergedHead && isOid(mergedHead) && isOid(localTrunk)) {
+            syncReady = await isAncestor(mergedHead, localTrunk);
+            if (!syncReady) {
+              const patches = await git.run(["cherry", localTrunk, mergedHead]);
+              const lines = patches.stdout.trim().split("\n");
+              syncReady = patches.exitCode === 0 && lines.every(line => line.startsWith("- "));
+            }
+          }
+        }
+        let behindParent = 0;
+        if (parentHead && base && base !== parentHead && isOid(base) && isOid(parentHead)
+            && await isAncestor(base, parentHead)) {
+          const distance = await git.run(["rev-list", "--count", `${base}..${parentHead}`]);
+          if (distance.exitCode === 0) behindParent = Number(distance.stdout.trim());
+        }
+        let commitCount: number | undefined;
+        if (!pr && localHead && parentHead) {
+          const commits = await git.run(["rev-list", "--count", `${parentHead}..${localHead}`]);
+          if (commits.exitCode === 0) commitCount = Number(commits.stdout.trim());
+        }
         const head = localHead ?? branch.head ?? pr?.headOid;
         layers.push({
-          branch: branch.branch, parent: parent.branch, health, ...(base ? { base } : {}),
+          branch: branch.branch, parent: parent.branch, health, local: !!localHead,
+          ...(behindParent > 0 ? { behindParent } : {}),
+          ...(syncReady ? { syncReady } : {}),
+          ...(commitCount === undefined ? {} : { commitCount }), ...(base ? { base } : {}),
           ...(head ? { head } : {}), ...(pr ? { pr, forgeRepo: scope } : {}),
         });
       }
       const stackSource: RepositoryStack["source"] = inferred ? "inferred" : "tracked";
       snapshot.stacks.push({
         id: JSON.stringify([stackSource, catalogRepository, stack.id ?? stack.number ?? stack.branches[0].branch]),
-        source: stackSource, catalogRepository, trunk: { branch: stack.trunk.branch, ...(trunkHead ? { head: trunkHead } : {}) }, layers,
+        source: stackSource, catalogRepository,
+        ...(linked ? { githubNumber: linked.number, githubUrl: linked.url } : {}),
+        ...(inferred ? { canTrack: Boolean(localTrunk && layers.every(layer => layer.local) &&
+          (!catalogScope || catalogScope === scope) && layers.every(layer => !trackedBranches.has(layer.branch))) } : {}),
+        trunk: { branch: stack.trunk.branch, local: !!localTrunk, ...(trunkHead ? { head: trunkHead } : {}) }, layers,
       });
     }
     return snapshot;

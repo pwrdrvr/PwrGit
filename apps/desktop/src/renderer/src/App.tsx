@@ -3,6 +3,7 @@ import { StackToolbar } from "./features/stacks/StackToolbar";
 import { useStackOperation } from "./features/stacks/useStackOperation";
 import { StackNavigationContext, type StackPick, useStackSnapshot } from "./features/stacks/stack-navigation";
 import { StackRail, StackView } from "./features/stacks/StackViews";
+import { stackPosition } from "@pwrgit/shared";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type {
   ChangeRequestEntry,
@@ -183,11 +184,13 @@ export function App() {
    */
   const [changeRequest, setChangeRequest] = useState<ChangeRequestPick | null>(null);
   const [stackPick, setStackPick] = useState<StackPick | null>(null);
+  const [stackSelectedBranch, setStackSelectedBranch] = useState<string>();
   const closeStack = useCallback(() => setStackPick(null), []);
   const selectStack = useCallback((pick: StackPick) => {
     setChangeRequest(null);
     setContributionsOpen(false);
     setStackPick(pick);
+    setStackSelectedBranch(pick.branch);
   }, []);
   const stackNavigation = useMemo(() => ({ pick: stackPick, select: selectStack }), [stackPick, selectStack]);
   const restoredSelectionForProfileRef = useRef<string | null>(null);
@@ -837,6 +840,9 @@ export function App() {
   const stackRunningBranch = stackOperation.pending === "run" && stackStage.phase === "plan" ? stackStage.plan.moves[0]?.branch : undefined;
   const stackFresh = stackStage.phase === "done" ? new Set(stackStage.applied.plan.moves.map(move => move.branch)) : undefined;
   const { snapshot: lineageStacks } = useStackSnapshot(selectedRepo?.id, selectedRepo?.profileId);
+  const { snapshot: changeRequestStacks } = useStackSnapshot(changeRequestRepo?.id, changeRequestRepo?.profileId);
+  const changeRequestStackPosition = shownChangeRequest && stackPosition(changeRequestStacks?.stacks ?? [],
+    layer => layer.forgeRepo === shownChangeRequest.entry.forgeRepo && layer.pr?.number === shownChangeRequest.entry.pr.number);
   const lineageVisible = stack === null && shownChangeRequest === null && diffTarget === null && fileInsightTarget === null;
   const visibleLineageRepoId = lineageVisible && selectedWorktree !== null ? selectedWorktree.repoId : null;
   useLayoutEffect(() => {
@@ -1259,6 +1265,9 @@ export function App() {
             <ChangeRequestView
               key={changeRequestPickKey(shownChangeRequest.repoId, shownChangeRequest.entry)}
               entry={shownChangeRequest.entry}
+              repoId={shownChangeRequest.repoId}
+              {...(changeRequestStackPosition ? { stackPosition: changeRequestStackPosition } : {})}
+              stackWritable={!!changeRequestStacks && !changeRequestStacks.readOnly && !changeRequestStacks.busy}
               state={changeRequestState}
               manyRemotes={shownChangeRequest.manyRemotes}
               worktreeId={changeRequestWorktreeId}
@@ -1271,6 +1280,7 @@ export function App() {
             />
           )}
           {stack && stackRepo && <StackView stack={stack} repoId={stackRepo.id} onClose={closeStack}
+            writable={stackWritable} selectedBranch={stackSelectedBranch} onSelectBranch={setStackSelectedBranch}
             toolbar={shownStacks?.busy ? <>
               <span role="status">{shownStacks.busy}</span>
               {shownStacks.recoveryAvailable && <button type="button" className="stack-button"
@@ -1310,7 +1320,7 @@ export function App() {
                 <LineageGraph
                   repoId={selectedRepo.id}
                   {...(lineageStacks ? { stacks: lineageStacks.stacks } : {})}
-                  onOpenStack={model => selectStack({ repoId: selectedRepo.id, stack: model })}
+                  stackWritable={!!lineageStacks && !lineageStacks.readOnly && !lineageStacks.busy}
                   repoName={selectedRepo.name}
                   worktreeId={selectedWorktree.id}
                   worktreePath={selectedWorktree.path}
@@ -1494,7 +1504,7 @@ export function App() {
               onCollapse={() => setRailCollapsed(true)} onOpenWorktree={worktreeId => {
                 if (stackRepo) setPendingReveal({ repoId: stackRepo.id, worktreeId, branch: null });
               }} />
-          : <StackRail stack={stack} onCollapse={() => setRailCollapsed(true)} />)}
+          : <StackRail stack={stack} branch={stackSelectedBranch} writable={stackWritable} onCollapse={() => setRailCollapsed(true)} />)}
         {!railCollapsed && shownChangeRequest === null && stack === null && (
           <Rail
             worktree={selectedWorktree}

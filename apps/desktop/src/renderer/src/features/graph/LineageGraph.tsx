@@ -263,11 +263,11 @@ export function LineageGraph({
   onRevealWorktree,
   onRevealCreatedWorktree,
   stacks,
-  onOpenStack
+  stackWritable = false
 }: {
   repoId: string;
   stacks?: RepositoryStack[];
-  onOpenStack?: (stack: RepositoryStack) => void;
+  stackWritable?: boolean;
   /** Repository name, shown when a dialog needs to name what it acts on. */
   repoName: string;
   worktreeId: string;
@@ -302,7 +302,7 @@ export function LineageGraph({
     for (const stack of stacks) stack.layers.forEach((layer, index) => {
       const position = { stack, layer, index: index + 1 };
       if (!positions.has(layer.branch)) positions.set(layer.branch, position);
-      if (layer.base && layer.health.needsRestack && !oldBases.has(layer.base)) oldBases.set(layer.base, position);
+      if (stack.source === "tracked" && layer.base && layer.health.needsRestack && !oldBases.has(layer.base)) oldBases.set(layer.base, position);
     });
     return { positions, oldBases };
   }, [stacks]);
@@ -1374,8 +1374,8 @@ export function LineageGraph({
                 contextOpen={hoveredCommit === vm.commit.hash && commitContext.visible}
                 flashing={flash === vm.commit.hash}
                 branchInfo={data?.branches ?? {}}
-                {...(stackAnnotations && onOpenStack ? {
-                  stackPositions: stackAnnotations.positions, oldStackBases: stackAnnotations.oldBases, onOpenStack
+                {...(stackAnnotations ? {
+                  stackPositions: stackAnnotations.positions, oldStackBases: stackAnnotations.oldBases, stackRepoId: repoId, stackWritable
                 } : {})}
                 authorAvatarUrl={
                   linkedIdentity(people[commitAuthorPersonKey(vm.commit.authorEmail)])

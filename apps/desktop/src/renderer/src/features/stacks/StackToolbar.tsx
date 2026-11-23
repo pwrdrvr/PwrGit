@@ -1,5 +1,6 @@
 import { useState } from "react";
 import type { RepositoryStack, StackAction } from "@pwrgit/shared";
+import { stackNextAction } from "./stack-presentation";
 
 export function StackToolbar({ stack, disabled, onPlan }: {
   stack: RepositoryStack; disabled: boolean; onPlan: (action: StackAction) => void;
@@ -7,19 +8,20 @@ export function StackToolbar({ stack, disabled, onPlan }: {
   const [adding, setAdding] = useState(false);
   const [branch, setBranch] = useState("");
   if (stack.source === "inferred") {
-    return <button type="button" className="stack-button stack-button--primary" disabled={disabled}
-      onClick={() => onPlan({ kind: "adopt" })}>Adopt stack</button>;
+    return <button type="button" className="stack-button" disabled={disabled || stack.canTrack === false}
+      onClick={() => onPlan({ kind: "adopt" })}>Track with gh stack…</button>;
   }
+  const next = stackNextAction(stack, !disabled);
   return <div className="stack-tools" onKeyDown={event => {
     if (!(event.metaKey || event.ctrlKey) || !event.shiftKey || disabled) return;
     const key = event.key.toLowerCase();
     if (key !== "r" && key !== "n") return;
     event.preventDefault();
-    if (key === "r") onPlan({ kind: "restack" });
+    if (key === "r") onPlan(next?.action ?? { kind: "restack" });
     else setAdding(true);
   }}>
     <button type="button" className="stack-button stack-button--primary" disabled={disabled}
-      onClick={() => onPlan({ kind: "restack" })}>Restack</button>
+      onClick={() => onPlan(next?.action ?? { kind: "restack" })}>{next?.label ?? "Restack"}</button>
     <button type="button" className="stack-button" disabled={disabled} aria-expanded={adding}
       onClick={() => setAdding(value => !value)}>New branch on top</button>
     {adding && <form className="stack-tools__new-branch" onSubmit={event => {

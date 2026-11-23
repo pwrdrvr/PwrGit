@@ -337,3 +337,24 @@ test.skipIf(!existsSync(native))("a second conflict uses a fresh checkout and pr
     }
   })
 );
+
+test.skipIf(!existsSync(native))("sync requires local trunk to include the merged parent, then replays just the remaining patches and supports undo", () =>
+  withStack(async ({ cwd, commonDir, initial, bottom, top }) => {
+    initial.stacks[0].branches[0].pullRequest = { number: 7, merged: true, mergedHead: bottom };
+    await writeFile(join(commonDir, "gh-stack"), JSON.stringify(initial));
+    const { bus, request, stackId, catalog } = await setup(cwd, commonDir);
+    const action = { kind: "sync" as const, mergedParent: "bottom" };
+    expect(await bus.dispatch("stack:plan", { ...request, stackId, action })).toMatchObject({ ok: false });
+    await git(cwd, "merge", "-q", "--squash", "bottom");
+    await git(cwd, "commit", "-qm", "Squash bottom");
+    const trunk = await git(cwd, "rev-parse", "main");
+    const plan = value(await bus.dispatch("stack:plan", { ...request, stackId, action }));
+    expect(plan.steps.map(step => [step.branch, step.oldBase, step.newBase])).toEqual([["top", bottom, trunk]]);
+    value(await bus.dispatch("stack:apply", { ...request, planId: plan.id }));
+    expect(await git(cwd, "log", "--format=%s", `${trunk}..top`)).toBe("top.txt");
+    expect(await git(cwd, "rev-parse", "bottom")).toBe(bottom);
+    expect(JSON.parse(await readFile(catalog, "utf8")).stacks[0].branches.map((layer: { branch: string }) => layer.branch)).toEqual(["top"]);
+    value(await bus.dispatch("stack:undo", { ...request, operationId: plan.id }));
+    expect(await git(cwd, "rev-parse", "top")).toBe(top);
+    expect(JSON.parse(await readFile(catalog, "utf8"))).toEqual(initial);
+  }));

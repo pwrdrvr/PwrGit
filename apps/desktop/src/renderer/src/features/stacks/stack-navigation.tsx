@@ -2,7 +2,7 @@ import { createContext, useCallback, useContext, useEffect, useState } from "rea
 import type { RepositoryStack, StackAction, StackSnapshot } from "@pwrgit/shared";
 import { dispatch, subscribe } from "../../lib/pwrgit";
 
-export type StackPick = { repoId: string; stack: RepositoryStack; action?: StackAction };
+export type StackPick = { repoId: string; stack: RepositoryStack; action?: StackAction; branch?: string | undefined };
 export const StackNavigationContext = createContext<{
   pick: StackPick | null;
   select: (pick: StackPick) => void;

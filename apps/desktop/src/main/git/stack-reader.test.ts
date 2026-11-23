@@ -3,6 +3,7 @@ import { join } from "node:path";
 import fc from "fast-check";
 import { expect, test, vi } from "vitest";
 import type { ChangeRequestEntry, ChangeRequestList, PrSummary, Repo } from "@pwrgit/shared";
+import { parseGitHubStacks } from "../github/stack-client";
 import { CommandBus } from "../command-bus";
 import { openDatabase } from "../persistence/db";
 import { ProfileService } from "../profiles/profile-service";
@@ -144,3 +145,28 @@ test("stack reads across independent repositories share a main-process concurren
     expect(active).toBe(0);
   }), { numRuns: 15 });
 });
+
+test("GitHub's ordered stack response identifies a remote-only stack and its merged member", () =>
+  withStack(async ({ cwd, top, bottom }) => {
+    const topPr = openPr(8, "top", "bottom", top);
+    topPr.pr.checkState = "failing";
+    const reader = new StackReader(runner, locks, async () => ({
+      forge: "github", fetchedAt: 100, truncated: false, entries: [topPr],
+      remotes: [listRemote(forgeRepo, false)],
+    }), () => undefined, (_repo, scope) => scope === forgeRepo ? parseGitHubStacks([{
+      number: 4235, open: true, base: { ref: "main" },
+      pull_requests: [
+        { number: 7, head: { ref: "bottom", sha: bottom }, state: "closed", merged_at: "2026-10-12T10:00:00Z" },
+        { number: 8, head: { ref: "top", sha: top }, state: "open", draft: false },
+      ]
+    }], "example", "orbit-deploy") : []);
+    const { stacks } = await reader.list(testRepo(cwd));
+    expect(stacks).toMatchObject([{
+      githubNumber: 4235, githubUrl: "https://github.com/example/orbit-deploy/stack/4235", source: "inferred",
+      trunk: { branch: "main" },
+      layers: [
+        { branch: "bottom", pr: { number: 7, state: "merged" } },
+        { branch: "top", pr: { number: 8, state: "open", checkState: "failing" }, health: { parentMerged: true } },
+      ],
+    }]);
+  }));

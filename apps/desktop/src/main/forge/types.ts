@@ -1,3 +1,4 @@
+import type { GitHubStack } from "@pwrgit/shared";
 import type {
   ForgeKind,
   OpenChangeRequest,
@@ -51,6 +52,7 @@ export function forgeOrigin(repo: Pick<ForgeRepo, "host" | "port">): string {
  */
 export type OpenPrList = {
   items: OpenChangeRequest[];
+  githubStacks?: GitHubStack[];
   truncated: boolean;
 };
 
@@ -226,7 +228,7 @@ export async function connectForge(
 /** `stampForge` for a list: every item learns which instance issued it. */
 export function stampOpenList(list: OpenPrList, repo: ForgeRepo): OpenPrList {
   return {
-    truncated: list.truncated,
+    ...list,
     items: list.items.map((item) => ({
       ...item,
       forge: repo.kind,

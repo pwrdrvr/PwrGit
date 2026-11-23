@@ -1,10 +1,10 @@
 import { memo, useMemo, useRef, type MouseEvent } from "react";
-import type { Commit, LaneBranchInfo, MovedTag, PrSummary, RepositoryStack, StackPosition } from "@pwrgit/shared";
+import type { Commit, LaneBranchInfo, MovedTag, PrSummary, StackPosition } from "@pwrgit/shared";
 import { BranchGlyph } from "../../lib/BranchGlyph";
 import { CheckoutGlyph } from "../../lib/CheckoutGlyph";
 import { AuthorAvatar } from "./AuthorAvatar";
 import { hoverIntentHandlers, type HoverIntent } from "../../lib/hoverIntent";
-import { StackPositionChip } from "../stacks/StackViews";
+import { StackPositionChip } from "../stacks/StackPopover";
 import { PrChip } from "../sidebar/PrChip";
 import { prChipLabel } from "../sidebar/pr-status";
 import { TagGlyph } from "../../lib/TagGlyph";
@@ -117,7 +117,8 @@ export function GraphRow({
   onTakeTag,
   stackPositions,
   oldStackBases,
-  onOpenStack
+  stackRepoId,
+  stackWritable
 }: {
   vm: GraphRowVM;
   laneCount: number;
@@ -136,7 +137,8 @@ export function GraphRow({
   branchInfo?: Record<string, LaneBranchInfo>;
   stackPositions?: ReadonlyMap<string, StackPosition>;
   oldStackBases?: ReadonlyMap<string, StackPosition>;
-  onOpenStack?: (stack: RepositoryStack) => void;
+  stackRepoId?: string;
+  stackWritable?: boolean;
   /** The author's linked forge avatar, from main's people store. Absent
    *  draws initials. */
   authorAvatarUrl?: string | undefined;
@@ -184,10 +186,10 @@ export function GraphRow({
   const width = Math.max(1, laneCount) * LANE_W;
   const color = laneColor(row.lane);
   const chipCount = refs.length + remoteRefs.length;
-  const bracket = refs.length ? refs.map(ref => stackPositions?.get(ref)).find(position => position !== undefined) : undefined;
   const oldStackBase = oldStackBases?.get(commit.hash);
   const isTip = chipCount > 0;
-  const orderedRefs = bracket ? [bracket.layer.branch, ...refs.filter(ref => ref !== bracket.layer.branch)] : refs;
+  const firstStackRef = refs.find(ref => stackPositions?.has(ref));
+  const orderedRefs = firstStackRef && firstStackRef !== refs[0] ? [firstStackRef, ...refs.filter(ref => ref !== firstStackRef)] : refs;
   const chipNames = [...orderedRefs, ...remoteRefs];
   const canTakeTag = onTakeTag !== undefined;
   const hasPersonButton = onShowPerson !== undefined;
@@ -198,7 +200,7 @@ export function GraphRow({
   const lineRef = useRef<HTMLDivElement>(null);
   const stripRef = useRef<HTMLSpanElement>(null);
   const { localChips, remoteChips, chipContent } = useMemo(() => {
-    const localChips = orderedRefs.slice(0, bracket ? 1 : MAX_REF_CHIPS).map((name, index) => {
+    const localChips = orderedRefs.slice(0, firstStackRef ? 1 : MAX_REF_CHIPS).map((name, index) => {
       const info = branchInfo?.[name];
       return {
         name,
@@ -230,7 +232,7 @@ export function GraphRow({
     ]);
     return { localChips, remoteChips, chipContent };
   }, [
-    orderedRefs, bracket, remoteRefs, branchInfo, pullRequest, isTip, chipCount, vm.tag, movedTag, oldStackBase, stackPositions,
+    orderedRefs, firstStackRef, remoteRefs, branchInfo, pullRequest, isTip, chipCount, vm.tag, movedTag, oldStackBase, stackPositions,
     publishedTags, isHead, commit.isMerge, isMine, commit.authorName, hasPersonButton
   ]);
   const chipFit = useRefChipFit(
@@ -358,10 +360,7 @@ export function GraphRow({
           />
         )}
         </svg>
-        {bracket && onOpenStack && <button type="button" className="stack-graph-bracket"
-          aria-label={`Open stack for ${bracket.layer.branch}`}
-          style={{ color }}
-          onClick={event => { event.stopPropagation(); onOpenStack(bracket.stack); }} />}
+
       </div>
 
       <div className="commit-body">
@@ -512,7 +511,7 @@ export function GraphRow({
                     <BranchGlyph size={8} strokeWidth={2.6} />
                     <span className="ref-chip__name">{name}</span>
                   </button>
-                  {position && onOpenStack && <StackPositionChip position={position} onSelect={() => onOpenStack(position.stack)} />}
+                  {position && stackRepoId && <StackPositionChip position={position} repoId={stackRepoId} writable={stackWritable} />}
                   {pr !== undefined && <PrChip pr={pr} />}
                   {worktreeId !== undefined && (
                     <button

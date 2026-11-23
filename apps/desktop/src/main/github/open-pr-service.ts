@@ -10,6 +10,7 @@ import {
   type ChangeRequestEntry,
   type ChangeRequestList,
   type ChangeRequestListFailure,
+  type GitHubStack,
   type ChangeRequestLocation,
   type ChangeRequestRemote,
   type ChangeRequestView,
@@ -102,6 +103,7 @@ export class OpenPrService {
    * here with its reason too, because `list()` reports it to the reader.
    * Keyed by `listKey`: one per repository and forge repository.
    */
+  private readonly githubStacks = new Map<string, GitHubStack[]>();
   private readonly lastFailure = new Map<string, ChangeRequestListFailure>();
   /**
    * When a forge repository other than the primary one (`origin`'s) was
@@ -136,6 +138,7 @@ export class OpenPrService {
   invalidatePendingWrites(): void {
     this.writeGeneration += 1;
     this.lastFailure.clear();
+    this.githubStacks.clear();
     this.unasked.clear();
     this.lookups.clear();
   }
@@ -897,9 +900,14 @@ export class OpenPrService {
     if (!this.isCurrent(generation)) return false;
     this.lastFailure.delete(key);
     this.write(repoId, remote, list);
+    if (list.githubStacks !== undefined) this.githubStacks.set(key, list.githubStacks);
     const path = this.repoPath(repoId);
     if (path !== undefined) await this.pruneViewRefs(path, remote, list);
     return true;
+  }
+
+  cachedGitHubStacks(repoId: string, forgeRepo: string): readonly GitHubStack[] {
+    return this.githubStacks.get(listKey(repoId, forgeRepo)) ?? [];
   }
 
   private fail(key: string, message: string): boolean {
@@ -937,6 +945,7 @@ export class OpenPrService {
         rows.run(repoId, forgeRepo);
         state.run(repoId, forgeRepo);
         this.lastFailure.delete(listKey(repoId, forgeRepo));
+        this.githubStacks.delete(listKey(repoId, forgeRepo));
         this.unasked.delete(listKey(repoId, forgeRepo));
       }
     })();
