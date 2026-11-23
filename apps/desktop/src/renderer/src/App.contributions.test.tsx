@@ -409,7 +409,7 @@ describe("Stack navigation in App", () => {
       try {
         await act(async () => root.render(<App />));
         await act(async () => button("Open demo stack").click());
-        await act(async () => button("Adopt stack").click());
+        await act(async () => button("Track with gh stack…").click());
         await act(async () => button("Run locally").click());
         if (notifyBeforeReply) {
           latest = [];
