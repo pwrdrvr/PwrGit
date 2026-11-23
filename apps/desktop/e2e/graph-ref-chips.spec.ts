@@ -67,7 +67,8 @@ test("CSS keeps the ref controls whole on mount, resize, refresh and a late font
       rect: Element.prototype.getBoundingClientRect,
       rects: Element.prototype.getClientRects,
       style: window.getComputedStyle,
-      resize: window.ResizeObserver
+      resize: window.ResizeObserver,
+      intersection: window.IntersectionObserver
     };
     const restore: (() => void)[] = [];
     // The oracle itself runs between audit windows. Count application reads
@@ -90,6 +91,12 @@ test("CSS keeps the ref controls whole on mount, resize, refresh and a late font
       constructor(callback: ResizeObserverCallback) {
         super(callback);
         mark("resize observer");
+      }
+    };
+    window.IntersectionObserver = class extends original.intersection {
+      constructor(callback: IntersectionObserverCallback, options?: IntersectionObserverInit) {
+        super(callback, options);
+        mark("intersection observer");
       }
     };
     for (const [proto, properties] of [
@@ -145,6 +152,7 @@ test("CSS keeps the ref controls whole on mount, resize, refresh and a late font
       Element.prototype.getClientRects = original.rects;
       window.getComputedStyle = original.style;
       window.ResizeObserver = original.resize;
+      window.IntersectionObserver = original.intersection;
       for (const reset of restore) reset();
     }
   }, widths);
@@ -167,6 +175,68 @@ test("CSS keeps the ref controls whole on mount, resize, refresh and a late font
   expect(readAudit.loaded[0]!.clipped).toEqual([]);
   expect(readAudit.loaded).toEqual(readAudit.fresh);
   expect(readAudit.refreshed).toEqual(readAudit.fresh);
+});
+
+const publishedTag = {
+  name: "v7",
+  local: { kind: "lightweight" as const, targetId: "old", objectId: "a" },
+  published: { kind: "lightweight" as const, targetId: "new", objectId: "b", remote: "origin" }
+};
+
+async function crowdedHead() {
+  await page.evaluate(() => {
+    const harness = window.graphRefHarness;
+    harness.mount(1, 360);
+    harness.changeBranch(true, true);
+    harness.changeRow({
+      refs: ["feature/WWWW-widget-preview-0"],
+      tag: { name: "release/" + "W".repeat(60), kind: "lightweight" },
+      isHead: true
+    });
+  });
+}
+
+test("a crowded HEAD reserves room for every visible ref control before Browse", async () => {
+  await crowdedHead();
+  for (const width of [360, 340, 382, 405, 420, 490, 650, 800, 276]) {
+    await page.evaluate((width) => window.graphRefHarness.resize(width), width);
+    expect((await readRows())[0]!.clipped, `crowded HEAD at ${width}px`).toEqual([]);
+    const obscured = await page.locator(".commit-meta").evaluate((line) =>
+      [...line.querySelectorAll(".ref-chips button, .ref-chips [role=button], .ref-browser")].flatMap((control) => {
+        if (control.getClientRects().length === 0) return [];
+        const rect = control.getBoundingClientRect();
+        const hit = document.elementFromPoint(rect.x + rect.width / 2, rect.y + rect.height / 2);
+        return control.contains(hit) ? [] : [control.className];
+      })
+    );
+    expect(obscured, `hit targets at ${width}px`).toEqual([]);
+  }
+});
+
+test("a published tag keeps a direct warning beside a local tag", async () => {
+  await crowdedHead();
+  await page.evaluate((tag) => window.graphRefHarness.changeRow({ publishedTags: [tag] }), publishedTag);
+  const local = page.locator(".commit-meta > span.commit-tag--tag");
+  const warning = page.locator(".commit-meta > button.commit-tag--tag.is-published");
+  await page.evaluate(() => window.graphRefHarness.resize(800));
+  await expect(local).toBeVisible();
+  for (const width of [800, 650, 490, 420, 405, 382, 360, 340, 276]) {
+    await page.evaluate((width) => window.graphRefHarness.resize(width), width);
+    await expect(warning.locator(".tag-glyph"), `published warning at ${width}px`).toBeVisible({ timeout: 1500 });
+    expect((await readRows())[0]!.clipped, `published warning at ${width}px`).toEqual([]);
+  }
+  await warning.press("Enter");
+  expect(await page.evaluate(() => window.graphRefHarness.lastAction())).toBe("tag:v7");
+  await page.evaluate(() => window.graphRefHarness.changeRow({
+    pullRequest: { number: 23, title: "Promote preview", url: "https://forge.example.test/pull/23", state: "open", isDraft: false }
+  }));
+  const clipped = [];
+  for (const width of [276, 320, 340, 360, 382, 405, 420, 463, 490, 650, 800]) {
+    await page.evaluate((width) => window.graphRefHarness.resize(width), width);
+    const row = (await readRows())[0]!;
+    if (row.clipped.length > 0) clipped.push({ width, controls: row.clipped });
+  }
+  expect(clipped).toEqual([]);
 });
 
 test("the ref list keeps every ordered name and reaches hidden branch actions by keyboard", async () => {
@@ -204,6 +274,47 @@ test("the ref list keeps every ordered name and reaches hidden branch actions by
   await expect(page.getByRole("button", { name: "Browse 13 refs at 0000000" })).toBeFocused();
 });
 
+test("reopening Browse dismisses branch actions and leaves Escape with the ref list", async () => {
+  await page.evaluate(() => window.graphRefHarness.mount(1, 276));
+  const summary = page.getByRole("button", { name: "Browse 11 refs at 0000000" });
+  const list = page.getByRole("region", { name: "Refs at 0000000" });
+  const menu = page.getByRole("menu", { name: "widget-0 actions" });
+  for (const reopen of [() => summary.click(), () => summary.press("Enter")]) {
+    await summary.press("Enter");
+    await list.getByRole("button", { name: "Actions for branch widget-0" }).press("Enter");
+    await expect(menu).toBeVisible();
+    await reopen();
+    await expect(list).toBeVisible();
+    await page.keyboard.press("Escape");
+    await expect(list).toBeHidden({ timeout: 1500 });
+    await expect(menu).toBeHidden();
+    await expect(summary).toBeFocused();
+  }
+});
+
+test("scrolling the row offscreen dismisses the ref list and its focused action", async () => {
+  await page.evaluate((tag) => {
+    window.graphRefHarness.mount(16, 420);
+    window.graphRefHarness.changeRow({ publishedTags: [tag] });
+  }, { ...publishedTag, name: "v-offscreen" });
+  const summary = page.getByRole("button", { name: "Browse 12 refs at 0000000" });
+  await summary.press("Enter");
+  const panel = page.locator(".ref-browser-panel");
+  const action = panel.getByRole("button", { name: /^origin's v-offscreen points here/ });
+  await action.focus();
+  await panel.evaluate((list) => { list.scrollTop = 32; });
+  await settle();
+  await expect(panel).toHaveCount(1);
+  await expect(action).toBeFocused();
+  const scroll = page.locator(".graph-scroll");
+  await scroll.evaluate((view) => { view.scrollTop = 240; });
+  await expect(panel).toHaveCount(0, { timeout: 1500 });
+  await expect(summary).not.toBeFocused();
+  expect(await scroll.evaluate((view) => view.scrollTop)).toBe(240);
+  await page.keyboard.press("Enter");
+  expect(await page.evaluate(() => window.graphRefHarness.lastAction())).not.toBe("tag:v-offscreen");
+});
+
 test("compact rows keep moved tags, stack positions and worktree actions in the ref list", async () => {
   await page.evaluate(() => {
     window.graphRefHarness.prepareDeepScene(175, 7);
@@ -222,7 +333,7 @@ test("compact rows keep moved tags, stack positions and worktree actions in the 
     harness.mount(1, 276);
     harness.changeBranch(true, true);
     const local = { kind: "lightweight" as const, targetId: "old", objectId: "a" };
-    harness.changeRow({ publishedTags: ["v7", "v8"].map((name) => ({
+    harness.changeRow({ isHead: true, publishedTags: ["v7", "v8"].map((name) => ({
       name, local, published: { ...local, remote: "origin", targetId: "new" }
     })) });
   });
@@ -234,7 +345,9 @@ test("compact rows keep moved tags, stack positions and worktree actions in the 
   await expect(list).toBeHidden();
   expect(await page.evaluate(() => window.graphRefHarness.lastAction())).toBe("tag:v8");
   await summary.press("Enter");
-  await list.getByRole("button", { name: /^Open the feature/ }).press("Enter");
+  const worktree = list.getByRole("button", { name: /^Open the feature/ });
+  await expect(worktree).toBeVisible({ timeout: 1500 });
+  await worktree.press("Enter");
   await expect(list).toBeHidden();
   expect(await page.evaluate(() => window.graphRefHarness.lastAction())).toBe("worktree:widget-checkout");
 });
@@ -357,5 +470,24 @@ if (shots) {
     }
     await page.getByRole("button", { name: "Browse 11 refs at 0000000" }).click();
     await page.getByRole("region", { name: "Refs at 0000000" }).screenshot({ path: join(shots, "after-list.png") });
+  });
+
+  test("captures crowded refs and a published tag warning", async () => {
+    mkdirSync(shots, { recursive: true });
+    const versions = [{ name: "after", html }];
+    if (baselineHtml !== undefined) versions.unshift({ name: "before", html: baselineHtml });
+    for (const version of versions) {
+      await page.goto(pathToFileURL(version.html).href);
+      await page.evaluate(() => window.graphRefHarness.ready);
+      await crowdedHead();
+      await settle();
+      await page.locator(".graph-harness").screenshot({ path: join(shots, `${version.name}-crowded.png`) });
+      await page.evaluate((tag) => {
+        window.graphRefHarness.resize(700);
+        window.graphRefHarness.changeRow({ publishedTags: [tag] });
+      }, publishedTag);
+      await settle();
+      await page.locator(".graph-harness").screenshot({ path: join(shots, `${version.name}-published.png`) });
+    }
   });
 }

@@ -390,8 +390,8 @@ export function GraphRow({
     return (
       <div className="commit-meta" style={{ "--ref-lane-color": color } as CSSProperties}>
         {pullRequest !== undefined && <PrChip pr={pullRequest} hoverIntent={hoverIntent} />}
-        {vm.tag !== undefined ? renderTag(vm.tag)
-          : publishedTags?.[0] !== undefined && renderPublishedTag(publishedTags[0])}
+        {vm.tag !== undefined && renderTag(vm.tag)}
+        {publishedTags?.[0] !== undefined && renderPublishedTag(publishedTags[0])}
         {isHead && <span className="commit-tag commit-tag--head">HEAD</span>}
         {oldStackBase && <span className="commit-tag commit-tag--old-parent" {...hoverTooltip(tip, `Recorded parent tip of ${oldStackBase.layer.branch}`)}>
           Old parent tip
@@ -593,7 +593,23 @@ function OpenRefBrowser({ id, commit, trigger, onClose, children }: {
   const panel = useRef<HTMLDivElement>(null);
   // Mount the list on demand. Supplying its invoker lets Chromium handle
   // anchoring, light dismiss and sequential focus navigation.
-  useLayoutEffect(() => { panel.current?.showPopover({ source: trigger }); }, [trigger]);
+  useLayoutEffect(() => {
+    const popup = panel.current;
+    if (popup === null) return;
+    popup.showPopover({ source: trigger });
+    // Watch only the open list's anchor. The viewport observer accounts for
+    // the graph's overflow clip, and scrolling inside the list leaves it alone.
+    const observer = new IntersectionObserver(([entry]) => {
+      if (entry === undefined || entry.isIntersecting || !popup.matches(":popover-open")) return;
+      const active = document.activeElement;
+      popup.hidePopover();
+      if ((active === trigger || popup.contains(active)) && document.activeElement === trigger) {
+        trigger.blur();
+      }
+    });
+    observer.observe(trigger);
+    return () => observer.disconnect();
+  }, [trigger]);
   return (
     <div
       ref={panel}

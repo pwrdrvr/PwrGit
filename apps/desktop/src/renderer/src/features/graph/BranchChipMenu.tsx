@@ -129,7 +129,7 @@ export function BranchChipMenu({
       y={target.y}
       label={`${target.ref} actions`}
       items={items}
-      {...(target.trigger === undefined ? {} : { triggerRef: { current: target.trigger } })}
+      {...(target.trigger === undefined ? {} : { focusReturnRef: { current: target.trigger } })}
       onClose={onClose}
     />
   );

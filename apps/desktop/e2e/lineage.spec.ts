@@ -214,7 +214,7 @@ test("remote-only branches use dashed lineage and ellipsized ref chips", async (
     return {
       overflow: style.overflow,
       textOverflow: style.textOverflow,
-      truncated: name.scrollWidth > name.clientWidth
+      truncated: name.scrollWidth > name.clientWidth || name.scrollHeight > name.clientHeight
     };
   });
   expect(truncation).toEqual({

@@ -11378,7 +11378,7 @@ button.commit-byline:focus-visible {
   align-items: center;
   gap: 5px;
   flex: 0 1 auto;
-  min-width: 0;
+  min-width: min-content;
 }
 .ref-chips .ref-chip,
 .ref-list .ref-chip {
@@ -11506,13 +11506,20 @@ button.ref-chip:focus-visible {
 }
 .ref-chips .ref-group {
   flex-shrink: 1;
-  min-width: 0;
+  min-width: min-content;
 }
 .ref-chips .ref-chip {
   flex-shrink: 1;
+  min-width: 44px;
 }
-.ref-chips .ref-chip {
-  min-width: calc-size(max-content, min(size, 44px));
+/* Let intrinsic sizing break a long ref name. The preview still paints a
+   single line, and its group's minimum includes the fixed badges and gaps. */
+.ref-chips .ref-chip__name {
+  white-space: normal;
+  overflow-wrap: anywhere;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 1;
 }
 .commit-meta > .commit-tag--tag {
   flex-shrink: 1;
@@ -11538,7 +11545,17 @@ button.ref-chip:focus-visible {
 /* Retain the primary branch and tag at ordinary split-pane widths. The
    secondary branch and branch-specific badges are still in the ref list. */
 @container lineage-meta (width < 450px) {
-  .ref-chips .ref-preview--secondary {
+  .ref-chips .ref-preview--secondary,
+  .commit-meta:has(> .pr-chip):has(> .commit-tag--tag) .ref-chips :is(.pr-chip, .stack-position) {
+    display: none;
+  }
+  /* Preserve the dashed warning when there's also a local tag. Its
+     accessible name and tooltip still identify the tag and publisher. */
+  .commit-meta:has(> .commit-tag--tag:not(.is-published)) > .commit-tag--tag.is-published {
+    padding-inline: 4px;
+    min-width: min-content;
+  }
+  .commit-meta:has(> .commit-tag--tag:not(.is-published)) > .is-published :is(.commit-tag__name, .commit-tag__remote) {
     display: none;
   }
 }
@@ -11554,14 +11571,24 @@ button.ref-chip:focus-visible {
   }
 }
 @container lineage-meta (width < 295px) {
-  .commit-meta:has(.ref-browser) > :is(.commit-tag--old-parent, .commit-tag--merge) {
+  .commit-meta:has(> :is(.commit-tag--tag, .commit-tag--head, .pr-chip)) .ref-chips :is(.pr-chip, .stack-position),
+  .commit-meta:has(> .pr-chip):has(> .commit-tag--head) .ref-chips .ref-wt,
+  .commit-meta:has(> .ref-browser) > :is(.commit-tag--old-parent, .commit-tag--merge) {
     display: none;
+  }
+  .commit-meta:has(> .pr-chip):has(> .commit-tag--head) > .commit-tag--tag:not(.is-published) {
+    min-width: calc-size(max-content, min(size, 30px));
   }
 }
 @container lineage-meta (width < 240px) {
   .ref-chips :is(.pr-chip, .stack-position),
-  .commit-meta:has(> .pr-chip, > .commit-tag--head) .ref-wt,
-  .commit-meta:has(.ref-chips) > .commit-tag--tag {
+  .commit-meta:has(> .pr-chip, > .commit-tag--head) .ref-chips .ref-wt,
+  .commit-meta:has(.ref-chips) > .commit-tag--tag:not(.is-moved, .is-published) {
+    display: none;
+  }
+}
+@container lineage-meta (width < 215px) {
+  .commit-meta:has(> .pr-chip):has(> .commit-tag--head) > .ref-chips {
     display: none;
   }
 }

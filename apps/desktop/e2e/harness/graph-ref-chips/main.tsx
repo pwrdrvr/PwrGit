@@ -155,7 +155,7 @@ function readRows() {
     return {
       chips: names.map((name) => ({
         text: name.textContent,
-        truncated: name.scrollWidth > name.clientWidth
+        truncated: name.scrollWidth > name.clientWidth || name.scrollHeight > name.clientHeight
       })),
       summary: line.querySelector(".ref-browser")?.textContent ?? null,
       clipped: slots.flatMap((slot) => {
