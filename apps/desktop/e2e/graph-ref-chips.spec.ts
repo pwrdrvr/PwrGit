@@ -176,6 +176,12 @@ test("a late font refits the row at an unchanged width", async () => {
 });
 
 test("first fit bounds rigid slots and checks squeezed adornments before paint", async () => {
+  await page.goto(pathToFileURL(html).href);
+  const stackFontReady = await page.evaluate(async () => {
+    await window.graphRefHarness.ready;
+    return document.fonts.check('500 10px "Geist Mono"', "1/1");
+  });
+  expect(stackFontReady).toBe(true);
   for (const width of [800, 525.125, 490.5, 420, 382.625, 344.375, 311.125, 250.5, 175]) {
     const { rigidInteriorReads, rows } = await page.evaluate((width) => {
       window.graphRefHarness.prepareDeepScene(width);
