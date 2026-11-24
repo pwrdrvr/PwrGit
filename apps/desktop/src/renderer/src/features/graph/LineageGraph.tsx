@@ -1,7 +1,10 @@
 import type { StackLaneColors } from "../stacks/stack-navigation";
 import { LocateGlyph } from "../../lib/LocateGlyph";
 import {
+  memo,
+  type ComponentProps,
   type ReactNode,
+  type RefObject,
   useCallback,
   useEffect,
   useLayoutEffect,
@@ -93,7 +96,7 @@ export function consumeBranchPrInvalidation(
   };
 }
 
-// Lane and people replies are structured-cloned IPC data. Preserve array
+// Lane, PR and people replies are structured-cloned IPC data. Preserve array
 // and record order: some graph consumers iterate refs in that order.
 function samePayload(a: unknown, b: unknown): boolean {
   if (a === b) return true;
@@ -248,6 +251,46 @@ function defaultLineageScope(): Promise<Scope> {
 const scrollBehavior = (): ScrollBehavior =>
   prefersReducedMotion() ? "auto" : "smooth";
 
+type RowProps = ComponentProps<typeof GraphRow>;
+type RowActions = Required<Pick<RowProps,
+  "onHideContext" | "onFocusContext" | "onHidePerson" | "onFocusPerson" |
+  "onOpenBranchMenu" | "onRevealWorktree" | "onTakeTag"
+>> & {
+  open: (vm: GraphRowVM) => void;
+  showContext: (target: HTMLElement, anchor: TooltipAnchor, vm: GraphRowVM) => void;
+  showPerson: (target: HTMLElement, vm: GraphRowVM) => void;
+  openCommitMenu: (vm: GraphRowVM, position: { x: number; y: number }) => void;
+};
+
+const EMPTY_LANDING = { top: [], bottom: [] };
+const EMPTY_BRANCHES = {};
+
+// The graph owns the shared cards and menus. Their state can change without
+// changing any row except the one that opened or closed a card.
+const LineageRow = memo(function LineageRow({
+  actions,
+  ...props
+}: Omit<RowProps, keyof RowActions | "onOpen" | "onShowContext" | "onShowPerson" | "onOpenContextMenu"> & {
+  actions: RefObject<RowActions>;
+}) {
+  return (
+    <GraphRow
+      {...props}
+      onOpen={() => actions.current.open(props.vm)}
+      onShowContext={(target, anchor) => actions.current.showContext(target, anchor, props.vm)}
+      onShowPerson={(target) => actions.current.showPerson(target, props.vm)}
+      onOpenContextMenu={(position) => actions.current.openCommitMenu(props.vm, position)}
+      onHideContext={() => actions.current.onHideContext()}
+      onFocusContext={() => actions.current.onFocusContext()}
+      onHidePerson={() => actions.current.onHidePerson()}
+      onFocusPerson={() => actions.current.onFocusPerson()}
+      onOpenBranchMenu={(target) => actions.current.onOpenBranchMenu(target)}
+      onRevealWorktree={(worktreeId) => actions.current.onRevealWorktree(worktreeId)}
+      onTakeTag={(moved) => actions.current.onTakeTag(moved)}
+    />
+  );
+});
+
 export function LineageGraph({
   repoId,
   repoName,
@@ -385,8 +428,16 @@ export function LineageGraph({
 
   const acceptCommitPullRequests = useCallback(
     (prs: Record<string, PrSummary | null>): void => {
-      if (Object.keys(prs).length === 0) return;
-      setCommitPullRequests((current) => ({ ...current, ...prs }));
+      setCommitPullRequests((current) => {
+        let next: typeof current | undefined;
+        for (const [hash, pr] of Object.entries(prs)) {
+          // Both a missing entry and a cached miss draw no PR chip or link.
+          if (samePayload(current[hash] ?? null, pr)) continue;
+          next ??= { ...current };
+          next[hash] = pr;
+        }
+        return next ?? current;
+      });
     },
     []
   );
@@ -975,6 +1026,23 @@ export function LineageGraph({
     setCommitMenu(null);
     setBranchMenu(target);
   };
+  const rowActions: RowActions = {
+    open: (vm) => onOpenCommit(vm.commit.hash, vm.commit.subject),
+    showContext: showCommitContext,
+    showPerson,
+    openCommitMenu,
+    onHideContext: commitContext.scheduleHide,
+    onFocusContext: commitContext.focusFirst,
+    onHidePerson: personCard.scheduleHide,
+    onFocusPerson: personCard.focusFirst,
+    onOpenBranchMenu: openBranchMenu,
+    onRevealWorktree,
+    onTakeTag: takeTag
+  };
+  const latestRowActions = useRef(rowActions);
+  useLayoutEffect(() => {
+    latestRowActions.current = rowActions;
+  });
 
   /**
    * Move this worktree onto a branch drawn in the graph. The menu is already
@@ -1391,17 +1459,17 @@ export function LineageGraph({
             className="graph-card"
           >
             {vms.map((vm, i) => (
-              <GraphRow
+              <LineageRow
                 key={vm.commit.hash}
                 vm={vm}
                 laneCount={prLandingLayout.laneCount}
-                prLanding={prLandingLayout.rows[i] ?? { top: [], bottom: [] }}
+                prLanding={prLandingLayout.rows[i] ?? EMPTY_LANDING}
                 now={now}
                 selected={selectedCommits.has(vm.commit.hash)}
                 focused={focusedCommit === vm.commit.hash}
                 contextOpen={hoveredCommit === vm.commit.hash && commitContext.visible}
                 flashing={flash === vm.commit.hash}
-                branchInfo={data?.branches ?? {}}
+                branchInfo={data?.branches ?? EMPTY_BRANCHES}
                 {...(stackAnnotations ? {
                   stackPositions: stackAnnotations.positions, oldStackBases: stackAnnotations.oldBases, stackRepoId: repoId, stackWritable
                 } : {})}
@@ -1411,19 +1479,7 @@ export function LineageGraph({
                 }
                 personOpen={openPerson?.hash === vm.commit.hash && personCard.visible}
                 hoverIntent={hoverIntent}
-                onOpen={() => onOpenCommit(vm.commit.hash, vm.commit.subject)}
-                onShowContext={(target, anchor) =>
-                  showCommitContext(target, anchor, vm)
-                }
-                onHideContext={commitContext.scheduleHide}
-                onFocusContext={commitContext.focusFirst}
-                onShowPerson={(target) => showPerson(target, vm)}
-                onHidePerson={personCard.scheduleHide}
-                onFocusPerson={personCard.focusFirst}
-                onOpenContextMenu={(position) => openCommitMenu(vm, position)}
-                onOpenBranchMenu={openBranchMenu}
-                onRevealWorktree={onRevealWorktree}
-                onTakeTag={takeTag}
+                actions={latestRowActions}
               />
             ))}
           </div>

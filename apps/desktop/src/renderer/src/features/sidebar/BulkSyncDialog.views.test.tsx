@@ -1,15 +1,24 @@
 // @vitest-environment jsdom
 
-import { act, useState } from "react";
+import { act, Profiler, useLayoutEffect, useState, type ComponentProps } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { BulkSyncSummary, Repo } from "@pwrgit/shared";
+import type { BulkSyncProgress, BulkSyncSummary, Repo } from "@pwrgit/shared";
 
 const { dispatch, subscribe } = vi.hoisted(() => ({
   dispatch: vi.fn(),
   subscribe: vi.fn()
 }));
 vi.mock("../../lib/pwrgit", () => ({ dispatch, subscribe }));
+const toastCommits = vi.hoisted(() => vi.fn());
+vi.mock("./BulkSyncToast", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("./BulkSyncToast")>();
+  function ObservedToast(props: ComponentProps<typeof actual.BulkSyncToast>) {
+    useLayoutEffect(() => { toastCommits(); });
+    return <actual.BulkSyncToast {...props} />;
+  }
+  return { ...actual, BulkSyncToast: ObservedToast };
+});
 
 import {
   BulkSyncDialog,
@@ -106,9 +115,9 @@ function Harness({
   );
 }
 
-async function render(props: Parameters<typeof Harness>[0]): Promise<void> {
+async function render(props: Parameters<typeof Harness>[0], onRender = vi.fn()): Promise<void> {
   await act(async () => {
-    root.render(<Harness {...props} />);
+    root.render(<Profiler id="bulk-sync" onRender={onRender}><Harness {...props} /></Profiler>);
   });
 }
 
@@ -127,6 +136,7 @@ beforeEach(() => {
   document.body.append(container);
   root = createRoot(container);
   views.length = 0;
+  toastCommits.mockClear();
   subscribe.mockImplementation(() => vi.fn());
   dispatch.mockImplementation((command: string) => {
     if (command === "remote:bulkSync") {
@@ -147,6 +157,51 @@ afterEach(async () => {
 });
 
 describe("BulkSyncDialog views", () => {
+  it("keeps detail-only events off the toast render path and shows the latest detail on expand", async () => {
+    vi.useFakeTimers({ toFake: ["requestAnimationFrame", "cancelAnimationFrame"] });
+    let emit!: (event: BulkSyncProgress) => void;
+    subscribe.mockImplementation((_channel, handler) => { emit = handler; return vi.fn(); });
+    await render({ initial: "toast", onClose: vi.fn() });
+    const operationId = dispatch.mock.calls.find(([name]) => name === "remote:bulkSync")![1].operationId;
+    const event = { operationId, mode: "fetch", repoId: "repo-a", completedRepos: 0, totalRepos: 1 } as const;
+    await act(async () => emit({ ...event, phase: "repo_started" }));
+    expect(toast()?.textContent).toContain("Fetching atlas-api");
+    toastCommits.mockClear();
+    for (const detail of ["Reading refs", "Fetching origin", "Verifying refs"]) {
+      await act(async () => emit({ ...event, phase: "repo_progress", detail }));
+    }
+    await act(async () => vi.advanceTimersToNextFrame());
+    expect(toastCommits).not.toHaveBeenCalled();
+    await act(async () => byName("Show details").click());
+    expect(dialog()?.textContent).toContain("Verifying refs");
+    await act(async () => emit({ ...event, phase: "repo_progress", detail: "Pruning stale refs" }));
+    await act(async () => vi.advanceTimersToNextFrame());
+    expect(dialog()?.textContent).toContain("Pruning stale refs");
+  });
+
+  it("commits the latest expanded progress once per frame across separate deliveries", async () => {
+    vi.useFakeTimers({ toFake: ["requestAnimationFrame", "cancelAnimationFrame"] });
+    let emit!: (event: BulkSyncProgress) => void;
+    subscribe.mockImplementation((_channel, handler) => { emit = handler; return vi.fn(); });
+    const commits = vi.fn();
+    await render({ initial: "dialog", onClose: vi.fn() }, commits);
+    const operationId = dispatch.mock.calls.find(([name]) => name === "remote:bulkSync")![1].operationId;
+    const event = { operationId, mode: "fetch", repoId: "repo-a", completedRepos: 0, totalRepos: 1 } as const;
+    commits.mockClear();
+
+    // Each delivery has its own React flush, but all arrive before the frame.
+    await act(async () => emit({ ...event, phase: "repo_started" }));
+    for (let i = 1; i <= 30; i++) {
+      await act(async () => emit({ ...event, phase: "repo_progress", detail: `Checking ref ${i}` }));
+    }
+
+    await act(async () => vi.advanceTimersToNextFrame());
+    expect(commits).toHaveBeenCalledTimes(1);
+    expect(dialog()?.textContent).toContain("Checking ref 30");
+    await act(async () => vi.advanceTimersToNextFrame());
+    expect(commits).toHaveBeenCalledTimes(1);
+  });
+
   it("fetches only the repositories it was given, under a title that says so", async () => {
     await render({ initial: "dialog", onClose: vi.fn() });
     expect(dispatch).toHaveBeenCalledWith(
@@ -421,6 +476,7 @@ describe("livePathLine", () => {
 
 describe("the status card's path line", () => {
   it("stays on screen as repositories start and finish (no layout shift)", async () => {
+    vi.useFakeTimers({ toFake: ["requestAnimationFrame", "cancelAnimationFrame"] });
     let progress: ((event: unknown) => void) | undefined;
     subscribe.mockImplementation((_channel: string, handler: (e: unknown) => void) => {
       progress = handler;
@@ -455,6 +511,7 @@ describe("the status card's path line", () => {
           repoId,
           ...extra
         });
+        vi.advanceTimersToNextFrame();
       });
 
     // Before anything starts: the line is there, holding its height.
