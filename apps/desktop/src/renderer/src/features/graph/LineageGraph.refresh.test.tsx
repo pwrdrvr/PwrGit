@@ -72,11 +72,13 @@ describe("LineageGraph refresh publication", () => {
     initialPeople: Record<string, CommitAuthorPerson> = {}
   ) {
     const container = document.createElement("div");
+    document.body.append(container);
     const root = createRoot(container);
     const subscriptions = new Map<string, (payload: unknown) => void>();
     const requests: unknown[] = [];
     const search = vi.fn<(commits: Commit[]) => void>();
     const navigate = vi.fn();
+    let openCommit = navigate;
     let nextGraph: () => Promise<LaneGraph> = async () => initial;
     let nextPeople = initialPeople;
     vi.stubGlobal("pwrgit", {
@@ -104,12 +106,19 @@ describe("LineageGraph refresh publication", () => {
           worktreePath="/synthetic/widget" viewingBranch="main" activeEmail=""
           selectedCommits={selected} focusedCommit={hash} revealCommit={null}
           tidyOffered={false} onEditHistory={noop} onCommitsChange={search}
-          onOpenCommit={navigate} onRevealWorktree={noop} onRevealCreatedWorktree={noop} />
+          onOpenCommit={openCommit} onRevealWorktree={noop} onRevealCreatedWorktree={noop} />
       );
     };
     await act(async () => render(worktreeId));
     return {
       row, search, navigate, requests,
+      async openContext(index: number) {
+        await act(async () => container.querySelectorAll<HTMLButtonElement>(".commit-sha-chip")[index]!.click());
+      },
+      async replaceNavigate(next: typeof navigate) {
+        openCommit = next;
+        await act(async () => render(worktreeId));
+      },
       async refresh(next: LaneGraph | Promise<LaneGraph>, people = initialPeople, repo = repoId) {
         nextGraph = async () => next;
         nextPeople = people;
@@ -122,9 +131,39 @@ describe("LineageGraph refresh publication", () => {
         nextPeople = people;
         await act(async () => render("second-worktree"));
       },
-      unmount: async () => act(async () => root.unmount())
+      unmount: async () => act(async () => {
+        root.unmount();
+        container.remove();
+      })
     };
   }
+
+  it("renders only rows whose context-open state changes when opening a commit card", async () => {
+    const initial = graph("Main");
+    const base = initial.commits[0]!;
+    const others = ["b", "c", "d"].map((letter) => ({
+      ...base, hash: letter.repeat(40), shortHash: letter.repeat(7), subject: letter
+    }));
+    const view = await mount({ ...initial, commits: [{ ...base, parents: [others[0]!.hash] }, ...others] });
+    try {
+      for (const index of [0, 2, 1]) {
+        rowCommits.mockClear();
+        await view.openContext(index);
+        const affected = [index === 0 ? "Main" : others[index - 1]!.subject];
+        if (index === 2) affected.push("Main");
+        if (index === 1) affected.push(others[1]!.subject);
+        expect(new Set(rowCommits.mock.calls.map(([subject]) => subject))).toEqual(new Set(affected));
+      }
+      rowCommits.mockClear();
+      const navigate = vi.fn();
+      await view.replaceNavigate(navigate);
+      expect(rowCommits).not.toHaveBeenCalled();
+      await act(async () => (view.row() as HTMLElement).click());
+      expect(navigate).toHaveBeenCalledWith(hash, "Main");
+    } finally {
+      await view.unmount();
+    }
+  });
 
   it("commits only changed replies and republishes search only for changed commit content", async () => {
     const initial = graph("Initial widget");

@@ -7524,10 +7524,11 @@ button.agent-menu__item:hover {
   );
   animation: bulk-sync-stripes 900ms linear infinite;
 }
-/* Both compact surfaces already show live progress. Keep the in-flight
+/* The background progress surfaces already show live progress. Keep the in-flight
    pattern without invalidating the window's paint layer on every frame. */
 .bulk-sync__bar.sidebar-toolbar__progress > .is-in-flight,
-.bulk-sync__bar.bulk-sync-toast__bar > .is-in-flight {
+.bulk-sync__bar.bulk-sync-toast__bar > .is-in-flight,
+.bulk-sync__bar.sync-run-card__bar > .is-in-flight {
   animation: none;
 }
 .bulk-sync__bar > .is-in-flight.is-halted {

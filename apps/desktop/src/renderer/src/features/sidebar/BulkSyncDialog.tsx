@@ -5,10 +5,12 @@ import {
   useMemo,
   useRef,
   useState,
+  useSyncExternalStore,
   type ReactNode
 } from "react";
 import type {
   BulkSyncMode,
+  BulkSyncProgress,
   BulkSyncRepoResult,
   BulkSyncRemoteResult,
   BulkSyncSummary,
@@ -33,7 +35,6 @@ import {
 } from "./bulk-sync-progress";
 
 type RepoProgress =
-  | { phase: "waiting" }
   | {
       phase: "running";
       detail?: string;
@@ -43,6 +44,84 @@ type RepoProgress =
       worktrees: BulkSyncWorktreeResult[];
     }
   | { phase: "complete"; result: BulkSyncRepoResult };
+
+function applyRepoProgress(previous: RepoProgress | undefined, event: BulkSyncProgress): RepoProgress | undefined {
+  if (event.phase === "repo_started") {
+    return { phase: "running", remotes: [], worktrees: [] };
+  }
+  if (event.phase === "repo_completed" && event.result !== undefined) {
+    return { phase: "complete", result: event.result };
+  }
+  if (event.phase !== "repo_progress" || previous?.phase === "complete") return previous;
+
+  const state = previous?.phase === "running"
+    ? previous
+    : { phase: "running" as const, remotes: [], worktrees: [] };
+  const { detail, worktreePath, remoteResult, worktreeResult } = event;
+  return {
+    ...state,
+    ...(detail === undefined ? {} : { detail, worktreePath }),
+    totalWorktrees: event.totalWorktrees ?? state.totalWorktrees,
+    remotes: remoteResult === undefined ? state.remotes : [
+      ...state.remotes.filter((remote) => remote.remote !== remoteResult.remote),
+      remoteResult
+    ],
+    worktrees: worktreeResult === undefined ? state.worktrees : [
+      ...state.worktrees.filter((worktree) => worktree.worktreeId !== worktreeResult.worktreeId),
+      worktreeResult
+    ]
+  };
+}
+
+/** A run retains the latest details for expansion. The collapsed surfaces
+ * subscribe to changes in repository state, counts, and the active path. */
+function createLiveProgress(initialTotal: number) {
+  const byRepo = new Map<string, RepoProgress>();
+  const listeners = new Set<() => void>();
+  let summaryVersion = 0;
+  let detailVersion = 0;
+  let completed = 0;
+  let total = initialTotal;
+  let newestStarted: string | null = null;
+  return {
+    repo: (id: string) => byRepo.get(id),
+    get completed() { return completed; },
+    get total() { return total; },
+    get newestStarted() { return newestStarted; },
+    getSummaryVersion: () => summaryVersion,
+    getDetailVersion: () => detailVersion,
+    subscribe: (listener: () => void) => {
+      listeners.add(listener);
+      return () => { listeners.delete(listener); };
+    },
+    accept(event: BulkSyncProgress) {
+      let summaryChanged = completed !== event.completedRepos || total !== event.totalRepos;
+      completed = event.completedRepos;
+      total = event.totalRepos;
+      let detailChanged = false;
+      const { repoId } = event;
+      if (repoId !== undefined) {
+        if (event.phase === "repo_started" && newestStarted !== repoId) {
+          newestStarted = repoId;
+          summaryChanged = true;
+        }
+        const previous = byRepo.get(repoId);
+        const next = applyRepoProgress(previous, event);
+        if (next !== previous && next !== undefined) {
+          byRepo.set(repoId, next);
+          detailChanged = true;
+          summaryChanged ||= previous?.phase !== next.phase ||
+            (previous.phase === "complete" && next.phase === "complete" &&
+              previous.result.outcome !== next.result.outcome);
+        }
+      }
+      if (!summaryChanged && !detailChanged) return;
+      if (summaryChanged) summaryVersion++;
+      detailVersion++;
+      for (const listener of listeners) listener();
+    }
+  };
+}
 
 const WORKTREE_REASON: Record<
   NonNullable<BulkSyncWorktreeResult["reason"]>,
@@ -344,25 +423,20 @@ export function BulkSyncDialog({
   const repoIdsRef = useRef(repoIds);
   // The repository that started last, and the path line last drawn, so the
   // status card's second line always has something to say. See livePathLine.
-  const newestStartedRef = useRef<string | null>(null);
   const lastPathRef = useRef<string | null>(null);
   const operationIdRef = useRef("");
   const replayRef = useRef(replay);
-  const [completed, setCompleted] = useState(replay?.results.length ?? 0);
-  const [total, setTotal] = useState(replay?.results.length ?? repoSnapshot.length);
   const [cancelling, setCancelling] = useState(false);
   const [summary, setSummary] = useState<BulkSyncSummary | null>(replay ?? null);
   const [error, setError] = useState<string | null>(null);
-  const [progress, setProgress] = useState<Map<string, RepoProgress>>(() =>
-    replay === undefined
-      ? new Map(repoSnapshot.map((repo) => [repo.id, { phase: "waiting" }]))
-      : new Map(
-          replay.results.map((result) => [
-            result.repoId,
-            { phase: "complete", result } as const
-          ])
-        )
+  const [progress] = useState(() => createLiveProgress(repoSnapshot.length));
+  const showDetails = view === "dialog";
+  const progressVersion = useSyncExternalStore(
+    progress.subscribe,
+    showDetails ? progress.getDetailVersion : progress.getSummaryVersion
   );
+  const completed = summary?.results.length ?? progress.completed;
+  const total = summary?.results.length ?? progress.total;
   // The live clock's origin. The operation launches one microtask after
   // mount, so this is its start to well inside the clock's one-second grain.
   const [startedAt] = useState(() => Date.now());
@@ -376,42 +450,7 @@ export function BulkSyncDialog({
     const operationId = crypto.randomUUID();
     operationIdRef.current = operationId;
     const off = subscribe("remote:bulkSyncProgress", (event) => {
-      if (!live || event.operationId !== operationId) return;
-      setCompleted(event.completedRepos);
-      setTotal(event.totalRepos);
-      if (event.repoId === undefined) return;
-      setProgress((previous) => {
-        const next = new Map(previous);
-        if (event.phase === "repo_started") {
-          newestStartedRef.current = event.repoId!;
-          next.set(event.repoId!, { phase: "running", remotes: [], worktrees: [] });
-        } else if (event.phase === "repo_progress") {
-          const current = previous.get(event.repoId!);
-          if (current?.phase === "complete") return previous;
-          const state = current?.phase === "running"
-            ? current
-            : { phase: "running" as const, remotes: [], worktrees: [] };
-          next.set(event.repoId!, {
-            ...state,
-            ...(event.detail === undefined ? {} : {
-              detail: event.detail,
-              worktreePath: event.worktreePath
-            }),
-            totalWorktrees: event.totalWorktrees ?? state.totalWorktrees,
-            remotes: event.remoteResult === undefined ? state.remotes : [
-              ...state.remotes.filter((remote) => remote.remote !== event.remoteResult!.remote),
-              event.remoteResult
-            ],
-            worktrees: event.worktreeResult === undefined ? state.worktrees : [
-              ...state.worktrees.filter((worktree) => worktree.worktreeId !== event.worktreeResult!.worktreeId),
-              event.worktreeResult
-            ]
-          });
-        } else if (event.phase === "repo_completed" && event.result !== undefined) {
-          next.set(event.repoId!, { phase: "complete", result: event.result });
-        }
-        return next;
-      });
+      if (live && !settled && event.operationId === operationId) progress.accept(event);
     });
     // StrictMode mounts, cleans up, then mounts an effect again in development.
     // Deferring launch by one microtask lets the throwaway pass disappear
@@ -432,16 +471,6 @@ export function BulkSyncDialog({
           if (!live) return;
           if (result.ok) {
             setSummary(result.value);
-            setCompleted(result.value.results.length);
-            setTotal(result.value.results.length);
-            setProgress(
-              new Map(
-                result.value.results.map((repo) => [
-                  repo.repoId,
-                  { phase: "complete", result: repo } as const
-                ])
-              )
-            );
           } else {
             setError(result.error.message);
           }
@@ -455,20 +484,20 @@ export function BulkSyncDialog({
         void dispatch("remote:cancelBulkSync", { operationId });
       }
     };
-  }, [mode, profileId]);
+  }, [mode, profileId, progress]);
 
   const ordered = useMemo(
     () =>
       summary === null
         ? repoSnapshot.map((repo) => ({
             repo: { id: repo.id, name: repo.name, path: repo.path },
-            progress: progress.get(repo.id)
+            progress: progress.repo(repo.id)
           }))
         : summary.results.map((result) => ({
             repo: { id: result.repoId, name: result.name, path: result.path },
             progress: { phase: "complete", result } as const
           })),
-    [progress, repoSnapshot, summary]
+    [progress, progressVersion, repoSnapshot, showDetails, summary]
   );
   const running = summary === null && error === null;
   const title = runTitle(mode, scope);
@@ -509,7 +538,7 @@ export function BulkSyncDialog({
 
   const livePath = livePathLine(
     runningRepos.map(({ repo }) => repo),
-    newestStartedRef.current,
+    progress.newestStarted,
     lastPathRef.current,
     platform
   );

@@ -55,6 +55,7 @@ const progressCount = ".sidebar-toolbar__count";
 const toast = ".bulk-sync-toast";
 const toastBar = ".bulk-sync-toast__bar";
 const toastInFlight = `${toastBar} > .is-in-flight`;
+const hoverBar = ".sync-run-card__bar";
 const flexTransition = "flex-grow 320ms ease";
 
 function applyAutomaticBenchmarkStyles(page: Page, stationary: boolean, animateWidths: boolean) {
@@ -64,6 +65,14 @@ function applyAutomaticBenchmarkStyles(page: Page, stationary: boolean, animateW
     ${stationary ? "" : `${inFlight}:not(.is-empty) { animation: bulk-sync-stripes 900ms linear infinite; }`}
     .bulk-sync__bar${toolbarBar} > i { transition: ${animateWidths ? flexTransition : "none"}; }
   ` });
+}
+
+async function openRunHoverCard(page: Page) {
+  await page.mouse.move(2, 2);
+  await page.getByRole("button", { name: "Try pull all", exact: true }).hover();
+  const card = page.locator(".sync-run-card");
+  await expect(card).toBeVisible();
+  return card;
 }
 
 async function ready(page: Page): Promise<void> {
@@ -122,7 +131,38 @@ test("the automatic-pull benchmark controls stripe motion and width transitions 
 });
 
 const shots = process.env["PWRGIT_HARNESS_SHOTS"];
+test("the live sync hover card shows an in-flight pattern without a paint animation", async ({ harness: { page } }) => {
+  await ready(page);
+  await start(page);
+  const card = await openRunHoverCard(page);
+  const segment = card.locator(`${hoverBar} > .is-in-flight`);
+  await expect(segment).not.toHaveClass(/\bis-empty\b/);
+  await expect(segment).toHaveCSS("background-image", /^repeating-linear-gradient\(/);
+  expect(await segment.evaluate((node) =>
+    node.getAnimations().filter((animation) => animation instanceof CSSAnimation).length
+  )).toBe(0);
+});
+
 if (shots !== undefined) {
+  test("captures the live sync hover card", async ({ harness: { page } }) => {
+    await ready(page);
+    await start(page);
+    await page.evaluate(() => {
+      for (let i = 0; i < 12; i++) window.bulkSyncPaint.complete(i, false);
+    });
+    await expect(page.locator(progressCount)).toHaveText("12/30");
+    const card = await openRunHoverCard(page);
+    await card.locator(`${hoverBar} > .is-in-flight`).evaluate((node) => {
+      for (const animation of node.getAnimations()) {
+        if (!(animation instanceof CSSAnimation)) continue;
+        animation.pause();
+        animation.currentTime = 400;
+      }
+    });
+    mkdirSync(shots, { recursive: true });
+    await card.screenshot({ path: join(shots, "sync-hover.png") });
+  });
+
   test("captures the automatic pull on the sync face", async ({ harness: { page } }) => {
     await ready(page);
     await start(page);
