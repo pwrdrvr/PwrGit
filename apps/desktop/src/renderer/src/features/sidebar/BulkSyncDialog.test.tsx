@@ -155,10 +155,12 @@ afterEach(async () => {
   container.remove();
   dispatch.mockReset();
   subscribe.mockReset();
+  vi.useRealTimers();
 });
 
 describe("BulkSyncDialog", () => {
   it("shows native Windows paths while keeping Git paths in the results", async () => {
+    vi.useFakeTimers({ toFake: ["requestAnimationFrame", "cancelAnimationFrame"] });
     const bulk = deferred<{ ok: true; value: BulkSyncSummary }>();
     dispatch.mockReturnValue(bulk.promise);
     const windowsRepo = { ...repos[0]!, path: "C:/PwrLab/repos/PwrGit" };
@@ -185,6 +187,7 @@ describe("BulkSyncDialog", () => {
         repoId: windowsRepo.id,
         repoName: windowsRepo.name
       });
+      vi.advanceTimersToNextFrame();
     });
     expect(
       container.querySelector(".bulk-sync__status-copy")?.textContent
@@ -233,6 +236,7 @@ describe("BulkSyncDialog", () => {
   });
 
   it("streams per-repository progress and explains conservative skips", async () => {
+    vi.useFakeTimers({ toFake: ["requestAnimationFrame", "cancelAnimationFrame"] });
     const bulk = deferred<{ ok: true; value: BulkSyncSummary }>();
     dispatch.mockImplementation((command: string) =>
       command === "remote:bulkSync"
@@ -268,6 +272,7 @@ describe("BulkSyncDialog", () => {
         repoId: "repo-safe",
         repoName: "safe"
       });
+      vi.advanceTimersToNextFrame();
     });
     const status = container.querySelector(".bulk-sync__status");
     expect(status?.classList).toContain("is-live");
@@ -320,6 +325,7 @@ describe("BulkSyncDialog", () => {
       // operation must not replace this repository's current step.
       progressHandler?.({ ...update, worktreeResult: safeResult.worktrees[0]! });
       progressHandler?.({ ...update, operationId: "elsewhere", detail: "Wrong operation" });
+      vi.advanceTimersToNextFrame();
     });
     const runningRepo = container.querySelector(".bulk-sync__repo.is-running");
     expect(runningRepo?.textContent).toContain(update.detail);
@@ -342,6 +348,7 @@ describe("BulkSyncDialog", () => {
         repoName: "safe",
         result: safeResult
       });
+      vi.advanceTimersToNextFrame();
     });
     expect(container.textContent).toContain("1 / 2");
     expect(container.textContent).toContain("1 updated");
@@ -589,6 +596,7 @@ describe("BulkSyncDialog", () => {
   });
 
   it("keeps terminal failures distinct while another repository is active", async () => {
+    vi.useFakeTimers({ toFake: ["requestAnimationFrame", "cancelAnimationFrame"] });
     const bulk = deferred<{ ok: true; value: BulkSyncSummary }>();
     dispatch.mockImplementation((command: string) =>
       command === "remote:bulkSync"
@@ -628,6 +636,7 @@ describe("BulkSyncDialog", () => {
         repoId: "repo-partial",
         repoName: "partial"
       });
+      vi.advanceTimersToNextFrame();
     });
 
     expect(container.querySelector(".bulk-sync__status")?.textContent).toContain(

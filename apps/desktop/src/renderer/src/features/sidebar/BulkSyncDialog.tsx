@@ -77,7 +77,9 @@ function applyRepoProgress(previous: RepoProgress | undefined, event: BulkSyncPr
  * subscribe to changes in repository state, counts, and the active path. */
 function createLiveProgress(initialTotal: number) {
   const byRepo = new Map<string, RepoProgress>();
-  const listeners = new Set<() => void>();
+  const summaryListeners = new Set<() => void>();
+  const detailListeners = new Set<() => void>();
+  let detailFrame: number | null = null;
   let summaryVersion = 0;
   let detailVersion = 0;
   let completed = 0;
@@ -90,9 +92,19 @@ function createLiveProgress(initialTotal: number) {
     get newestStarted() { return newestStarted; },
     getSummaryVersion: () => summaryVersion,
     getDetailVersion: () => detailVersion,
-    subscribe: (listener: () => void) => {
-      listeners.add(listener);
-      return () => { listeners.delete(listener); };
+    subscribeSummary: (listener: () => void) => {
+      summaryListeners.add(listener);
+      return () => { summaryListeners.delete(listener); };
+    },
+    subscribeDetails: (listener: () => void) => {
+      detailListeners.add(listener);
+      return () => {
+        detailListeners.delete(listener);
+        if (detailListeners.size === 0 && detailFrame !== null) {
+          cancelAnimationFrame(detailFrame);
+          detailFrame = null;
+        }
+      };
     },
     accept(event: BulkSyncProgress) {
       let summaryChanged = completed !== event.completedRepos || total !== event.totalRepos;
@@ -116,9 +128,19 @@ function createLiveProgress(initialTotal: number) {
         }
       }
       if (!summaryChanged && !detailChanged) return;
-      if (summaryChanged) summaryVersion++;
       detailVersion++;
-      for (const listener of listeners) listener();
+      if (summaryChanged) {
+        summaryVersion++;
+        for (const listener of summaryListeners) listener();
+      }
+      // Keep snapshots current for expansion, but publish progress to the
+      // repository list once per frame, even across separate IPC deliveries.
+      if (detailListeners.size > 0 && detailFrame === null) {
+        detailFrame = requestAnimationFrame(() => {
+          detailFrame = null;
+          for (const listener of detailListeners) listener();
+        });
+      }
     }
   };
 }
@@ -432,7 +454,7 @@ export function BulkSyncDialog({
   const [progress] = useState(() => createLiveProgress(repoSnapshot.length));
   const showDetails = view === "dialog";
   const progressVersion = useSyncExternalStore(
-    progress.subscribe,
+    showDetails ? progress.subscribeDetails : progress.subscribeSummary,
     showDetails ? progress.getDetailVersion : progress.getSummaryVersion
   );
   const completed = summary?.results.length ?? progress.completed;

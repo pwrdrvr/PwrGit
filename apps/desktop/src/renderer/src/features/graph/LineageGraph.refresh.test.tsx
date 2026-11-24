@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { ok, type Commit, type CommitAuthorPerson, type LaneGraph } from "@pwrgit/shared";
+import { ok, type Commit, type CommitAuthorPerson, type LaneGraph, type PrSummary } from "@pwrgit/shared";
 import fc from "fast-check";
 import { act, useLayoutEffect, type ComponentProps } from "react";
 import { createRoot } from "react-dom/client";
@@ -81,14 +81,21 @@ describe("LineageGraph refresh publication", () => {
     let openCommit = navigate;
     let nextGraph: () => Promise<LaneGraph> = async () => initial;
     let nextPeople = initialPeople;
+    const cachedPrs = new Map<string, PrSummary | null>();
     vi.stubGlobal("pwrgit", {
-      dispatch: async (name: string, request: { authors?: unknown[] }) => {
+      dispatch: async (name: string, request: { authors?: unknown[]; commitHashes?: string[] }) => {
         if (name === "graph:lanes") {
           requests.push(request);
           return ok(structuredClone(await nextGraph()));
         }
         if (name === "people:replaceInterest" && request.authors?.length) {
           return ok(structuredClone(nextPeople));
+        }
+        if (name === "pr:refreshCommits") {
+          return ok(Object.fromEntries((request.commitHashes ?? []).flatMap((commitHash) => {
+            const pr = cachedPrs.get(commitHash);
+            return pr === undefined ? [] : [[commitHash, structuredClone(pr)]];
+          })));
         }
         if (name === "settings:read") return ok({ experimental: { lineageAllBranches: false } });
         return ok({});
@@ -112,6 +119,10 @@ describe("LineageGraph refresh publication", () => {
     await act(async () => render(worktreeId));
     return {
       row, search, navigate, requests,
+      async publishCommitPrs(prs: Record<string, PrSummary | null>) {
+        for (const [commitHash, pr] of Object.entries(prs)) cachedPrs.set(commitHash, pr);
+        await act(async () => subscriptions.get("pr:commitChanged")?.({ repoId, prs }));
+      },
       async openContext(index: number) {
         await act(async () => container.querySelectorAll<HTMLButtonElement>(".commit-sha-chip")[index]!.click());
       },
@@ -138,7 +149,7 @@ describe("LineageGraph refresh publication", () => {
     };
   }
 
-  it("renders only rows whose context-open state changes when opening a commit card", async () => {
+  it("renders only rows whose context-open state changes when a commit card gets an unchanged cached PR reply", async () => {
     const initial = graph("Main");
     const base = initial.commits[0]!;
     const others = ["b", "c", "d"].map((letter) => ({
@@ -146,6 +157,11 @@ describe("LineageGraph refresh publication", () => {
     }));
     const view = await mount({ ...initial, commits: [{ ...base, parents: [others[0]!.hash] }, ...others] });
     try {
+      const associated = others[1]!.hash;
+      const pr = { number: 42, state: "open", title: "Improve widgets", url: "https://example.test/widgets/pull/42", isDraft: false } as const;
+      await view.publishCommitPrs({ [hash]: null, [others[0]!.hash]: null, [associated]: pr });
+      const associatedRow = document.querySelector(`[data-hash="${associated}"]`);
+      expect(associatedRow?.textContent).toContain("42");
       for (const index of [0, 2, 1]) {
         rowCommits.mockClear();
         await view.openContext(index);
@@ -154,6 +170,8 @@ describe("LineageGraph refresh publication", () => {
         if (index === 1) affected.push(others[1]!.subject);
         expect(new Set(rowCommits.mock.calls.map(([subject]) => subject))).toEqual(new Set(affected));
       }
+      await view.publishCommitPrs({ [associated]: null });
+      expect(associatedRow?.textContent).not.toContain("42");
       rowCommits.mockClear();
       const navigate = vi.fn();
       await view.replaceNavigate(navigate);

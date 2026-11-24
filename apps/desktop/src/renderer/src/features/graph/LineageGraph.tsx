@@ -96,7 +96,7 @@ export function consumeBranchPrInvalidation(
   };
 }
 
-// Lane and people replies are structured-cloned IPC data. Preserve array
+// Lane, PR and people replies are structured-cloned IPC data. Preserve array
 // and record order: some graph consumers iterate refs in that order.
 function samePayload(a: unknown, b: unknown): boolean {
   if (a === b) return true;
@@ -428,8 +428,16 @@ export function LineageGraph({
 
   const acceptCommitPullRequests = useCallback(
     (prs: Record<string, PrSummary | null>): void => {
-      if (Object.keys(prs).length === 0) return;
-      setCommitPullRequests((current) => ({ ...current, ...prs }));
+      setCommitPullRequests((current) => {
+        let next: typeof current | undefined;
+        for (const [hash, pr] of Object.entries(prs)) {
+          // Both a missing entry and a cached miss draw no PR chip or link.
+          if (samePayload(current[hash] ?? null, pr)) continue;
+          next ??= { ...current };
+          next[hash] = pr;
+        }
+        return next ?? current;
+      });
     },
     []
   );
