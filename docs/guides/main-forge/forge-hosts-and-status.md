@@ -104,8 +104,8 @@ Settings → Forges (`ForgeHostConfig.account`). The logic is
   account". Reading as the active account instead would put one name on
   screen while reading as another.
 - **An environment token outranks a pin.** `githubEnvToken`: `GH_TOKEN` or
-  `GITHUB_TOKEN` for github.com, and `GH_ENTERPRISE_TOKEN` only for the host
-  `GH_HOST` names. It is read from the user's environment, never from a
+  `GITHUB_TOKEN` for github.com, `GH_TOKEN` for a `*.ghe.com` tenancy, and
+  `GH_ENTERPRISE_TOKEN` only for the host `GH_HOST` names. It is read from the user's environment, never from a
   spawn's overrides: a provider sets `GH_HOST` to *target* a host, which must
   not promote the user's Enterprise token to it. The row carries the variable's
   name (`tokenEnv`), never its value, and offers no choice.
@@ -119,6 +119,10 @@ Settings → Forges (`ForgeHostConfig.account`). The logic is
 - **The login is argv.** `sanitizeForgeHostAccount` (shared) guards the write
   path, the settings read and enumeration: a value starting with `-` would be
   a `gh` flag.
+- **Re-check clears the token cache.** It exists to observe a terminal
+  sign-in or sign-out; a cached token would keep a signed-out pinned account
+  "signed in" on the card while its row warns. Concurrent reads of one
+  host+account share a single `gh auth token`.
 - **The account joins the probe signature.** `ForgeProbeTarget.account` is in
   `index.ts`'s `forgeTargetSignature`, so choosing one re-probes like a switch.
 - **Unpinned spawns must stay synchronous.** `GitHubCredentials.run` spawns

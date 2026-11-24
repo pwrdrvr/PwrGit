@@ -196,7 +196,9 @@ export function ForgeProductSection(props: {
   const rows = hosts ?? [];
   // The account select per host, so "Use active account" can hand focus to
   // the control that now shows the choice it just made.
-  const accountSelects = useRef(new Map<string, HTMLSelectElement>());
+  const [accountSelects] = useState(() => ({
+    current: new Map<string, HTMLSelectElement>()
+  }));
 
   return (
     <SettingsSection

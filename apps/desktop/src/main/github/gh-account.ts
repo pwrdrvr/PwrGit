@@ -30,7 +30,7 @@ import { GITHUB_DOT_COM, githubEnvToken } from "./gh-env-token";
  * runner redacts their values from every diagnostic.
  */
 
-export { GITHUB_DOT_COM, githubEnvToken };
+export { GITHUB_DOT_COM };
 
 const TOKEN_TTL_MS = 5 * 60_000;
 
@@ -141,6 +141,12 @@ export type GitHubCredentialsDeps = {
 
 export class GitHubCredentials {
   private readonly cache = new Map<string, { token: string; at: number }>();
+  /** One `gh auth token` per host+account at a time: a PR refresh fans out
+   *  many spawns for one pinned host, and each needs this token first. */
+  private readonly inFlight = new Map<string, Promise<string | null>>();
+  /** Bumped by `clear`, so a read already running cannot re-cache what was
+   *  just retired. */
+  private generation = 0;
   private chooser: GhAccountChooser = () => undefined;
   private readonly env: () => NodeJS.ProcessEnv;
   private readonly now: () => number;
@@ -158,8 +164,12 @@ export class GitHubCredentials {
     this.chooser = chooser ?? (() => undefined);
   }
 
+  /** Retire every cached token. Called by the Hosts pane's Re-check, which
+   *  exists to observe a sign-in or sign-out made in a terminal. */
   clear(): void {
     this.cache.clear();
+    this.inFlight.clear();
+    this.generation += 1;
   }
 
   /** The account a host is pinned to, sanitized; undefined follows gh's
@@ -188,6 +198,25 @@ export class GitHubCredentials {
     if (cached !== undefined && this.now() - cached.at < this.ttlMs) {
       return cached.token;
     }
+    const running = this.inFlight.get(cacheKey);
+    if (running !== undefined) return await running;
+    const generation = this.generation;
+    const minting = this.mint(key, account).then((token) => {
+      if (token !== null && generation === this.generation) {
+        this.cache.set(cacheKey, { token, at: this.now() });
+      }
+      return token;
+    });
+    this.inFlight.set(cacheKey, minting);
+    try {
+      return await minting;
+    } finally {
+      if (this.inFlight.get(cacheKey) === minting) this.inFlight.delete(cacheKey);
+    }
+  }
+
+  /** One `gh auth token` for a host and, when pinned, its account. */
+  private async mint(key: string, account: string | undefined): Promise<string | null> {
     const args =
       key === ""
         ? ["auth", "token"]
@@ -207,15 +236,12 @@ export class GitHubCredentials {
             // for another GH_HOST) must not answer in its place.
             await this.deps.run(args, { env: withoutEnvTokens() })
       ).trim();
-      if (token !== "") {
-        this.cache.set(cacheKey, { token, at: this.now() });
-        return token;
-      }
+      return token === "" ? null : token;
     } catch {
       // gh missing, or no such account on this host. A pinned account is
       // never retried without `--user`: that would read as somebody else.
+      return null;
     }
-    return null;
   }
 
   /**

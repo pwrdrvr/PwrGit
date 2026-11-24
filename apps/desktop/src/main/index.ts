@@ -769,6 +769,11 @@ if (!gotSingleInstanceLock) {
       return true;
     };
     const forgeHostsView = new ForgeHostsView(forgeHosts, async () => {
+      // Re-check exists to observe a sign-in or sign-out made in a terminal.
+      // A cached GitHub token would answer for an account that has since
+      // signed out: the row would warn that a pinned account is gone while
+      // the card, probing through the cache, still read the host as signed in.
+      githubCredentials.clear();
       const refreshed = await forgeHostDirectory.refresh({ force: true });
       // Swallowed: a probe that refuses is not a reason to discard host
       // enumeration that already succeeded, and Re-check must still hand back

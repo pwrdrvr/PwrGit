@@ -100,6 +100,9 @@ export function parseGhHosts(json: string): DiscoveredForgeHost[] {
     const list = Array.isArray(accounts) ? accounts : [];
     const chosen = list.find((entry) => entry?.active === true) ?? list[0];
     const login = typeof chosen?.login === "string" ? chosen.login : undefined;
+    // Active by LOGIN, not by entry: gh can list one login twice, and the
+    // copy kept below must not lose the flag the dropped copy carried.
+    const activeLogin = sanitizeForgeHostAccount(login);
     const every: DiscoveredForgeAccount[] = [];
     for (const entry of list) {
       const name = sanitizeForgeHostAccount(entry?.login);
@@ -107,7 +110,7 @@ export function parseGhHosts(json: string): DiscoveredForgeHost[] {
       every.push({
         host,
         login: name,
-        active: entry === chosen,
+        active: name === activeLogin,
         ...(typeof entry?.state === "string" ? { state: entry.state } : {}),
         ...(typeof entry?.tokenSource === "string"
           ? { tokenSource: entry.tokenSource }

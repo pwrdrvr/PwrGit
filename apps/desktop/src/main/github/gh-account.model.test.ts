@@ -2,6 +2,7 @@ import fc from "fast-check";
 import { describe, expect, it } from "vitest";
 import type { CliRunOptions } from "../forge/cli-runner";
 import { GhAccountUnavailableError, GitHubCredentials } from "./gh-account";
+import { githubEnvToken } from "./gh-env-token";
 
 /**
  * Model test: which account a GitHub host reads as, and whose token every
@@ -355,5 +356,77 @@ describe("GitHub account selection and token resolution", () => {
     await expect(
       credentials.run(["api", "--hostname", host, "user"]),
     ).rejects.toBeInstanceOf(GhAccountUnavailableError);
+  });
+});
+
+describe("GitHubCredentials token reads", () => {
+  it("shares one gh auth token between concurrent reads of a pinned host", async () => {
+    let calls = 0;
+    let release!: (token: string) => void;
+    const credentials = new GitHubCredentials({
+      run: async () => {
+        calls += 1;
+        return await new Promise<string>((resolve) => {
+          release = resolve;
+        });
+      },
+      env: () => ({}),
+    });
+    credentials.setAccountChooser(() => "release-bot");
+    const reads = Array.from({ length: 5 }, () =>
+      credentials.token("ghe.contoso-labs.test"),
+    );
+    release("tok-bot");
+    expect(await Promise.all(reads)).toEqual(Array(5).fill("tok-bot"));
+    expect(calls).toBe(1);
+  });
+
+  it("does not re-cache a read that a clear retired mid-flight", async () => {
+    const answers = ["tok-before", "tok-after"];
+    let release!: () => void;
+    const credentials = new GitHubCredentials({
+      run: async () => {
+        const answer = answers.shift()!;
+        if (answer === "tok-before") {
+          await new Promise<void>((resolve) => {
+            release = resolve;
+          });
+        }
+        return answer;
+      },
+      env: () => ({}),
+    });
+    const first = credentials.token("github.com");
+    credentials.clear();
+    release();
+    expect(await first).toBe("tok-before");
+    expect(await credentials.token("github.com")).toBe("tok-after");
+  });
+});
+
+describe("githubEnvToken", () => {
+  it("gives a GHE.com tenancy GH_TOKEN, never an Enterprise Server token", () => {
+    const env = {
+      GH_HOST: "acme.ghe.com",
+      GH_ENTERPRISE_TOKEN: "ent",
+      GH_TOKEN: "gh",
+      GITHUB_TOKEN: "pat",
+    };
+    expect(githubEnvToken("acme.ghe.com", env)).toEqual({
+      name: "GH_TOKEN",
+      value: "gh",
+    });
+    expect(
+      githubEnvToken("acme.ghe.com", { ...env, GH_TOKEN: undefined }),
+    ).toBeNull();
+    expect(
+      githubEnvToken("ghe.contoso-labs.test", {
+        ...env,
+        GH_HOST: "ghe.contoso-labs.test",
+      }),
+    ).toEqual({
+      name: "GH_ENTERPRISE_TOKEN",
+      value: "ent",
+    });
   });
 });

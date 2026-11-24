@@ -112,6 +112,20 @@ describe("parseGhHosts", () => {
     ]);
   });
 
+  it("keeps the active flag when gh lists one login twice", () => {
+    const json = JSON.stringify({
+      hosts: {
+        "github.com": [
+          { login: "octo-dev", active: false },
+          { login: "octo-dev", active: true }
+        ]
+      }
+    });
+    expect(parseGhHosts(json)[0]?.accounts).toEqual([
+      { host: "github.com", login: "octo-dev", active: true }
+    ]);
+  });
+
   it("drops a login that could never be pinned", () => {
     // It would become `gh auth token --user` argv: a leading dash is a flag.
     const json = JSON.stringify({
