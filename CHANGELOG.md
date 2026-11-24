@@ -1,5 +1,12 @@
 # Changelog
 
+## v0.63.0 - 2026-11-24
+
+- Forges - Added an account picker in Settings → Forges for GitHub hosts with multiple CLI sign-ins. Pin the account PwrGit uses for forge reads. If that account signs out, PwrGit shows how to reconnect or return to the active account.
+- Stacks - Added stack position badges and a stack overview to pull request chips. Merged pull requests keep their stack context even after their source branch is deleted. Stack rows summarize pull request states so you can see what needs attention.
+- Stack refresh - Improved GitHub stack history loading so it runs independently of open pull request refreshes and keeps the last complete history visible during refresh.
+- Runtime - Updated Electron and the agent protocol and transport dependencies.
+
 ## v0.62.1 - 2026-11-23
 
 - Stacks - Improved stacked pull request views with a clearer status rail in Stack order and clickable position badges in Recent. The badges open a stack overview that highlights the current pull request. This release also improves pull request navigation and fixes stack sync safety checks.
