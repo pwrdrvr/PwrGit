@@ -6,10 +6,13 @@ import { expect, test, vi } from "vitest";
 import { ok, stackPositionForPr, type Repo } from "@pwrgit/shared";
 import { CommandBus } from "../command-bus";
 import type { GitExec } from "../git/dugite";
+import { RepoIndexer } from "../git/repo-indexer";
 import { NativeStackLocks } from "../git/stack-catalog-store";
 import { registerStackReadHandlers } from "../git/stack-read-handlers";
 import { StackReader, stackRunner } from "../git/stack-reader";
 import { openDatabase, type DB } from "../persistence/db";
+import { ProfileService } from "../profiles/profile-service";
+import { resolveForge } from "../forge/providers";
 import { registerChangeRequestHandlers } from "./change-request-handlers";
 import { OpenPrService } from "./open-pr-service";
 import { StackHistoryService } from "./stack-history-service";
@@ -55,12 +58,14 @@ function pendingPage() {
   return { promise, resolve };
 }
 
-function startSession(db: DB, repos: readonly Repo[], now: () => number) {
-  const openPrs = new OpenPrService(db, git, { now });
+function startSession(db: DB, repos: readonly Repo[], now: () => number, enabled: () => boolean = () => true) {
+  const openPrs = new OpenPrService(db, git, { now, resolveForge: url => enabled() ? resolveForge(url) : null });
   const bus = new CommandBus();
   registerChangeRequestHandlers(bus, openPrs);
   const history = new StackHistoryService(db, path => openPrs.forgeRemotes(path),
-    scope => emitEvent("stack:changed", scope), now);
+    scope => emitEvent("stack:changed", scope), enabled, now);
+  const indexer = new RepoIndexer(db, git);
+  indexer.onRepoDeleted(id => history.forgetRepo(id));
   const reader = new StackReader(stackRunner(git), new NativeStackLocks(() => { throw new Error("unexpected lock"); }),
     id => openPrs.list(id), () => undefined, repo => history.list(repo));
   registerStackReadHandlers(bus, id => repos.find(repo => repo.id === id) ?? null, reader);
@@ -70,7 +75,7 @@ function startSession(db: DB, repos: readonly Repo[], now: () => number) {
     return result.value.stacks;
   };
   return {
-    bus, history, readStacks,
+    bus, history, indexer, readStacks,
     deleteProfile: (profileId: string) => {
       db.prepare("DELETE FROM profiles WHERE id = ?").run(profileId);
       openPrs.invalidatePendingWrites();
@@ -84,7 +89,7 @@ function startSession(db: DB, repos: readonly Repo[], now: () => number) {
   };
 }
 
-function fixture(dbPath = ":memory:") {
+function fixture(dbPath = ":memory:", enabled?: () => boolean) {
   emitEvent.mockClear();
   fetchOpenPrs.mockClear();
   getGitHubToken.mockResolvedValue("fixture");
@@ -94,17 +99,120 @@ function fixture(dbPath = ":memory:") {
   });
   const first = repo("repo", "p");
   const second = repo("other", "q");
-  for (const { id, profileId, path } of [first, second]) {
+  const third = repo("third", "q");
+  for (const { profileId } of [first, second]) {
     db.prepare("INSERT INTO profiles (id, name, email) VALUES (?, ?, ?)").run(profileId, profileId, `${profileId}@example.invalid`);
+  }
+  for (const { id, profileId, path } of [first, second, third]) {
     db.prepare("INSERT INTO repos (id, profile_id, name, path) VALUES (?, ?, 'orbit', ?)").run(id, profileId, path);
   }
   let now = 0;
   return {
-    ...startSession(db, [first, second], () => now),
-    db, first, second,
+    ...startSession(db, [first, second, third], () => now, enabled),
+    db, first, second, third,
     advance: (ms: number) => { now += ms; },
   };
 }
+
+test.each(["disabled", "retry-after", "exhausted"] as const)("queued refreshes pause for %s", async reason => {
+  await fc.assert(fc.asyncProperty(
+    fc.integer({ min: 90, max: 500 }),
+    async seconds => {
+      let enabled = true;
+      const { advance, first, second, third, readStacks, close } = fixture(":memory:", () => enabled);
+      const blocking = pendingPage();
+      const other = pendingPage();
+      const fetch = vi.fn<typeof globalThis.fetch>()
+        .mockReturnValueOnce(blocking.promise)
+        .mockReturnValueOnce(other.promise)
+        .mockImplementation(async () => stackPage(1, 1, 333));
+      vi.stubGlobal("fetch", fetch);
+      getGitHubToken.mockClear();
+      const flush = () => new Promise<void>(resolve => setImmediate(resolve));
+      try {
+        await readStacks(first);
+        await readStacks(second);
+        await vi.waitFor(() => expect(fetch).toHaveBeenCalledTimes(2));
+        await readStacks(third);
+        expect(fetch).toHaveBeenCalledTimes(2);
+
+        const now = Math.floor(Date.now() / 1000) * 1000;
+        const wallClock = vi.spyOn(Date, "now").mockReturnValue(now);
+        try {
+          if (reason === "disabled") {
+            enabled = false;
+            blocking.resolve(stackPage(1, 1, 111));
+          } else {
+            blocking.resolve(new Response(null, reason === "retry-after"
+              ? { status: 429, headers: { "Retry-After": String(seconds) } }
+              : { status: 403, headers: { "X-RateLimit-Remaining": "0", "X-RateLimit-Reset": String(now / 1000 + seconds) } }));
+          }
+          await flush();
+        } finally { wallClock.mockRestore(); }
+        expect(fetch).toHaveBeenCalledTimes(2);
+
+        if (reason === "disabled") {
+          expect(getGitHubToken).toHaveBeenCalledTimes(2);
+          enabled = true;
+        } else {
+          advance(seconds * 1000 - 1);
+          await readStacks(third);
+          await flush();
+          expect(fetch).toHaveBeenCalledTimes(2);
+          advance(1);
+        }
+        await readStacks(third);
+        await vi.waitFor(() => expect(emitEvent).toHaveBeenCalledWith("stack:changed", {
+          repoId: third.id, profileId: third.profileId,
+        }));
+        expect(fetch).toHaveBeenCalledTimes(3);
+      } finally {
+        blocking.resolve(stackPage(1, 1, 111));
+        other.resolve(stackPage(1, 1, 222));
+        close();
+      }
+    }), { numRuns: 3, examples: [[120]] });
+});
+
+test("removing a repository discards fresh and in-flight history before rediscovery", async () => {
+  await fc.assert(fc.asyncProperty(fc.boolean(), fc.boolean(), async (pruned, pending) => {
+    const { advance, db, first, indexer, readStacks, close } = fixture();
+    const obsolete = pendingPage();
+    const fetch = vi.fn<typeof globalThis.fetch>()
+      .mockResolvedValueOnce(stackPage(1, 1, 111))
+      .mockImplementation(async () => stackPage(1, 1, 222));
+    if (pending) fetch.mockReturnValueOnce(obsolete.promise);
+    vi.stubGlobal("fetch", fetch);
+    try {
+      await readStacks(first);
+      await vi.waitFor(() => expect(emitEvent).toHaveBeenCalledTimes(1));
+      if (pending) {
+        advance(10 * 60_000);
+        await readStacks(first);
+        await vi.waitFor(() => expect(fetch).toHaveBeenCalledTimes(2));
+      }
+      if (pruned) {
+        db.prepare("UPDATE repos SET source = 'scan' WHERE id = ?").run(first.id);
+        const profile = new ProfileService(db).get(first.profileId)!;
+        expect(await indexer.rescanProfile(profile)).toEqual([]);
+      } else {
+        indexer.deleteRepo(first.id);
+      }
+      emitEvent.mockClear();
+      db.prepare("INSERT INTO repos (id, profile_id, name, path) VALUES (?, ?, 'orbit', ?)").run(first.id, first.profileId, first.path);
+      expect(await readStacks(first)).toEqual([]);
+      if (pending) {
+        expect(fetch.mock.calls[1][1]?.signal?.aborted).toBe(true);
+        obsolete.resolve(stackPage(1, 1, 999));
+      }
+      await vi.waitFor(() => expect(emitEvent).toHaveBeenCalledTimes(1));
+      expect((await readStacks(first)).map(stack => stack.layers[0].pr?.number)).toEqual([222]);
+    } finally {
+      obsolete.resolve(stackPage(1, 1, 999));
+      close();
+    }
+  }), { numRuns: 4, examples: [[true, false], [true, true], [false, false], [false, true]] });
+});
 
 test("the open list publishes while a history page is pending", async () => {
   await fc.assert(fc.asyncProperty(fc.integer({ min: 1, max: 8 }), async heldPage => {

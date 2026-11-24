@@ -9,6 +9,7 @@ type StackPage = {
   stacks: GitHubStack[];
   etag: string | null;
   next: string | undefined;
+  full: boolean;
 };
 
 export type GitHubStackHistory = {
@@ -73,21 +74,26 @@ export function parseGitHubStacks(value: unknown, owner: string, name: string): 
  * leads to revalidation of older pages. The caller commits the walk atomically. */
 export async function fetchGitHubStacks(
   token: string, owner: string, name: string, previous?: GitHubStackHistory, signal?: AbortSignal,
+  beforePage?: () => void,
 ): Promise<GitHubStackHistory> {
   const pages = new Map<string, StackPage>();
   const stacks = new Map<number, GitHubStack>();
   let url: string | undefined = `${API_ORIGIN}/repos/${encodeURIComponent(owner)}/${encodeURIComponent(name)}/stacks?per_page=${PER_PAGE}&page=1`;
   while (url !== undefined) {
+    beforePage?.();
     signal?.throwIfAborted();
     if (pages.has(url)) throw new Error("GitHub Stacks repeated a page.");
     const cached = previous?.pages.get(url);
+    // A full terminal page can gain a next link without its body changing.
+    // Fetch it unconditionally because a 304 can omit pagination headers.
+    const validator = cached?.full && cached.next === undefined ? null : cached?.etag;
     const timeout = AbortSignal.timeout(5_000);
     const response = await fetch(url, {
       headers: {
         Accept: "application/vnd.github+json",
         Authorization: `Bearer ${token}`,
         "X-GitHub-Api-Version": GITHUB_VERSION,
-        ...(cached?.etag ? { "If-None-Match": cached.etag } : {}),
+        ...(validator ? { "If-None-Match": validator } : {}),
       },
       signal: signal ? AbortSignal.any([signal, timeout]) : timeout,
       redirect: "error",
@@ -95,7 +101,7 @@ export async function fetchGitHubStacks(
     const link = response.headers.get("link");
     const etag = response.headers.get("etag");
     let page: StackPage;
-    if (response.status === 304 && cached?.etag) {
+    if (response.status === 304 && cached && validator) {
       page = link === null && etag === null ? cached : {
         ...cached, etag: etag ?? cached.etag, next: link === null ? cached.next : nextPage(link, url),
       };
@@ -103,7 +109,7 @@ export async function fetchGitHubStacks(
       if (!response.ok) throw new StackHistoryResponseError(response);
       const body: unknown = await response.json();
       if (!Array.isArray(body)) throw new Error("GitHub Stacks returned an invalid list.");
-      page = { stacks: parseGitHubStacks(body, owner, name), etag, next: nextPage(link, url) };
+      page = { stacks: parseGitHubStacks(body, owner, name), etag, next: nextPage(link, url), full: body.length >= PER_PAGE };
     }
     pages.set(url, page);
     for (const stack of page.stacks) stacks.set(stack.number, stack);

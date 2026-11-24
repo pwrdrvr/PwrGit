@@ -904,8 +904,10 @@ if (!gotSingleInstanceLock) {
       resolveForge: (url) => resolveEnabledForge(url)
     });
     const stackHistory = new StackHistoryService(
-      db, path => openPrService.forgeRemotes(path), scope => emitEvent("stack:changed", scope)
+      db, path => openPrService.forgeRemotes(path), scope => emitEvent("stack:changed", scope),
+      host => forgeHosts.isEnabled(host).enabled
     );
+    indexer.onRepoDeleted(repoId => stackHistory.forgetRepo(repoId));
     const stackReader = new StackReader(
       stackRunner(execGit), new NativeStackLocks(mcpExecutablePath),
       repoId => openPrService.list(repoId),

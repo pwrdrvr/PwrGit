@@ -62,6 +62,49 @@ const testRepo = (path: string, id = "here"): Repo => ({
 });
 const locks = new NativeStackLocks(() => { throw new Error("read-only view invoked the helper"); });
 
+test("merged history wins in either refresh order, scoped by forge repository and PR number", () =>
+  withStack(async ({ cwd }) => {
+    const mirror = "github.com/example/mirror";
+    await fc.assert(fc.asyncProperty(fc.boolean(), fc.integer({ min: 1, max: 5000 }), async (historyFirst, number) => {
+      const chain = (key: string) => [openPr(number, "bottom", "main", undefined, key),
+        openPr(number + 1, "top", "bottom", undefined, key)];
+      let entries = [...chain(forgeRepo), ...chain(mirror)];
+      let history: ReturnType<typeof parseGitHubStacks> = [];
+      const reader = new StackReader(runner, locks, async () => ({
+        forge: "github", fetchedAt: 100, truncated: false, remotes: [listRemote(forgeRepo, false), listRemote(mirror, false)], entries,
+      }), () => undefined, () => history.map(stack => ({ scope: forgeRepo, remote: "origin", stack })));
+      const publishHistory = () => {
+        history = parseGitHubStacks([{
+          number: 4235, open: false, base: { ref: "main" },
+          pull_requests: chain(forgeRepo).map(({ pr }) => ({
+            number: pr.number, head: { ref: pr.headRefName }, state: "closed", merged_at: "2026-11-12T10:00:00Z",
+          })),
+        }], "example", "orbit-deploy");
+      };
+      const publishOpenList = () => { entries = chain(mirror); };
+      const assertSnapshot = async (expected: "open" | "merged" | "absent") => {
+        const { stacks } = await reader.list(testRepo(cwd));
+        for (const pr of [number, number + 1]) {
+          const position = stackPositionForPr(stacks, { number: pr }, forgeRepo);
+          expect(position ? position.stack.closed ?? "open" : "absent").toBe(expected);
+          expect(stackPositionForPr(stacks, { number: pr }, mirror)?.layer.pr?.state).toBe("open");
+        }
+        expect(stacks).toHaveLength(expected === "absent" ? 1 : 2);
+      };
+      await assertSnapshot("open");
+      if (historyFirst) {
+        publishHistory();
+        await assertSnapshot("merged");
+        publishOpenList();
+      } else {
+        publishOpenList();
+        await assertSnapshot("absent");
+        publishHistory();
+      }
+      await assertSnapshot("merged");
+    }), { numRuns: 8, examples: [[true, 1], [false, 1]] });
+  }));
+
 test("tracked PR identity is independent of ordering and the newest observation of that PR wins", () =>
   withStack(async ({ cwd, commonDir, initial }) => {
     initial.stacks[0].branches[0].pullRequest = { number: 17 };

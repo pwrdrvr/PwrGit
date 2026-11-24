@@ -29,12 +29,16 @@ type RepoHistory = { profileId: string; path: string; remotes: Map<string, Remot
 /** Stack reads use the last complete history while its own refresh runs. */
 export class StackHistoryService {
   private readonly repos = new Map<string, RepoHistory>();
+  // REST limits follow the token across checkouts and profiles. Only the
+  // deadline is shared. Catalogs and validators stay in their repo cache.
+  private readonly cooldownUntil = new Map<string, number>();
   private readonly refreshRemote = limitConcurrency(this.fetchRemote.bind(this), 2);
 
   constructor(
     private readonly db: DB,
     private readonly resolveRemotes: (path: string) => Promise<readonly ForgeRemote[] | null>,
     private readonly changed: (scope: HistoryScope) => void,
+    private readonly isEnabled: (host: string) => boolean,
     private readonly now: () => number = () => performance.now(),
   ) {}
 
@@ -75,7 +79,7 @@ export class StackHistoryService {
         : cached.verified && now - cached.verified.at < HISTORY_TTL_MS)) continue;
       const controller = new AbortController();
       cached.pending = controller;
-      void this.refreshRemote(repo, parts, cached, controller.signal)
+      void this.refreshRemote(repo, parts, cached, controller)
         .catch(cause => logMain("warn", "pr", `stack history refresh failed for ${repo.id}`, cause))
         .finally(() => { delete cached.pending; });
     }
@@ -86,6 +90,11 @@ export class StackHistoryService {
     for (const [id, state] of this.repos) {
       if (state.profileId === profileId) this.forget(id, state);
     }
+  }
+
+  forgetRepo(repoId: string): void {
+    const state = this.repos.get(repoId);
+    if (state) this.forget(repoId, state);
   }
 
   private forget(id: string, state: RepoHistory): void {
@@ -99,10 +108,12 @@ export class StackHistoryService {
   }
 
   private async fetchRemote(
-    repo: HistoryRepo, { owner, name }: { owner: string; name: string }, cached: RemoteHistory, signal: AbortSignal,
+    repo: HistoryRepo, { owner, name }: { owner: string; name: string }, cached: RemoteHistory, controller: AbortController,
   ): Promise<void> {
-    if (signal.aborted || !this.owns(repo)) return;
+    const { signal } = controller;
+    if (signal.aborted || !this.isEnabled(GITHUB_DOT_COM) || !this.owns(repo)) return;
     const previous = cached.verified;
+    let credential: string | undefined;
     let verified: NonNullable<RemoteHistory["verified"]>;
     try {
       const token = await githubProvider.getToken(GITHUB_DOT_COM);
@@ -110,17 +121,24 @@ export class StackHistoryService {
       if (!token) throw new Error("GitHub is signed out.");
       // A validator is only reusable with the same authenticated identity.
       const auth = createHash("sha256").update(token).digest("hex");
-      const history = await fetchGitHubStacks(token, owner, name, previous?.auth === auth ? previous.history : undefined, signal);
+      credential = auth;
+      const history = await fetchGitHubStacks(token, owner, name, previous?.auth === auth ? previous.history : undefined, signal, () => {
+        if (!this.isEnabled(GITHUB_DOT_COM) || (this.cooldownUntil.get(auth) ?? 0) > this.now()) controller.abort();
+      });
       verified = { auth, at: this.now(), history };
     } catch (cause) {
-      if (signal.aborted || !this.owns(repo)) return;
-      const backoff = Math.min((cached.failure?.backoff ?? INITIAL_BACKOFF_MS / 2) * 2, MAX_BACKOFF_MS);
       const serverDelay = cause instanceof StackHistoryResponseError && Number.isFinite(cause.retryAfterMs)
         ? cause.retryAfterMs : 0;
-      cached.failure = { at: this.now(), backoff, delay: Math.max(backoff, serverDelay) };
+      const now = this.now();
+      if (credential && serverDelay > 0) {
+        this.cooldownUntil.set(credential, Math.max(this.cooldownUntil.get(credential) ?? 0, now + serverDelay));
+      }
+      if (signal.aborted || !this.owns(repo)) return;
+      const backoff = Math.min((cached.failure?.backoff ?? INITIAL_BACKOFF_MS / 2) * 2, MAX_BACKOFF_MS);
+      cached.failure = { at: now, backoff, delay: Math.max(backoff, serverDelay) };
       return;
     }
-    if (signal.aborted || !this.owns(repo)) return;
+    if (signal.aborted || !this.isEnabled(GITHUB_DOT_COM) || !this.owns(repo)) return;
     cached.verified = verified;
     delete cached.failure;
     if (!isDeepStrictEqual(previous?.history.stacks ?? [], verified.history.stacks)) {

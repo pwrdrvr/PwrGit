@@ -1,6 +1,37 @@
 import { expect, test, vi } from "vitest";
 import { fetchGitHubStacks } from "./stack-client";
 
+test("a full terminal page must rediscover pagination even when its ETag is unchanged", async () => {
+  await fc.assert(fc.asyncProperty(fc.integer({ min: 1, max: 4 }), async terminal => {
+    let last = terminal;
+    const fetch = vi.fn(async (url: string, options: RequestInit) => {
+      const page = Number(new URL(url).searchParams.get("page"));
+      const etag = `"page-${page}"`;
+      if (new Headers(options.headers).get("If-None-Match") === etag) return new Response(null, { status: 304 });
+      const next = new URL(url);
+      next.searchParams.set("page", String(page + 1));
+      return Response.json(Array.from({ length: 100 }, (_, index) => {
+        const number = 100 * (page - 1) + index + 1;
+        return { number, open: false, base: { ref: "main" }, pull_requests: [
+          { number, state: "closed", head: { ref: `branch-${number}` } },
+        ] };
+      }), { headers: { ETag: etag, ...(page < last ? { Link: `<${next}>; rel="next"` } : {}) } });
+    });
+    vi.stubGlobal("fetch", fetch);
+    try {
+      const initial = await fetchGitHubStacks("fixture", "example", "orbit");
+      last++;
+      fetch.mockClear();
+      const refreshed = await fetchGitHubStacks("fixture", "example", "orbit", initial);
+      expect(refreshed.stacks).toHaveLength(last * 100);
+      expect(fetch.mock.calls.map(([, options]) => new Headers(options.headers).has("If-None-Match")))
+        .toEqual([...Array(terminal - 1).fill(true), false, false]);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  }), { numRuns: 8, examples: [[1]] });
+});
+
 test("walks beyond five pages to find both old closed stacks and open stacks", async () => {
   const fetch = vi.fn(async (url: string) => {
     const page = Number(new URL(url).searchParams.get("page"));
@@ -40,3 +71,4 @@ test.each([
     vi.unstubAllGlobals();
   }
 });
+import fc from "fast-check";
