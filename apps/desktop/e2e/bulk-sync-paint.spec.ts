@@ -34,8 +34,11 @@ const test = base.extend<{ manualWindow: boolean; harness: { app: ElectronApplic
       });
       try {
         const page = await app.firstWindow();
+        const pageErrors: string[] = [];
+        page.on("pageerror", (error) => pageErrors.push(error.message));
         await page.emulateMedia({ reducedMotion: "no-preference" });
         await use({ app, page });
+        expect(pageErrors).toEqual([]);
       } finally {
         await app.close();
       }
@@ -52,6 +55,16 @@ const progressCount = ".sidebar-toolbar__count";
 const toast = ".bulk-sync-toast";
 const toastBar = ".bulk-sync-toast__bar";
 const toastInFlight = `${toastBar} > .is-in-flight`;
+const flexTransition = "flex-grow 320ms ease";
+
+function applyAutomaticBenchmarkStyles(page: Page, stationary: boolean, animateWidths: boolean) {
+  // Set the width transition independently of the stripe and the shipped
+  // compact-bar CSS, so each control changes only its intended variable.
+  return page.addStyleTag({ content: `
+    ${stationary ? "" : `${inFlight}:not(.is-empty) { animation: bulk-sync-stripes 900ms linear infinite; }`}
+    .bulk-sync__bar${toolbarBar} > i { transition: ${animateWidths ? flexTransition : "none"}; }
+  ` });
+}
 
 async function ready(page: Page): Promise<void> {
   await page.waitForFunction(() => "bulkSyncPaint" in window);
@@ -93,6 +106,19 @@ test("the automatic pull's sidebar stripes stay still as outcomes accumulate", a
   await expect(dialog).toBeVisible();
   // The larger status bar still animates when a user opens the run.
   await expect(dialog.locator(".bulk-sync__bar > .is-in-flight")).toHaveCSS("animation-name", "bulk-sync-stripes");
+});
+
+test("the automatic-pull benchmark controls stripe motion and width transitions independently", async ({ harness: { page } }) => {
+  await ready(page);
+  await start(page);
+  const segment = page.locator(inFlight);
+  for (const [stationary, animateWidths] of [[false, true], [true, true], [false, false]] as const) {
+    const style = await applyAutomaticBenchmarkStyles(page, stationary, animateWidths);
+    await expect(segment).toHaveCSS("animation-name", stationary ? "none" : "bulk-sync-stripes");
+    expect(await segment.evaluate((node) => getComputedStyle(node).transitionProperty))
+      .toBe(animateWidths ? "flex-grow" : "none");
+    await style.evaluate((node) => { node.parentNode?.removeChild(node); });
+  }
 });
 
 const shots = process.env["PWRGIT_HARNESS_SHOTS"];
@@ -247,8 +273,8 @@ manualBenchmark("measures collapsed Pull Recent by phase", async ({ harness: { a
       const noFlex = scenario.includes("flex");
       await page.addStyleTag({ content: `
         ${toastInFlight}:not(.is-empty) { animation: ${staticStripe ? "none" : "bulk-sync-stripes 900ms linear infinite"}; }
-        .bulk-sync__bar${toastBar} > i { transition: ${noFlex ? "none" : "flex-grow 320ms ease"}; }
-        .bulk-sync__bar${toolbarBar} > i { transition: ${scenario === "static-no-compact-flex" ? "none" : "flex-grow 320ms ease"}; }
+        .bulk-sync__bar${toastBar} > i { transition: ${noFlex ? "none" : flexTransition}; }
+        .bulk-sync__bar${toolbarBar} > i { transition: ${scenario === "static-no-compact-flex" ? "none" : flexTransition}; }
       ` });
       if (steady) await startManual(page);
       await page.waitForTimeout(450);
@@ -355,12 +381,7 @@ benchmark("measures automatic pull paint and CPU", async ({ harness: { app, page
         await ready(page);
         const steady = scenario === "steady" || scenario === "steady-static";
         const stationary = scenario === "static" || scenario === "steady-static";
-        // The stationary cases use the shipped CSS. The other cases restore
-        // the v0.61.2 animation on the face and vary at most one other input.
-        await page.addStyleTag({ content: `
-          ${stationary ? "" : `${inFlight}:not(.is-empty) { animation: bulk-sync-stripes 900ms linear infinite; }`}
-          ${scenario === "no-flex-transition" ? `${toolbarBar} > i { transition: none; }` : ""}
-        ` });
+        await applyAutomaticBenchmarkStyles(page, stationary, scenario !== "no-flex-transition");
         if (steady) await start(page);
         await page.waitForTimeout(400);
 

@@ -1,5 +1,6 @@
 import {
   DEFAULT_AI_PROVIDER_SETTINGS,
+  EXPERIMENTAL_DEFAULTS,
   type BulkSyncProgress,
   type BulkSyncRepoResult,
   type BulkSyncSummary,
@@ -115,7 +116,10 @@ Object.assign(window, {
     async dispatch(command: string, request?: { repoIds?: string[]; operationId?: string; mode?: string }) {
       switch (command) {
         case "settings:read":
-          return { ok: true, value: { general: { tagCheckAfterSync: false } } };
+          return { ok: true, value: {
+            general: { tagCheckAfterSync: false },
+            experimental: EXPERIMENTAL_DEFAULTS
+          } };
         case "aiProviders:read":
           return { ok: true, value: { profileId: profile.id, settings: DEFAULT_AI_PROVIDER_SETTINGS } };
         case "repo:list": {
