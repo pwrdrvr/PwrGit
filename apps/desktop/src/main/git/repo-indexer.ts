@@ -306,6 +306,7 @@ type ChangeRequestMatch = {
  * The GitExec is injected so the scan logic is testable against system git.
  */
 export class RepoIndexer {
+  private readonly repoDeletedListeners = new Set<(repoId: string) => void>();
   private readonly branchIndexTurns = new Map<string, Promise<void>>();
   private readonly yieldToEventLoop: () => Promise<void>;
   private readonly branchWriteChunkSize: number;
@@ -339,6 +340,14 @@ export class RepoIndexer {
       options.hydrationRetryIntervalMs ?? HYDRATION_RETRY_INTERVAL_MS
     );
     this.now = options.now ?? Date.now;
+  }
+
+  onRepoDeleted(listener: (repoId: string) => void): void {
+    this.repoDeletedListeners.add(listener);
+  }
+
+  private repoDeleted(repoId: string): void {
+    for (const listener of this.repoDeletedListeners) listener(repoId);
   }
 
   /** Full root discovery is periodic; explicit user rescans bypass this gate. */
@@ -453,10 +462,10 @@ export class RepoIndexer {
       await this.yieldToEventLoop();
     }
     signal?.throwIfAborted();
-    this.db.transaction(() => {
-      if (canPruneFromScan(profile, everyRootReadable, seenRepoIds.length)) {
-        this.pruneScannedRepos(profile.id, seenRepoIds);
-      }
+    const pruned = this.db.transaction(() => {
+      const removed = canPruneFromScan(profile, everyRootReadable, seenRepoIds.length)
+        ? this.pruneScannedRepos(profile.id, seenRepoIds)
+        : [];
       // The scan clock records that a discovery pass got to look, which is a
       // weaker claim than the one pruning needs: a readable root that holds no
       // repos did complete a pass. A root that could not be listed did not, and
@@ -471,7 +480,9 @@ export class RepoIndexer {
         profile.id,
         [...found].filter((dir) => !unread.has(dir))
       );
+      return removed;
     })();
+    for (const { id } of pruned) this.repoDeleted(id);
 
     return this.listRepos(profile.id);
   }
@@ -816,10 +827,11 @@ export class RepoIndexer {
    *  so it is cleared first, as profile deletion does. A hide entry is kept:
    *  it is keyed by path and Settings lists it as not found until forgotten. */
   deleteRepo(repoId: string): void {
-    this.db.transaction(() => {
+    const removed = this.db.transaction(() => {
       this.db.prepare("DELETE FROM branch_pr WHERE repo_id = ?").run(repoId);
-      this.db.prepare("DELETE FROM repos WHERE id = ?").run(repoId);
+      return this.db.prepare("DELETE FROM repos WHERE id = ?").run(repoId).changes;
     })();
+    if (removed) this.repoDeleted(repoId);
   }
 
   /** Drop one worktree row without re-listing the repo: for a path git no
@@ -862,7 +874,7 @@ export class RepoIndexer {
     // under a scan root, which we cannot promise, so the UI names where the
     // worktree went instead of asserting it is already listed.
     if (primary !== undefined && !primary.bare && primary.path !== repo.path) {
-      this.db.prepare("DELETE FROM repos WHERE id = ?").run(repoId);
+      this.deleteRepo(repoId);
       return ok({
         outcome: "deindexed",
         profileId: repo.profileId,
@@ -2008,19 +2020,13 @@ export class RepoIndexer {
     for (const dir of dirs) insert.run(profileId, dir);
   }
 
-  private pruneScannedRepos(profileId: string, keepIds: string[]): void {
-    if (keepIds.length === 0) {
-      this.db
-        .prepare("DELETE FROM repos WHERE profile_id = ? AND source = 'scan'")
-        .run(profileId);
-      return;
-    }
-    const placeholders = keepIds.map(() => "?").join(",");
-    this.db
+  private pruneScannedRepos(profileId: string, keepIds: string[]): { id: string }[] {
+    const excludeKept = keepIds.length ? `AND id NOT IN (${keepIds.map(() => "?").join(",")})` : "";
+    return this.db
       .prepare(
-        `DELETE FROM repos WHERE profile_id = ? AND source = 'scan' AND id NOT IN (${placeholders})`
+        `DELETE FROM repos WHERE profile_id = ? AND source = 'scan' ${excludeKept} RETURNING id`
       )
-      .run(profileId, ...keepIds);
+      .all(profileId, ...keepIds) as { id: string }[];
   }
 }
 

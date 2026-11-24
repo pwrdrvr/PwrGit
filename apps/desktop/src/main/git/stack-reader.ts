@@ -3,6 +3,7 @@ import {
   type PrSummary, type Repo, type RepositoryStack, type StackLayer, type StackSnapshot,
 } from "@pwrgit/shared";
 import type { GitExec } from "./dugite";
+import type { ScopedGitHubStack } from "../github/stack-history-service";
 import { GhStackCatalogStore, type NativeStackLocks } from "./stack-catalog-store";
 import type { GhStack, GhStackBranch, GitRunner } from "./stack-engine";
 import { isOid, StackGit } from "./stack-engine/git";
@@ -41,7 +42,7 @@ export class StackReader {
     private readonly locks: NativeStackLocks,
     private readonly readOpen: (repoId: string) => Promise<ChangeRequestList>,
     private readonly readBranchPr: (repoId: string, branch: string) => BranchPrObservation | null | undefined,
-    private readonly readGitHubStacks: (repoId: string, forgeRepo: string) => readonly GitHubStack[] = () => [],
+    private readonly readGitHubStacks: (repo: Repo) => readonly ScopedGitHubStack[] | Promise<readonly ScopedGitHubStack[]> = () => [],
     private readonly readPrTitles: (repoId: string, forgeRepo: string) => ReadonlyMap<number, string> = () => new Map(),
   ) {}
 
@@ -58,14 +59,17 @@ export class StackReader {
 
   async list(repo: Repo): Promise<StackSnapshot> {
     const { commonDir, store, tracked } = await this.location(repo);
-    const open = await this.readOpen(repo.id);
+    const [open, github] = await Promise.all([this.readOpen(repo.id), this.readGitHubStacks(repo)]);
     const { catalog } = tracked;
     const remotes = new Map(open.remotes.map(remote => [remote.forgeRepo, remote]));
-    const github = open.remotes.flatMap(remote => this.readGitHubStacks(repo.id, remote.forgeRepo).map(stack => ({
-      scope: remote.forgeRepo, stack,
-    })));
+    const githubRemotes = new Map(github.map(({ scope, remote }) => [scope, remote]));
     const linked = github.filter(({ stack }) => !stack.closed);
     const closed = github.filter(({ stack }) => stack.closed);
+    // A merge is terminal even if the independently refreshed open list
+    // still carries the PR. Match by repository and number, never by branch.
+    const mergedPrs = new Set(github.flatMap(({ scope, stack }) =>
+      stack.members.filter(pr => pr.state === "merged").map(pr => `${scope}#${pr.number}`)));
+    const openEntries = open.entries.filter(({ forgeRepo, pr }) => !mergedPrs.has(`${forgeRepo}#${pr.number}`));
     const catalogScope = parsedCatalogKey(catalog.repository);
     const trackedBranches = new Set(catalog.stacks.flatMap(stack => stack.branches.map(branch => branch.branch)));
     const usedLinked = new Set<GitHubStack>();
@@ -86,7 +90,7 @@ export class StackReader {
       if (sameMembers) usedLinked.add(match.stack);
       return [{
         stack, catalogRepository: catalog.repository, inferred: false,
-        open: open.entries.filter(entry => !catalog.repository || entry.forgeRepo === catalogScope),
+        open: openEntries.filter(entry => !catalog.repository || entry.forgeRepo === catalogScope),
         ...(sameMembers ? { linked: match.stack } : {}),
         ...(match ? { observations: match.stack } : {}),
       }];
@@ -97,7 +101,7 @@ export class StackReader {
       if (usedLinked.has(stack)) continue;
       const separator = scope.indexOf("/");
       sources.push({
-        inferred: true, open: open.entries.filter(entry => entry.forgeRepo === scope), linked: stack,
+        inferred: true, open: openEntries.filter(entry => entry.forgeRepo === scope), linked: stack,
         catalogRepository: `${scope.slice(0, separator)}:${scope.slice(separator + 1)}`,
         stack: { trunk: { branch: stack.trunk }, branches: stack.members.map(pr => ({
           branch: pr.headRefName!, pullRequest: { number: pr.number },
@@ -107,7 +111,7 @@ export class StackReader {
     // GitHub's ordered membership wins PR lookups when the local catalog
     // differs. Keep the catalog's write model scoped to its local branches.
     sources.push(...trackedSources);
-    const completeEntries = open.entries.filter(entry => !(remotes.get(entry.forgeRepo)?.truncated ?? open.truncated));
+    const completeEntries = openEntries.filter(entry => !(remotes.get(entry.forgeRepo)?.truncated ?? open.truncated));
     for (const entries of inferPullRequestStacks(completeEntries, trackedBranches)) {
       if (entries.some(entry => linkedPrs.has(`${entry.forgeRepo}#${entry.pr.number}`))) continue;
       const [{ forgeRepo, pr }] = entries;
@@ -169,7 +173,7 @@ export class StackReader {
       const { stack, inferred, catalogRepository, linked } = source;
       if (!stack.branches.length) continue;
       const scope = parsedCatalogKey(catalogRepository);
-      const remote = remotes.get(scope)?.name ?? "origin";
+      const remote = remotes.get(scope)?.name ?? githubRemotes.get(scope) ?? "origin";
       const localTrunk = local(stack.trunk.branch);
       const trunkHead = localTrunk ?? stack.trunk.head;
       const layers: StackLayer[] = [];
@@ -182,6 +186,7 @@ export class StackReader {
         const listFetchedAt = entry ? remotes.get(entry.forgeRepo)?.fetchedAt ?? open.fetchedAt : null;
         if (cached?.pr.host && cached.pr.repoPath && forgeRepoKey(cached.pr.host, cached.pr.repoPath) === scope &&
             (number === undefined || cached.pr.number === number) &&
+            (cached.pr.state === "merged" || !mergedPrs.has(`${scope}#${cached.pr.number}`)) &&
             (!entry || (cached.pr.number === entry.pr.number && cached.fetchedAt >= (listFetchedAt ?? 0)))) {
           return cached.pr;
         }

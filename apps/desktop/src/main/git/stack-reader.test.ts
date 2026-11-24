@@ -62,6 +62,49 @@ const testRepo = (path: string, id = "here"): Repo => ({
 });
 const locks = new NativeStackLocks(() => { throw new Error("read-only view invoked the helper"); });
 
+test("merged history wins in either refresh order, scoped by forge repository and PR number", () =>
+  withStack(async ({ cwd }) => {
+    const mirror = "github.com/example/mirror";
+    await fc.assert(fc.asyncProperty(fc.boolean(), fc.integer({ min: 1, max: 5000 }), async (historyFirst, number) => {
+      const chain = (key: string) => [openPr(number, "bottom", "main", undefined, key),
+        openPr(number + 1, "top", "bottom", undefined, key)];
+      let entries = [...chain(forgeRepo), ...chain(mirror)];
+      let history: ReturnType<typeof parseGitHubStacks> = [];
+      const reader = new StackReader(runner, locks, async () => ({
+        forge: "github", fetchedAt: 100, truncated: false, remotes: [listRemote(forgeRepo, false), listRemote(mirror, false)], entries,
+      }), () => undefined, () => history.map(stack => ({ scope: forgeRepo, remote: "origin", stack })));
+      const publishHistory = () => {
+        history = parseGitHubStacks([{
+          number: 4235, open: false, base: { ref: "main" },
+          pull_requests: chain(forgeRepo).map(({ pr }) => ({
+            number: pr.number, head: { ref: pr.headRefName }, state: "closed", merged_at: "2026-11-12T10:00:00Z",
+          })),
+        }], "example", "orbit-deploy");
+      };
+      const publishOpenList = () => { entries = chain(mirror); };
+      const assertSnapshot = async (expected: "open" | "merged" | "absent") => {
+        const { stacks } = await reader.list(testRepo(cwd));
+        for (const pr of [number, number + 1]) {
+          const position = stackPositionForPr(stacks, { number: pr }, forgeRepo);
+          expect(position ? position.stack.closed ?? "open" : "absent").toBe(expected);
+          expect(stackPositionForPr(stacks, { number: pr }, mirror)?.layer.pr?.state).toBe("open");
+        }
+        expect(stacks).toHaveLength(expected === "absent" ? 1 : 2);
+      };
+      await assertSnapshot("open");
+      if (historyFirst) {
+        publishHistory();
+        await assertSnapshot("merged");
+        publishOpenList();
+      } else {
+        publishOpenList();
+        await assertSnapshot("absent");
+        publishHistory();
+      }
+      await assertSnapshot("merged");
+    }), { numRuns: 8, examples: [[true, 1], [false, 1]] });
+  }));
+
 test("tracked PR identity is independent of ordering and the newest observation of that PR wins", () =>
   withStack(async ({ cwd, commonDir, initial }) => {
     initial.stacks[0].branches[0].pullRequest = { number: 17 };
@@ -153,13 +196,13 @@ test("GitHub's ordered stack response identifies a remote-only stack and its mer
     const reader = new StackReader(runner, locks, async () => ({
       forge: "github", fetchedAt: 100, truncated: false, entries: [topPr],
       remotes: [listRemote(forgeRepo, false)],
-    }), () => undefined, (_repo, scope) => scope === forgeRepo ? parseGitHubStacks([{
+    }), () => undefined, () => parseGitHubStacks([{
       number: 4235, open: true, base: { ref: "main" },
       pull_requests: [
         { number: 7, head: { ref: "bottom", sha: bottom }, state: "closed", merged_at: "2026-10-12T10:00:00Z" },
         { number: 8, head: { ref: "top", sha: top }, state: "open", draft: false },
       ]
-    }], "example", "orbit-deploy") : []);
+    }], "example", "orbit-deploy").map(stack => ({ scope: forgeRepo, remote: "origin", stack })));
     const { stacks } = await reader.list(testRepo(cwd));
     expect(stacks).toMatchObject([{
       githubNumber: 4235, githubUrl: "https://github.com/example/orbit-deploy/stack/4235", source: "inferred",
@@ -224,7 +267,9 @@ test("R9 API membership, position and closure survive any missing branch refs", 
       const reader = new StackReader(runner, locks, async () => ({
         forge: "github", fetchedAt: 100, truncated: false, entries: [],
         remotes: [listRemote(forgeRepo, false)],
-      }), () => undefined, () => parseGitHubStacks(rows, "example", "orbit-deploy"),
+      }), () => undefined, () => parseGitHubStacks(rows, "example", "orbit-deploy").map(stack => ({
+        scope: forgeRepo, remote: "origin", stack,
+      })),
       (repoId, scope) => repoId === "here" && scope === forgeRepo ? cachedTitles : new Map());
       const snapshot = await reader.list(testRepo(cwd));
       for (const [stackIndex, row] of rows.entries()) {
@@ -271,7 +316,9 @@ test("a tracked stack keeps unpublished work and uses GitHub merge observations"
       const reader = new StackReader(runner, locks, async () => ({
         forge: "github", fetchedAt: 100, truncated: false, entries: [],
         remotes: [listRemote(forgeRepo, false)],
-      }), () => undefined, () => parseGitHubStacks([row], "example", "orbit-deploy"));
+      }), () => undefined, () => parseGitHubStacks([row], "example", "orbit-deploy").map(stack => ({
+        scope: forgeRepo, remote: "origin", stack,
+      })));
       const snapshot = await reader.list(testRepo(cwd));
       const local = snapshot.stacks.find(stack => stack.source === "tracked");
       expect(local?.layers.map(layer => layer.branch)).toEqual(["bottom", "top", "unpublished"]);
