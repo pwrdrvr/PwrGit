@@ -167,7 +167,9 @@ const render = () => flushSync(() => root.render(<ToolbarScene key={key} {...sce
 
 export const toolbarFit = {
   ready: Promise.all(
-    ['500 11px "Geist Sans"', '600 11px "Geist Sans"', '700 10px "Geist Sans"',
+    // The branch navigator also uses regular Geist Sans. Load it before
+    // mounting so opening the overlay does not invalidate the fit via fonts.
+    ['400 11px "Geist Sans"', '500 11px "Geist Sans"', '600 11px "Geist Sans"', '700 10px "Geist Sans"',
       '500 9.5px "Geist Mono"', '600 10px "Geist Mono"', '700 9.5px "Geist Mono"'].map((font) => document.fonts.load(font))
   ),
   mount(next: Omit<Scene, "tick">) {
