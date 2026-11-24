@@ -13,10 +13,14 @@ import { HotCpuProfiler } from "./hot-cpu-profiler";
 import { createHotCpuProfileSession } from "./hot-cpu-profile-session";
 import { resolveHotCpuProfileConfig } from "./hot-cpu-profile-config";
 
-vi.mock("electron", () => ({
-  app: { getVersion: () => "test", getAppMetrics: vi.fn(() => []) },
-  contentTracing: { startRecording: vi.fn(), stopRecording: vi.fn() }
-}));
+vi.mock("electron", async () => {
+  const { forkTraceWorker } = await import("../../../test-support/chromium-trace-utility");
+  return {
+    app: { getVersion: () => "test", getAppMetrics: vi.fn(() => []) },
+    contentTracing: { startRecording: vi.fn(), stopRecording: vi.fn() },
+    utilityProcess: { fork: forkTraceWorker }
+  };
+});
 vi.mock("../logs", () => ({ logMain: vi.fn() }));
 const logger = { info: () => {}, warn: () => {}, error: () => {} };
 const versions = { appVersion: "test", electronVersion: "test", chromeVersion: "test", nodeVersion: process.version };
