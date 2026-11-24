@@ -82,7 +82,7 @@ MIT
 - @pwrdrvr/agent-acp@0.16.1 | https://github.com/pwrdrvr/agent-kit
 - @pwrdrvr/agent-client@0.8.2 | https://github.com/pwrdrvr/agent-kit
 - @pwrdrvr/agent-core@0.2.0 | https://github.com/pwrdrvr/agent-kit
-- @pwrdrvr/agent-transport@0.1.7 | https://github.com/pwrdrvr/agent-kit
+- @pwrdrvr/agent-transport@0.1.8 | https://github.com/pwrdrvr/agent-kit
 - @pwrdrvr/codex-app-server-protocol@0.164.0 | https://github.com/pwrdrvr/codex-app-server-protocol
 - @pwrdrvr/codex-discovery@0.4.0 | https://github.com/pwrdrvr/agent-kit
 - @shutterstock/p-map-iterable@1.2.0 | https://github.com/shutterstock/p-map-iterable
@@ -797,7 +797,7 @@ Applies to:
 - @pwrdrvr/agent-acp@0.16.1 (MIT)
 - @pwrdrvr/agent-client@0.8.2 (MIT)
 - @pwrdrvr/agent-core@0.2.0 (MIT)
-- @pwrdrvr/agent-transport@0.1.7 (MIT)
+- @pwrdrvr/agent-transport@0.1.8 (MIT)
 - @pwrdrvr/codex-app-server-protocol@0.164.0 (MIT)
 - @pwrdrvr/codex-discovery@0.4.0 (MIT)
 
