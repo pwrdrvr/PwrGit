@@ -20,6 +20,7 @@ import {
   canonicalForgeHostname,
   ok,
   resolveUpdateSelection,
+  sanitizeForgeHostAccount,
   sanitizeForgeHostLabel,
   type AppSettingsPatch,
   type AppSettingsSnapshot,
@@ -251,14 +252,28 @@ function sanitizeForgeHosts(
     if (typeof value.label === "string") {
       entry.label = sanitizeForgeHostLabel(value.label) ?? "";
     }
-    // An entry that survived sanitizing with nothing in it says nothing; treat
-    // it as the clear it amounts to.
-    out[host] =
+    // The same empty-string-clears rule as `label`: "" is how the pane says
+    // "follow gh's active account again". A value that is not a login (a
+    // flag, a path, whitespace) is dropped rather than stored — it reaches
+    // `gh auth token --user` as argv.
+    let refused = false;
+    if (typeof value.account === "string") {
+      const account = sanitizeForgeHostAccount(value.account);
+      if (account !== null) entry.account = account;
+      else if (value.account.trim() === "") entry.account = "";
+      else refused = true;
+    }
+    const empty =
       entry.kind === undefined &&
       entry.enabled === undefined &&
-      entry.label === undefined
-        ? null
-        : entry;
+      entry.label === undefined &&
+      entry.account === undefined;
+    // A write whose only field was refused changes nothing — reading it as a
+    // clear would delete the host's other decisions over a bad value.
+    if (empty && refused) continue;
+    // An entry that survived sanitizing with nothing in it says nothing; treat
+    // it as the clear it amounts to.
+    out[host] = empty ? null : entry;
   }
   return Object.keys(out).length === 0 ? undefined : out;
 }
@@ -349,6 +364,7 @@ export function registerSettingsHandlers(
         // it, and leaving the key in place would persist an empty name that
         // every reader then has to treat as absent anyway.
         if (merged.label === "") delete merged.label;
+        if (merged.account === "") delete merged.account;
         // A host left with no decisions on it is a host nobody has decided
         // anything about — same state as never having had a row, and keeping
         // an empty object would make it one that cannot be returned to `auto`.

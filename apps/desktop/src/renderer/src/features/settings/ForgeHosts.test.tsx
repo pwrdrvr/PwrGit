@@ -687,3 +687,148 @@ describe("Settings → Forges — one section per product", () => {
     expect(alertIn(dialog())).toContain("github.com is already on the list.");
   });
 });
+
+describe("Settings → Forges — the account a host reads as", () => {
+  const TWO = [
+    { login: "a.hopper", active: true },
+    { login: "release-bot", active: false }
+  ];
+  const contoso = (overrides: Partial<ForgeHostRow> = {}): ForgeHostRow =>
+    host({ host: "ghe.contoso-labs.test", account: "a.hopper", accounts: TWO, ...overrides });
+
+  function accountSelect(hostname: string): HTMLSelectElement | null {
+    return container.querySelector<HTMLSelectElement>(
+      `select[aria-label="GitHub account for ${hostname}"]`
+    );
+  }
+
+  function subLine(hostname: string): string {
+    const label = [...container.querySelectorAll(".settings-field__label")].find(
+      (element) => element.textContent?.startsWith(hostname)
+    );
+    return label?.querySelector(".settings-field__sub")?.textContent ?? "";
+  }
+
+  async function choose(select: HTMLSelectElement, value: string): Promise<void> {
+    await act(async () => {
+      select.value = value;
+      select.dispatchEvent(new Event("change", { bubbles: true }));
+    });
+  }
+
+  it("offers no choice for a host with one account", async () => {
+    await render([host({ account: "octo-dev", accounts: [{ login: "octo-dev", active: true }] })]);
+    expect(accountSelect("github.com")).toBeNull();
+    expect(subLine("github.com")).toBe("signed in as octo-dev");
+  });
+
+  it("offers the active account first, then each login, and names the reader", async () => {
+    await render([contoso()]);
+    const select = accountSelect("ghe.contoso-labs.test")!;
+    expect([...select.options].map((option) => [option.value, option.text])).toEqual([
+      ["", "Active gh account (a.hopper)"],
+      ["a.hopper", "a.hopper"],
+      ["release-bot", "release-bot"]
+    ]);
+    expect(select.value).toBe("");
+    expect(subLine("ghe.contoso-labs.test")).toBe("reads as a.hopper · 2 accounts");
+  });
+
+  it("writes a choice at once and keeps focus on the select", async () => {
+    await render([contoso()]);
+    const select = accountSelect("ghe.contoso-labs.test")!;
+    select.focus();
+    rows = [contoso({ account: "release-bot", chosenAccount: "release-bot" })];
+    await choose(select, "release-bot");
+    expect(writes).toEqual([
+      { forgeHosts: { "ghe.contoso-labs.test": { account: "release-bot" } } }
+    ]);
+    expect(document.activeElement).toBe(accountSelect("ghe.contoso-labs.test"));
+    expect(accountSelect("ghe.contoso-labs.test")?.value).toBe("release-bot");
+    expect(subLine("ghe.contoso-labs.test")).toBe("reads as release-bot · 2 accounts");
+    expect(container.textContent).toContain(
+      "PwrGit reads as release-bot here, whichever account gh has active."
+    );
+  });
+
+  it("sends the empty string to go back to the active account", async () => {
+    await render([contoso({ account: "release-bot", chosenAccount: "release-bot" })]);
+    await choose(accountSelect("ghe.contoso-labs.test")!, "");
+    expect(writes).toEqual([{ forgeHosts: { "ghe.contoso-labs.test": { account: "" } } }]);
+  });
+
+  it("warns about a chosen account that signed out, and offers the way back", async () => {
+    await render([
+      host({
+        host: "ghe.build.test",
+        accounts: [
+          { login: "a.hopper", active: true },
+          { login: "release-bot", active: false }
+        ],
+        chosenAccount: "b.liskov"
+      })
+    ]);
+    const select = accountSelect("ghe.build.test")!;
+    expect(select.value).toBe("b.liskov");
+    expect(select.selectedOptions[0]?.text).toBe("b.liskov (not signed in)");
+    // The row names nobody as the reader: nothing is read.
+    expect(subLine("ghe.build.test")).toBe("2 accounts");
+    const warning = container.querySelector(".settings-field__warning");
+    expect(warning?.textContent).toBe(
+      "b.liskov is not signed in to gh here. PwrGit reads nothing from this host until b.liskov signs in again or you choose another account."
+    );
+    // A description, not an alert: it describes a saved state.
+    expect(warning?.closest("[role='alert']")).toBeNull();
+    expect(select.getAttribute("aria-describedby")).toBe(warning?.id);
+
+    const useActive = container.querySelector<HTMLButtonElement>(
+      'button[aria-label="Use the active gh account for ghe.build.test"]'
+    )!;
+    expect(useActive.textContent).toBe("Use active account (a.hopper)");
+    await click(useActive);
+    expect(writes).toEqual([{ forgeHosts: { "ghe.build.test": { account: "" } } }]);
+    expect(document.activeElement).toBe(accountSelect("ghe.build.test"));
+    expect(button("Copy sign-in command")).toBeDefined();
+  });
+
+  it("keeps a switched-off host's choice visible but disabled", async () => {
+    await render([
+      contoso({
+        enabled: false,
+        enabledSource: "config",
+        account: "release-bot",
+        chosenAccount: "release-bot"
+      })
+    ]);
+    const select = accountSelect("ghe.contoso-labs.test")!;
+    expect(select.disabled).toBe(true);
+    expect(select.value).toBe("release-bot");
+  });
+
+  it("offers no choice while a token comes from the environment", async () => {
+    await render([
+      contoso({ tokenEnv: "GH_ENTERPRISE_TOKEN", chosenAccount: "release-bot" })
+    ]);
+    expect(accountSelect("ghe.contoso-labs.test")).toBeNull();
+    expect(container.textContent).toContain(
+      "Token from GH_ENTERPRISE_TOKEN. The account choice does not apply."
+    );
+  });
+
+  it("offers no choice on a GitLab host", async () => {
+    await render([
+      host(),
+      host({
+        host: "gitlab.com",
+        kind: "gitlab",
+        cli: "glab",
+        account: "o.dev",
+        accounts: [
+          { login: "o.dev", active: true },
+          { login: "o.bot", active: false }
+        ]
+      })
+    ]);
+    expect(section("GitLab").querySelector("select")).toBeNull();
+  });
+});

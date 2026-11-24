@@ -79,6 +79,7 @@ import { createE2EForgeFixtureServices } from "./forge/e2e-forge-fixture";
 import { IdentityService } from "./forge/identity-service";
 import { ForgeStatusService } from "./forge/status";
 import { ForgeHostDirectory } from "./forge/cli-hosts";
+import { githubCredentials } from "./github/gh-cli";
 import { ForgeHosts, ForgeHostsView } from "./forge/hosts";
 import { resolveForge } from "./forge/providers";
 import { resolveForgeRepo } from "./forge/resolve";
@@ -255,7 +256,12 @@ const FORGE_REPROBE_DEBOUNCE_MS = 300;
 function forgeTargetSignature(hosts: ForgeHosts): string {
   return hosts
     .statusTargets()
-    .map((target) => `${target.kind} ${target.host} ${target.enabled}`)
+    // The account is part of the answer: pinning one that no longer resolves
+    // turns the host signed out, so a choice must re-probe like a switch.
+    .map(
+      (target) =>
+        `${target.kind} ${target.host} ${target.enabled} ${target.account ?? ""}`
+    )
     .join("\n");
 }
 
@@ -690,6 +696,10 @@ if (!gotSingleInstanceLock) {
       },
       discovered: () => forgeHostDirectory.current()
     });
+    // Every `gh` spawn and token read asks this which account a host reads
+    // as. The same `ForgeHosts` the rows and the probe targets come from, so
+    // the row, the card and every read name one account.
+    githubCredentials.setAccountChooser((host) => forgeHosts.accountFor(host));
     // One probe for the whole app: `ForgeStatusService` caches and dedups
     // in-flight reads, and a second instance would quietly undo both by
     // keeping its own cache and spawning its own `gh`/`glab`.
@@ -760,6 +770,11 @@ if (!gotSingleInstanceLock) {
       return true;
     };
     const forgeHostsView = new ForgeHostsView(forgeHosts, async () => {
+      // Re-check exists to observe a sign-in or sign-out made in a terminal.
+      // A cached GitHub token would answer for an account that has since
+      // signed out: the row would warn that a pinned account is gone while
+      // the card, probing through the cache, still read the host as signed in.
+      githubCredentials.clear();
       const refreshed = await forgeHostDirectory.refresh({ force: true });
       // Swallowed: a probe that refuses is not a reason to discard host
       // enumeration that already succeeded, and Re-check must still hand back

@@ -17746,6 +17746,13 @@ body.is-col-resizing {
   font: 500 11.5px/1.4 var(--font-sans);
   color: var(--danger-text);
 }
+/* A saved state that stops reads (a pinned forge account that signed out).
+   Warning-coloured text in the help column, not an alert: nothing just
+   happened, and `.settings-field__error` is for a write that failed. */
+.settings-field__warning {
+  font: 500 11px/1.45 var(--font-sans);
+  color: var(--status-warning);
+}
 .settings-empty {
   margin: 4px 0;
   font: 400 12.5px/1.5 var(--font-sans);

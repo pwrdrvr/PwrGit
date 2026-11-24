@@ -4,9 +4,13 @@ import {
   githubGraphqlBaseUrl
 } from "./pr-client";
 
-vi.mock("./gh-cli", () => ({
-  runGh: vi.fn(async (args: string[]) => `token-for-${args.at(-1)}`)
-}));
+vi.mock("./gh-cli", async () => {
+  // The real credential store over a fake `gh`, so these specs still see the
+  // exact argv `getGitHubToken` spawns.
+  const { GitHubCredentials } = await import("./gh-account");
+  const runGh = vi.fn(async (args: string[]) => `token-for-${args.at(-1)}`);
+  return { runGh, githubCredentials: new GitHubCredentials({ run: runGh }) };
+});
 
 afterEach(() => {
   clearGitHubTokenCache();

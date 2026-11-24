@@ -55,6 +55,32 @@ describe("forgeHosts patch path", () => {
     });
   });
 
+  it("pins an account for a host, and clears it on an empty one", async () => {
+    // "" is how the select returns a host to gh's active account.
+    const { settings, update } = harness();
+    await update({ forgeHosts: { "ghe.contoso-labs.test": { enabled: true } } });
+    await update({ forgeHosts: { "ghe.contoso-labs.test": { account: " release-bot " } } });
+    expect(settings.get().forges?.hosts["ghe.contoso-labs.test"]).toEqual({
+      enabled: true,
+      account: "release-bot"
+    });
+    await update({ forgeHosts: { "ghe.contoso-labs.test": { account: "" } } });
+    expect(settings.get().forges?.hosts["ghe.contoso-labs.test"]).toEqual({
+      enabled: true
+    });
+  });
+
+  it("refuses an account that is not a login, keeping the stored one", async () => {
+    // The value becomes `gh auth token --user` argv: a leading dash is a flag.
+    // Refusing it must not read as the clear that "" is.
+    const { settings, update } = harness();
+    await update({ forgeHosts: { "ghe.contoso-labs.test": { account: "a.hopper" } } });
+    await update({ forgeHosts: { "ghe.contoso-labs.test": { account: "--hostname" } } });
+    expect(settings.get().forges?.hosts["ghe.contoso-labs.test"]).toEqual({
+      account: "a.hopper"
+    });
+  });
+
   it("caps a pasted short name rather than storing an essay", async () => {
     const { settings, update } = harness();
     await update({ forgeHosts: { "a.example": { label: "z".repeat(400) } } });

@@ -137,6 +137,16 @@ export type ForgeProduct = {
    */
   readonly forkCompletesAsynchronously: boolean;
   /**
+   * The CLI holds several accounts per host and hands over a token for a
+   * named one, so a host can be pinned to an account.
+   *
+   * `gh` does (`gh auth token --hostname H --user A`); `glab` and `cafe` hold
+   * one account per host, so a choice there would be a control that changes
+   * nothing. Settings → Forges shows the account select only where this is
+   * true AND the CLI reports two or more accounts.
+   */
+  readonly accountChoice: boolean;
+  /**
    * What the integration can answer at all.
    *
    * Not a login: these say what is possible, which is why a false one means
@@ -226,6 +236,7 @@ export const FORGE_PRODUCTS: Readonly<Record<ForgeKind, ForgeProduct>> = freeze(
     hostAllowlistEnv: "PWRGIT_GITCAFE_HOSTS",
     addHost: { button: "Add GitCafe host…", sub: "For a GitCafe host you have not signed in to yet.", title: "Add a GitCafe host", placeholder: "git.cafe" },
     forkCompletesAsynchronously: true,
+    accountChoice: false,
     capabilities: {
       batchedBranchLookup: false,
       batchedCommitAssociation: false,
@@ -276,6 +287,7 @@ export const FORGE_PRODUCTS: Readonly<Record<ForgeKind, ForgeProduct>> = freeze(
       placeholder: "github.acme-inc.com"
     },
     forkCompletesAsynchronously: false,
+    accountChoice: true,
     capabilities: {
       batchedBranchLookup: true,
       // `associatedPullRequests` takes many commit OIDs in one aliased query.
@@ -329,6 +341,7 @@ export const FORGE_PRODUCTS: Readonly<Record<ForgeKind, ForgeProduct>> = freeze(
     },
     // The fork API returns before the project is ready to clone.
     forkCompletesAsynchronously: true,
+    accountChoice: false,
     capabilities: {
       // `mergeRequests(sourceBranches: [...])` batches natively.
       batchedBranchLookup: true,

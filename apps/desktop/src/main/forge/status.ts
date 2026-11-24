@@ -59,6 +59,16 @@ export type ForgeProbeTarget = {
    * It still counts toward the summary `loggedIn` — a credential is a credential.
    */
   assumed?: boolean;
+  /**
+   * The account this host is pinned to (`ForgeHosts.accountFor`), when one is.
+   *
+   * The probe does not pass it on: `getGitHubToken` reads the same pin from
+   * the same source, so a probe and a read cannot ask about different
+   * accounts. It is here because the target list is what `index.ts`
+   * signs to decide when to re-probe, and choosing an account changes the
+   * answer — a pinned account that no longer resolves is signed out.
+   */
+  account?: string;
 };
 
 /**

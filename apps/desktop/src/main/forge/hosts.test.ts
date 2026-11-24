@@ -657,3 +657,96 @@ describe("forge surfaces agree: shrunk counterexamples", () => {
     ).toEqual([{ kind: "github", host: "gitlab.com", enabled: true }]);
   });
 });
+
+describe("ForgeHosts account choice", () => {
+  const TWO: DiscoveredForgeHost = {
+    kind: "github",
+    host: "ghe.contoso-labs.test",
+    account: "a.hopper",
+    accounts: [
+      { host: "ghe.contoso-labs.test", login: "a.hopper", active: true },
+      { host: "ghe.contoso-labs.test", login: "release-bot", active: false }
+    ]
+  };
+
+  it("reads as the active account until one is chosen", () => {
+    const [row] = new ForgeHostsView(make({ discovered: [TWO] }), async () => {}).rows();
+    expect(row).toMatchObject({
+      account: "a.hopper",
+      accounts: [
+        { login: "a.hopper", active: true },
+        { login: "release-bot", active: false }
+      ]
+    });
+    expect(row?.chosenAccount).toBeUndefined();
+  });
+
+  it("reads as the chosen account, and the probe target carries it", () => {
+    const hosts = make({
+      discovered: [TWO],
+      hosts: { "ghe.contoso-labs.test": { account: "release-bot" } }
+    });
+    const [row] = new ForgeHostsView(hosts, async () => {}).rows();
+    expect(row).toMatchObject({ account: "release-bot", chosenAccount: "release-bot" });
+    expect(
+      hosts.statusTargets().find((target) => target.host === "ghe.contoso-labs.test")
+    ).toMatchObject({ account: "release-bot" });
+  });
+
+  it("reads as nobody once the chosen account has signed out", () => {
+    // The credential layer will not fall back, so the row must not name the
+    // active account either.
+    const hosts = make({
+      discovered: [TWO],
+      hosts: { "ghe.contoso-labs.test": { account: "b.liskov" } }
+    });
+    const [row] = new ForgeHostsView(hosts, async () => {}).rows();
+    expect(row?.account).toBeUndefined();
+    expect(row?.chosenAccount).toBe("b.liskov");
+  });
+
+  it("keeps the choice on a switched-off host", () => {
+    const hosts = make({
+      discovered: [TWO],
+      hosts: { "ghe.contoso-labs.test": { account: "release-bot", enabled: false } }
+    });
+    expect(hosts.accountFor("ghe.contoso-labs.test")).toBe("release-bot");
+  });
+
+  it("lets an environment token outrank the choice", () => {
+    const hosts = make({
+      discovered: [TWO],
+      hosts: { "ghe.contoso-labs.test": { account: "release-bot" } },
+      env: { GH_HOST: "ghe.contoso-labs.test", GH_ENTERPRISE_TOKEN: "x" }
+    });
+    const [row] = new ForgeHostsView(hosts, async () => {}).rows();
+    expect(row).toMatchObject({ tokenEnv: "GH_ENTERPRISE_TOKEN", account: "a.hopper" });
+  });
+
+  it("does not hand an Enterprise token to a host GH_HOST does not name", () => {
+    const hosts = make({
+      discovered: [TWO],
+      env: { GH_HOST: "ghe.other.test", GH_ENTERPRISE_TOKEN: "x", GITHUB_TOKEN: "y" }
+    });
+    expect(hosts.tokenEnvFor("ghe.contoso-labs.test")).toBeUndefined();
+    expect(hosts.tokenEnvFor("github.com")).toBe("GITHUB_TOKEN");
+  });
+
+  it("ignores an account stored for a product with one account per host", () => {
+    const hosts = make({
+      discovered: [GL("gitlab.com")],
+      hosts: { "gitlab.com": { account: "someone-else" } }
+    });
+    expect(hosts.accountFor("gitlab.com")).toBeUndefined();
+    expect(hosts.list()[0]?.account).toBe("o.dev");
+  });
+
+  it("never pins a stored value that is not a login", () => {
+    // settings.json is read unvalidated, and this becomes `--user` argv.
+    const hosts = make({
+      discovered: [TWO],
+      hosts: { "ghe.contoso-labs.test": { account: "--hostname" } }
+    });
+    expect(hosts.accountFor("ghe.contoso-labs.test")).toBeUndefined();
+  });
+});

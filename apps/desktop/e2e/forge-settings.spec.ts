@@ -6,12 +6,21 @@ import { _electron as electron, expect, test, type Page } from "@playwright/test
 import { cleanEnv } from "./fixtures/electron-app";
 import { buildHarness } from "./harness/build";
 
-const VIEWS = ["cross-cli", "reassigned-saas"] as const;
+const VIEWS = ["cross-cli", "reassigned-saas", "host-accounts"] as const;
 
-const mount = (page: Page, view: (typeof VIEWS)[number]): Promise<void> =>
-  page.evaluate((name) => {
-    (window as unknown as { __harness: { mount: (view: string) => void } }).__harness.mount(name);
-  }, view);
+const mount = (
+  page: Page,
+  view: (typeof VIEWS)[number],
+  theme: "light" | "dark" = "light"
+): Promise<void> =>
+  page.evaluate(
+    ([name, mode]) => {
+      (
+        window as unknown as { __harness: { mount: (view: string, theme: string) => void } }
+      ).__harness.mount(name, mode);
+    },
+    [view, theme] as const
+  );
 
 /**
  * Settings › Forges, in a Vite build of the real Settings window whose rows and
@@ -33,7 +42,7 @@ test("Settings › Forges never contradicts itself about a GitLab host", async (
       ...(process.env["PWRGIT_E2E_DISABLE_GPU"] === "1" ? ["--disable-gpu"] : []),
       join(dirname(fileURLToPath(import.meta.url)), "harness/electron-main.cjs")
     ],
-    env: cleanEnv({ PWRGIT_HARNESS_HTML: html, PWRGIT_HARNESS_WIDTH: "980", PWRGIT_HARNESS_HEIGHT: "900" })
+    env: cleanEnv({ PWRGIT_HARNESS_HTML: html, PWRGIT_HARNESS_WIDTH: "980", PWRGIT_HARNESS_HEIGHT: "1100" })
   });
   const shots = process.env["PWRGIT_HARNESS_SHOTS"];
   if (shots) mkdirSync(shots, { recursive: true });
@@ -66,6 +75,32 @@ test("Settings › Forges never contradicts itself about a GitLab host", async (
     // GitLab, so the GitLab card must not claim it is connected.
     await show("reassigned-saas");
     await expect(chip).not.toHaveText("Connected");
+
+    // Accounts per host. A pinned account names the reader on the row; one
+    // that signed out reads as nobody and says so, rather than naming the
+    // account gh has active.
+    const github = page.locator("section[aria-label='GitHub']");
+    for (const theme of ["light", "dark"] as const) {
+      await mount(page, "host-accounts", theme);
+      await expect(github).not.toContainText("Checking…");
+      await expect(github).toContainText("reads as release-bot · 2 accounts");
+      await expect(
+        github.getByRole("combobox", { name: "GitHub account for ghe.contoso-labs.test" })
+      ).toHaveValue("release-bot");
+      await expect(github).toContainText(
+        "b.liskov is not signed in to gh here. PwrGit reads nothing from this host until b.liskov signs in again or you choose another account."
+      );
+      await expect(
+        github.getByRole("button", { name: "Use the active gh account for ghe.build.test" })
+      ).toBeVisible();
+      await expect(
+        github.getByRole("combobox", { name: "GitHub account for github.com" })
+      ).toHaveCount(0);
+      if (shots) {
+        await page.mouse.move(0, 0);
+        await github.screenshot({ path: join(shots, `host-accounts-${theme}.png`) });
+      }
+    }
   } finally {
     await app.close();
   }

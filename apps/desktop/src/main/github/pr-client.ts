@@ -9,7 +9,8 @@ import {
   type ForgeRepo,
   type OpenPrList
 } from "../forge/types";
-import { runGh } from "./gh-cli";
+import { githubCredentials, runGh } from "./gh-cli";
+import { GITHUB_DOT_COM } from "./gh-account";
 import { ForgeResponseError } from "../forge/repo-provider";
 import {
   buildCommitPrQuery,
@@ -28,32 +29,34 @@ async function gh(args: string[]): Promise<string> {
   return runGh(args);
 }
 
-const TOKEN_TTL_MS = 5 * 60_000;
-/** Keyed by host, mirroring `getGitLabToken`: an Enterprise Server instance and
- *  github.com are different credentials, and a single-slot cache would hand one
- *  host's token to the other for the rest of the TTL. */
-const tokenCache = new Map<string, { token: string; at: number }>();
+export { GITHUB_DOT_COM };
 
-export const GITHUB_DOT_COM = "github.com";
-
-/** Only reset by tests; the cache is otherwise per-host and time-bounded. */
+/** Only reset by tests; the cache is otherwise per host and account, and
+ *  time-bounded. */
 export function clearGitHubTokenCache(): void {
-  tokenCache.clear();
+  githubCredentials.clear();
 }
 
 /**
- * `GITHUB_TOKEN` if set, else the token `gh` already holds for this host.
+ * The environment token that applies to this host, else the token `gh` holds
+ * for the account this host reads as.
  *
  * `gh auth token` without `--hostname` answers for whatever host `gh` considers
  * default, which on a machine signed in to both github.com and an Enterprise
  * instance is a coin toss the caller cannot see. Always ask for the host we are
  * about to query.
  *
- * `GITHUB_TOKEN` applies to **github.com only**. It is a github.com PAT in
- * every convention that sets it, and sending it to a self-managed Enterprise
- * host would hand that server a credential for a forge it has nothing to do
- * with. `gh` draws the same line (`GH_ENTERPRISE_TOKEN` is a separate
- * variable), so an Enterprise host falls through to `gh auth token` instead.
+ * **The account.** A host pinned to an account (`ForgeHostConfig.account`)
+ * asks `gh auth token --hostname H --user A`; an unpinned one gets gh's active
+ * account. The cache is keyed by host AND account. A pinned account gh cannot
+ * answer for is null — signed out — and is never retried as the active
+ * account. The logic is `GitHubCredentials.token` in `gh-account.ts`.
+ *
+ * `GITHUB_TOKEN` (and `GH_TOKEN`) apply to **github.com only**. A github.com
+ * PAT sent to a self-managed Enterprise host would hand that server a
+ * credential for a forge it has nothing to do with. `gh` draws the same line:
+ * `GH_ENTERPRISE_TOKEN` is a separate variable, and PwrGit honours it only for
+ * the host `GH_HOST` names. An environment token outranks a pinned account.
  *
  * Omitting `host` means "whatever host `gh` considers default", NOT github.com.
  * That distinction is load-bearing: `GH_HOST` sets gh's default, and defaulting
@@ -68,32 +71,7 @@ export function clearGitHubTokenCache(): void {
 export async function getGitHubToken(
   host?: string
 ): Promise<string | null> {
-  const key = host?.trim().toLowerCase() ?? "";
-  const cached = tokenCache.get(key);
-  if (cached !== undefined && Date.now() - cached.at < TOKEN_TTL_MS) {
-    return cached.token;
-  }
-  // "" is gh's own default host, which GITHUB_TOKEN has always applied to.
-  const env =
-    key === "" || key === GITHUB_DOT_COM
-      ? process.env.GITHUB_TOKEN?.trim()
-      : undefined;
-  if (env) {
-    tokenCache.set(key, { token: env, at: Date.now() });
-    return env;
-  }
-  try {
-    const token = await gh(
-      key === "" ? ["auth", "token"] : ["auth", "token", "--hostname", key]
-    );
-    if (token) {
-      tokenCache.set(key, { token, at: Date.now() });
-      return token;
-    }
-  } catch {
-    // gh missing, or holds no account for this host.
-  }
-  return null;
+  return await githubCredentials.token(host);
 }
 
 /**

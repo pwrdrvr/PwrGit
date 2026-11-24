@@ -194,6 +194,11 @@ export function ForgeProductSection(props: {
   const state = forgeProductState(status);
   const { label, addHost } = forgeProduct(kind);
   const rows = hosts ?? [];
+  // The account select per host, so "Use active account" can hand focus to
+  // the control that now shows the choice it just made.
+  const [accountSelects] = useState(() => ({
+    current: new Map<string, HTMLSelectElement>()
+  }));
 
   return (
     <SettingsSection
@@ -242,6 +247,18 @@ export function ForgeProductSection(props: {
                   derived={props.names.get(row.host) ?? row.host}
                   onCommit={(label) => props.onWrite(row, { label })}
                 />
+                {offersAccountChoice(row) ? (
+                  <ForgeHostAccountField
+                    row={row}
+                    productLabel={label}
+                    blocked={props.blocked}
+                    selectRef={(element) => {
+                      if (element === null) accountSelects.current.delete(row.host);
+                      else accountSelects.current.set(row.host, element);
+                    }}
+                    onChoose={(account) => props.onWrite(row, { account })}
+                  />
+                ) : null}
                 <SettingsSwitch
                   checked={row.enabled}
                   // In-flight is aria-disabled, never disabled: Chromium
@@ -293,6 +310,19 @@ export function ForgeProductSection(props: {
                 {row.origin === "config" && row.enabledSource !== "auto" ? (
                   <span>{sourceNote(row)}</span>
                 ) : null}
+                <ForgeHostAccountNote
+                  row={row}
+                  copied={props.copied === row.host}
+                  blocked={props.blocked}
+                  onUseActive={() => {
+                    if (props.blocked) return;
+                    props.onWrite(row, { account: "" });
+                    // The button goes once the write lands; the select is
+                    // where the choice now reads.
+                    accountSelects.current.get(row.host)?.focus();
+                  }}
+                  onCopy={() => props.onCopy(row)}
+                />
                 {row.origin === "config" || row.kindSource === "config" ? (
                   <span className="settings-field__actions">
                     {row.origin === "config" ? (
@@ -452,6 +482,176 @@ function ForgeHostNameField(props: {
   );
 }
 
+/**
+ * Whether a host's row offers an account choice.
+ *
+ * Only where there is one, the rule `AiFeaturesSettings` uses for a provider
+ * with a single option: a product whose CLI can read as a named account
+ * (`accountChoice`), no environment token in charge, and either two accounts
+ * to choose between or a choice already made — a pinned account that has
+ * since signed out still needs a control to move off it.
+ */
+function offersAccountChoice(row: ForgeHostRow): boolean {
+  if (!forgeProduct(row.kind).accountChoice || row.tokenEnv !== undefined) {
+    return false;
+  }
+  return (row.accounts?.length ?? 0) >= 2 || row.chosenAccount !== undefined;
+}
+
+/** The account the CLI itself has active here, when it reports one. */
+function activeAccount(row: ForgeHostRow): string | undefined {
+  return row.accounts?.find((entry) => entry.active)?.login;
+}
+
+/** A pinned account the CLI no longer holds. Nothing is read from the host
+ *  until it signs in again or another is chosen — `account` is absent then,
+ *  because main refuses to fall back. */
+function chosenAccountSignedOut(row: ForgeHostRow): boolean {
+  return (
+    row.chosenAccount !== undefined &&
+    row.tokenEnv === undefined &&
+    row.account === undefined
+  );
+}
+
+function accountWarningId(row: ForgeHostRow): string {
+  return `forge-account-warning-${row.host}`;
+}
+
+/**
+ * Which account a host is read as.
+ *
+ * A native select: the choices are a handful of logins, and a native control
+ * gets arrow keys, type-ahead and the platform's own announcement for free.
+ * "Active gh account (…)" is its own choice, the first one, and saves no
+ * account — it follows `gh auth switch`. Picking a login, even the one that is
+ * active today, pins it.
+ *
+ * A choice writes at once, like the switch beside it, and focus stays here.
+ * In flight it is aria-disabled, never disabled, for the reason the switch
+ * gives: Chromium blurs a disabled element. A switched-off host DOES disable
+ * it — nothing is read there, and the select stays visible so the choice is
+ * kept rather than looking forgotten.
+ */
+function ForgeHostAccountField(props: {
+  row: ForgeHostRow;
+  productLabel: string;
+  blocked: boolean;
+  selectRef: (element: HTMLSelectElement | null) => void;
+  onChoose: (account: string) => void;
+}) {
+  const { row } = props;
+  const accounts = row.accounts ?? [];
+  const active = activeAccount(row);
+  const chosen = row.chosenAccount;
+  const stale = chosen !== undefined && !accounts.some((entry) => entry.login === chosen);
+  return (
+    <label className="settings-inline-field">
+      <span className="settings-inline-field__label">Account</span>
+      <select
+        ref={props.selectRef}
+        aria-label={`${props.productLabel} account for ${row.host}`}
+        aria-disabled={props.blocked}
+        {...(chosenAccountSignedOut(row) && row.enabled
+          ? { "aria-describedby": accountWarningId(row) }
+          : {})}
+        className="settings-select"
+        disabled={!row.enabled}
+        value={chosen ?? ""}
+        onChange={(event) => {
+          if (props.blocked) return;
+          props.onChoose(event.target.value);
+        }}
+      >
+        <option value="">
+          {active === undefined
+            ? `Active ${row.cli} account`
+            : `Active ${row.cli} account (${active})`}
+        </option>
+        {accounts.map((entry) => (
+          <option key={entry.login} value={entry.login}>
+            {entry.login}
+          </option>
+        ))}
+        {stale ? <option value={chosen}>{`${chosen} (not signed in)`}</option> : null}
+      </select>
+    </label>
+  );
+}
+
+/**
+ * What the account choice means for this host, in the row's help.
+ *
+ * A signed-out pinned account is a warning line, not an alert: it describes a
+ * saved state, not something that just happened, and the select names it as
+ * its description so it is heard where the fix is made.
+ */
+function ForgeHostAccountNote(props: {
+  row: ForgeHostRow;
+  copied: boolean;
+  blocked: boolean;
+  onUseActive: () => void;
+  onCopy: () => void;
+}) {
+  const { row } = props;
+  if (!forgeProduct(row.kind).accountChoice) return null;
+  if (row.tokenEnv !== undefined) {
+    return (
+      <span>
+        Token from <code>{row.tokenEnv}</code>. The account choice does not
+        apply.
+      </span>
+    );
+  }
+  // Off reads nothing, with any account; the select keeps the choice for
+  // when the host comes back on, and the switch's own note says why.
+  if (!row.enabled) return null;
+  const chosen = row.chosenAccount;
+  if (chosen === undefined) {
+    return row.origin === "cli" && row.accounts?.length === 1 ? (
+      <span>One account, so there is nothing to choose.</span>
+    ) : null;
+  }
+  if (!chosenAccountSignedOut(row)) {
+    return (
+      <span>
+        PwrGit reads as {chosen} here, whichever account <code>{row.cli}</code>{" "}
+        has active.
+      </span>
+    );
+  }
+  const active = activeAccount(row);
+  return (
+    <>
+      <span className="settings-field__warning" id={accountWarningId(row)}>
+        {chosen} is not signed in to <code>{row.cli}</code> here. PwrGit reads
+        nothing from this host until {chosen} signs in again or you choose
+        another account.
+      </span>
+      <span className="settings-field__actions">
+        {active === undefined ? null : (
+          <button
+            aria-disabled={props.blocked}
+            aria-label={`Use the active ${row.cli} account for ${row.host}`}
+            className="settings-inline-button"
+            type="button"
+            onClick={props.onUseActive}
+          >
+            Use active account ({active})
+          </button>
+        )}
+        <button
+          className="settings-inline-button"
+          type="button"
+          onClick={props.onCopy}
+        >
+          {props.copied ? "Copied" : "Copy sign-in command"}
+        </button>
+      </span>
+    </>
+  );
+}
+
 /** The per-host sign-in command. Exported because the row RENDERS it and the
  *  pane's Copy button puts it on the clipboard — two places that must never
  *  print different commands. */
@@ -470,7 +670,17 @@ export function signInCommand(row: ForgeHostRow): string {
  */
 function describeRow(row: ForgeHostRow): string {
   const parts: string[] = [];
-  if (row.account !== undefined) parts.push(`signed in as ${row.account}`);
+  const several = forgeProduct(row.kind).accountChoice && (row.accounts?.length ?? 0) > 1;
+  if (several) {
+    // "reads as", not "signed in as", once there is more than one account:
+    // the row must never name one account while PwrGit reads with another.
+    // A pinned account that has signed out reads as nobody, so only the
+    // count is said.
+    if (row.account !== undefined) parts.push(`reads as ${row.account}`);
+    parts.push(`${row.accounts?.length ?? 0} accounts`);
+  } else if (row.account !== undefined) {
+    parts.push(`signed in as ${row.account}`);
+  }
   if (row.kindSource === "config") parts.push("added by you");
   if (parts.length === 0) {
     parts.push(

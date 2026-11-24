@@ -3,6 +3,8 @@ import {
   FORGE_KINDS,
   forgeProduct,
   isForgeKind,
+  sanitizeForgeHostAccount,
+  type ForgeHostAccount,
   type ForgeHostConfig,
   type ForgeKind,
   type ForgeSettings,
@@ -12,6 +14,23 @@ import type { DiscoveredForgeHost } from "./cli-hosts";
 import type { ForgeHostRow } from "@pwrgit/shared";
 import type { ForgeProbeTarget } from "./status";
 import type { ForgeHostOverrides } from "./resolve";
+import { githubEnvToken } from "../github/gh-env-token";
+
+/**
+ * The environment variable a product's CLI takes this host's token from,
+ * when one applies — and with it, the account choice stops applying.
+ *
+ * Only products with `accountChoice` are asked; the others have no choice for
+ * an environment token to override. The name only: the value never leaves
+ * the credential module.
+ */
+const ENV_TOKEN_NAME: Readonly<
+  Record<ForgeKind, (host: string, env: NodeJS.ProcessEnv) => string | undefined>
+> = {
+  gitcafe: () => undefined,
+  github: (host, env) => githubEnvToken(host, env)?.name,
+  gitlab: () => undefined
+};
 
 /** Env escape hatches, mirroring the `GITHUB_TOKEN`/`GITLAB_TOKEN` pattern
  *  already used by the CLI clients. A comma-separated allowlist of hosts;
@@ -59,7 +78,14 @@ export type ForgeHostEntry = ResolvedForgeHost & {
   /** `cli` — the CLI is signed in here. `config` — the user added it by hand
    *  and no CLI reports it, which is the state that needs a sign-in prompt. */
   origin: "cli" | "config";
+  /** The account this host reads as. See `ForgeHosts.accountFields`. */
   account?: string;
+  /** Every account the CLI holds here, when it can hold several. */
+  accounts?: ForgeHostAccount[];
+  /** The pinned account, whether or not it still resolves. */
+  chosenAccount?: string;
+  /** The environment variable this host's token comes from, when one applies. */
+  tokenEnv?: string;
   scopes?: string[];
 };
 
@@ -249,6 +275,63 @@ export class ForgeHosts {
     return { enabled: true, source: "auto" };
   }
 
+  /**
+   * The account this host is pinned to, or undefined to follow the CLI's
+   * active account.
+   *
+   * Only for a product whose CLI can hand over a named account's token
+   * (`accountChoice`); anywhere else a stored account would be a setting that
+   * changes nothing. Sanitized on read, because settings.json is parsed
+   * unvalidated and this value becomes `gh auth token --user` argv. Kept for a
+   * switched-off host too: off stops reads, it does not forget the choice.
+   */
+  accountFor(host: string): string | undefined {
+    const key = canonical(host);
+    const { kind } = this.kindFor(key);
+    if (kind === null || !forgeProduct(kind).accountChoice) return undefined;
+    return sanitizeForgeHostAccount(this.configFor(key)?.account) ?? undefined;
+  }
+
+  /** The environment variable this host's token comes from, when one applies. */
+  tokenEnvFor(host: string): string | undefined {
+    const key = canonical(host);
+    const { kind } = this.kindFor(key);
+    if (kind === null || !forgeProduct(kind).accountChoice) return undefined;
+    return ENV_TOKEN_NAME[kind](key, this.env);
+  }
+
+  /**
+   * The account fields of one host's row, and the one answer to "which
+   * account does PwrGit read this host as".
+   *
+   * An environment token outranks everything: the account is what the CLI
+   * reports as active (gh names the token's owner). Otherwise a pinned
+   * account is the answer while the CLI still holds it, and NOBODY once it
+   * does not — the credential layer refuses to fall back, so naming the
+   * active account here would put one name on screen while reads fail.
+   * Without a pin, the active account.
+   */
+  private accountFields(
+    host: string,
+    found: DiscoveredForgeHost | undefined
+  ): Pick<ForgeHostEntry, "account" | "accounts" | "chosenAccount" | "tokenEnv"> {
+    const chosen = this.accountFor(host);
+    const tokenEnv = this.tokenEnvFor(host);
+    const accounts = found?.accounts?.map(({ login, active }) => ({ login, active }));
+    const readsAs =
+      tokenEnv !== undefined || chosen === undefined
+        ? found?.account
+        : accounts?.some((entry) => entry.login === chosen) === true
+          ? chosen
+          : undefined;
+    return {
+      ...(readsAs === undefined ? {} : { account: readsAs }),
+      ...(accounts === undefined ? {} : { accounts }),
+      ...(chosen === undefined ? {} : { chosenAccount: chosen }),
+      ...(tokenEnv === undefined ? {} : { tokenEnv })
+    };
+  }
+
   /** Everything resolved, for one host. */
   resolve(host: string): ResolvedForgeHost {
     const key = canonical(host);
@@ -295,12 +378,18 @@ export class ForgeHosts {
       entries.set(found.host, {
         ...resolved,
         origin: "cli",
-        ...(found.account === undefined ? {} : { account: found.account }),
+        ...this.accountFields(found.host, found),
         ...(found.scopes === undefined ? {} : { scopes: found.scopes })
       });
     }
     for (const [host, resolved] of mismatched) {
-      if (!entries.has(host)) entries.set(host, { ...resolved, origin: "config" });
+      if (!entries.has(host)) {
+        entries.set(host, {
+          ...resolved,
+          origin: "config",
+          ...this.accountFields(host, undefined)
+        });
+      }
     }
     for (const key of this.configs().keys()) {
       if (entries.has(key)) continue;
@@ -308,7 +397,11 @@ export class ForgeHosts {
       // A config entry that only flipped a switch on a host no CLI reports
       // names no forge, so there is nothing to show a row for.
       if (resolved.kind === null) continue;
-      entries.set(key, { ...resolved, origin: "config" });
+      entries.set(key, {
+        ...resolved,
+        origin: "config",
+        ...this.accountFields(key, undefined)
+      });
     }
     return [...entries.values()].sort((a, b) => a.host.localeCompare(b.host));
   }
@@ -340,7 +433,8 @@ export class ForgeHosts {
       targets.set(`${entry.kind} ${entry.host}`, {
         kind: entry.kind,
         host: entry.host,
-        enabled: entry.enabled
+        enabled: entry.enabled,
+        ...withAccount(this.accountFor(entry.host))
       });
     }
     // Hosts named only by a product's `hostAllowlistEnv` have no settings row,
@@ -356,7 +450,8 @@ export class ForgeHosts {
       targets.set(key, {
         kind,
         host,
-        enabled: this.isEnabled(host).enabled
+        enabled: this.isEnabled(host).enabled,
+        ...withAccount(this.accountFor(host))
       });
     }
     for (const kind of FORGE_KINDS) {
@@ -466,10 +561,20 @@ export class ForgeHostsView {
               origin: entry.origin,
               cli: forgeProduct(entry.kind).cli,
               ...(entry.account === undefined ? {} : { account: entry.account }),
+              ...(entry.accounts === undefined ? {} : { accounts: entry.accounts }),
+              ...(entry.chosenAccount === undefined
+                ? {}
+                : { chosenAccount: entry.chosenAccount }),
+              ...(entry.tokenEnv === undefined ? {} : { tokenEnv: entry.tokenEnv }),
               ...(entry.scopes === undefined ? {} : { scopes: entry.scopes }),
               ...(entry.label === undefined ? {} : { label: entry.label })
             }
           ]
     );
   }
+}
+
+/** A probe target's account, spread only when one is pinned. */
+function withAccount(account: string | undefined): { account?: string } {
+  return account === undefined ? {} : { account };
 }

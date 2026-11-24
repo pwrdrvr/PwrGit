@@ -26,8 +26,11 @@ import type { DiscoveredForgeHost } from "../../../src/main/forge/cli-hosts";
 
 type World = {
   installed: Record<ForgeKind, boolean>;
-  /** What each CLI holds a credential for, and so reports. */
+  /** What each CLI holds a credential for, and so reports: the ACTIVE
+   *  account per host. */
   signedIn: Record<ForgeKind, Record<string, string>>;
+  /** Further accounts `gh` holds on a host, not active. */
+  moreAccounts?: Record<string, string[]>;
   settings: Record<string, ForgeHostConfig>;
   env: Record<string, string>;
 };
@@ -36,7 +39,10 @@ export type View =
   /** gh reports a host the user added as GitLab. */
   | "cross-cli"
   /** An env allowlist gives gitlab.com to GitHub; glab is signed in there. */
-  | "reassigned-saas";
+  | "reassigned-saas"
+  /** Two accounts on two Enterprise hosts: one pinned to its bot, one pinned
+   *  to an account that has since signed out. */
+  | "host-accounts";
 
 const VIEWS: Record<View, World> = {
   "cross-cli": {
@@ -54,13 +60,43 @@ const VIEWS: Record<View, World> = {
     signedIn: { github: { "github.com": "octo-dev" }, gitlab: { "gitlab.com": "o.dev" }, gitcafe: {} },
     settings: {},
     env: { PWRGIT_GITHUB_HOSTS: "github.com,gitlab.com" }
+  },
+  "host-accounts": {
+    installed: { github: true, gitlab: false, gitcafe: false },
+    signedIn: {
+      github: {
+        "github.com": "octo-dev",
+        "ghe.contoso-labs.test": "a.hopper",
+        "ghe.build.test": "a.hopper"
+      },
+      gitlab: {},
+      gitcafe: {}
+    },
+    moreAccounts: {
+      "ghe.contoso-labs.test": ["release-bot"],
+      "ghe.build.test": ["release-bot"]
+    },
+    settings: {
+      "ghe.contoso-labs.test": { account: "release-bot" },
+      "ghe.build.test": { account: "b.liskov" }
+    },
+    env: {}
   }
 };
 
 function discovered(world: World): DiscoveredForgeHost[] {
   return FORGE_KINDS.flatMap((kind) =>
     world.installed[kind]
-      ? Object.entries(world.signedIn[kind]).map(([host, account]) => ({ kind, host, account }))
+      ? Object.entries(world.signedIn[kind]).map(([host, account]) => ({
+          kind,
+          host,
+          account,
+          accounts: [account, ...(world.moreAccounts?.[host] ?? [])].map((login) => ({
+            host,
+            login,
+            active: login === account
+          }))
+        }))
       : []
   );
 }
@@ -77,7 +113,16 @@ function statuses(world: World, hosts: ForgeHosts): ForgeStatus[] {
         host: target.host,
         enabled: target.enabled,
         assumed: target.assumed === true,
-        loggedIn: target.enabled && target.host in world.signedIn[kind]
+        // A pinned account the CLI does not hold reads nothing, as
+        // `GitHubCredentials.token` answers. A build whose targets carry no
+        // account (before the choice existed) reads as the active one.
+        loggedIn:
+          target.enabled &&
+          target.host in world.signedIn[kind] &&
+          (target.account === undefined ||
+            [world.signedIn[kind][target.host], ...(world.moreAccounts?.[target.host] ?? [])].includes(
+              target.account
+            ))
       }));
     return {
       ...base,
@@ -91,6 +136,7 @@ function statuses(world: World, hosts: ForgeHosts): ForgeStatus[] {
 }
 
 let world = VIEWS["cross-cli"];
+let theme: "light" | "dark" = "light";
 const read = () => {
   const found = discovered(world);
   const hosts = new ForgeHosts({
@@ -105,7 +151,9 @@ const snapshot = { general: GENERAL_DEFAULTS } as AppSettingsSnapshot;
 const bridge = {
   profileId: null,
   platform: "darwin",
-  appearance: { theme: "light", resolvedTheme: "light" },
+  get appearance() {
+    return { theme, resolvedTheme: theme };
+  },
   getAppMenuModel: async () => [],
   popupAppMenu: () => undefined,
   runWindowControl: async () => undefined,
@@ -113,7 +161,7 @@ const bridge = {
   onWindowFrameState: () => () => undefined,
   dispatch: async (name: string) => {
     if (name === "settings:read") return ok(snapshot);
-    if (name === "appearance:read") return ok({ theme: "light", resolvedTheme: "light" });
+    if (name === "appearance:read") return ok({ theme, resolvedTheme: theme });
     if (name === "profile:list") {
       return ok({
         activeProfileId: "demo",
@@ -146,9 +194,11 @@ const harness = {
     ].map((font) => document.fonts.load(font)));
     await document.fonts.ready;
   })(),
-  mount(view: View): void {
+  mount(view: View, nextTheme: "light" | "dark" = "light"): void {
     root?.unmount();
     world = VIEWS[view];
+    theme = nextTheme;
+    document.documentElement.dataset["theme"] = nextTheme;
     window.location.hash = "#settings?page=forges";
     root = createRoot(document.getElementById("root")!);
     root.render(<SettingsWindow />);
