@@ -1,7 +1,11 @@
 import { createReadStream, createWriteStream } from "node:fs";
+import { readFile } from "node:fs/promises";
 import { pipeline } from "node:stream/promises";
-import { workerData } from "node:worker_threads";
+import { fileURLToPath } from "node:url";
+import { isMainThread, Worker, workerData } from "node:worker_threads";
 import { traceJsonFragment } from "./chromium-trace-json.ts";
+
+export type ChromiumTraceFilterResult = { cpuMs: number } | { error: string };
 
 // The native JSON exporter can include URLs, arbitrary User Timing names and
 // nested metadata regardless of enable_argument_filter. Rebuild the artifact
@@ -138,9 +142,37 @@ async function* filterTrace(rawPath: string, allowedCategories: readonly string[
   yield "]}";
 }
 
-const { rawPath, filteredPath, allowedCategories } = workerData as {
-  rawPath: string;
-  filteredPath: string;
-  allowedCategories: readonly string[];
-};
-await pipeline(filterTrace(rawPath, allowedCategories), createWriteStream(filteredPath, { flags: "wx", mode: 0o600 }));
+if (isMainThread) {
+  // Run the existing heap-limited worker in a utility process so its CPU
+  // (including I/O and V8 background work) is outside the browser process.
+  // Load the self-contained bundle through Electron's ASAR-aware filesystem.
+  try {
+    const [rawPath, filteredPath, ...allowedCategories] = process.argv.slice(2);
+    const source = await readFile(fileURLToPath(import.meta.url), "base64");
+    const worker = new Worker(new URL(`data:text/javascript;base64,${source}`), {
+      workerData: { rawPath, filteredPath, allowedCategories },
+      resourceLimits: { maxOldGenerationSizeMb: 96 }
+    });
+    await new Promise<void>((resolve, reject) => {
+      worker.once("error", reject);
+      worker.once("exit", (code) => {
+        if (code === 0) resolve();
+        else reject(new Error(`Chromium trace filter exited with code ${code}`));
+      });
+    });
+    const { user, system } = process.cpuUsage();
+    process.parentPort.postMessage({ cpuMs: (user + system) / 1_000 } satisfies ChromiumTraceFilterResult);
+    process.exit(0);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Chromium trace filter failed";
+    process.parentPort.postMessage({ error: message } satisfies ChromiumTraceFilterResult);
+    process.exit(1);
+  }
+} else {
+  const { rawPath, filteredPath, allowedCategories } = workerData as {
+    rawPath: string;
+    filteredPath: string;
+    allowedCategories: readonly string[];
+  };
+  await pipeline(filterTrace(rawPath, allowedCategories), createWriteStream(filteredPath, { flags: "wx", mode: 0o600 }));
+}

@@ -2,6 +2,7 @@ import { createServer } from "node:http";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { createPackage } from "@electron/asar";
 import { _electron as electron, expect, test } from "@playwright/test";
 import { DIAGNOSTICS_DEFAULTS } from "@pwrgit/shared";
 import { build } from "vite";
@@ -12,8 +13,9 @@ const HERE = dirname(fileURLToPath(import.meta.url));
 test("a rolling Chromium trace retains trigger context when export acknowledgement follows the CPU notice", async ({}, info) => {
   test.setTimeout(90_000);
   const html = info.outputPath("index.html");
-  const controller = info.outputPath("diagnostics-manager.mjs");
-  const worker = info.outputPath("chromium-trace-worker.mjs");
+  const controller = info.outputPath("modules", "diagnostics-manager.mjs");
+  const worker = info.outputPath("modules", "chromium-trace-worker.mjs");
+  const archive = info.outputPath("app.asar");
   const outputRoot = info.outputPath("diagnostics");
   await mkdir(dirname(html), { recursive: true });
   await writeFile(html, "<!doctype html><meta charset=utf-8><main>Trace fixture</main>");
@@ -35,6 +37,7 @@ test("a rolling Chromium trace retains trigger context when export acknowledgeme
       }
     }
   });
+  await createPackage(dirname(worker), archive);
 
   const privateValue = "synthetic-private-trace-value";
   const lineageMark = "PwrGit Lineage publish repo-change view=1 target=2";
@@ -215,7 +218,8 @@ test("a rolling Chromium trace retains trigger context when export acknowledgeme
       } finally {
         await manager.shutdown();
       }
-    }, { controller, worker, outputRoot, privateValue, lineageMark, url, profileDurationMs, logsPath: info.outputPath("logs"), settings: {
+    }, { controller, worker: join(archive, "chromium-trace-worker.mjs"), outputRoot, privateValue, lineageMark, url,
+      profileDurationMs, logsPath: info.outputPath("logs"), settings: {
       ...DIAGNOSTICS_DEFAULTS, hotCpuProfilingEnabled: true, hotCpuProfilingStartDelayMs: 0 as const,
       hotCpuProfilingRules: { ...DIAGNOSTICS_DEFAULTS.hotCpuProfilingRules,
         slowburn: { ...DIAGNOSTICS_DEFAULTS.hotCpuProfilingRules.slowburn, enabled: true }
@@ -223,7 +227,8 @@ test("a rolling Chromium trace retains trigger context when export acknowledgeme
       hotCpuProfilingCaptureChromiumTrace: true
     } });
 
-    expect(result.capture).toMatchObject({ status: "written" });
+    expect(result.capture).toMatchObject({ status: "written", filterCpuMs: expect.any(Number), filterElapsedMs: expect.any(Number) });
+    expect(result.capture?.filterCpuMs).toBeGreaterThan(0);
     expect(result.triggers).toBe(1);
     expect(result.matches).toMatchObject([
       { id: "sustained", sampleCount: 2, durationMs: 100, thresholdPercent: 50, sampleCpuPercent: 90 },

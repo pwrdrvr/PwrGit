@@ -2,8 +2,9 @@ import { addAbortListener } from "node:events";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { Worker } from "node:worker_threads";
-import type { ContentTracing, TraceConfig } from "electron";
+import { fileURLToPath } from "node:url";
+import { utilityProcess, type ContentTracing, type TraceConfig } from "electron";
+import type { ChromiumTraceFilterResult } from "./chromium-trace-worker";
 
 const TRACE_CATEGORIES = ["devtools.timeline", "blink.user_timing", "cc", "viz"];
 // A full 32 MiB rolling buffer has exported 141,316,964 bytes on Electron
@@ -38,7 +39,10 @@ type NativeStopTiming = {
 };
 
 type ChromiumTraceCapture =
-  | (NativeStopTiming & { status: "written"; recordingStartedAtMs: number; rawBytes: number; rawLimitBytes: number })
+  | (NativeStopTiming & {
+    status: "written"; recordingStartedAtMs: number; rawBytes: number; rawLimitBytes: number;
+    filterElapsedMs: number; filterCpuMs?: number;
+  })
   | { status: "skipped"; reason: "not-recording" | "trigger-predates-recording" | "canceled" };
 
 export class ChromiumTraceStopError extends Error {
@@ -54,7 +58,7 @@ type TraceOptions = {
   stopTimeoutMs?: number;
   filterTimeoutMs?: number;
   filterTrace?: (rawPath: string, filteredPath: string) => Promise<void>;
-  workerModule?: string | URL | undefined;
+  workerModule?: string | undefined;
 };
 
 async function withDeadline<T>(
@@ -154,10 +158,10 @@ export class ChromiumTrace {
         const profileWaitMs = Math.min(profileDurationMs + PROFILE_SETTLEMENT_GRACE_MS, 2_147_483_647);
         const publish = await withDeadline(Promise.resolve(canPublish()), profileWaitMs, "Waiting for CPU profile", signal);
         if (!publish) return { status: "skipped", reason: "canceled" };
-        await this.publish(frozen.rawPath, filePath, budget, signal);
+        const filter = await this.publish(frozen.rawPath, filePath, budget, signal);
         return {
           status: "written", recordingStartedAtMs: frozen.recording.wallMs,
-          ...frozen.timing, rawBytes, rawLimitBytes: MAX_RAW_TRACE_BYTES
+          ...frozen.timing, rawBytes, rawLimitBytes: MAX_RAW_TRACE_BYTES, ...filter
         };
       } finally {
         await frozen.cleanup();
@@ -219,7 +223,9 @@ export class ChromiumTrace {
     }
   }
 
-  private async publish(rawPath: string, filePath: string, budget: string, signal: AbortSignal): Promise<void> {
+  private async publish(rawPath: string, filePath: string, budget: string, signal: AbortSignal): Promise<{
+    filterElapsedMs: number; filterCpuMs?: number;
+  }> {
     // Stage the filtered file on the destination filesystem so it becomes
     // visible under the artifact name only after the entire export succeeds.
     let staging: string | undefined;
@@ -227,10 +233,14 @@ export class ChromiumTrace {
       signal.throwIfAborted();
       staging = await fs.mkdtemp(path.join(path.dirname(filePath), ".pwrgit-trace-"));
       const filteredPath = path.join(staging, "filtered.json");
-      if (this.options.filterTrace) await this.options.filterTrace(rawPath, filteredPath);
-      else await this.filterInWorker(rawPath, filteredPath, signal);
+      const started = performance.now();
+      const filterCpuMs = this.options.filterTrace
+        ? await this.options.filterTrace(rawPath, filteredPath)
+        : await this.filterInUtilityProcess(rawPath, filteredPath, signal);
+      const filterElapsedMs = performance.now() - started;
       signal.throwIfAborted();
       await fs.rename(filteredPath, filePath);
+      return { filterElapsedMs, ...(filterCpuMs !== undefined && { filterCpuMs }) };
     } catch (error) {
       if (signal.reason === TRACE_DISARMED) throw TRACE_DISARMED;
       const message = error instanceof Error ? error.message : String(error);
@@ -244,28 +254,35 @@ export class ChromiumTrace {
     }
   }
 
-  private async filterInWorker(rawPath: string, filteredPath: string, signal: AbortSignal): Promise<void> {
-    const module = this.options.workerModule ?? new URL("./chromium-trace-worker.ts", import.meta.url);
-    // Packaged workers live inside app.asar. Resolve the standalone ESM
-    // asset with Electron's filesystem before starting Node's loader.
-    const entry = typeof module === "string"
-      ? new URL(`data:text/javascript;base64,${await fs.readFile(module, "base64")}`)
-      : module;
+  private async filterInUtilityProcess(rawPath: string, filteredPath: string, signal: AbortSignal): Promise<number> {
     signal.throwIfAborted();
-    const worker = new Worker(entry, {
-      workerData: { rawPath, filteredPath, allowedCategories: TRACE_CATEGORIES },
-      resourceLimits: { maxOldGenerationSizeMb: 96 }
+    if (typeof utilityProcess?.fork !== "function") throw new Error("Isolated Chromium trace filtering is unavailable");
+    const entry = this.options.workerModule ?? fileURLToPath(new URL("./chromium-trace-worker.ts", import.meta.url));
+    const child = utilityProcess.fork(entry, [rawPath, filteredPath, ...TRACE_CATEGORIES], {
+      serviceName: "PwrGit Chromium trace filter", stdio: "ignore"
     });
+    let result: ChromiumTraceFilterResult | undefined;
+    child.once("message", (message: ChromiumTraceFilterResult) => { result = message; });
+    // Fatal V8 reports are followed by exit. Keep report contents out of logs.
+    child.on("error", () => {});
+    let exited = false;
+    const exit = new Promise<number>((resolve) => child.once("exit", (code) => {
+      exited = true;
+      resolve(code);
+    }));
     try {
-      await withDeadline(new Promise<void>((resolve, reject) => {
-        worker.once("error", reject);
-        worker.once("exit", (code) => {
-          if (code === 0) resolve();
-          else reject(new Error(`Chromium trace filter exited with code ${code}`));
-        });
-      }), this.options.filterTimeoutMs ?? FILTER_TIMEOUT_MS, "Filtering Chromium trace", signal);
+      const code = await withDeadline(exit, this.options.filterTimeoutMs ?? FILTER_TIMEOUT_MS, "Filtering Chromium trace", signal);
+      if (result && "error" in result) throw new Error(result.error);
+      if (code !== 0 || !result) throw new Error(`Chromium trace filter failed (exit code ${code})`);
+      return result.cpuMs;
     } finally {
-      await worker.terminate();
+      if (!exited) {
+        // An early abort can arrive before Electron has a PID to kill. Wait
+        // for exit before removing scratch files, including on Windows.
+        if (child.pid === undefined) child.once("spawn", () => child.kill());
+        else child.kill();
+        await exit;
+      }
     }
   }
 

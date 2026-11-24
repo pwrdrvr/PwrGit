@@ -1,21 +1,29 @@
 import { createHash } from "node:crypto";
+import { EventEmitter } from "node:events";
 import { createReadStream } from "node:fs";
 import fs from "node:fs/promises";
 import { mkdtemp, open, readdir, readFile, rename, rm, stat, truncate, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import fc from "fast-check";
 import { expect, it, vi } from "vitest";
 import { markRetryableTestBody } from "../../../../../scripts/ci/vitest-test-body.ts";
+import { forkTraceWorker } from "../../../test-support/chromium-trace-utility";
 import { ChromiumTrace } from "./chromium-trace";
 
+const { forkFilter } = vi.hoisted(() => ({ forkFilter: vi.fn() }));
+vi.mock("electron", () => ({ utilityProcess: { fork: forkFilter } }));
+
+forkFilter.mockImplementation(forkTraceWorker);
+
 const emptyTrace = JSON.stringify({ traceEvents: [] });
-const stalledWorker = new URL(`data:text/javascript,${encodeURIComponent(`
+const stalledWorker = `data:text/javascript,${encodeURIComponent(`
   import { workerData } from "node:worker_threads";
   import { writeFileSync } from "node:fs";
   writeFileSync(workerData.filteredPath, '{"traceEvents":[');
   setInterval(() => {}, 1_000);
-`)}`);
+`)}`;
 
 async function waitForPartialExport(directory: string): Promise<void> {
   await vi.waitFor(async () => {
@@ -24,6 +32,72 @@ async function waitForPartialExport(directory: string): Promise<void> {
     await expect(readFile(join(directory, staging!, "filtered.json"), "utf8")).resolves.toBe('{"traceEvents":[');
   }, { timeout: 3_000 });
 }
+
+it("publishes only after a successful utility exit and reaps canceled exports before cleanup", async () => {
+  await fc.assert(fc.asyncProperty(
+    fc.constantFrom("success", "disarm", "shutdown"),
+    fc.constantFrom("launching", "spawned", "reported"),
+    async (settlement, checkpoint) => {
+      const directory = await mkdtemp(join(tmpdir(), "pwrgit-trace-utility-model-"));
+      const output = join(directory, "trace.json");
+      let filterPaths!: [string, string];
+      let notifyFork!: () => void;
+      const forked = new Promise<void>(resolve => { notifyFork = resolve; });
+      const child = Object.assign(new EventEmitter(), { pid: undefined as number | undefined, kill: vi.fn() });
+      forkFilter.mockImplementationOnce((_entry: string, [rawPath, filteredPath]: [string, string]) => {
+        filterPaths = [rawPath, filteredPath];
+        notifyFork();
+        return child;
+      });
+      let mono = 0;
+      const trace = new ChromiumTrace(() => ({
+        async startRecording() {},
+        async stopRecording(file = "") { await writeFile(file, emptyTrace); return file; }
+      }), () => {}, { monotonicNow: () => ++mono });
+      const spawn = () => { child.pid = 42; child.emit("spawn"); };
+      const report = () => child.emit("message", { cpuMs: 123 });
+      try {
+        await trace.setArmed(true);
+        const capture = trace.capture(output, ++mono).catch((error: unknown) => error);
+        await Promise.race([forked, capture]);
+        expect(filterPaths).toBeDefined();
+        const [rawPath, filteredPath] = filterPaths;
+        if (checkpoint !== "launching") spawn();
+        if (checkpoint === "reported") report();
+        await writeFile(filteredPath, emptyTrace);
+        const disarm = settlement === "disarm" ? trace.setArmed(false) : undefined;
+        if (settlement === "shutdown") trace.beginShutdown(0);
+        await expect(stat(output)).rejects.toMatchObject({ code: "ENOENT" });
+        await expect(stat(rawPath)).resolves.toBeDefined();
+        await expect(stat(filteredPath)).resolves.toBeDefined();
+        if (checkpoint === "launching") {
+          expect(child.kill).not.toHaveBeenCalled();
+          spawn();
+        }
+        expect(child.kill).toHaveBeenCalledTimes(settlement === "success" ? 0 : 1);
+        if (checkpoint !== "reported") report();
+        child.pid = undefined;
+        child.emit("exit", 0);
+        const result = await capture;
+        if (settlement === "success") {
+          expect(result).toMatchObject({ status: "written", filterCpuMs: 123 });
+          await expect(readFile(output, "utf8")).resolves.toBe(emptyTrace);
+        } else {
+          expect(result).toMatchObject(settlement === "disarm"
+            ? { status: "skipped", reason: "canceled" }
+            : { message: expect.stringContaining("timed out during shutdown") });
+          await expect(readdir(directory)).resolves.toEqual([]);
+        }
+        await disarm;
+        await expect(stat(rawPath)).rejects.toMatchObject({ code: "ENOENT" });
+        await expect(stat(filteredPath)).rejects.toMatchObject({ code: "ENOENT" });
+      } finally {
+        child.emit("exit", 1);
+        await rm(directory, { recursive: true, force: true });
+      }
+    }
+  ), { numRuns: 30 });
+});
 
 it("reserves one frozen export across overlapping triggers, rearming, disarm and clock adjustments", async ({ task }) => {
   markRetryableTestBody(task);
@@ -538,7 +612,7 @@ it("discards malformed and timed-out exports and releases the recording queue", 
     await expect(stat(rawPath!)).rejects.toMatchObject({ code: "ENOENT" });
     expect(await readdir(directory)).toEqual([]);
 
-    options.workerModule = new URL("./chromium-trace-worker.ts", import.meta.url);
+    options.workerModule = fileURLToPath(new URL("./chromium-trace-worker.ts", import.meta.url));
     malformed = true;
     const failure = await trace.capture(output, ++mono).catch((error: Error) => error.message);
     expect(failure).toMatch(/^Chromium trace contains invalid JSON .*raw bytes/);
