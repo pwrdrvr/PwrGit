@@ -67,14 +67,6 @@ function applyAutomaticBenchmarkStyles(page: Page, stationary: boolean, animateW
   ` });
 }
 
-async function openRunHoverCard(page: Page) {
-  await page.mouse.move(2, 2);
-  await page.getByRole("button", { name: "Try pull all", exact: true }).hover();
-  const card = page.locator(".sync-run-card");
-  await expect(card).toBeVisible();
-  return card;
-}
-
 async function ready(page: Page): Promise<void> {
   await page.waitForFunction(() => "bulkSyncPaint" in window);
   await page.evaluate(() => window.bulkSyncPaint.ready);
@@ -131,38 +123,7 @@ test("the automatic-pull benchmark controls stripe motion and width transitions 
 });
 
 const shots = process.env["PWRGIT_HARNESS_SHOTS"];
-test("the live sync hover card shows an in-flight pattern without a paint animation", async ({ harness: { page } }) => {
-  await ready(page);
-  await start(page);
-  const card = await openRunHoverCard(page);
-  const segment = card.locator(`${hoverBar} > .is-in-flight`);
-  await expect(segment).not.toHaveClass(/\bis-empty\b/);
-  await expect(segment).toHaveCSS("background-image", /^repeating-linear-gradient\(/);
-  expect(await segment.evaluate((node) =>
-    node.getAnimations().filter((animation) => animation instanceof CSSAnimation).length
-  )).toBe(0);
-});
-
 if (shots !== undefined) {
-  test("captures the live sync hover card", async ({ harness: { page } }) => {
-    await ready(page);
-    await start(page);
-    await page.evaluate(() => {
-      for (let i = 0; i < 12; i++) window.bulkSyncPaint.complete(i, false);
-    });
-    await expect(page.locator(progressCount)).toHaveText("12/30");
-    const card = await openRunHoverCard(page);
-    await card.locator(`${hoverBar} > .is-in-flight`).evaluate((node) => {
-      for (const animation of node.getAnimations()) {
-        if (!(animation instanceof CSSAnimation)) continue;
-        animation.pause();
-        animation.currentTime = 400;
-      }
-    });
-    mkdirSync(shots, { recursive: true });
-    await card.screenshot({ path: join(shots, "sync-hover.png") });
-  });
-
   test("captures the automatic pull on the sync face", async ({ harness: { page } }) => {
     await ready(page);
     await start(page);
@@ -248,7 +209,81 @@ manualTest("collapsed Pull Recent updates both compact bars without animating th
   await expect(dialog.getByText("task-1: Checking for uncommitted changes…", { exact: true })).toBeVisible();
 });
 
+async function hoverRunCard(page: Page) {
+  const face = page.getByRole("button", { name: "Try pull recent", exact: true });
+  const card = page.getByRole("tooltip").filter({ hasText: "Pulling the Focused list" });
+  await face.hover();
+  await expect(card).toBeVisible();
+  return { face, card };
+}
+
+manualTest("Pull Recent hover card keeps live outcomes and stationary stripes", async ({ harness: { page } }) => {
+  await manualReady(page);
+  await startManual(page);
+  const { face, card } = await hoverRunCard(page);
+  const bar = card.locator(hoverBar);
+  const active = bar.locator(".is-in-flight");
+  const success = bar.locator(".is-success");
+  const skipped = bar.locator(".is-skipped");
+  for (const [from, to] of [[0, 0], [0, 2], [2, 7]] as const) {
+    await page.evaluate(([first, end]) => {
+      for (let i = first; i < end; i++) window.bulkSyncPaint.complete(i, false);
+    }, [from, to]);
+    await expect(card.getByText(`${to} of 30`, { exact: true })).toBeVisible();
+    await expect(active).toHaveCSS("background-image", /^repeating-linear-gradient\(/);
+    await expect(active).toHaveCSS("flex-grow", "3");
+    await expect(bar.locator(".is-queued")).toHaveCSS("flex-grow", String(27 - to));
+    // Chromium is the oracle for every live state sampled here. The texture
+    // schedules no further paints and the segment widths need no easing.
+    expect(await bar.evaluate((node) =>
+      node.getAnimations({ subtree: true }).map((animation) => animation.constructor.name)
+    )).toEqual([]);
+    expect(await bar.locator("i").evaluateAll((segments) =>
+      [...new Set(segments.map((segment) => getComputedStyle(segment).transitionProperty))]
+    )).toEqual(["none"]);
+    await expect(success).toHaveCSS("flex-grow", String(to === 7 ? 6 : to));
+    await expect(skipped).toHaveCSS("flex-grow", to === 7 ? "1" : "0");
+  }
+  await expect(card.getByText("3 running", { exact: true })).toBeVisible();
+  await expect(card.getByText("20 queued", { exact: true })).toBeVisible();
+  await page.mouse.move(2, 2);
+  await expect(card).toHaveCount(0);
+  await page.getByRole("button", { name: "Add repositories" }).focus();
+  await page.keyboard.press("Tab");
+  await expect(face).toBeFocused();
+  await expect(card.getByText("7 of 30", { exact: true })).toBeVisible();
+  await page.keyboard.press("Enter");
+  await expect(card).toHaveCount(0);
+  const dialog = page.getByRole("dialog");
+  await expect(dialog).toBeVisible();
+  await expect(dialog.locator(".bulk-sync__bar > .is-in-flight")).toHaveCSS("animation-name", "bulk-sync-stripes");
+  await expect(dialog.locator(".bulk-sync__bar > .is-success")).toHaveCSS("transition-property", "flex-grow");
+});
+
 if (shots !== undefined) {
+  manualTest("captures the open Pull Recent hover card", async ({ harness: { page } }) => {
+    await manualReady(page);
+    await startManual(page);
+    await page.evaluate(() => {
+      for (let i = 0; i < 12; i++) window.bulkSyncPaint.complete(i, false);
+    });
+    const { card } = await hoverRunCard(page);
+    await expect(card.getByText("12 of 30", { exact: true })).toBeVisible();
+    // Sample the animated baseline at a fixed point in its cycle.
+    await card.locator(hoverBar).evaluate((bar) => {
+      for (const animation of bar.getAnimations({ subtree: true })) {
+        if (!(animation instanceof CSSAnimation)) continue;
+        animation.pause();
+        animation.currentTime = 400;
+      }
+    });
+    mkdirSync(shots, { recursive: true });
+    await page.screenshot({
+      path: join(shots, "pull-recent-hover.png"),
+      clip: { x: 0, y: 0, width: 460, height: 270 }
+    });
+  });
+
   manualTest("captures collapsed Pull Recent", async ({ harness: { page } }) => {
     await manualReady(page);
     await startManual(page);
@@ -288,6 +323,7 @@ const readMetrics = async (cdp: CDPSession) => Object.fromEntries(
 
 function paintArea(nodeName = ""): string {
   if (nodeName === "#document") return "document";
+  if (/sync-run-card|viewport-tooltip/u.test(nodeName)) return "hoverCard";
   if (nodeName.includes("bulk-sync-toast")) return "toast";
   if (nodeName.includes("sidebar-toolbar")) return "toolbar";
   if (nodeName.includes("graph-")) return "lineage";
@@ -297,6 +333,86 @@ function paintArea(nodeName = ""): string {
 
 const benchmark = process.env["PWRGIT_BULK_PAINT_BENCH"] === "1" ? test : test.skip;
 const manualBenchmark = process.env["PWRGIT_BULK_TOAST_BENCH"] === "1" ? manualTest : manualTest.skip;
+const hoverBenchmark = process.env["PWRGIT_BULK_HOVER_BENCH"] === "1" ? manualTest : manualTest.skip;
+
+hoverBenchmark("measures the open Pull Recent hover card while steady and advancing", async ({ harness: { app, page } }) => {
+  test.setTimeout(180_000);
+  const cases = ["baseline", "static-stripes", "shipped-css"] as const;
+  const traceDir = process.env["PWRGIT_BULK_HOVER_TRACE_DIR"];
+  if (traceDir !== undefined) mkdirSync(traceDir, { recursive: true });
+  for (let sample = 0; sample < 3; sample++) {
+    for (const scenario of sample % 2 === 0 ? cases : [...cases].reverse()) {
+      await manualReady(page);
+      if (scenario !== "shipped-css") {
+        // Restore only the hover bar's old CSS. The stripe-only variant
+        // isolates the transition cost during the same progress workload.
+        await page.addStyleTag({ content: `
+          .bulk-sync__bar${hoverBar} > .is-in-flight:not(.is-empty) {
+            animation: ${scenario === "baseline" ? "bulk-sync-stripes 900ms linear infinite" : "none"};
+          }
+          .bulk-sync__bar${hoverBar} > i { transition: ${flexTransition}; }
+        ` });
+      }
+      await startManual(page);
+      const { card } = await hoverRunCard(page);
+      await expect(card.getByText("0 of 30", { exact: true })).toBeVisible();
+      await page.waitForTimeout(450);
+
+      const cdp = await page.context().newCDPSession(page);
+      const events: TraceEvent[] = [];
+      cdp.on("Tracing.dataCollected", ({ value }) => {
+        for (const event of value) events.push(event as unknown as TraceEvent);
+      });
+      await cdp.send("Performance.enable", { timeDomain: "threadTicks" });
+      await cdp.send("Tracing.start", { categories: "devtools.timeline,blink.user_timing,cc,viz" });
+      const probe = async (phase: string) => {
+        await page.evaluate((name) => performance.mark(`pull-recent-hover-${name}`), phase);
+        return { phase, cpu: await readCpu(app), metrics: await readMetrics(cdp) };
+      };
+      const steady = await probe("steady");
+      await page.waitForTimeout(2_000);
+      const advancing = await probe("advancing");
+      await page.evaluate(() => window.bulkSyncPaint.manualWorkload({ detail: true, invalidate: true }));
+      await page.waitForTimeout(350);
+      const end = await probe("end");
+      const finished = new Promise<void>((resolve) => cdp.once("Tracing.tracingComplete", () => resolve()));
+      await cdp.send("Tracing.end");
+      await finished;
+      await cdp.detach();
+
+      await expect(card.getByText("29 of 30", { exact: true })).toBeVisible();
+      const delivery = await page.evaluate(() => window.bulkSyncPaint.delivery);
+      expect(delivery).toMatchObject({ completed: 29, detailEvents: 509 });
+      if (traceDir !== undefined) {
+        writeFileSync(join(traceDir, `${scenario}-${sample}.json`), JSON.stringify({ traceEvents: events }));
+      }
+      for (const [from, to] of [[steady, advancing], [advancing, end]] as const) {
+        expect(to.cpu.pid).toBe(from.cpu.pid);
+        const start = events.find((event) => event.name === `pull-recent-hover-${from.phase}`)?.ts;
+        const end = events.find((event) => event.name === `pull-recent-hover-${to.phase}`)?.ts;
+        expect(start).toBeDefined();
+        expect(end).toBeGreaterThan(start!);
+        const paints = events.filter((event) =>
+          event.pid === from.cpu.pid && event.ts >= start! && event.ts < end! && event.name === "Paint" && event.ph === "X"
+        );
+        const paintsByNode: Record<string, number> = {};
+        for (const event of paints) {
+          const area = paintArea(event.args?.data?.nodeName);
+          paintsByNode[area] = (paintsByNode[area] ?? 0) + 1;
+        }
+        const delta = (name: string) => to.metrics[name]! - from.metrics[name]!;
+        console.log(JSON.stringify({
+          scenario, sample, phase: from.phase, wallMs: (end! - start!) / 1000,
+          rendererMs: (to.cpu.renderer - from.cpu.renderer) * 1000,
+          gpuMs: (to.cpu.gpu - from.cpu.gpu) * 1000,
+          layouts: delta("LayoutCount"), layoutMs: delta("LayoutDuration") * 1000,
+          paints: paints.length, paintsByNode
+        }));
+      }
+    }
+  }
+});
+
 manualBenchmark("measures collapsed Pull Recent by phase", async ({ harness: { app, page } }) => {
   test.setTimeout(360_000);
   const cases = [
