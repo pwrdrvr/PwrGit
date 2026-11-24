@@ -64,7 +64,7 @@
     "stream-json": "3.9.0"
   },
   "devDependencies": {
-    "@electron/asar": "^4.3.1",
+    "@electron/asar": "^4.3.2",
     "@electron/rebuild": "^4.2.1",
     "@playwright/test": "^1.65.0",
     "@types/better-sqlite3": "^7.6.13",
