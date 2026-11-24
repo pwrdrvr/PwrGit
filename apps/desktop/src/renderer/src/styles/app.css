@@ -7470,7 +7470,7 @@ button.agent-menu__item:hover {
 }
 /* Apply each completed repository immediately on the compact bars. Easing
    flex-grow there repeats layout between results across the main window. */
-.bulk-sync__bar:is(.sidebar-toolbar__progress, .bulk-sync-toast__bar) > i {
+.bulk-sync__bar:is(.sidebar-toolbar__progress, .bulk-sync-toast__bar, .sync-run-card__bar) > i {
   transition: none;
 }
 .bulk-sync__bar > i.is-empty,
@@ -7524,10 +7524,9 @@ button.agent-menu__item:hover {
   );
   animation: bulk-sync-stripes 900ms linear infinite;
 }
-/* Both compact surfaces already show live progress. Keep the in-flight
-   pattern without invalidating the window's paint layer on every frame. */
-.bulk-sync__bar.sidebar-toolbar__progress > .is-in-flight,
-.bulk-sync__bar.bulk-sync-toast__bar > .is-in-flight {
+/* Keep the in-flight pattern on compact progress bars without invalidating
+   the window's paint layer on every frame. */
+.bulk-sync__bar:is(.sidebar-toolbar__progress, .bulk-sync-toast__bar, .sync-run-card__bar) > .is-in-flight {
   animation: none;
 }
 .bulk-sync__bar > .is-in-flight.is-halted {
