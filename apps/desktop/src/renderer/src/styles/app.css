@@ -7468,6 +7468,11 @@ button.agent-menu__item:hover {
   background: var(--bulk-sync-outcome, transparent);
   transition: flex-grow 320ms ease;
 }
+/* Apply each completed repository immediately on the compact bars. Easing
+   flex-grow there repeats layout between results across the main window. */
+.bulk-sync__bar:is(.sidebar-toolbar__progress, .bulk-sync-toast__bar) > i {
+  transition: none;
+}
 .bulk-sync__bar > i.is-empty,
 .bulk-sync__bar > i.is-queued {
   min-width: 0;
@@ -7519,9 +7524,10 @@ button.agent-menu__item:hover {
   );
   animation: bulk-sync-stripes 900ms linear infinite;
 }
-/* The sync face already has a busy glyph and a live count. Keep the pattern
-   in its 2px bar without repainting it on every animation frame. */
-.bulk-sync__bar.sidebar-toolbar__progress > .is-in-flight {
+/* Both compact surfaces already show live progress. Keep the in-flight
+   pattern without invalidating the window's paint layer on every frame. */
+.bulk-sync__bar.sidebar-toolbar__progress > .is-in-flight,
+.bulk-sync__bar.bulk-sync-toast__bar > .is-in-flight {
   animation: none;
 }
 .bulk-sync__bar > .is-in-flight.is-halted {
