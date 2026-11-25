@@ -1,9 +1,11 @@
 // @vitest-environment jsdom
 import type { Worktree } from "@pwrgit/shared";
-import { act } from "react";
+import fc from "fast-check";
+import { act, useLayoutEffect } from "react";
 import { createRoot } from "react-dom/client";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
+import { flushFitLadders } from "../../lib/useFitLadder";
 import { WorktreeRow } from "./WorktreeRow";
 
 const worktree = (partial: Partial<Worktree>): Worktree => ({
@@ -53,6 +55,91 @@ const render = (
   wt: Worktree,
   options: { reorderable?: boolean; platform?: string } = {}
 ): string => renderToStaticMarkup(row(wt, options));
+
+it("reuses source badge fits on equivalent commits and settles changed content before a parent read", async () => {
+  const host = document.createElement("div");
+  document.body.append(host);
+  const root = createRoot(host);
+  const scrollWidth = Object.getOwnPropertyDescriptor(Element.prototype, "scrollWidth")!;
+  const clientWidth = Object.getOwnPropertyDescriptor(Element.prototype, "clientWidth")!;
+  let reads = 0;
+  let parentDepth = -1;
+  const badge = () => host.querySelector(".badge--source-row")!;
+  const depth = () => Number(badge().classList.contains("fit-glyph")) +
+    Number(badge().classList.contains("fit-gone"));
+  const snapshot = (branch: string, behind: number, dirty: number, head: string): Worktree =>
+    worktree({
+      branch, dirty, head,
+      source: { remote: "upstream", label: "upstream/main", ahead: 0, behind }
+    });
+
+  function Parent({ checkout }: { checkout: Worktree }) {
+    useLayoutEffect(() => {
+      flushFitLadders();
+      parentDepth = depth();
+    });
+    return row(checkout);
+  }
+
+  // A width model for jsdom. The branch needs one unit per character, a
+  // dirty tag takes four units, and the short badge trades its word for a glyph.
+  const room = 30;
+  const badgeWidths = (behind: number) => [10 + String(behind).length, 4 + String(behind).length, 0];
+  Object.defineProperty(Element.prototype, "scrollWidth", {
+    ...scrollWidth,
+    get(this: Element) {
+      if (!host.contains(this) || !this.matches(".wt-row__branch")) return scrollWidth.get!.call(this);
+      reads++;
+      return this.textContent!.length;
+    }
+  });
+  Object.defineProperty(Element.prototype, "clientWidth", {
+    ...clientWidth,
+    get(this: Element) {
+      if (!host.contains(this) || !this.matches(".wt-row__branch")) return clientWidth.get!.call(this);
+      const behind = Number(badge().textContent!.match(/↓(\d+)/)![1]);
+      return room - badgeWidths(behind)[depth()]! -
+        (this.parentElement!.querySelector(".badge--warn") === null ? 0 : 4);
+    }
+  });
+  const commit = async (checkout: Worktree) => {
+    reads = 0;
+    await act(() => root.render(<Parent checkout={checkout} />));
+    const width = badgeWidths(checkout.source!.behind);
+    const branch = checkout.branch.length + (checkout.dirty === 0 ? 0 : 4);
+    const expected = width.findIndex((size) => size + branch <= room);
+    expect(parentDepth).toBe(expected);
+    expect(depth()).toBe(expected);
+    const accessibleText = badge().nextElementSibling;
+    expect(accessibleText?.matches(".a11y-sr-only")).toBe(true);
+    expect(accessibleText?.textContent)
+      .toContain(`${checkout.branch} is ${checkout.source!.behind}`);
+  };
+  try {
+    await fc.assert(fc.asyncProperty(
+      fc.array(fc.tuple(
+        fc.integer({ min: 16, max: 25 }),
+        fc.constantFrom(2, 12, 120),
+        fc.integer({ min: 0, max: 2 })
+      ), { minLength: 1, maxLength: 8 }),
+      async (edits) => {
+        for (const [length, behind, dirty] of edits) {
+          const branch = "b".repeat(length);
+          await commit(snapshot(branch, behind, dirty, "prior"));
+          // An incoming repo snapshot can replace the checkout and its nested
+          // source object without changing anything the row needs to fit.
+          await commit(snapshot(branch, behind, dirty, "new-head"));
+          expect(reads).toBe(0);
+        }
+      }
+    ), { numRuns: 20 });
+  } finally {
+    await act(() => root.unmount());
+    host.remove();
+    Object.defineProperty(Element.prototype, "scrollWidth", scrollWidth);
+    Object.defineProperty(Element.prototype, "clientWidth", clientWidth);
+  }
+});
 
 /**
  * Park the pointer on one element of a live row and read the card it opens.
