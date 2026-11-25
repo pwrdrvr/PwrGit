@@ -1,5 +1,5 @@
 import { useRef } from "react";
-import { useStepLadder } from "../../lib/useFitLadder";
+import { useContentStepLadder } from "../../lib/useFitLadder";
 import {
   hoverTooltip,
   type ViewportTooltip
@@ -59,7 +59,7 @@ export function PullBadge({
   const ref = useRef<HTMLSpanElement>(null);
   const row = (): HTMLElement | null =>
     ref.current?.closest<HTMLElement>(".wt-row") ?? null;
-  useStepLadder(
+  useContentStepLadder(
     ref,
     () => {
       const badge = ref.current;
@@ -74,7 +74,9 @@ export function PullBadge({
     // Only the worktree's source badge steps. Settle wrapping before other
     // ladders measure the width left by the sidebar scrollbar.
     placement === "row" && pull.kind === "source" ? ROW_FIT_STEPS : [],
-    { observe: row, affectsHeight: true }
+    // The branch and sibling badges can change the fit even if this badge's
+    // text and the row's width stay the same.
+    { content: row, affectsHeight: true }
   );
   const sentence = pullSentence(pull, branch);
 

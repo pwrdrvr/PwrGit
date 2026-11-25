@@ -127,24 +127,34 @@ export function useFitLadder(
   }, []);
 }
 
-/** A stepped row whose in-flow content is all inside the stepped element. */
+/** Refit when the measured row's content or size changes. */
 export function useContentStepLadder(
   rowRef: RefObject<HTMLElement | null>,
   fits: () => boolean,
-  steps: readonly string[]
+  steps: readonly string[],
+  {
+    content = () => rowRef.current,
+    affectsHeight = false
+  }: {
+    /** The whole measured row if the steps apply to just one of its children. */
+    content?: () => HTMLElement | null;
+    affectsHeight?: boolean;
+  } = {}
 ): void {
-  const content = useRef<{ row: HTMLElement; observer: MutationObserver } | null>(null);
+  const observed = useRef<{ row: HTMLElement; observer: MutationObserver } | null>(null);
   const refit = useStepLadder(rowRef, fits, steps, {
+    observe: content,
+    affectsHeight,
     measureOnCommit: false,
     afterFit: () => {
       // The fit already covered these changes, including its own step writes.
-      content.current?.observer.takeRecords();
+      observed.current?.observer.takeRecords();
     }
   });
 
   useLayoutEffect(() => {
-    const row = rowRef.current;
-    const previous = content.current;
+    const row = steps.length === 0 || rowRef.current === null ? null : content();
+    const previous = observed.current;
     if (previous?.row === row) {
       // Ancestor layout effects can flush fits to read final row geometry.
       if (previous.observer.takeRecords().length > 0) refit();
@@ -152,7 +162,7 @@ export function useContentStepLadder(
     }
 
     previous?.observer.disconnect();
-    content.current = null;
+    observed.current = null;
     if (row === null) return;
     const observer = new MutationObserver(refit);
     observer.observe(row, {
@@ -165,11 +175,12 @@ export function useContentStepLadder(
     observer.observe(document.documentElement, {
       attributeFilter: ["data-sidebar-text", "data-density", "style"]
     });
-    content.current = { row, observer };
+    observed.current = { row, observer };
+    refit();
   });
   useLayoutEffect(() => () => {
-    content.current?.observer.disconnect();
-    content.current = null;
+    observed.current?.observer.disconnect();
+    observed.current = null;
   }, []);
 }
 
@@ -241,6 +252,53 @@ function requestFit(ladder: Ladder): void {
 
 const watched = new Map<Element, Set<Ladder>>();
 let resizeObserver: ResizeObserver | null = null;
+
+/**
+ * Settle the rows of a scrollport before a layout effect reads their geometry.
+ * A scrollbar can change all their widths before ResizeObserver delivers.
+ */
+export function useScrollportFitLadders(ref: RefObject<HTMLElement | null>): () => void {
+  const lastWidth = useRef<number | undefined>(undefined);
+  const flush = useCallback(() => {
+    const scrollport = ref.current;
+    if (scrollport === null) {
+      flushFitLadders();
+      return;
+    }
+
+    const queueWidthChanges = (): void => {
+      const width = scrollport.clientWidth;
+      if (width === lastWidth.current) return;
+      lastWidth.current = width;
+      for (const [target, ladders] of watched) {
+        if (!scrollport.contains(target)) continue;
+        for (const ladder of ladders) pending.add(ladder);
+      }
+    };
+
+    queueWidthChanges();
+    if (pending.size === 0) return;
+    flushFitLadders();
+    // Settling a wrapped row can itself remove a scrollbar. Refit at the
+    // new width before the caller uses the heights from the first pass.
+    queueWidthChanges();
+    flushFitLadders();
+  }, [ref]);
+
+  useLayoutEffect(() => {
+    const scrollport = ref.current;
+    if (scrollport === null || typeof ResizeObserver === "undefined") return;
+    // Keep the width current across browser resizes between React commits.
+    const observer = new ResizeObserver(flush);
+    observer.observe(scrollport);
+    return () => {
+      observer.disconnect();
+      lastWidth.current = undefined;
+    };
+  }, [ref, flush]);
+
+  return flush;
+}
 
 function onFontsLoaded(): void {
   for (const ladders of watched.values()) {

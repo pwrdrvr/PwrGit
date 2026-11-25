@@ -6,6 +6,12 @@ import type {
 import { GENERAL_DEFAULTS } from "@pwrgit/shared";
 import { dispatch, subscribe } from "./pwrgit";
 
+function setAppearanceAttribute(root: HTMLElement, name: string, value: string | null): void {
+  if (root.getAttribute(name) === value) return;
+  if (value === null) root.removeAttribute(name);
+  else root.setAttribute(name, value);
+}
+
 /**
  * Appearance axes are applied as `data-*` on <html>, where `tokens.css` and
  * `app.css` pick them up. Mirrors PwrAgnt's `applyAppearanceAttributes`.
@@ -22,17 +28,12 @@ export function applyAppearance(
   if (typeof document === "undefined") return;
   const root = document.documentElement;
 
-  if (textSize !== GENERAL_DEFAULTS.sidebarTextSize) {
-    root.setAttribute("data-sidebar-text", textSize);
-  } else {
-    root.removeAttribute("data-sidebar-text");
-  }
-
-  if (density !== GENERAL_DEFAULTS.sidebarDensity) {
-    root.setAttribute("data-density", density);
-  } else {
-    root.removeAttribute("data-density");
-  }
+  setAppearanceAttribute(
+    root, "data-sidebar-text", textSize === GENERAL_DEFAULTS.sidebarTextSize ? null : textSize
+  );
+  setAppearanceAttribute(
+    root, "data-density", density === GENERAL_DEFAULTS.sidebarDensity ? null : density
+  );
 }
 
 /** Dark owns the bare :root block; light is the only attributed override. */

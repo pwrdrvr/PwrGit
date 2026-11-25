@@ -35,7 +35,7 @@ import {
   useViewportTooltip
 } from "../../lib/useViewportTooltip";
 import { useRelativeClock } from "../../lib/useRelativeClock";
-import { flushFitLadders } from "../../lib/useFitLadder";
+import { useScrollportFitLadders } from "../../lib/useFitLadder";
 import { ContextMenu, type MenuItem } from "../shell/ContextMenu";
 import { forkMenuLabel, worktreeMenuItems } from "../shell/worktree-menu-items";
 import { openResetToRemote } from "../graph/reset-to-remote";
@@ -503,6 +503,7 @@ export function Sidebar({
   // or a re-ranked Working block inserted above the held row is compensated
   // in the same frame it appears.
   const listRef = useRef<HTMLDivElement>(null);
+  const flushSidebarFits = useScrollportFitLadders(listRef);
   useEffect(() => {
     const list = listRef.current;
     return list === null ? undefined : trackSidebarAnchors(list);
@@ -511,9 +512,9 @@ export function Sidebar({
     if (selectedWorktreeId !== null) keepSidebarAnchorForSelection();
   }, [selectedWorktreeId]);
   useLayoutEffect(() => {
-    // All repo rows have requested their fits. Their final heights are
-    // needed by the scroll anchor and any pending repository-index jump.
-    flushFitLadders();
+    // A commit can change the scrollbar before ResizeObserver runs. The
+    // anchor and any pending jump need the row heights at the new width.
+    flushSidebarFits();
     applySidebarAnchor(listRef.current);
   });
 
@@ -529,6 +530,7 @@ export function Sidebar({
     const spacer = spacerRef.current;
     if (list === null || spacer === null) return;
     const place = (): number | null => {
+      flushSidebarFits();
       const row =
         [...list.querySelectorAll<HTMLElement>(".repo-row[data-repo-id]")].find(
           (el) => el.dataset["repoId"] === repoId
