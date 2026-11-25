@@ -11298,17 +11298,20 @@ button.commit-byline:focus-visible {
    the same expression, so the two stay the same width.
 
    `ch` resolves against the element's own font, and neither element draws
-   text: left to inherit, it measured the body's 16px "0" (10.75px), and the
-   rule bit below a ~540px pane. Both take `.commit-msg`'s size and weight so
-   14ch is fourteen characters of subject. */
+   text. Both take `.commit-msg`'s size and weight so 14ch is fourteen
+   characters of subject. */
+.graph-lanes-clip,
+.lane-scrollbar {
+  --lane-clip-limit: clamp(16px, calc(100cqi - 204px - 14ch), 160px);
+  max-width: var(--lane-clip-limit);
+  font-size: 12.5px;
+  font-weight: 600;
+}
 .graph-lanes-clip {
   flex: 0 0 auto;
   align-self: stretch;
   display: flex;
   align-items: center;
-  font-size: 12.5px;
-  font-weight: 600;
-  max-width: clamp(16px, calc(100cqi - 204px - 14ch), 160px);
   overflow: hidden;
 }
 .graph-lanes {
@@ -11316,17 +11319,28 @@ button.commit-byline:focus-visible {
   display: block;
   transform: translateX(var(--lane-scroll, 0px));
 }
+@property --lane-scrollable {
+  syntax: "<number>";
+  inherits: false;
+  initial-value: 0;
+}
 .lane-scrollbar {
   /* Reserve a row above the vertical viewport so lanes cannot scroll behind
-     the transparent space around macOS's horizontal scrollbar. */
+     the transparent space around macOS's horizontal scrollbar. Resolve
+     overflow in the same layout as the clips, rounding to the scrollport's
+     CSS pixel width. A collapsed bar still lets the browser clamp its scroll
+     position to zero when all lanes fit. */
+  --lane-scrollable: max(0, sign(var(--lane-track-width) - round(nearest, var(--lane-clip-limit), 1px)));
   flex-shrink: 0;
   overflow-x: auto;
   overflow-y: hidden;
-  height: 12px;
-  font-size: 12.5px;
-  font-weight: 600;
-  max-width: clamp(16px, calc(100cqi - 204px - 14ch), 160px);
-  margin: 0 0 4px 29px;
+  visibility: if(style(--lane-scrollable: 1): visible; else: hidden);
+  height: calc(12px * var(--lane-scrollable));
+  margin: 0 0 calc(4px * var(--lane-scrollable)) 29px;
+}
+.lane-scrollbar > div {
+  width: var(--lane-track-width);
+  height: 1px;
 }
 .lane-scrollbar::-webkit-scrollbar {
   height: 8px;
