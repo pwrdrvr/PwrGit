@@ -603,7 +603,14 @@ export class IdentityService {
   ): Promise<boolean> {
     if (candidates.length === 0 || (!force && this.backedOff(repoId))) return false;
     const existing = this.siblingRefreshing.get(repoId);
-    if (existing !== undefined) return existing;
+    if (existing !== undefined) {
+      // The lookup in flight may have been started for other candidates (a
+      // fork-status read leaves out the tracked remote). Run this caller's
+      // list once it settles; the due filter skips what it just refreshed.
+      return existing.then(async (changed) =>
+        (await this.ensureRemoteIdentities(repoId, candidates, force)) || changed
+      );
+    }
     const work = this.refreshSiblingCandidates(
       repoId,
       candidates,
@@ -659,9 +666,13 @@ export class IdentityService {
           const repository = await this.forgeSlots.run(() =>
             provider.viewRepo(candidate.nameWithOwner)
           );
+          // Keyed by the slug the remote's URL names, not the forge's answer:
+          // every reader looks the row up by URL, and a renamed repository
+          // answers with its new name. Stored under that, the row was never
+          // found, so each read looked it up again and reported a change.
           const next: RemoteForgeIdentity = {
-            hostname: repository.hostname,
-            nameWithOwner: repository.nameWithOwner,
+            hostname: candidate.hostname,
+            nameWithOwner: candidate.nameWithOwner,
             ...(repository.viewerCanPush === undefined
               ? {}
               : { viewerCanPush: repository.viewerCanPush }),

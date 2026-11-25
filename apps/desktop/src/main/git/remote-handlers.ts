@@ -1564,6 +1564,11 @@ export function registerRemoteHandlers(
     const saved = await operations.runRepository(req.repoId, async () => {
       const endpoints = await listRemoteEndpoints(execGit, repo.path);
       if (!endpoints.ok) return endpoints;
+      // A preference for a remote that is gone would outlive it and apply to
+      // whatever repository is next added under that name.
+      if (!endpoints.value.some((entry) => entry.name === remote)) {
+        return err({ ...notFound, message: `There is no remote named ${remote}.` });
+      }
       for (const alias of forkSyncRemoteAliases(remote, endpoints.value, hostsForRemotes?.() ?? {})) {
         setForkSyncRemotePref(db, req.repoId, alias, req.enabled);
       }
@@ -1695,15 +1700,25 @@ export function registerRemoteHandlers(
     const pushes: ForkSyncPush[] = [];
     const repo = repoOf(worktree.repoId);
     let stopped = false;
+    // Every planned destination gets an entry in the receipt. One left out
+    // reads as pushed when the sync says "synced".
+    let routeChanged = false;
     for (const entry of planned) {
-      if (stopped) {
+      if (stopped || routeChanged) {
         pushes.push(skip(entry));
         continue;
       }
       let current = await readCurrent();
-      if (current === null) break;
+      if (current === null) {
+        routeChanged = true;
+        pushes.push(skip(entry));
+        continue;
+      }
       let target = targetFor(current, entry);
-      if (target === undefined) continue;
+      if (target === undefined) {
+        pushes.push(skip(entry));
+        continue;
+      }
       if (!target.enabled) {
         pushes.push(skip(target));
         continue;
@@ -1739,12 +1754,18 @@ export function registerRemoteHandlers(
           continue;
         }
         current = await readCurrent();
-        if (current === null) break;
+        if (current === null) {
+          routeChanged = true;
+          pushes.push(skip(entry));
+          continue;
+        }
         target = targetFor(current, entry);
       }
 
-
-      if (target === undefined || target.unfetched) continue;
+      if (target === undefined || target.unfetched) {
+        pushes.push(skip(target ?? entry));
+        continue;
+      }
       if (!target.enabled) {
         pushes.push(skip(target));
         continue;

@@ -993,14 +993,28 @@ export function WorktreeHeader({
   const [movedOnAnswer, setMovedOnAnswer] = useState<MovedOnAnswer | null>(() =>
     readMovedOnAnswer(repo.id)
   );
-  // Optimistic toggle state for multi-fork sync checkboxes; cleared when a
-  // fresh `remote:forkStatus` read arrives from main.
+  // Optimistic toggle state for multi-fork sync checkboxes. A fresh
+  // `remote:forkStatus` read retires only the overrides it already agrees
+  // with: a read that predates a toggle's write (another toggle's change
+  // event, a background fetch) would otherwise flip that checkbox back.
   const [syncTargetOverrides, setSyncTargetOverrides] = useState<
     Record<string, boolean>
   >({});
   useEffect(() => {
     setSyncTargetOverrides({});
-  }, [forkRead, repo.id]);
+  }, [repo.id]);
+  useEffect(() => {
+    const targets = forkRead?.source?.syncTargets;
+    setSyncTargetOverrides((prev) => {
+      const pending = Object.entries(prev).filter(([remote, enabled]) => {
+        const fresh = targets?.find((target) => target.remote === remote);
+        return fresh !== undefined && fresh.enabled !== enabled;
+      });
+      return pending.length === Object.keys(prev).length
+        ? prev
+        : Object.fromEntries(pending);
+    });
+  }, [forkRead]);
   useEffect(() => {
     setPullChoice(readPullChoice(repo.id));
     setMovedOnAnswer(readMovedOnAnswer(repo.id));

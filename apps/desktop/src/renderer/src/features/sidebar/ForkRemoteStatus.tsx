@@ -4,9 +4,9 @@ import {
   isForgeKind,
   parseForgeRemote,
   remoteMatchesForgeRepo,
+  remoteForgeIdentitiesOf,
   routedRemotes,
   trackedRemoteName,
-  type RemoteForgeIdentity,
   type Repo,
   type RepoIdentity,
   type RepoRefs,
@@ -120,22 +120,7 @@ export function remotesRoute(
   hosts: Parameters<typeof routedRemotes>[2]
 ): { lead: string; strip: Parameters<typeof RouteStrip>[0] } | null {
   if (identity?.parent === undefined) return null;
-  const remoteIdentities: RemoteForgeIdentity[] = [];
-  for (const remote of refs.remotes) {
-    if (remote.viewerCanPush === undefined && remote.forkParent === undefined) continue;
-    const parsed = parseForgeRemote(remote.fetchUrl, hosts);
-    if (parsed === null) continue;
-    remoteIdentities.push({
-      hostname: parsed.hostname,
-      nameWithOwner: parsed.nameWithOwner,
-      ...(remote.viewerCanPush === undefined
-        ? {}
-        : { viewerCanPush: remote.viewerCanPush }),
-      ...(remote.forkParent === undefined ? {} : { parent: remote.forkParent }),
-      ...(remote.forkRoot === undefined ? {} : { root: remote.forkRoot })
-    });
-  }
-  const rows = routedRemotes(identity, refs.remotes, hosts, remoteIdentities);
+  const rows = routedRemotes(identity, refs.remotes, hosts, remoteForgeIdentitiesOf(refs.remotes, hosts));
   const tracked = trackedRemoteName(branch.upstream, refs.remotes);
   const forks = rows.filter((row) => row.role === "fork");
   const fork =

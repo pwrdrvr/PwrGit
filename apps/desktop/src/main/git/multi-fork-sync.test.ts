@@ -412,6 +412,13 @@ describe("multi-fork sync (real git + SQLite)", () => {
       push: true
     });
     expect(synced.ok).toBe(true);
+    if (!synced.ok) throw new Error("expected sync");
+    // The fork without the branch is named in the receipt as not pushed,
+    // rather than left out of it.
+    expect(synced.value.pushes?.map((entry) => [entry.outcome, "remote" in entry ? entry.remote : null])).toEqual([
+      ["pushed", "origin"],
+      ["skipped", "personal"]
+    ]);
     expect(await gitOk(["rev-parse", "refs/heads/release/v1"], w.originBare)).toBe(relTip);
     const personalBranches = await gitOk(["for-each-ref", "--format=%(refname:short)", "refs/heads"], w.personalBare);
     expect(personalBranches.split("\n")).toEqual(["main"]);
@@ -548,6 +555,16 @@ describe("multi-fork sync (real git + SQLite)", () => {
     expect(synced.ok).toBe(true);
     expect(await gitOk(["rev-parse", "HEAD"], w.checkout)).toBe(tip);
     expect(await gitOk(["rev-parse", "main"], w.readonlyBare)).toBe(w.initial);
+  });
+
+  it("refuses a fork sync preference for a remote the repository does not have", async () => {
+    const w = await createMultiForkWorld();
+    const set = await w.bus.dispatch("remote:setForkSyncRemote", {
+      repoId: "repo-1", remote: "gone", enabled: false
+    });
+    expect(set.ok).toBe(false);
+    // Left behind, the row would opt out whatever is next added as `gone`.
+    expect(readForkSyncPrefs(w.db, "repo-1").has("gone")).toBe(false);
   });
 
   it("shares the visible Remotes opt-out with the alias tracked by Sync", async () => {
@@ -695,6 +712,45 @@ describe("multi-fork sync (real git + SQLite)", () => {
     } finally {
       clock.mockRestore();
     }
+
+    // A caller whose candidates differ from the lookup in flight still gets
+    // its own looked up, rather than joining a lookup that skips them.
+    const first = { remote: "a", host: "github" as const, hostname: "github.com", nameWithOwner: "first/t3code" };
+    const second = { remote: "b", host: "github" as const, hostname: "github.com", nameWithOwner: "second/t3code" };
+    await Promise.all([
+      service.ensureRemoteIdentities("repo-1", [first]),
+      service.ensureRemoteIdentities("repo-1", [second])
+    ]);
+    expect(viewed).toEqual(expect.arrayContaining(["first/t3code", "second/t3code"]));
+
+    // A sibling whose URL names a renamed repository: the forge answers with
+    // the new name. The row is still found by the URL's slug, so the next
+    // read neither asks again nor reports a change (which re-read fork status
+    // and asked again, without end).
+    const renamed = { remote: "old", host: "github" as const, hostname: "github.com", nameWithOwner: "huntharo/old-t3code" };
+    provider.viewRepo = vi.fn(async (slug: string): Promise<CloneRepository> => {
+      viewed.push(slug);
+      return {
+        host: "github",
+        hostname: "github.com",
+        owner: "huntharo",
+        name: "t3code",
+        nameWithOwner: "huntharo/t3code",
+        visibility: "public",
+        viewerCanPush: true,
+        parent: { nameWithOwner: "pingdotgg/t3code", url: "https://github.com/pingdotgg/t3code" },
+        sshUrl: "git@github.com:huntharo/t3code.git",
+        httpsUrl: "https://github.com/huntharo/t3code",
+        localPaths: []
+      };
+    });
+    expect(await service.ensureRemoteIdentities("repo-1", [renamed])).toBe(true);
+    const lookups = viewed.length;
+    expect(await service.ensureRemoteIdentities("repo-1", [renamed])).toBe(false);
+    expect(viewed).toHaveLength(lookups);
+    expect(readRemoteIdentities(db, "repo-1").map((row) => row.nameWithOwner)).toContain(
+      "huntharo/old-t3code"
+    );
 
     // Remove the `huntharo` remote and force refresh: cached row is pruned.
     remotesOutput = [

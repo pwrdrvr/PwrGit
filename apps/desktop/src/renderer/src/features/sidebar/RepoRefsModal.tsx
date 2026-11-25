@@ -7,13 +7,12 @@ import {
   changeRequestNoun,
   changeRequestNumberQuery,
   changeRequestSigil,
-  parseForgeRemote,
+  remoteForgeIdentitiesOf,
   routedRemotes,
   type ForgeKind,
   type LocalBranchSummary,
   type PrSummary,
   type RemoteBranchSummary,
-  type RemoteForgeIdentity,
   type RemoteSummary,
   type Repo,
   type RepoRefs,
@@ -668,22 +667,12 @@ export function RepoRefsModal({
   const parentOffer = forkParentOffer(repo.identity, refs.remotes, forgeHosts);
   // What each remote is, from the fork the forge confirmed — not its name.
   const { remoteRoles, forkKnown } = useMemo(() => {
-    const remoteIdentities: RemoteForgeIdentity[] = [];
-    for (const remote of refs.remotes) {
-      if (remote.viewerCanPush === undefined && remote.forkParent === undefined) continue;
-      const parsed = parseForgeRemote(remote.fetchUrl, forgeHosts);
-      if (parsed === null) continue;
-      remoteIdentities.push({
-        hostname: parsed.hostname,
-        nameWithOwner: parsed.nameWithOwner,
-        ...(remote.viewerCanPush === undefined
-          ? {}
-          : { viewerCanPush: remote.viewerCanPush }),
-        ...(remote.forkParent === undefined ? {} : { parent: remote.forkParent }),
-        ...(remote.forkRoot === undefined ? {} : { root: remote.forkRoot })
-      });
-    }
-    const rows = routedRemotes(repo.identity, refs.remotes, forgeHosts, remoteIdentities);
+    const rows = routedRemotes(
+      repo.identity,
+      refs.remotes,
+      forgeHosts,
+      remoteForgeIdentitiesOf(refs.remotes, forgeHosts)
+    );
     return {
       remoteRoles: new Map(rows.map((row) => [row.name, row])),
       forkKnown: rows.some((row) => row.role === "fork")

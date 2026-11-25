@@ -3083,6 +3083,76 @@ describe("WorktreeHeader keeps a fork up with its source", () => {
     }
   });
 
+  it("keeps a fork's pending toggle while a read from before its write lands", async () => {
+    const withPersonal = (enabled: boolean, behind = 10): ForkStatus => ({
+      ...behindSource(),
+      source: {
+        ...behindSource({ behind }).source!,
+        syncTargets: [
+          {
+            remote: "origin",
+            branch: "main",
+            nameWithOwner: "org/sparkline",
+            tracked: true,
+            enabled: true,
+            pushBack: behindSource().source!.pushBack
+          },
+          {
+            remote: "personal",
+            branch: "main",
+            nameWithOwner: "me/sparkline",
+            tracked: false,
+            enabled,
+            pushBack: {
+              remote: "personal",
+              branch: "main",
+              ref: "refs/remotes/personal/main",
+              head: "c".repeat(40),
+              overwrites: 0,
+              adds: 10
+            }
+          }
+        ]
+      }
+    });
+    // `remote:setForkSyncRemote` is not answered: the write is still queued
+    // (behind the repository lock, say) when other reads arrive.
+    answer(withPersonal(true));
+    await remount();
+    await act(async () => caret()?.click());
+    const personal = (): HTMLButtonElement | undefined =>
+      [...document.querySelectorAll<HTMLButtonElement>('[role="menuitemcheckbox"]')][1];
+    await act(async () => {
+      personal()!.click();
+      await settle();
+    });
+    expect(personal()?.getAttribute("aria-checked")).toBe("false");
+
+    // A background fetch moves the source and re-reads before the write
+    // persists: a new read that still has `personal` on.
+    answer(withPersonal(true, 11));
+    await act(async () => {
+      bridge.handlers.get("graph:changed")?.({ repoId: "repo-1" });
+      await settle();
+    });
+    expect(personal()?.getAttribute("aria-checked")).toBe("false");
+
+    // The read that carries the write retires the override, so later reads
+    // are shown as they are.
+    answer(withPersonal(false));
+    await act(async () => {
+      bridge.handlers.get("graph:changed")?.({ repoId: "repo-1" });
+      await settle();
+    });
+    expect(personal()?.getAttribute("aria-checked")).toBe("false");
+    answer(withPersonal(true));
+    await act(async () => {
+      bridge.handlers.get("graph:changed")?.({ repoId: "repo-1" });
+      await settle();
+    });
+    expect(personal()?.getAttribute("aria-checked")).toBe("true");
+  });
+
   it("highlights Pull and reports a behind sibling fork when local main is already up to date", async () => {
     const siblingBehindOnly: ForkStatus = {
       ...behindSource(),

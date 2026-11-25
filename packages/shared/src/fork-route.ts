@@ -1,5 +1,5 @@
 import { parseForgeRemote, remoteMatchesForgeRepo, type ForgeHostMap } from "./forge-remote";
-import type { RemoteForgeIdentity, RepoIdentity } from "./types";
+import type { RemoteForgeIdentity, RemoteSummary, RepoIdentity } from "./types";
 
 /**
  * What a remote is to the person reading it, rather than what it is called.
@@ -134,4 +134,29 @@ export function trackedRemoteName(
     }
   }
   return best;
+}
+
+/**
+ * The forge facts `repo:refs` attached to each remote, as the identities
+ * `routedRemotes` reads: one per remote whose push access or fork parent is
+ * confirmed, keyed by the repository its fetch URL names.
+ */
+export function remoteForgeIdentitiesOf(
+  remotes: readonly Pick<RemoteSummary, "fetchUrl" | "viewerCanPush" | "forkParent" | "forkRoot">[],
+  hosts: ForgeHostMap = {}
+): RemoteForgeIdentity[] {
+  const identities: RemoteForgeIdentity[] = [];
+  for (const remote of remotes) {
+    if (remote.viewerCanPush === undefined && remote.forkParent === undefined) continue;
+    const parsed = parseForgeRemote(remote.fetchUrl, hosts);
+    if (parsed === null) continue;
+    identities.push({
+      hostname: parsed.hostname,
+      nameWithOwner: parsed.nameWithOwner,
+      ...(remote.viewerCanPush === undefined ? {} : { viewerCanPush: remote.viewerCanPush }),
+      ...(remote.forkParent === undefined ? {} : { parent: remote.forkParent }),
+      ...(remote.forkRoot === undefined ? {} : { root: remote.forkRoot })
+    });
+  }
+  return identities;
 }
