@@ -75,64 +75,102 @@ export function snapshotHasActiveChange(snapshot: SubmoduleSnapshot): boolean {
   return snapshot.submodules.some(submoduleHasActiveChange);
 }
 
-function summaryBadgeFor(
-  snapshot: SubmoduleSnapshot | null,
-  error: string | null
-): { label: string; tone: "warn" | "danger" | "muted" } | null {
-  if (error !== null) return { label: "Scan failed", tone: "danger" };
-  if (snapshot === null) return null;
-
-  const activeCount = snapshot.submodules.filter(submoduleHasActiveChange).length;
-  if (activeCount > 0) {
-    return { label: `${activeCount} changed`, tone: "warn" };
-  }
-
-  const issueRows = snapshot.submodules.filter(
-    (submodule) => submodule.issues.length > 0
+/**
+ * A submodule that is checked out locally without error-severity issues.
+ * The header count shows working submodules only so it never double-counts
+ * unconfigured, uninitialized, or failing entries shown beside it.
+ */
+export function submoduleIsWorking(submodule: SubmoduleStatus): boolean {
+  return (
+    submodule.checkoutState === "checked_out" &&
+    !submodule.issues.some((problem) => problem.severity === "error")
   );
-  if (issueRows.length === 0 && snapshot.issues.length === 0) return null;
+}
 
-  if (snapshot.issues.length === 0) {
-    if (
-      issueRows.every(
-        (submodule) =>
-          submodule.issues.some(
-            (problem) => problem.code === "gitmodules_entry_missing"
-          ) &&
-          submodule.issues.every(
-            (problem) =>
-              problem.code === "gitmodules_entry_missing" ||
-              problem.code === "checkout_uninitialized"
-          )
-      )
-    ) {
-      return { label: `${issueRows.length} unconfigured`, tone: "muted" };
-    }
-    if (
-      issueRows.every((submodule) =>
+type SummaryBadge = { label: string; tone: "warn" | "danger" | "muted" };
+
+function nonWorkingLabel(nonWorking: SubmoduleStatus[]): string {
+  const count = nonWorking.length;
+  if (
+    nonWorking.every(
+      (submodule) =>
+        submodule.issues.some(
+          (problem) => problem.code === "gitmodules_entry_missing"
+        ) &&
+        submodule.issues.every(
+          (problem) =>
+            problem.code === "gitmodules_entry_missing" ||
+            problem.code === "checkout_uninitialized"
+        )
+    )
+  ) {
+    return `${count} unconfigured`;
+  }
+  if (
+    nonWorking.every(
+      (submodule) =>
+        submodule.checkoutState === "uninitialized" &&
         submodule.issues.every(
           (problem) => problem.code === "checkout_uninitialized"
         )
-      )
-    ) {
-      return { label: `${issueRows.length} uninitialized`, tone: "muted" };
-    }
-    if (
-      issueRows.every((submodule) =>
+    )
+  ) {
+    return `${count} uninitialized`;
+  }
+  if (
+    nonWorking.every(
+      (submodule) =>
+        submodule.checkoutState === "deinitialized" &&
         submodule.issues.every(
           (problem) => problem.code === "checkout_deinitialized"
         )
-      )
-    ) {
-      return { label: `${issueRows.length} deinitialized`, tone: "muted" };
+    )
+  ) {
+    return `${count} deinitialized`;
+  }
+  if (
+    nonWorking.some((submodule) =>
+      submodule.issues.some((problem) => problem.severity === "error")
+    )
+  ) {
+    return `${count} failing`;
+  }
+  return `${count} inactive`;
+}
+
+function summaryBadgesFor(
+  snapshot: SubmoduleSnapshot | null,
+  error: string | null
+): SummaryBadge[] {
+  if (error !== null) return [{ label: "Scan failed", tone: "danger" }];
+  if (snapshot === null) return [];
+
+  const badges: SummaryBadge[] = [];
+  const working = snapshot.submodules.filter(submoduleIsWorking);
+  const nonWorking = snapshot.submodules.filter(
+    (submodule) => !submoduleIsWorking(submodule)
+  );
+  const activeWorking = working.filter(submoduleHasActiveChange).length;
+
+  if (activeWorking > 0) {
+    badges.push({ label: `${activeWorking} changed`, tone: "warn" });
+  }
+  if (nonWorking.length > 0) {
+    badges.push({ label: nonWorkingLabel(nonWorking), tone: "muted" });
+  }
+  if (badges.length === 0) {
+    const warningRows = working.filter(
+      (submodule) => submodule.issues.length > 0
+    );
+    const total = warningRows.length + snapshot.issues.length;
+    if (total > 0) {
+      badges.push({
+        label: `${total} ${total === 1 ? "notice" : "notices"}`,
+        tone: "muted"
+      });
     }
   }
-
-  const total = issueRows.length + snapshot.issues.length;
-  return {
-    label: `${total} ${total === 1 ? "notice" : "notices"}`,
-    tone: "muted"
-  };
+  return badges;
 }
 
 function renderSubmodulePath(path: string) {
@@ -393,7 +431,11 @@ export function SubmodulePanel({
   const defaultExpanded =
     error !== null || (snapshot !== null && snapshotHasActiveChange(snapshot));
   const expanded = userExpanded ?? defaultExpanded;
-  const summaryBadge = summaryBadgeFor(snapshot, error);
+  const workingCount =
+    snapshot === null
+      ? null
+      : snapshot.submodules.filter(submoduleIsWorking).length;
+  const summaryBadges = summaryBadgesFor(snapshot, error);
 
   return (
     <section className="submodule-panel" aria-label="Submodules">
@@ -406,18 +448,17 @@ export function SubmodulePanel({
         >
           <SectionChevron open={expanded} />
           <span>Submodules</span>
-          {snapshot !== null && (
-            <span className="submodule-panel__count">
-              {snapshot.submodules.length}
-            </span>
+          {workingCount !== null && (
+            <span className="submodule-panel__count">{workingCount}</span>
           )}
-          {summaryBadge !== null && (
+          {summaryBadges.map((badge) => (
             <span
-              className={`submodule-chip submodule-chip--${summaryBadge.tone}`}
+              key={badge.label}
+              className={`submodule-chip submodule-chip--${badge.tone}`}
             >
-              {summaryBadge.label}
+              {badge.label}
             </span>
-          )}
+          ))}
         </button>
         <button
           type="button"

@@ -43,6 +43,9 @@ test("keeps passive submodules collapsed below Changes while auto-expanding acti
         passiveDefault.locator(".submodule-panel__toggle")
       ).toHaveAttribute("aria-expanded", "false");
       await expect(
+        passiveDefault.locator(".submodule-panel__count")
+      ).toHaveText("0");
+      await expect(
         passiveDefault.locator(".submodule-panel").getByText("2 unconfigured")
       ).toBeVisible();
 

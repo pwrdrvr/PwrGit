@@ -216,6 +216,9 @@ describe("SubmodulePanel", () => {
     );
     expect(toggle?.getAttribute("aria-expanded")).toBe("false");
     expect(onConcernChange).toHaveBeenLastCalledWith(false);
+    expect(container.querySelector(".submodule-panel__count")?.textContent).toBe(
+      "0"
+    );
     expect(container.textContent).toContain("2 unconfigured");
     expect(container.querySelectorAll(".submodule-row")).toHaveLength(0);
 
@@ -234,6 +237,64 @@ describe("SubmodulePanel", () => {
     for (const row of rows) {
       expect(row.querySelectorAll(".submodule-issue small")).toHaveLength(1);
     }
+  });
+
+  it("shows working and failing counts separately when both are present", async () => {
+    const sha = "1111111111111111111111111111111111111111";
+    const mixedSnapshot: SubmoduleSnapshot = {
+      truncated: false,
+      issues: [],
+      submodules: [
+        ...["alpha", "beta", "gamma"].map((name) => ({
+          name,
+          path: `modules/${name}`,
+          depth: 0,
+          pinnedCommit: sha,
+          indexCommit: sha,
+          checkedOutCommit: sha,
+          checkoutState: "checked_out" as const,
+          relation: "at_pin" as const,
+          dirty: false,
+          detached: true,
+          pinnedTags: [],
+          configuredUrl: `../${name}.git`,
+          issues: []
+        })),
+        ...["broken-a", "broken-b"].map((name) => ({
+          name,
+          path: `modules/${name}`,
+          depth: 0,
+          pinnedCommit: sha,
+          indexCommit: sha,
+          checkoutState: "missing" as const,
+          relation: "unknown" as const,
+          dirty: null,
+          detached: null,
+          pinnedTags: [],
+          configuredUrl: `../${name}.git`,
+          issues: [
+            {
+              code: "checkout_missing" as const,
+              severity: "error" as const,
+              message: "The submodule checkout path is missing."
+            }
+          ]
+        }))
+      ]
+    };
+    dispatchMock.mockResolvedValueOnce(ok(mixedSnapshot));
+
+    await act(async () => {
+      root.render(<SubmodulePanel worktreeId="worktree-1" />);
+    });
+
+    expect(container.querySelector(".submodule-panel__count")?.textContent).toBe(
+      "3"
+    );
+    expect(
+      container.querySelector(".submodule-panel__toggle .submodule-chip")
+        ?.textContent
+    ).toBe("2 failing");
   });
 
   it("disappears after a successful scan finds no submodules or parent issues", async () => {

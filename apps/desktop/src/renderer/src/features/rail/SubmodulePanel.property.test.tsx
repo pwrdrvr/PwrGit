@@ -64,6 +64,18 @@ function hasActiveLocalChange(submodule: SubmoduleStatus): boolean {
   );
 }
 
+/**
+ * Oracle for the header count partition: `.submodule-panel__count` reports only
+ * working (checked-out, error-free) submodules, while non-working submodules are
+ * counted separately in the status pill so `working + nonWorking === total`.
+ */
+function isWorkingSubmodule(submodule: SubmoduleStatus): boolean {
+  return (
+    submodule.checkoutState === "checked_out" &&
+    !submodule.issues.some((problem) => problem.severity === "error")
+  );
+}
+
 const submoduleScenarioArb: fc.Arbitrary<SubmoduleStatus> = fc
   .record({
     id: fc.constantFrom("alpha", "beta", "distilled", "floci", "core"),
@@ -214,11 +226,26 @@ describe("SubmodulePanel quiet-by-default properties", () => {
         });
 
         const expectActive = snapshot.submodules.some(hasActiveLocalChange);
+        const workingCount = snapshot.submodules.filter(isWorkingSubmodule).length;
+        const nonWorkingCount = snapshot.submodules.length - workingCount;
         const toggle = container.querySelector<HTMLButtonElement>(
           ".submodule-panel__toggle"
         );
         expect(toggle).not.toBeNull();
         expect(toggle?.getAttribute("aria-expanded")).toBe(String(expectActive));
+        expect(
+          container.querySelector(".submodule-panel__count")?.textContent
+        ).toBe(String(workingCount));
+        if (nonWorkingCount > 0) {
+          const headerChips = [
+            ...container.querySelectorAll(".submodule-panel__toggle .submodule-chip")
+          ].map((el) => el.textContent?.trim() ?? "");
+          expect(
+            headerChips.some((label) =>
+              label.startsWith(`${nonWorkingCount} `) && !label.endsWith(" changed")
+            )
+          ).toBe(true);
+        }
         expect(onConcernChange).toHaveBeenLastCalledWith(expectActive);
 
         const rowsBeforeClick = container.querySelectorAll(".submodule-row");
