@@ -11,7 +11,7 @@ import { WorktreeHeader } from "../../../src/renderer/src/features/graph/Worktre
 import { RepoRefsModal } from "../../../src/renderer/src/features/sidebar/RepoRefsModal";
 import "../../../src/renderer/src/styles/app.css";
 
-type Mode = "pull-before" | "pull-after" | "remotes-before" | "remotes-after";
+type Mode = "pull-before" | "pull-after" | "pull-disabled" | "remotes-before" | "remotes-after";
 
 const sampledAt = "2026-11-24T15:00:00.000Z";
 const headSha = "a".repeat(40);
@@ -221,6 +221,17 @@ function makeRefs(multi: boolean): RepoRefs {
 }
 
 let currentMode: Mode = "pull-after";
+function currentForkStatus(): ForkStatus {
+  const disabled = currentMode === "pull-disabled";
+  const status = makeForkStatus(disabled || currentMode === "pull-after");
+  if (disabled && status.source?.syncTargets !== undefined) {
+    status.source.syncTargets = status.source.syncTargets
+      .filter((target) => target.tracked)
+      .map((target) => ({ ...target, enabled: false }));
+  }
+  return status;
+}
+
 let renderKey = 0;
 const listeners = new Map<string, Set<(payload: unknown) => void>>();
 
@@ -243,7 +254,7 @@ Object.assign(window, {
         case "remote:forkStatus":
           return {
             ok: true,
-            value: makeForkStatus(currentMode === "pull-after")
+            value: currentForkStatus()
           };
         case "remote:setForkSyncRemote": {
           const remote = String(req?.["remote"] ?? "");

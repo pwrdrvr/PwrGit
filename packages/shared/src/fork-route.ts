@@ -23,7 +23,7 @@ export type RoutedRemote = {
   canPush?: boolean;
 };
 
-type RemoteUrls = { name: string; fetchUrl: string; pushUrl: string };
+type RemoteUrls = { name: string; fetchUrl: string; pushUrl: string; pushUrls?: string[] };
 
 /**
  * Each remote labelled by what it is, for the surfaces that draw where a
@@ -72,7 +72,7 @@ export function routedRemotes(
     if (current !== undefined && remoteMatchesForgeRepo(remote.fetchUrl, current, hosts)) {
       const canPush =
         current.viewerCanPush !== undefined &&
-        remoteMatchesForgeRepo(remote.pushUrl, current, hosts)
+        (remote.pushUrls ?? [remote.pushUrl]).every((url) => remoteMatchesForgeRepo(url, current, hosts))
           ? { canPush: current.viewerCanPush }
           : {};
       if (parent !== undefined) {
@@ -92,7 +92,9 @@ export function routedRemotes(
         `${parsedFetch.hostname.toLowerCase()}\0${parsedFetch.nameWithOwner.toLowerCase()}`
       );
       if (meta !== undefined) {
-        const pushMatches = remoteMatchesForgeRepo(remote.pushUrl, meta, hosts);
+        const pushMatches = (remote.pushUrls ?? [remote.pushUrl]).every((url) =>
+          remoteMatchesForgeRepo(url, meta, hosts)
+        );
         const canPush =
           meta.viewerCanPush !== undefined && pushMatches
             ? { canPush: meta.viewerCanPush }
@@ -100,10 +102,11 @@ export function routedRemotes(
         const metaParent = meta.parent?.toLowerCase();
         const metaRoot = meta.root?.toLowerCase();
         const sameForkNetwork =
-          (originalSlug !== undefined &&
+          current?.hostname.toLowerCase() === meta.hostname.toLowerCase() &&
+          ((originalSlug !== undefined &&
             (metaParent === originalSlug || metaRoot === originalSlug)) ||
-          (rootSlug !== undefined &&
-            (metaParent === rootSlug || metaRoot === rootSlug));
+            (rootSlug !== undefined &&
+              (metaParent === rootSlug || metaRoot === rootSlug)));
         if (sameForkNetwork) {
           return { name: remote.name, nameWithOwner: meta.nameWithOwner, role: "fork", ...canPush };
         }

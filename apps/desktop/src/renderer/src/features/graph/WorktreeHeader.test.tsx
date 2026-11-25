@@ -2572,6 +2572,37 @@ describe("WorktreeHeader keeps a fork up with its source", () => {
     expect(statusChip()).toBe("rebased · pushed to origin/main");
   });
 
+  it.each([false, true])("the sole sync target's opt-in controls the route and rebase action (%s)", async (enabled) => {
+    const status = behindSource();
+    status.source!.syncTargets = [{
+      remote: "origin", branch: "main", tracked: true, enabled,
+      pushBack: status.source!.pushBack
+    }];
+    answer(status, {
+      "remote:syncFork": err({ kind: "remote", code: "not_fast_forward", message: "Diverged" }),
+      "remote:inspectDivergence": ok({
+        branch: "main", head: "1".repeat(40), upstream: "upstream/main",
+        upstreamHead: "3".repeat(40), workingTreeClean: true,
+        localCommits: [], upstreamCommits: [], alignedCommits: [], matchingCommitSubjects: false
+      })
+    });
+    await remount();
+    await openMenu();
+    const choice = row("Sync with upstream/main");
+    const route = choice?.querySelector(".pull-menu__route [role='img']")?.getAttribute("aria-label");
+    expect(route?.includes("then to origin")).toBe(enabled);
+    expect(document.querySelector('[role="menuitemcheckbox"]')).toBeNull();
+    await act(async () => {
+      choice?.click();
+      await settle();
+    });
+    const dialog = document.querySelector(".pull-divergence");
+    expect(dialog).not.toBeNull();
+    expect([...dialog!.querySelectorAll("button")].some((button) =>
+      button.textContent === "Rebase and push"
+    )).toBe(enabled);
+  });
+
   // Post-ship 2d: once the source had nothing new, Sync fell back to pulling
   // origin/main, but the tick stayed on Sync — on something Pull was not
   // going to do.

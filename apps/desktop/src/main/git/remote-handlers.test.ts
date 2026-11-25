@@ -1932,41 +1932,52 @@ describe("remote handlers", () => {
       const sourceTip = "3".repeat(40);
       /** `main` tracks `origin/main`, identical to it, and upstream is two ahead. */
       const behindSource = (
-        pushBack: { overwrites: number; adds: number } | null = {
+        counts: { overwrites: number; adds: number } | null = {
           overwrites: 0,
           adds: 2
         }
-      ): ForkStatus => ({
-        branch: "main",
-        head: reviewedFork,
-        source: {
-          ref: "refs/remotes/upstream/main",
-          label: "upstream/main",
-          remote: "upstream",
-          head: sourceTip,
-          ahead: 0,
-          behind: 2,
-          pushBack:
-            pushBack === null
-              ? null
-              : {
-                  remote: "origin",
-                  branch: "main",
-                  ref: "refs/remotes/origin/main",
-                  head: reviewedFork,
-                  ...pushBack
-                }
-        },
-        tracked: {
-          ref: "refs/remotes/origin/main",
-          label: "origin/main",
+      ): ForkStatus => {
+        const pushBack = counts === null ? null : {
           remote: "origin",
+          branch: "main",
+          ref: "refs/remotes/origin/main",
           head: reviewedFork,
-          ahead: 0,
-          behind: 0
-        },
-        drift: null
+          ...counts
+        };
+        return {
+          branch: "main",
+          head: reviewedFork,
+          source: {
+            ref: "refs/remotes/upstream/main",
+            label: "upstream/main",
+            remote: "upstream",
+            head: sourceTip,
+            ahead: 0,
+            behind: 2,
+            pushBack,
+            syncTargets: [{ remote: "origin", branch: "main", tracked: true, enabled: true, pushBack }]
+          },
+          tracked: {
+            ref: "refs/remotes/origin/main",
+            label: "origin/main",
+            remote: "origin",
+            head: reviewedFork,
+            ahead: 0,
+            behind: 0
+          },
+          drift: null
+        };
+      };
+
+      beforeEach(() => {
+        vi.mocked(pullFastForward).mockResolvedValue(ok({
+          fastForwarded: true,
+          sourceHead: sourceTip,
+          stashed: false,
+          reappliedWithConflicts: false
+        }));
       });
+
       const request = {
         worktreeId: "wt-1",
         branch: "main",
@@ -2033,9 +2044,8 @@ describe("remote handlers", () => {
       });
 
       it("fast-forwards to the source, then pushes the same tip to the fork", async () => {
-        vi.mocked(resolveForkStatus)
-          .mockResolvedValueOnce(ok(behindSource()))
-          .mockResolvedValueOnce(ok(behindSource()));
+        vi.mocked(resolveForkStatus).mockResolvedValue(ok(behindSource()));
+        vi.mocked(execGit).mockResolvedValueOnce(ok({ exitCode: 0, stdout: "", stderr: "" }));
         vi.mocked(commitsSince).mockResolvedValueOnce(2);
         const bus = new CommandBus();
         const refreshes = refresher();
@@ -2068,7 +2078,8 @@ describe("remote handlers", () => {
         expect(commitsSince).toHaveBeenCalledWith(
           expect.any(Function),
           "/repos/project",
-          reviewedFork
+          reviewedFork,
+          sourceTip
         );
         expect(pushBranchWithLease).toHaveBeenCalledWith(
           expect.any(Function),
@@ -2081,6 +2092,21 @@ describe("remote handlers", () => {
           }
         );
         expect(refreshes.refreshRepoWorktrees).toHaveBeenCalledWith("repo-1");
+      });
+
+      it("leaves both fork branches untouched if the source advances again after Pull", async () => {
+        const latest = behindSource();
+        latest.source!.head = "4".repeat(40);
+        vi.mocked(resolveForkStatus)
+          .mockResolvedValueOnce(ok(behindSource()))
+          .mockResolvedValue(ok(latest));
+        const bus = new CommandBus();
+        registerRemoteHandlers(bus, db, refresher(), new WorktreeOperationQueue());
+
+        const synced = await bus.dispatch("remote:syncFork", request);
+        expect(synced.ok).toBe(true);
+        expect(pushBranchWithLease).not.toHaveBeenCalled();
+        expect(commitsSince).toHaveBeenCalledWith(expect.any(Function), "/repos/project", reviewedFork, sourceTip);
       });
 
       it("refuses a checkout that has moved since the chip was drawn", async () => {
@@ -2101,7 +2127,8 @@ describe("remote handlers", () => {
       it("carries Pull's retained recovery identity through fork sync even without push tracking", async () => {
         const recoveryStash = "a".repeat(40);
         vi.mocked(pullFastForward).mockResolvedValueOnce(ok({
-          fastForwarded: true, stashed: true, reappliedWithConflicts: false, recoveryStash
+          fastForwarded: true, sourceHead: sourceTip, stashed: true,
+          reappliedWithConflicts: false, recoveryStash
         }));
         vi.mocked(resolveForkStatus)
           .mockResolvedValueOnce(ok(behindSource()))
@@ -2117,7 +2144,7 @@ describe("remote handlers", () => {
       it("never forces the fork: a diverged one is reported, not pushed", async () => {
         vi.mocked(resolveForkStatus)
           .mockResolvedValueOnce(ok(behindSource()))
-          .mockResolvedValueOnce(ok(behindSource({ overwrites: 1, adds: 2 })));
+          .mockResolvedValue(ok(behindSource({ overwrites: 1, adds: 2 })));
         const bus = new CommandBus();
         registerRemoteHandlers(bus, db, refresher(), new WorktreeOperationQueue());
 
@@ -2132,9 +2159,8 @@ describe("remote handlers", () => {
       });
 
       it("keeps the fast-forward when the push after it fails", async () => {
-        vi.mocked(resolveForkStatus)
-          .mockResolvedValueOnce(ok(behindSource()))
-          .mockResolvedValueOnce(ok(behindSource()));
+        vi.mocked(resolveForkStatus).mockResolvedValue(ok(behindSource()));
+        vi.mocked(execGit).mockResolvedValueOnce(ok({ exitCode: 0, stdout: "", stderr: "" }));
         vi.mocked(pushBranchWithLease).mockResolvedValueOnce(
           err({
             kind: "remote",

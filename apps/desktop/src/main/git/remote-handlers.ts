@@ -2,6 +2,7 @@ import {
   err,
   ok,
   parseForgeRemote,
+  forkSyncRemoteAliases,
   resolveSourceForgeRepo,
   siblingForkCandidates,
   type PullProgressPhase,
@@ -10,6 +11,7 @@ import {
   type CloneRepository,
   type ForkStatus,
   type ForkSyncPush,
+  type ForkSyncTarget,
   type ForkTrackingOffer,
   type ForgeHostMap,
   type RepoIdentity,
@@ -49,7 +51,7 @@ import {
   resolveForkStatus,
   resolveResetTargets,
   updateRemote,
-  verifyRemotePushUrls,
+  verifiedForkPushUrl,
   type FastForwardTarget,
   type ForkParentHint,
   type ForkStatusOptions,
@@ -320,7 +322,7 @@ export function registerRemoteHandlers(
     hosts: hostsForRemotes?.() ?? {}
   });
 
-  const discoverMissingSiblingForks = (
+  const discoverSiblingForks = (
     repoId: string,
     cwd: string,
     trackedRemote: string | null,
@@ -338,30 +340,14 @@ export function registerRemoteHandlers(
         hosts
       );
       if (source === null) return;
-      const cached = new Set(
-        readRemoteIdentities(db, repoId).map(
-          (entry) =>
-            `${entry.hostname.toLowerCase()}\0${entry.nameWithOwner.toLowerCase()}`
-        )
-      );
-      if (identity !== undefined) {
-        cached.add(
-          `${identity.hostname.toLowerCase()}\0${identity.nameWithOwner.toLowerCase()}`
-        );
-      }
-      const missing = siblingForkCandidates(endpoints.value, {
+      const candidates = siblingForkCandidates(endpoints.value, {
         sourceRemote,
         trackedRemote,
         source,
         hosts
-      }).filter(
-        (candidate) =>
-          !cached.has(
-            `${candidate.hostname.toLowerCase()}\0${candidate.nameWithOwner.toLowerCase()}`
-          )
-      );
-      if (missing.length === 0) return;
-      return ensureRemoteIdentities(repoId, missing).then((changed) => {
+      });
+      if (candidates.length === 0) return;
+      return ensureRemoteIdentities(repoId, candidates).then((changed) => {
         if (!changed) return;
         const repo = repoOf(repoId);
         const latestIdentity = readIdentity?.(repoId);
@@ -1044,14 +1030,15 @@ export function registerRemoteHandlers(
   /** Push one reviewed object to a remote branch, leased on its reviewed tip. */
   const runLeasedPush = async (
     worktreeId: string,
-    req: { remote: string; branch: string; head: string; expectedHead: string }
+    req: { remote: string; branch: string; head: string; expectedHead: string },
+    sync?: { branch: string; sourceRef: string; target: ForkSyncTarget }
   ): Promise<Result<null>> => {
     const live = worktreeOf(worktreeId);
     if (!live.ok) return live;
     const worktree = live.value;
     const repo = repoOf(worktree.repoId);
     const startedAt = Date.now();
-    const result = await tracked(
+    const result = await tracked<Result<void>>(
       {
         kind: "push",
         profileId: repo?.profileId ?? "",
@@ -1062,8 +1049,61 @@ export function registerRemoteHandlers(
       },
       "push",
       async (git, activity) => {
-        const pushed = await pushBranchWithLease(git, worktree.path, req);
+        const path = worktree.path;
+        let url: string | undefined;
+        if (sync !== undefined) {
+          // This read and the push share the remote:update lock. Keep the
+          // reviewed lease even if a fresh status sees a different remote tip.
+          const options = forkStatusOptionsOf(worktree.repoId);
+          const current = await resolveForkStatus(
+            git, path, forkParentOf(worktree.repoId), readIdentity?.(worktree.repoId), options
+          );
+          if (!current.ok) return current;
+          const source = current.value?.source;
+          const target = source?.syncTargets?.find((entry) =>
+            entry.remote === req.remote && entry.branch === req.branch &&
+            entry.tracked === sync.target.tracked && entry.hostname === sync.target.hostname &&
+            entry.nameWithOwner === sync.target.nameWithOwner
+          );
+          if (current.value?.branch !== sync.branch || source?.ref !== sync.sourceRef ||
+              source.head !== req.head || target?.enabled !== true) {
+            if (activity.signal.aborted) {
+              return err({ kind: "remote", code: "canceled", message: "Stopped at your request." });
+            }
+            return err({ kind: "remote", code: "fork_sync_stale", message: "The sync route changed." });
+          }
+          // The explicit lease guards the destination tip. Independently
+          // require a fast-forward from that exact tip to the pinned source.
+          const ancestor = await git(["merge-base", "--is-ancestor", req.expectedHead, req.head], path);
+          if (!ancestor.ok) return ancestor;
+          if (ancestor.value.exitCode !== 0) {
+            return err({ kind: "remote", code: "fork_sync_stale", message: "The planned update is no longer a fast-forward." });
+          }
+          if (!target.tracked && target.hostname !== undefined && target.nameWithOwner !== undefined) {
+            const verified = await verifiedForkPushUrl(git, path, req.remote, {
+              hostname: target.hostname,
+              nameWithOwner: target.nameWithOwner
+            }, options.hosts);
+            if (verified === null) {
+              return activity.signal.aborted
+                ? err({ kind: "remote", code: "canceled", message: "Stopped at your request." })
+                : err({
+                    kind: "remote", code: "fork_push_url_changed",
+                    message: `${req.remote}'s push URLs no longer match the confirmed fork repository.`
+                  });
+            }
+            url = verified;
+          }
+        }
+        const pushed = url === undefined
+          ? await pushBranchWithLease(git, path, req)
+          : await pushBranchWithLease(git, path, req, url);
         if (pushed.ok) {
+          if (url !== undefined) {
+            // Older Git does not update tracking refs on URL-based pushes.
+            activity.setPhase("fetch");
+            await fetchNamedRemotes(git, path, [req.remote], true);
+          }
           activity.setPhase("refresh");
           await refreshRemoteBranches(worktree.repoId, "push");
         }
@@ -1510,7 +1550,7 @@ export function registerRemoteHandlers(
     return result;
   });
 
-  bus.register("remote:setForkSyncRemote", (req) => {
+  bus.register("remote:setForkSyncRemote", async (req) => {
     const repo = repoOf(req.repoId);
     if (repo === null) return err({ ...notFound, message: "repo not found" });
     const remote = req.remote.trim();
@@ -1521,7 +1561,15 @@ export function registerRemoteHandlers(
         message: "Remote name is required."
       });
     }
-    setForkSyncRemotePref(db, req.repoId, remote, req.enabled);
+    const saved = await operations.runRepository(req.repoId, async () => {
+      const endpoints = await listRemoteEndpoints(execGit, repo.path);
+      if (!endpoints.ok) return endpoints;
+      for (const alias of forkSyncRemoteAliases(remote, endpoints.value, hostsForRemotes?.() ?? {})) {
+        setForkSyncRemotePref(db, req.repoId, alias, req.enabled);
+      }
+      return ok(null);
+    });
+    if (!saved.ok) return saved;
     emitEvent("repo:changed", {
       profileId: repo.profileId,
       repoIds: [req.repoId]
@@ -1543,7 +1591,7 @@ export function registerRemoteHandlers(
         forkStatusOptionsOf(worktree.repoId)
       );
       if (status.ok && status.value?.source != null) {
-        discoverMissingSiblingForks(
+        discoverSiblingForks(
           worktree.repoId,
           worktree.path,
           status.value.tracked?.remote ?? null,
@@ -1565,7 +1613,7 @@ export function registerRemoteHandlers(
     const worktree = live.value;
     const parent = forkParentOf(worktree.repoId);
     const identity = readIdentity?.(worktree.repoId);
-    const options = forkStatusOptionsOf(worktree.repoId);
+    const options = { ...forkStatusOptionsOf(worktree.repoId), includeMissingSiblings: true };
     const before = await resolveForkStatus(
       execGit,
       worktree.path,
@@ -1588,18 +1636,8 @@ export function registerRemoteHandlers(
         message: `${req.branch} is no longer checked out against that source. Nothing was changed.`
       });
     }
-    const { tracked } = status;
-    const fetchRemotes: string[] = [];
-    if (tracked !== null) fetchRemotes.push(tracked.remote);
-    if (req.push && source.syncTargets !== undefined) {
-      for (const target of source.syncTargets) {
-        if (target.enabled && !fetchRemotes.includes(target.remote)) {
-          fetchRemotes.push(target.remote);
-        }
-      }
-    }
-    if (!fetchRemotes.includes(source.remote)) fetchRemotes.push(source.remote);
-
+    const tracking = status.tracked;
+    const fetchRemotes = [...new Set(tracking === null ? [source.remote] : [tracking.remote, source.remote])];
     const pulled = await runPull(req.worktreeId, {
       kind: "ref",
       ref: source.ref,
@@ -1609,19 +1647,8 @@ export function registerRemoteHandlers(
     });
     if (!pulled.ok) return pulled;
 
-    // Read again: the fetch moved all fetched tips, and every push is judged
-    // against what each fork remote holds now, not when the chip was drawn.
-    const freshOptions = forkStatusOptionsOf(worktree.repoId);
-    const [after, arrived] = await Promise.all([
-      resolveForkStatus(
-        execGit,
-        worktree.path,
-        parent,
-        readIdentity?.(worktree.repoId),
-        freshOptions
-      ),
-      commitsSince(execGit, worktree.path, status.head)
-    ]);
+    const sourceHead = pulled.value.sourceHead!;
+    const arrived = await commitsSince(execGit, worktree.path, status.head, sourceHead);
     const outcome = {
       source: source.label,
       arrived,
@@ -1629,140 +1656,122 @@ export function registerRemoteHandlers(
       reappliedWithConflicts: pulled.value.reappliedWithConflicts,
       ...(pulled.value.recoveryStash === undefined ? {} : { recoveryStash: pulled.value.recoveryStash })
     };
-    const now = after.ok ? after.value : null;
-    if (now === null || now.source === null) {
-      return ok({ ...outcome, push: { outcome: "no_tracking" as const } });
-    }
-    const targets =
-      now.source.syncTargets ??
-      (now.tracked === null
-        ? []
-        : [
-            {
-              remote: now.tracked.remote,
-              branch:
-                now.source.pushBack?.branch ??
-                now.tracked.label.slice(now.tracked.remote.length + 1),
-              tracked: true,
-              enabled: true,
-              pushBack: now.source.pushBack
-            }
-          ]);
-    if (targets.length === 0) {
-      return ok({ ...outcome, push: { outcome: "no_tracking" as const } });
-    }
-    const enabledTargets = targets.filter((entry) => entry.enabled);
-    // Pull's "only" choice, or every fork remote disabled: the fast-forward was
-    // the whole request, and the remotes wait for the user's own Push.
-    if (!req.push || enabledTargets.length === 0) {
-      const first = enabledTargets[0] ?? targets[0]!;
+    const readCurrent = async () => {
+      const after = await resolveForkStatus(
+        execGit,
+        worktree.path,
+        forkParentOf(worktree.repoId),
+        readIdentity?.(worktree.repoId),
+        { ...forkStatusOptionsOf(worktree.repoId), includeMissingSiblings: true }
+      );
+      const now = after.ok ? after.value : null;
+      return now?.branch === status.branch && now.source?.ref === source.ref &&
+        now.source.head === sourceHead && now.tracked?.ref === tracking?.ref
+        ? now.source
+        : null;
+    };
+
+    const now = await readCurrent();
+    if (now === null) return ok({ ...outcome, push: { outcome: "no_tracking" as const } });
+    const skip = (target: ForkSyncTarget): ForkSyncPush => ({
+      outcome: "skipped", remote: target.remote, branch: target.branch
+    });
+    const targets = now.syncTargets ?? [];
+    const planned = (source.syncTargets ?? []).filter((entry) => entry.enabled);
+    if (!req.push || planned.length === 0) {
+      const skipped = targets.map(skip);
       return ok({
         ...outcome,
-        push: {
-          outcome: "skipped" as const,
-          remote: first.remote,
-          branch: first.branch
-        },
-        ...(targets.length > 1
-          ? {
-              pushes: targets.map((entry) => ({
-                outcome: "skipped" as const,
-                remote: entry.remote,
-                branch: entry.branch
-              }))
-            }
-          : {})
+        push: skipped[0] ?? { outcome: "no_tracking" as const },
+        ...(skipped.length > 1 ? { pushes: skipped } : {})
       });
     }
 
-    const hosts = hostsForRemotes?.() ?? {};
-    const remoteIdentities = freshOptions.remoteIdentities ?? [];
-    const currentIdentity = readIdentity?.(worktree.repoId);
+    const targetFor = (current: typeof now, entry: ForkSyncTarget) =>
+      current.syncTargets?.find((item) =>
+        item.remote === entry.remote && item.tracked === entry.tracked &&
+        item.hostname === entry.hostname && item.nameWithOwner === entry.nameWithOwner
+      );
     const pushes: ForkSyncPush[] = [];
-    let canceled = false;
-
-    for (const entry of enabledTargets) {
-      const target = { remote: entry.remote, branch: entry.branch };
-      if (canceled) {
-        pushes.push({ outcome: "skipped", ...target });
+    const repo = repoOf(worktree.repoId);
+    let stopped = false;
+    for (const entry of planned) {
+      if (stopped) {
+        pushes.push(skip(entry));
         continue;
       }
-      if (entry.unfetched) {
-        // After fetching, the sibling remote still did not carry this branch;
-        // never invent a new branch on a sibling fork.
+      let current = await readCurrent();
+      if (current === null) break;
+      let target = targetFor(current, entry);
+      if (target === undefined) continue;
+      if (!target.enabled) {
+        pushes.push(skip(target));
         continue;
       }
-      if (entry.pushBack === null) {
-        pushes.push({ outcome: "up_to_date", ...target });
-        continue;
-      }
-      if (entry.pushBack.overwrites > 0) {
-        pushes.push({
-          outcome: "diverged",
-          ...target,
-          overwrites: entry.pushBack.overwrites
-        });
-        continue;
-      }
-      // For sibling forks (not the checked-out branch's tracked remote),
-      // re-verify EVERY configured push URL still points to the confirmed fork.
       if (!entry.tracked) {
-        const meta =
-          entry.nameWithOwner === undefined
-            ? undefined
-            : remoteIdentities.find(
-                (row) =>
-                  row.nameWithOwner.toLowerCase() ===
-                  entry.nameWithOwner!.toLowerCase()
-              ) ??
-              (currentIdentity?.nameWithOwner.toLowerCase() ===
-              entry.nameWithOwner.toLowerCase()
-                ? {
-                    hostname: currentIdentity.hostname,
-                    nameWithOwner: currentIdentity.nameWithOwner
-                  }
-                : undefined);
-        const verified =
-          meta !== undefined &&
-          (await verifyRemotePushUrls(
-            execGit,
-            worktree.path,
-            entry.remote,
-            meta,
-            hosts
-          ));
-        if (!verified) {
-          pushes.push({
-            outcome: "failed",
-            ...target,
-            message: `${entry.remote}'s push URLs no longer match the confirmed fork repository.`
-          });
+        const fetched = await tracked(
+          {
+            kind: "fetch",
+            profileId: repo?.profileId ?? "",
+            repoId: worktree.repoId,
+            repoName: repo?.name ?? worktree.repoId,
+            worktreeId: req.worktreeId,
+            branch: status.branch
+          },
+          "fetch",
+          async (git, activity) => {
+            const fetched = await fetchNamedRemotes(git, worktree.path, [entry.remote], true);
+            if (fetched.ok) {
+              activity.setPhase("refresh");
+              await refreshRemoteBranches(worktree.repoId, "fork sync fetch");
+            }
+            return fetched;
+          }
+        );
+        if (!fetched.ok) {
+          stopped = fetched.error.code === "canceled";
+          pushes.push(stopped
+            ? { outcome: "stopped", remote: entry.remote, branch: entry.branch }
+            : {
+                outcome: "fetch_failed", remote: entry.remote, branch: entry.branch,
+                message: sanitizeGitLogDetail(classifyAuthFailure(fetched.error).message)
+              });
           continue;
         }
+        current = await readCurrent();
+        if (current === null) break;
+        target = targetFor(current, entry);
       }
-      const pushed = await runLeasedPush(req.worktreeId, {
-        ...target,
-        head: now.source.head,
-        expectedHead: entry.pushBack.head
-      });
-      if (pushed.ok) {
-        pushes.push({ outcome: "pushed", ...target });
+
+
+      if (target === undefined || target.unfetched) continue;
+      if (!target.enabled) {
+        pushes.push(skip(target));
+        continue;
+      }
+      const { remote, branch, pushBack } = target;
+      if (pushBack === null) {
+        pushes.push({ outcome: "up_to_date", remote, branch });
+      } else if (pushBack.overwrites > 0) {
+        pushes.push({ outcome: "diverged", remote, branch, overwrites: pushBack.overwrites });
       } else {
-        if (pushed.error.code === "canceled") canceled = true;
-        pushes.push({
-          outcome: "failed",
-          ...target,
-          message: pushed.error.message
-        });
+        const pushed = await runLeasedPush(req.worktreeId, {
+          remote, branch, head: sourceHead, expectedHead: pushBack.head
+        }, { branch: status.branch, sourceRef: source.ref, target });
+        if (pushed.ok) {
+          pushes.push({ outcome: "pushed", remote, branch });
+        } else if (pushed.error.code === "canceled") {
+          stopped = true;
+          pushes.push({ outcome: "stopped", remote, branch });
+        } else if (pushed.error.code === "fork_sync_stale") {
+          pushes.push(skip(target));
+        } else {
+          pushes.push({ outcome: "failed", remote, branch, message: pushed.error.message });
+        }
       }
     }
 
-    const primary: ForkSyncPush =
-      pushes[0] ?? {
-        outcome: "up_to_date",
-        remote: enabledTargets[0]!.remote,
-        branch: enabledTargets[0]!.branch
-      };
+    const primary: ForkSyncPush = pushes[0] ?? { outcome: "no_tracking" };
     return ok({
       ...outcome,
       push: primary,

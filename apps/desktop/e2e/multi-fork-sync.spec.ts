@@ -109,3 +109,18 @@ test("renders Remotes tab writable fork badges and opt-out toggles", async () =>
   await toggles.nth(1).click();
   await expect(toggles.nth(1)).not.toBeChecked();
 });
+
+test("shows the route for a disabled sole fork", async () => {
+  await page.evaluate(() => window.multiForkHarness.mount("pull-disabled"));
+  await page.locator(".wt-split__caret").click();
+  const menu = page.locator(".pull-menu");
+  await expect(menu).toBeVisible();
+  if (shotsDir !== undefined) {
+    mkdirSync(shotsDir, { recursive: true });
+    await page.locator(".shot-frame").screenshot({
+      path: join(shotsDir, "pull-disabled.png")
+    });
+  }
+  await expect(menu).toContainText("No fork remotes are enabled for push.");
+  await expect(menu.getByRole("menuitemcheckbox")).toHaveCount(0);
+});

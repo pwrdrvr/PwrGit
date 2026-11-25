@@ -362,10 +362,12 @@ function forkPushTarget(fork: ForkStatus): {
 } | null {
   const { tracked, source } = fork;
   if (tracked === null) return null;
+  const target = source?.syncTargets?.find((entry) => entry.tracked && entry.remote === tracked.remote);
+  if (source?.syncTargets !== undefined && target?.enabled !== true) return null;
   return {
     remote: tracked.remote,
     branch:
-      source?.pushBack?.branch ?? tracked.label.slice(tracked.remote.length + 1),
+      target?.branch ?? source?.pushBack?.branch ?? tracked.label.slice(tracked.remote.length + 1),
     label: tracked.label,
     head: tracked.head
   };
@@ -405,12 +407,11 @@ function pullMenuRows(
       rebase review.
     </>
   );
-  const syncTargets = fork.source.syncTargets ?? [];
-  const multiFork = syncTargets.length >= 2;
-  const enabledTargets = syncTargets.filter((target) => target.enabled);
-  const enabledTargetNames = enabledTargets.map(
-    (target) => target.nameWithOwner ?? target.remote
-  );
+  const syncTargets = source.syncTargets;
+  const enabledTargets = (syncTargets ?? []).filter((target) => target.enabled);
+  const enabledTargetNames = syncTargets === undefined
+    ? [repos.fork]
+    : enabledTargets.map((target) => target.nameWithOwner ?? target.remote);
   const enabledRemotes = enabledTargets.map((target) => target.remote);
   const behindEnabledTargets = enabledTargets.filter(
     (target) =>
@@ -418,36 +419,21 @@ function pullMenuRows(
       target.pushBack.adds > 0 &&
       target.pushBack.overwrites === 0
   );
-  const syncStops = !multiFork
-    ? [
-        { text: repos.original, kind: "repo" as const },
-        { text: branch, kind: "here" as const },
-        { text: repos.fork, kind: "go" as const }
-      ]
-    : enabledTargetNames.length === 0
-      ? [
-          { text: repos.original, kind: "repo" as const },
-          { text: branch, kind: "here" as const }
-        ]
-      : [
-          { text: repos.original, kind: "repo" as const },
-          { text: branch, kind: "here" as const },
-          {
-            text: enabledTargetNames[0]!,
-            ...(enabledTargetNames.length > 1
-              ? { extra: enabledTargetNames.slice(1) }
-              : {}),
-            kind: "go" as const
-          }
-        ];
-  const syncRouteLabel = !multiFork
-    ? `${repos.original} to ${branch}, then to ${repos.fork}`
-    : enabledTargetNames.length === 0
-      ? `${repos.original} to ${branch}`
-      : `${repos.original} to ${branch}, then to ${andList(enabledTargetNames)}`;
+  const syncStops = [
+    { text: repos.original, kind: "repo" as const },
+    { text: branch, kind: "here" as const },
+    ...(enabledTargetNames.length === 0 ? [] : [{
+      text: enabledTargetNames[0]!,
+      ...(enabledTargetNames.length > 1 ? { extra: enabledTargetNames.slice(1) } : {}),
+      kind: "go" as const
+    }])
+  ];
+  const syncRouteLabel = enabledTargetNames.length === 0
+    ? `${repos.original} to ${branch}`
+    : `${repos.original} to ${branch}, then to ${andList(enabledTargetNames)}`;
   const syncDetail: ReactNode = own
     ? stops
-    : !multiFork
+    : syncTargets === undefined
       ? (
           <>
             Fast-forward <code>{branch}</code>
@@ -635,8 +621,8 @@ function pullTitle(choice: PullChoice, fork: ForkChoice | null): string {
   if (hasOwnCommits(fork)) {
     return `Pull · ${branch} has ${commits(source.ahead)} ${source.label} doesn't, so this stops for a rebase review`;
   }
-  if (choice === "sync" && (source.syncTargets?.length ?? 0) >= 2) {
-    const enabled = source.syncTargets!.filter((target) => target.enabled);
+  if (choice === "sync" && source.syncTargets !== undefined) {
+    const enabled = source.syncTargets.filter((target) => target.enabled);
     if (enabled.length === 0) {
       return `Pull · fast-forward ${branch} to ${source.label}`;
     }
@@ -678,6 +664,8 @@ function forkSyncReceipt(
       (entry): entry is Extract<ForkSyncPush, { outcome: "failed" }> =>
         entry.outcome === "failed"
     );
+    const fetchFailed = outcome.pushes.filter((entry) => entry.outcome === "fetch_failed");
+    const stopped = outcome.pushes.find((entry) => entry.outcome === "stopped");
     const skipped = outcome.pushes.filter(
       (entry): entry is Extract<ForkSyncPush, { outcome: "skipped" }> =>
         entry.outcome === "skipped"
@@ -698,10 +686,16 @@ function forkSyncReceipt(
         `pushing ${entry.remote}/${entry.branch} failed — ${entry.message.split("\n")[0]}`
       );
     }
+    for (const entry of fetchFailed) {
+      parts.push(`fetching ${entry.remote} failed — ${entry.message.split("\n")[0]}`);
+    }
+    if (stopped !== undefined) parts.push(`sync stopped at ${stopped.remote}/${stopped.branch}`);
     if (
       pushed.length === 0 &&
       diverged.length === 0 &&
       failed.length === 0 &&
+      fetchFailed.length === 0 &&
+      stopped === undefined &&
       skipped.length > 0
     ) {
       parts.push(
@@ -719,30 +713,30 @@ function forkSyncReceipt(
     summary += restored;
     const standingDiverged =
       diverged.length > 0 && (outcome.arrived > 0 || pushed.length > 0);
-    const stands = failed.length > 0 || standingDiverged;
-    const flash: Chip =
-      failed.length > 0
-        ? { text: "synced · push failed", tone: "warn" }
-        : standingDiverged
-          ? {
-              text:
-                pushed.length > 0
-                  ? `synced · ${diverged.length} not pushed`
-                  : "pulled · not pushed",
-              tone: "warn"
-            }
-          : pushed.length === 0 &&
-              diverged.length === 0 &&
-              failed.length === 0 &&
-              skipped.length > 0
-            ? { text: `pulled ${outcome.source}`, tone: "ok" }
-            : outcome.arrived === 0 && pushed.length === 0
-              ? { text: "up to date", tone: "ok" }
-              : { text: `synced with ${outcome.source}`, tone: "ok" };
+    const stands = failed.length > 0 || fetchFailed.length > 0 || standingDiverged;
+    let flash: Chip = { text: `synced with ${outcome.source}`, tone: "ok" };
+    if (failed.length > 0) {
+      flash = { text: "synced · push failed", tone: "warn" };
+    } else if (fetchFailed.length > 0) {
+      flash = { text: "synced · sibling fetch failed", tone: "warn" };
+    } else if (standingDiverged) {
+      flash = {
+        text: pushed.length > 0 ? `synced · ${diverged.length} not pushed` : "pulled · not pushed",
+        tone: "warn"
+      };
+    } else if (stopped !== undefined) {
+      flash = { text: "sync stopped", tone: "muted" };
+    } else if (pushed.length === 0 && diverged.length === 0 && skipped.length > 0) {
+      flash = { text: `pulled ${outcome.source}`, tone: "ok" };
+    } else if (outcome.arrived === 0 && pushed.length === 0) {
+      flash = { text: "up to date", tone: "ok" };
+    }
     return { summary, flash, stands };
   }
 
-  const moved = `Fast-forwarded ${branch} to ${outcome.source} · ${commits(outcome.arrived)}`;
+  const moved = outcome.arrived > 0
+    ? `Fast-forwarded ${branch} to ${outcome.source} · ${commits(outcome.arrived)}`
+    : `${branch} is up to date with ${outcome.source}`;
   const { push } = outcome;
   // Nothing arrived and the fork's branch is ahead of the source: the sync had
   // nothing to do, and holding back a push it never had a reason to make is
@@ -770,6 +764,10 @@ function forkSyncReceipt(
   } else if (push.outcome === "failed") {
     pushFailed = true;
     summary = `${moved}, but pushing ${push.remote}/${push.branch} failed — ${push.message.split("\n")[0]}`;
+  } else if (push.outcome === "fetch_failed") {
+    summary = `${moved} · fetching ${push.remote} failed — ${push.message.split("\n")[0]}`;
+  } else if (push.outcome === "stopped") {
+    summary = `${moved} · sync stopped at ${push.remote}/${push.branch}`;
   } else if (push.outcome === "skipped") {
     summary = `${moved} · ${push.remote}/${push.branch} not pushed`;
   }
@@ -781,17 +779,13 @@ function forkSyncReceipt(
     };
   }
   summary += restored;
-  return {
-    summary,
-    flash: pushFailed
-      ? { text: "synced · push failed", tone: "warn" }
-      : notPushed
-        ? { text: "pulled · not pushed", tone: "warn" }
-        : push.outcome === "skipped"
-          ? { text: `pulled ${outcome.source}`, tone: "ok" }
-          : { text: `synced with ${outcome.source}`, tone: "ok" },
-    stands: pushFailed || notPushed
-  };
+  let flash: Chip = { text: `synced with ${outcome.source}`, tone: "ok" };
+  if (pushFailed) flash = { text: "synced · push failed", tone: "warn" };
+  else if (push.outcome === "fetch_failed") flash = { text: "synced · sibling fetch failed", tone: "warn" };
+  else if (notPushed) flash = { text: "pulled · not pushed", tone: "warn" };
+  else if (push.outcome === "stopped") flash = { text: "sync stopped", tone: "muted" };
+  else if (push.outcome === "skipped") flash = { text: `pulled ${outcome.source}`, tone: "ok" };
+  return { summary, flash, stands: pushFailed || notPushed || push.outcome === "fetch_failed" };
 }
 
 type Busy = "fetch" | "pull" | "push" | null;
@@ -1358,7 +1352,8 @@ export function WorktreeHeader({
     if (!current()) return { ok: true, value: undefined };
     if (!inspected.ok) return inspected;
     const pushTo =
-      push && fresh.ok && fresh.value !== null ? forkPushTarget(fresh.value) : null;
+      push && fresh.ok && fresh.value?.branch === inspected.value.branch &&
+      fresh.value.source?.ref === sourceRef ? forkPushTarget(fresh.value) : null;
     setDivergence(inspected.value);
     setDivergenceFork({ ref: sourceRef, pushTo });
     return { ok: true, value: undefined };

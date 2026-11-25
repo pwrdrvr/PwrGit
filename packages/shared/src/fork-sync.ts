@@ -1,6 +1,6 @@
 import {
+  canonicalForgeHostname,
   parseForgeRemote,
-  remoteMatchesForgeRepo,
   type ForgeHostMap
 } from "./forge-remote";
 import {
@@ -30,35 +30,62 @@ export type EligibleForkRemote = {
   root?: string;
 };
 
-/**
- * Look up the cached forge metadata for a remote whose fetch & push URLs point
- * to the same forge repository. Checks `identity` first (only while `origin`
- * still points at that repo), then `remoteIdentities`.
- */
-export function remoteForgeMetadata(
-  remote: Pick<RemoteEndpoint, "fetchUrl" | "pushUrl">,
+type ForkRemoteUrls = Pick<RemoteEndpoint, "fetchUrl" | "pushUrl" | "pushUrls">;
+
+/** Sync requires a confirmed forge instance, including for SSH URLs. */
+export function matchesForkSyncRepository(
+  url: string,
+  expected: { hostname: string; nameWithOwner: string },
+  hosts: ForgeHostMap
+): boolean {
+  const parsed = parseForgeRemote(url, hosts);
+  return parsed !== null &&
+    parsed.hostname === canonicalForgeHostname(expected.hostname) &&
+    parsed.nameWithOwner.toLowerCase() === expected.nameWithOwner.toLowerCase();
+}
+
+function allPushUrlsMatch(
+  remote: ForkRemoteUrls,
+  expected: { hostname: string; nameWithOwner: string },
+  hosts: ForgeHostMap
+): boolean {
+  const urls = remote.pushUrls ?? [remote.pushUrl];
+  return urls.length > 0 && urls.every((url) => matchesForkSyncRepository(url, expected, hosts));
+}
+
+/** Remote nicknames that safely address the same forge repository. */
+export function forkSyncRemoteAliases(
+  remote: string,
+  endpoints: readonly RemoteEndpoint[],
+  hosts: ForgeHostMap
+): string[] {
+  const endpoint = endpoints.find((entry) => entry.name === remote);
+  const repo = endpoint === undefined ? null : parseForgeRemote(endpoint.fetchUrl, hosts);
+  if (endpoint === undefined || repo === null || !isForgeKind(repo.host) ||
+      !allPushUrlsMatch(endpoint, repo, hosts)) {
+    return [remote];
+  }
+  return endpoints.filter((entry) =>
+    matchesForkSyncRepository(entry.fetchUrl, repo, hosts) && allPushUrlsMatch(entry, repo, hosts)
+  ).map((entry) => entry.name);
+}
+
+/** Cached metadata for the fetch repository, independent of the push routing. */
+export function remoteFetchForgeMetadata(
+  remote: Pick<RemoteEndpoint, "fetchUrl">,
   identity: RepoIdentity | undefined,
   endpoints: readonly Pick<RemoteEndpoint, "name" | "fetchUrl">[],
   remoteIdentities: readonly RemoteForgeIdentity[],
   hosts: ForgeHostMap = {}
 ): RemoteForgeIdentity | null {
   const fetch = parseForgeRemote(remote.fetchUrl, hosts);
-  const push = parseForgeRemote(remote.pushUrl, hosts);
-  if (
-    fetch === null ||
-    push === null ||
-    !isForgeKind(fetch.host) ||
-    fetch.hostname !== push.hostname ||
-    fetch.nameWithOwner.toLowerCase() !== push.nameWithOwner.toLowerCase()
-  ) {
-    return null;
-  }
+  if (fetch === null || !isForgeKind(fetch.host)) return null;
   const origin = endpoints.find((entry) => entry.name === "origin");
   if (
     identity !== undefined &&
     origin !== undefined &&
-    remoteMatchesForgeRepo(origin.fetchUrl, identity, hosts) &&
-    remoteMatchesForgeRepo(remote.fetchUrl, identity, hosts)
+    matchesForkSyncRepository(origin.fetchUrl, identity, hosts) &&
+    matchesForkSyncRepository(remote.fetchUrl, identity, hosts)
   ) {
     return {
       hostname: identity.hostname,
@@ -81,6 +108,18 @@ export function remoteForgeMetadata(
       entry.nameWithOwner.toLowerCase() === slug
   );
   return hit ?? null;
+}
+
+/** Cached metadata only when every push destination matches the fetch repository. */
+function remoteForgeMetadata(
+  remote: ForkRemoteUrls,
+  identity: RepoIdentity | undefined,
+  endpoints: readonly RemoteEndpoint[],
+  remoteIdentities: readonly RemoteForgeIdentity[],
+  hosts: ForgeHostMap
+): RemoteForgeIdentity | null {
+  const meta = remoteFetchForgeMetadata(remote, identity, endpoints, remoteIdentities, hosts);
+  return meta !== null && allPushUrlsMatch(remote, meta, hosts) ? meta : null;
 }
 
 /**
@@ -155,14 +194,11 @@ export function siblingForkCandidates(
       continue;
     }
     const fetch = parseForgeRemote(remote.fetchUrl, hosts);
-    const push = parseForgeRemote(remote.pushUrl, hosts);
     if (
       fetch === null ||
-      push === null ||
       !isForgeKind(fetch.host) ||
       fetch.hostname.toLowerCase() !== sourceHost ||
-      push.hostname.toLowerCase() !== sourceHost ||
-      fetch.nameWithOwner.toLowerCase() !== push.nameWithOwner.toLowerCase()
+      !allPushUrlsMatch(remote, fetch, hosts)
     ) {
       continue;
     }
@@ -256,9 +292,11 @@ export function eligibleSiblingForkRemotes(
  */
 export function isForkSyncRemoteEnabled(
   remote: string,
-  prefs: ReadonlyMap<string, boolean>
+  prefs: ReadonlyMap<string, boolean>,
+  endpoints: readonly RemoteEndpoint[] = [],
+  hosts: ForgeHostMap = {}
 ): boolean {
-  return prefs.get(remote) ?? true;
+  return forkSyncRemoteAliases(remote, endpoints, hosts).every((name) => prefs.get(name) !== false);
 }
 
 /**
@@ -301,7 +339,7 @@ export function repoForkSyncEligibility(
   const validIdentity =
     options.identity !== undefined &&
     origin !== undefined &&
-    remoteMatchesForgeRepo(origin.fetchUrl, options.identity, hosts)
+    matchesForkSyncRepository(origin.fetchUrl, options.identity, hosts)
       ? options.identity
       : undefined;
 
@@ -375,7 +413,7 @@ export function repoForkSyncEligibility(
     if (eligible) seenEligibleSlugs.add(slug);
     result.set(endpoint.name, {
       eligible,
-      enabled: eligible ? isForkSyncRemoteEnabled(endpoint.name, options.prefs) : false,
+      enabled: eligible ? isForkSyncRemoteEnabled(endpoint.name, options.prefs, endpoints, hosts) : false,
       ...(meta.viewerCanPush === undefined ? {} : { viewerCanPush: meta.viewerCanPush }),
       ...(meta.parent === undefined ? {} : { parent: meta.parent }),
       ...(meta.root === undefined ? {} : { root: meta.root })

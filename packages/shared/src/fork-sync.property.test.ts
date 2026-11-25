@@ -34,6 +34,7 @@ describe("multi-fork sync rules (properties)", () => {
             name: remoteNameArb,
             fetchSlug: slugArb,
             samePush: fc.boolean(),
+            hasExtraPush: fc.boolean(),
             otherPushSlug: slugArb,
             sameHost: fc.boolean(),
             knownInForge: fc.boolean(),
@@ -78,7 +79,8 @@ describe("multi-fork sync rules (properties)", () => {
             endpoints.push({
               name: spec.name,
               fetchUrl: ghUrl(spec.fetchSlug, host),
-              pushUrl: ghUrl(pushSlug, host)
+              pushUrl: ghUrl(pushSlug, host),
+              ...(spec.hasExtraPush ? { pushUrls: [ghUrl(pushSlug, host), ghUrl(spec.fetchSlug, "mirror.example")] } : {})
             });
             const metaKey = `${host}\0${spec.fetchSlug.toLowerCase()}`;
             if (spec.knownInForge && !seenMeta.has(metaKey)) {
@@ -127,6 +129,7 @@ describe("multi-fork sync rules (properties)", () => {
             expect(entry.viewerCanPush).toBe(true);
             const endpoint = endpoints.find((e) => e.name === entry.remote)!;
             expect(endpoint.fetchUrl.toLowerCase()).toBe(endpoint.pushUrl.toLowerCase());
+            expect(endpoint.pushUrls).toBeUndefined();
             const meta = metaByKey.get(
               `github.com\0${entry.nameWithOwner.toLowerCase()}`
             );
@@ -219,6 +222,26 @@ describe("multi-fork sync rules (properties)", () => {
       { name: "readonly", nameWithOwner: "alice/t3code", role: "fork", canPush: false },
       { name: "mirror", nameWithOwner: "bob/t3code", role: "fork" }
     ]);
+  });
+
+  it("only assigns sibling roles on the original's forge instance", () => {
+    fc.assert(fc.property(slugArb, fc.boolean(), fc.boolean(), (parent, sameHost, useRoot) => {
+      const identity: RepoIdentity = {
+        host: "github", hostname: "github.com", owner: "home", name: "app",
+        nameWithOwner: "home/app", visibility: "public",
+        parent: { nameWithOwner: parent, url: `https://github.com/${parent}` }
+      };
+      const host = sameHost ? "github.com" : "gitlab.com";
+      const sibling = ghUrl("sibling/app", host);
+      const rows = routedRemotes(identity, [
+        { name: "origin", fetchUrl: ghUrl("home/app"), pushUrl: ghUrl("home/app") },
+        { name: "peer", fetchUrl: sibling, pushUrl: sibling }
+      ], {}, [{
+        hostname: host, nameWithOwner: "sibling/app", viewerCanPush: true,
+        ...(useRoot ? { root: parent } : { parent })
+      }]);
+      expect(rows[1]?.role).toBe(sameHost ? "fork" : "other");
+    }));
   });
 
   it("prefers origin as a sibling fork when the checked-out branch tracks another fork remote", () => {

@@ -231,30 +231,14 @@ export function registerBranchHandlers(
         hosts
       );
       if (source !== null) {
-        const cached = new Set(
-          remoteIdentities.map(
-            (entry) =>
-              `${entry.hostname.toLowerCase()}\0${entry.nameWithOwner.toLowerCase()}`
-          )
-        );
-        if (identity !== undefined) {
-          cached.add(
-            `${identity.hostname.toLowerCase()}\0${identity.nameWithOwner.toLowerCase()}`
-          );
-        }
-        const missing = siblingForkCandidates(listed.value.remotes, {
+        const candidates = siblingForkCandidates(listed.value.remotes, {
           sourceRemote: sourceRemoteName,
           trackedRemote: originIsReadOnlySource ? null : "origin",
           source,
           hosts
-        }).filter(
-          (candidate) =>
-            !cached.has(
-              `${candidate.hostname.toLowerCase()}\0${candidate.nameWithOwner.toLowerCase()}`
-            )
-        );
-        if (missing.length > 0) {
-          void ensureRemoteIdentities(req.repoId, missing)
+        });
+        if (candidates.length > 0) {
+          void ensureRemoteIdentities(req.repoId, candidates)
             .then((changed) => {
               if (!changed) return;
               emitEvent("repo:changed", {

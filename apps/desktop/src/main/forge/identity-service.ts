@@ -213,6 +213,7 @@ export class IdentityService {
   private readonly forgeSlots = new IdentitySlots(FORGE_CONCURRENCY);
   private readonly refreshing = new Map<string, Promise<IdentityLookup>>();
   private readonly siblingRefreshing = new Map<string, Promise<boolean>>();
+  private readonly siblingRetryAfter = new Map<string, Map<string, number>>();
   /**
    * Per-repo "do not ask again before" stamps. Two maps, not one, because the
    * two reasons recover differently and merging them gets both wrong.
@@ -541,7 +542,9 @@ export class IdentityService {
       (identity.parent !== undefined ||
         identity.viewerCanPush === false ||
         hasUpstreamRemote);
-    const keepKeys = new Set<string>();
+    const keepKeys = new Set(siblings.map((sibling) =>
+      `${sibling.hostname.toLowerCase()}\0${sibling.nameWithOwner.toLowerCase()}`
+    ));
     const excluded = new Set<string>([origin.nameWithOwner.toLowerCase()]);
     if (identity.parent !== undefined) {
       excluded.add(identity.parent.nameWithOwner.toLowerCase());
@@ -558,17 +561,18 @@ export class IdentityService {
         const slugLower = sibling.nameWithOwner.toLowerCase();
         if (excluded.has(slugLower)) continue;
         excluded.add(slugLower);
-        keepKeys.add(`${sibling.hostname.toLowerCase()}\0${slugLower}`);
-        if (candidates.length < MAX_SIBLING_REMOTE_LOOKUPS) {
-          candidates.push(sibling);
-        }
+        candidates.push(sibling);
       }
+    }
+    const retryAfter = this.siblingRetryAfter.get(repo.id);
+    for (const key of retryAfter?.keys() ?? []) {
+      if (!keepKeys.has(key)) retryAfter?.delete(key);
     }
     if (pruneRemoteIdentities(this.db, repo.id, keepKeys)) {
       siblingsChanged = true;
     }
     if (candidates.length > 0) {
-      if (await this.refreshSiblingCandidates(repo.id, candidates, force)) {
+      if (await this.ensureRemoteIdentities(repo.id, candidates, force)) {
         siblingsChanged = true;
       }
     }
@@ -594,15 +598,16 @@ export class IdentityService {
    */
   async ensureRemoteIdentities(
     repoId: string,
-    candidates: readonly SiblingForkCandidate[]
+    candidates: readonly SiblingForkCandidate[],
+    force = false
   ): Promise<boolean> {
-    if (candidates.length === 0 || this.backedOff(repoId)) return false;
+    if (candidates.length === 0 || (!force && this.backedOff(repoId))) return false;
     const existing = this.siblingRefreshing.get(repoId);
     if (existing !== undefined) return existing;
     const work = this.refreshSiblingCandidates(
       repoId,
-      candidates.slice(0, MAX_SIBLING_REMOTE_LOOKUPS),
-      false
+      candidates,
+      force
     ).finally(() => {
       if (this.siblingRefreshing.get(repoId) === work) {
         this.siblingRefreshing.delete(repoId);
@@ -624,19 +629,28 @@ export class IdentityService {
         row
       );
     }
+    const retryAfter = this.siblingRetryAfter.get(repoId) ?? new Map<string, number>();
+    const keyFor = (entry: SiblingForkCandidate) =>
+      `${entry.hostname.toLowerCase()}\0${entry.nameWithOwner.toLowerCase()}`;
+    const now = Date.now();
+    // Apply the budget after checking freshness so a list of cached siblings
+    // cannot prevent a later candidate from ever being looked up.
+    const due = candidates.filter((candidate) => {
+      if (force) return true;
+      const key = keyFor(candidate);
+      const retryAt = retryAfter.get(key);
+      if (retryAt !== undefined) return now >= retryAt;
+      const prev = stored.get(key);
+      if (prev?.fetchedAt === undefined) return true;
+      const age = now - Date.parse(`${prev.fetchedAt}Z`);
+      const ttl = prev.viewerCanPush === undefined ? IDENTITY_RETRY_MS : IDENTITY_TTL_MS;
+      return !Number.isFinite(age) || age > ttl;
+    }).slice(0, MAX_SIBLING_REMOTE_LOOKUPS);
     let changed = false;
     await Promise.all(
-      candidates.map(async (candidate) => {
-        const key = `${candidate.hostname.toLowerCase()}\0${candidate.nameWithOwner.toLowerCase()}`;
+      due.map(async (candidate) => {
+        const key = keyFor(candidate);
         const prev = stored.get(key);
-        if (!force && prev?.fetchedAt !== undefined) {
-          const age = Date.now() - Date.parse(`${prev.fetchedAt}Z`);
-          const ttl =
-            prev.viewerCanPush === undefined
-              ? IDENTITY_RETRY_MS
-              : IDENTITY_TTL_MS;
-          if (Number.isFinite(age) && age <= ttl) return;
-        }
         const gate = this.hosts.isEnabled(candidate.hostname);
         if (!gate.enabled) return;
         const provider = this.forges.get(candidate.host, candidate.hostname);
@@ -659,27 +673,22 @@ export class IdentityService {
               : { root: repository.root.nameWithOwner })
           };
           writeRemoteIdentity(this.db, repoId, next);
+          retryAfter.delete(key);
           if (!sameRemoteIdentity(prev, next)) changed = true;
         } catch (cause) {
-          if (provider.isAuthError(cause)) {
-            this.authRetryAfter.set(repoId, Date.now() + IDENTITY_RETRY_MS);
-            return;
-          }
+          retryAfter.set(key, Date.now() + IDENTITY_RETRY_MS);
+          if (provider.isAuthError(cause)) return;
           logMain(
             "debug",
             "forge",
             `sibling remote identity lookup failed for ${candidate.nameWithOwner}:`,
             provider.errorMessage(cause)
           );
-          const fallback: RemoteForgeIdentity = {
-            hostname: candidate.hostname,
-            nameWithOwner: candidate.nameWithOwner
-          };
-          writeRemoteIdentity(this.db, repoId, fallback);
-          if (!sameRemoteIdentity(prev, fallback)) changed = true;
         }
       })
     );
+    if (retryAfter.size > 0) this.siblingRetryAfter.set(repoId, retryAfter);
+    else this.siblingRetryAfter.delete(repoId);
     return changed;
   }
 
@@ -718,6 +727,7 @@ export class IdentityService {
   forget(repoId: string): void {
     this.authRetryAfter.delete(repoId);
     this.gateRetryAfter.delete(repoId);
+    this.siblingRetryAfter.delete(repoId);
     this.db.prepare("DELETE FROM repo_identity WHERE repo_id = ?").run(repoId);
     forgetRemoteIdentities(this.db, repoId);
   }

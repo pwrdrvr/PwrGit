@@ -345,6 +345,8 @@ export type ForkSyncTarget = {
   remote: string;
   /** Target branch name on that remote, e.g. `main`. */
   branch: string;
+  /** Forge instance that confirmed this destination, when known. */
+  hostname?: string;
   /** Confirmed forge `owner/name` for this remote, when known. */
   nameWithOwner?: string;
   /** True for the checked-out branch's tracked remote; false for sibling forks. */
@@ -453,6 +455,10 @@ export type ForkSyncPush =
   /** It has commits the source lacks, so only a forced push could match it.
    *  The sync never forces; the reset dialog's leased push is the way. */
   | { outcome: "diverged"; remote: string; branch: string; overwrites: number }
+  /** The sibling could not be fetched and its tracking refs were not used. */
+  | { outcome: "fetch_failed"; remote: string; branch: string; message: string }
+  /** The user stopped this step. Completed work stands. */
+  | { outcome: "stopped"; remote: string; branch: string }
   /** The push itself failed; the local fast-forward stands. */
   | { outcome: "failed"; remote: string; branch: string; message: string }
   /** Pull's "only" choice: the tracked branch was left where it is. */
@@ -546,12 +552,14 @@ export type PushPublishTarget = {
  *  side; the fork seed reads the fetch side, because that is the one the
  *  identity service reads — a push URL pointed elsewhere is a mirror, and
  *  seeding a fork from the mirror would fork the wrong project. */
-export type RemoteEndpoint = Pick<RemoteSummary, "name" | "fetchUrl" | "pushUrl">;
+export type RemoteEndpoint = Pick<RemoteSummary, "name" | "fetchUrl" | "pushUrl" | "pushUrls">;
 
 export type RemoteSummary = {
   name: string;
   fetchUrl: string;
   pushUrl: string;
+  /** Additional push destinations when Git reports multiple URLs, including the first. */
+  pushUrls?: string[];
   /** Branch name relative to the remote, when its symbolic HEAD is known. */
   defaultBranch?: string;
   skipFetchAll: boolean;

@@ -2,7 +2,7 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import type { CloneRepository, ForgeHostMap, RepoIdentity } from "@pwrgit/shared";
+import { err, type CloneRepository, type ForgeHostMap, type RepoIdentity } from "@pwrgit/shared";
 import { CommandBus } from "../command-bus";
 import { IdentityService } from "../forge/identity-service";
 import type { ForgeRepoProvider, ForgeRepoRegistry } from "../forge/repo-provider";
@@ -21,13 +21,18 @@ import { WorktreeOperationQueue } from "./worktree-operation-queue";
 import type { SettingsService } from "../settings/settings-service";
 
 const urlRewrites: Array<[string, string]> = [];
+let rejectPushTo: readonly string[] = [];
+let afterGit: ((args: string[], cwd: string, git: typeof execGit) => Promise<void>) | undefined;
 
 vi.mock("./dugite", async (importOriginal) => {
   const actual = await importOriginal<typeof import("./dugite")>();
   return {
     ...actual,
-    execGit: vi.fn((args: string[], cwd: string, options?: Parameters<typeof actual.execGit>[2]) => {
+    execGit: vi.fn(async (args: string[], cwd: string, options?: Parameters<typeof actual.execGit>[2]) => {
       const sub = args.find((arg) => !arg.startsWith("-"));
+      if (sub === "push" && args.some((arg) => rejectPushTo.includes(arg))) {
+        return err({ kind: "remote", code: "canceled", message: "Stopped at your request." });
+      }
       if ((sub === "fetch" || sub === "push") && urlRewrites.length > 0) {
         const prefix = urlRewrites.flatMap(([localPath, forgeUrl]) => [
           "-c",
@@ -35,7 +40,9 @@ vi.mock("./dugite", async (importOriginal) => {
         ]);
         return actual.execGit([...prefix, ...args], cwd, options);
       }
-      return actual.execGit(args, cwd, options);
+      const result = await actual.execGit(args, cwd, options);
+      await afterGit?.(args, cwd, actual.execGit);
+      return result;
     })
   };
 });
@@ -82,6 +89,8 @@ describe("multi-fork sync (real git + SQLite)", () => {
 
   afterEach(() => {
     urlRewrites.length = 0;
+    afterGit = undefined;
+    rejectPushTo = [];
     for (const db of dbs.splice(0)) db.close();
     for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true });
   });
@@ -211,7 +220,8 @@ describe("multi-fork sync (real git + SQLite)", () => {
       originBare,
       personalBare,
       readonlyBare,
-      initial
+      initial,
+      identity
     };
   }
 
@@ -258,6 +268,7 @@ describe("multi-fork sync (real git + SQLite)", () => {
     expect(await gitOk(["rev-parse", "HEAD"], w.checkout)).toBe(tip2);
     expect(await gitOk(["rev-parse", "refs/heads/main"], w.originBare)).toBe(tip2);
     expect(await gitOk(["rev-parse", "refs/heads/main"], w.personalBare)).toBe(tip2);
+    expect(await gitOk(["rev-parse", "refs/remotes/personal/main"], w.checkout)).toBe(tip2);
     expect(await gitOk(["rev-parse", "refs/heads/main"], w.readonlyBare)).toBe(w.initial);
     expect(tip1).not.toBe(tip2);
   });
@@ -364,18 +375,12 @@ describe("multi-fork sync (real git + SQLite)", () => {
     await gitOk(["push", "origin", "main"], w.upstreamWork);
     await gitOk(["fetch", "upstream"], w.checkout);
 
-    const synced = await w.bus.dispatch("remote:syncFork", {
-      worktreeId: "wt-1",
-      branch: "main",
-      sourceRef: "refs/remotes/upstream/main",
-      push: true
-    });
-    expect(synced.ok).toBe(true);
-    if (!synced.ok) return;
-    expect(synced.value.pushes).toEqual([
-      { outcome: "pushed", remote: "origin", branch: "main" },
-      expect.objectContaining({ outcome: "failed", remote: "personal", branch: "main" })
-    ]);
+    const status = await w.bus.dispatch("remote:forkStatus", { worktreeId: "wt-1" });
+    const refs = await w.bus.dispatch("repo:refs", { repoId: "repo-1" });
+    expect(status.ok && status.value?.source?.syncTargets?.map((t) => t.remote)).toEqual(["origin"]);
+    expect(refs.ok && refs.value.remotes.find((r) => r.name === "personal")?.forkSyncEligible).toBeUndefined();
+    const synced = await sync(w);
+    expect(synced.ok && synced.value.push).toEqual({ outcome: "pushed", remote: "origin", branch: "main" });
     expect(await gitOk(["rev-parse", "refs/heads/main"], w.originBare)).toBe(upstreamTip);
     expect(await gitOk(["rev-parse", "refs/heads/main"], w.personalBare)).toBe(w.initial);
     expect(await gitOk(["rev-parse", "refs/heads/main"], mirrorBare)).toBe(w.initial);
@@ -410,6 +415,150 @@ describe("multi-fork sync (real git + SQLite)", () => {
     expect(await gitOk(["rev-parse", "refs/heads/release/v1"], w.originBare)).toBe(relTip);
     const personalBranches = await gitOk(["for-each-ref", "--format=%(refname:short)", "refs/heads"], w.personalBare);
     expect(personalBranches.split("\n")).toEqual(["main"]);
+  });
+
+  function sync(w: Awaited<ReturnType<typeof createMultiForkWorld>>, branch = "main") {
+    return w.bus.dispatch("remote:syncFork", {
+      worktreeId: "wt-1",
+      branch,
+      sourceRef: `refs/remotes/upstream/${branch}`,
+      push: true
+    });
+  }
+
+  async function publishSource(w: Awaited<ReturnType<typeof createMultiForkWorld>>, branch: string) {
+    const tip = await commitFile(w.upstreamWork, "update.txt", branch, "source advance");
+    await gitOk(["push", "origin", branch], w.upstreamWork);
+    await gitOk(["fetch", "upstream"], w.checkout);
+    return tip;
+  }
+
+  it.each([false, true])("only maps to the sibling default when the source ref is its default (%s)", async (sourceDefault) => {
+    const w = await createMultiForkWorld();
+    await gitOk(["checkout", "-b", "develop"], w.upstreamWork);
+    await gitOk(["push", "origin", "develop"], w.upstreamWork);
+    await gitOk(["checkout", "-b", "develop"], w.checkout);
+    await gitOk(["push", "-u", "origin", "develop"], w.checkout);
+    await gitOk(["remote", "set-head", "origin", "develop"], w.checkout);
+    if (sourceDefault) {
+      await gitOk(["symbolic-ref", "HEAD", "refs/heads/develop"], w.upstreamBare);
+      await gitOk(["fetch", "upstream"], w.checkout);
+      await gitOk(["remote", "set-head", "upstream", "develop"], w.checkout);
+    }
+    const tip = await publishSource(w, "develop");
+    expect((await sync(w, "develop")).ok).toBe(true);
+    expect(await gitOk(["rev-parse", "refs/heads/develop"], w.originBare)).toBe(tip);
+    expect(await gitOk(["rev-parse", "refs/heads/main"], w.personalBare)).toBe(sourceDefault ? tip : w.initial);
+  });
+
+  it.each([false, true])("discovers existing sibling branches without local refs and leaves absent ones absent (%s)", async (exists) => {
+    const w = await createMultiForkWorld();
+    await gitOk(["checkout", "-b", "release"], w.upstreamWork);
+    await gitOk(["push", "origin", "release"], w.upstreamWork);
+    await gitOk(["checkout", "-b", "release"], w.checkout);
+    await gitOk(["push", "-u", "origin", "release"], w.checkout);
+    if (exists) await gitOk(["push", w.personalBare, "release"], w.upstreamWork);
+    const tip = await publishSource(w, "release");
+    expect((await sync(w, "release")).ok).toBe(true);
+    expect(await gitOk(["for-each-ref", "--format=%(objectname)", "refs/heads/release"], w.personalBare)).toBe(exists ? tip : "");
+  });
+
+  it("keeps the local fast-forward and healthy push when a sibling fetch fails", async () => {
+    const w = await createMultiForkWorld();
+    const tip = await publishSource(w, "main");
+    urlRewrites.splice(2, 1, [join(w.root, "unavailable.git"), "git@github.com:me/app.git"]);
+    const result = await sync(w);
+    expect(result.ok && result.value.pushes).toEqual([
+      { outcome: "pushed", remote: "origin", branch: "main" },
+      expect.objectContaining({ outcome: "fetch_failed", remote: "personal" })
+    ]);
+    expect(await gitOk(["rev-parse", "HEAD"], w.checkout)).toBe(tip);
+    expect(await gitOk(["rev-parse", "main"], w.originBare)).toBe(tip);
+    expect(await gitOk(["rev-parse", "main"], w.personalBare)).toBe(w.initial);
+  });
+
+  it("keeps post-pull pushes on the requested route if the checkout switches", async () => {
+    const w = await createMultiForkWorld();
+    await gitOk(["checkout", "-b", "release"], w.upstreamWork);
+    await gitOk(["push", "origin", "release"], w.upstreamWork);
+    await gitOk(["push", w.personalBare, "release"], w.upstreamWork);
+    await gitOk(["push", "origin", "HEAD:release"], w.checkout);
+    await gitOk(["fetch", "--all"], w.checkout);
+    await gitOk(["branch", "--track", "release", "origin/release"], w.checkout);
+    await publishSource(w, "release");
+    await gitOk(["checkout", "main"], w.upstreamWork);
+    const tip = await commitFile(w.upstreamWork, "main.txt", "main", "main advance");
+    await gitOk(["push", "origin", "main"], w.upstreamWork);
+    afterGit = async (args, cwd, git) => {
+      if (cwd !== w.checkout || args[0] !== "merge" || !args.includes("--ff-only")) return;
+      const result = await git(["checkout", "release"], cwd);
+      expect(result.ok && result.value.exitCode).toBe(0);
+    };
+    expect((await sync(w)).ok).toBe(true);
+    expect(await gitOk(["rev-parse", "refs/heads/main"], w.checkout)).toBe(tip);
+    expect(await gitOk(["rev-parse", "refs/heads/release"], w.personalBare)).toBe(w.initial);
+    expect(await gitOk(["rev-parse", "refs/heads/release"], w.originBare)).toBe(w.initial);
+  });
+
+  it("uses the verified sibling destination across an external remote edit", async () => {
+    const w = await createMultiForkWorld();
+    const tip = await publishSource(w, "main");
+    afterGit = async (args, cwd, git) => {
+      if (cwd !== w.checkout || args.join(" ") !== "remote get-url --push --all -- personal") return;
+      afterGit = undefined;
+      const result = await git([
+        "remote", "set-url", "--push", "personal", "git@github.com:alice/app.git"
+      ], cwd);
+      expect(result.ok && result.value.exitCode).toBe(0);
+    };
+    expect((await sync(w)).ok).toBe(true);
+    expect(await gitOk(["rev-parse", "main"], w.personalBare)).toBe(tip);
+    expect(await gitOk(["rev-parse", "main"], w.readonlyBare)).toBe(w.initial);
+  });
+
+  it("reports a stopped sibling push and preserves previously pushed tips", async () => {
+    const w = await createMultiForkWorld();
+    const tip = await publishSource(w, "main");
+    rejectPushTo = ["personal", "git@github.com:me/app.git"];
+    const synced = await sync(w);
+    expect(synced.ok && synced.value.pushes).toEqual([
+      { outcome: "pushed", remote: "origin", branch: "main" },
+      { outcome: "stopped", remote: "personal", branch: "main" }
+    ]);
+    expect(await gitOk(["rev-parse", "main"], w.originBare)).toBe(tip);
+    expect(await gitOk(["rev-parse", "main"], w.personalBare)).toBe(w.initial);
+  });
+
+  it("keeps a confirmed read-only tracked fork as a Pull source only", async () => {
+    const w = await createMultiForkWorld();
+    await gitOk(["remote", "rename", "origin", "organization"], w.checkout);
+    await gitOk(["remote", "rename", "upstream", "origin"], w.checkout);
+    await gitOk(["branch", "--set-upstream-to=coworker/main"], w.checkout);
+    Object.assign(w.identity, { owner: "acme", nameWithOwner: "acme/app", viewerCanPush: false });
+    delete w.identity.parent;
+    const status = await w.bus.dispatch("remote:forkStatus", { worktreeId: "wt-1" });
+    expect(status.ok && status.value?.tracked?.remote).toBe("coworker");
+    expect(status.ok && status.value?.source?.remote).toBe("origin");
+    expect(status.ok && status.value?.source?.syncTargets?.some((t) => t.remote === "coworker")).toBe(false);
+    const tip = await commitFile(w.upstreamWork, "change.txt", "upstream", "source change");
+    await gitOk(["push", "origin", "main"], w.upstreamWork);
+    const synced = await w.bus.dispatch("remote:syncFork", {
+      worktreeId: "wt-1", branch: "main", sourceRef: "refs/remotes/origin/main", push: true
+    });
+    expect(synced.ok).toBe(true);
+    expect(await gitOk(["rev-parse", "HEAD"], w.checkout)).toBe(tip);
+    expect(await gitOk(["rev-parse", "main"], w.readonlyBare)).toBe(w.initial);
+  });
+
+  it("shares the visible Remotes opt-out with the alias tracked by Sync", async () => {
+    const w = await createMultiForkWorld();
+    await gitOk(["remote", "add", "alias", "git@github.com:org/app.git"], w.checkout);
+    await gitOk(["fetch", "alias"], w.checkout);
+    await gitOk(["branch", "--set-upstream-to=alias/main"], w.checkout);
+    await w.bus.dispatch("remote:setForkSyncRemote", { repoId: "repo-1", remote: "origin", enabled: false });
+    await publishSource(w, "main");
+    expect((await sync(w)).ok).toBe(true);
+    expect(await gitOk(["rev-parse", "main"], w.originBare)).toBe(w.initial);
   });
 
   it("enriches repo:refs remotes with fork sync eligibility and preference state", async () => {
@@ -462,6 +611,7 @@ describe("multi-fork sync (real git + SQLite)", () => {
     ].join("\n");
 
     const viewed: string[] = [];
+    let siblingUnavailable = false;
     const provider = {
       viewRepo: vi.fn(async (slug: string): Promise<CloneRepository> => {
         viewed.push(slug);
@@ -480,12 +630,13 @@ describe("multi-fork sync (real git + SQLite)", () => {
             localPaths: []
           };
         }
+        if (siblingUnavailable) throw new Error("temporary rate limit");
         return {
           host: "github",
           hostname: "github.com",
-          owner: "huntharo",
+          owner: slug.split("/")[0]!,
           name: "t3code",
-          nameWithOwner: "huntharo/t3code",
+          nameWithOwner: slug,
           visibility: "public",
           viewerCanPush: true,
           parent: { nameWithOwner: "pingdotgg/t3code", url: "https://github.com/pingdotgg/t3code" },
@@ -524,6 +675,26 @@ describe("multi-fork sync (real git + SQLite)", () => {
         parent: "pingdotgg/t3code"
       }
     ]);
+
+    const confirmed = readRemoteIdentities(db, "repo-1");
+    siblingUnavailable = true;
+    await service.refresh([repo], { force: true });
+    expect(readRemoteIdentities(db, "repo-1")).toEqual(confirmed);
+
+    const uncached = { remote: "another", host: "github" as const, hostname: "github.com", nameWithOwner: "another/t3code" };
+    expect(await service.ensureRemoteIdentities("repo-1", [uncached])).toBe(false);
+    const attempts = viewed.length;
+    await service.ensureRemoteIdentities("repo-1", [uncached]);
+    expect(viewed).toHaveLength(attempts);
+    const now = Date.now();
+    const clock = vi.spyOn(Date, "now").mockReturnValue(now + 10 * 60_000);
+    try {
+      siblingUnavailable = false;
+      await service.ensureRemoteIdentities("repo-1", [uncached]);
+      expect(viewed).toHaveLength(attempts + 1);
+    } finally {
+      clock.mockRestore();
+    }
 
     // Remove the `huntharo` remote and force refresh: cached row is pruned.
     remotesOutput = [
