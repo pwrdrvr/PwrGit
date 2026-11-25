@@ -1,9 +1,13 @@
-import { createContext, useContext, useLayoutEffect, type ReactElement } from "react";
+import {
+  createContext, useCallback, useContext, useLayoutEffect, useRef,
+  type ReactElement, type ReactNode, type RefObject
+} from "react";
 import { BranchGlyph } from "../../lib/BranchGlyph";
 import { ChangeRequestGlyph } from "../../lib/ChangeRequestGlyph";
 import { RemoteGlyph } from "../../lib/RemoteGlyph";
 import { TagGlyph } from "../../lib/TagGlyph";
 import { WorktreeGlyph } from "../../lib/WorktreeGlyph";
+import { useStepLadder } from "../../lib/useFitLadder";
 import { gatedTooltip, type TooltipHandle } from "../../lib/useViewportTooltip";
 
 /**
@@ -73,19 +77,68 @@ export function headingsFit(block: HTMLElement | null): boolean {
   return true;
 }
 
-/**
- * The block's re-fit, for the sections that re-render on their own state:
- * `RepoChangeRequestSection` and `RepoRefsSections` hold their lists and
- * counts themselves, so "533" can land after `RepoRow` last rendered.
- */
 const RefitSections = createContext<() => void>(() => {});
 export const RefitSectionsProvider = RefitSections.Provider;
 
-/** Ask the repository block to re-fit after every render of the caller.
- *  Coalesced with the block's own fit (`useStepLadder`). */
-export function useRefitSections(): void {
+/** Watch the heading's measured content, including labels hidden by a step.
+ * Lists, tooltips and roving focus outside the heading do not affect fit. */
+export function SectionHeading({
+  className = "ref-section__head-wrap",
+  children
+}: { className?: string; children: ReactNode }): ReactElement {
   const refit = useContext(RefitSections);
-  useLayoutEffect(() => refit());
+  const observer = useRef<MutationObserver | null>(null);
+  const watchHeading = useCallback((row: HTMLDivElement | null) => {
+    if (row === null) return;
+    const changes = new MutationObserver(refit);
+    observer.current = changes;
+    changes.observe(row, {
+      subtree: true,
+      childList: true,
+      characterData: true,
+      attributeFilter: ["class", "style", "hidden", "width", "height", "data-rank", "data-fold"]
+    });
+    refit();
+    return () => {
+      changes.disconnect();
+      observer.current = null;
+      refit();
+    };
+  }, [refit]);
+  useLayoutEffect(() => {
+    // Sidebar can flush fits for an anchor before the observer callback.
+    // The ladder writes its classes outside the observed heading.
+    if (observer.current?.takeRecords().length) refit();
+  });
+  return <div className={className} ref={watchHeading}>{children}</div>;
+}
+
+/** One ladder per open repository. Appearance can change the measured text
+ * or padding without resizing its block. */
+export function useSectionHeadingLadder(
+  sections: RefObject<HTMLDivElement | null>,
+  block: RefObject<HTMLDivElement | null>,
+  expanded: boolean
+): () => void {
+  const refit = useStepLadder(sections, () => headingsFit(sections.current), SECTION_FIT_STEPS, {
+    observe: () => block.current,
+    measureOnCommit: false
+  });
+  const appearance = useRef<MutationObserver | null>(null);
+  useLayoutEffect(() => {
+    if (!expanded) return;
+    const changes = new MutationObserver(refit);
+    changes.observe(document.documentElement, { attributeFilter: ["data-sidebar-text", "data-density", "style"] });
+    appearance.current = changes;
+    return () => {
+      changes.disconnect();
+      appearance.current = null;
+    };
+  }, [expanded, refit]);
+  useLayoutEffect(() => {
+    if (appearance.current?.takeRecords().length) refit();
+  });
+  return refit;
 }
 
 export type SectionKind = "worktrees" | "stacks" | "changeRequests" | "branches" | "tags" | "remotes";
