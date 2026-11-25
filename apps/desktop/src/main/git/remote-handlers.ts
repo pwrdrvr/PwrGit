@@ -76,7 +76,7 @@ import { WorktreeOperationQueue } from "./worktree-operation-queue";
 import { mapLimit } from "../util/map-limit";
 import { inspectForkTracking, repairForkTracking } from "./fork-tracking";
 import { inspectRetrack, listTrackingOptions, retrackBranch } from "./branch-tracking";
-import { tagSourcesFor } from "./tag-sources";
+import { tagSourcesFor, wasStopped } from "./tag-sources";
 import { tagAutoChecksFor } from "./tag-auto-check";
 
 /** Forge reads at once while confirming extra forks for tracking repair. */
@@ -536,7 +536,7 @@ export function registerRemoteHandlers(
   /** A listing landed. The lineage redraws only when a moved tag came or went. */
   const announceTags = (repoId: string, movedSetChanged: boolean): void => {
     const repo = repoOf(repoId);
-    if (repo !== null) emitEvent("repo:changed", { profileId: repo.profileId, repoIds: [repoId] });
+    if (repo !== null) emitEvent("tag:changed", { profileId: repo.profileId, repoId, refreshPreview: true });
     if (movedSetChanged) emitEvent("graph:changed", { repoId });
   };
 
@@ -566,7 +566,12 @@ export function registerRemoteHandlers(
       "fetch",
       (git) => tagSources.refresh(git, req.repoId, repo.path, remote)
     );
-    if (!result.ok) return err(classifyAuthFailure(result.error));
+    if (!result.ok) {
+      if (!wasStopped(result.error)) {
+        emitEvent("tag:changed", { profileId: repo.profileId, repoId: req.repoId, refreshPreview: false });
+      }
+      return err(classifyAuthFailure(result.error));
+    }
     logMain("info", "tag", `listed ${remote}'s tags for ${repo.path} (${seconds(startedAt)})`);
     tagChecks.clearFailure(req.repoId, remote);
     announceTags(req.repoId, result.value);

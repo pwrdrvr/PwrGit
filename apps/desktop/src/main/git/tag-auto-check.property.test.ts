@@ -1,9 +1,11 @@
 import fc from "fast-check";
-import { err, ok, type Result, type TagSourceState } from "@pwrgit/shared";
+import { err, ok, TAG_SOURCE_SYNC_TTL_MS, type Result, type TagSourceState } from "@pwrgit/shared";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { emitEvent } from "../ipc";
 import { openDatabase, type DB } from "../persistence/db";
 import type { GitExec, GitOutput } from "./dugite";
 import { TAG_CHECK_CONCURRENCY, TagAutoChecks, type TagAutoCheckOptions } from "./tag-auto-check";
+import { TagSources } from "./tag-sources";
 
 vi.mock("../ipc", () => ({ emitEvent: vi.fn() }));
 vi.mock("../logs", () => ({ logMain: vi.fn() }));
@@ -32,6 +34,82 @@ function database(): DB {
   for (const id of REPOS) db.prepare("INSERT INTO repos (id, profile_id, name, path) VALUES (?, 'p1', ?, ?)").run(id, id, `/repos/${id}`);
   return db;
 }
+
+async function checkListings(listings: Array<Array<[string, string]>>): Promise<void> {
+  const db = database();
+  db.prepare("INSERT INTO profiles (id, name, email) VALUES ('p2', 'Other', 'other@example.com')").run();
+  db.prepare("INSERT INTO repos (id, profile_id, name, path) VALUES ('other', 'p2', 'r0', '/other/r0')").run();
+  let now = TAG_SOURCE_SYNC_TTL_MS * 2;
+  let listed = 0;
+  const sources = new TagSources(db, () => now);
+  const local = "a".repeat(40);
+  let published = new Map([["release", local]]);
+  const git: GitExec = async (args) => {
+    let stdout: string;
+    switch (args[0]) {
+      case "config":
+        stdout = "remote.origin.url\n/origin.git\0";
+        break;
+      case "ls-remote":
+        listed += 1;
+        stdout = [...published].map(([name, id]) => `${id}\trefs/tags/${name}`).join("\n");
+        break;
+      case "for-each-ref":
+        stdout = `${local} refs/tags/release\n`;
+        break;
+      default:
+        throw new Error(`Unexpected Git command: ${args.join(" ")}`);
+    }
+    return ok({ stdout, stderr: "", exitCode: 0 });
+  };
+  expect((await sources.refresh(git, "r0", "/repos/r0", "origin")).ok).toBe(true);
+  listed = 0;
+  const checks = new TagAutoChecks(db, { sources, git, now: () => now });
+  let previousMove: string | undefined;
+  const events = vi.mocked(emitEvent);
+  for (const [i, listing] of listings.entries()) {
+    now += TAG_SOURCE_SYNC_TTL_MS + 1;
+    published = new Map(listing);
+    events.mockClear();
+    await Promise.all([checks.view("r0"), checks.view("r0")]);
+    expect(listed).toBe(i + 1);
+    const snapshot = sources.store.tags("r0", "origin");
+    expect(new Map([...snapshot ?? []].map(([name, tag]) => [name, tag.objectId]))).toEqual(published);
+    expect(sources.store.snapshot("r0", "origin")?.checked_at_ms).toBe(now);
+    expect(sources.store.snapshot("other", "origin")).toBeNull();
+
+    const channels = events.mock.calls.map(([channel]) => String(channel));
+    // Rechecking the publisher only invalidates its tag readers, even when
+    // names or values changed. A remote-only tag never moves a Lineage chip.
+    expect(channels).not.toContain("repo:changed");
+    expect(events.mock.calls[0]).toEqual(["tag:changed", {
+      profileId: "p1", repoId: "r0", refreshPreview: true
+    }]);
+    const current = published.get("release");
+    const move = current === local ? undefined : current;
+    expect(sources.store.moves("r0", ["origin"], [{ name: "release", objectId: local }]).get("release")?.objectId).toBe(move);
+    expect(channels.filter((channel) => channel === "graph:changed")).toHaveLength(Number(previousMove !== move));
+    previousMove = move;
+  }
+}
+
+describe("automatic tag notification oracle", () => {
+  it("does not reload the repository tree after an identical expired listing", async () => {
+    const listing: Array<[string, string]> = [["release", "a".repeat(40)]];
+    await checkListings([listing, listing]);
+  });
+
+  it("publishes successive snapshots, including same-count moves and remote-only changes", async () => {
+    const name = fc.constantFrom("release", "nightly", "preview");
+    const object = fc.constantFrom("a", "b", "c").map((id) => id.repeat(40));
+    const listing = fc.uniqueArray(fc.tuple(name, object), { selector: ([name]) => name });
+    await fc.assert(fc.asyncProperty(fc.array(listing, { minLength: 1, maxLength: 10 }), (next) =>
+      checkListings([[["release", "a".repeat(40)]], ...next])
+    ), {
+      numRuns: 30
+    });
+  });
+});
 
 /** `started` and `ended` count events in one sequence, so "after" means after. */
 type Listing = { repo: string; outcome: "ok" | "fail" | "aborted"; started: number; ended: number };

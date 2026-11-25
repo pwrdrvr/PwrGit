@@ -79,6 +79,24 @@ afterEach(() => {
 });
 
 describe("published tag handlers", () => {
+  it("only invalidates the preview and graph when a Tags read learns the comparison", async () => {
+    const { local, newHead } = fixture();
+    register(local);
+    tagSourcesFor(db).store.recordListing("repo-1", "origin", git(local, "remote", "get-url", "origin"), [{
+      name: "v1.0.0", objectId: newHead, targetId: newHead, annotated: false
+    }], Date.now());
+
+    const result = await bus.dispatch("repo:tagStatus", { repoId: "repo-1", filter: "differs" });
+    expect(result.ok && result.value.rows).toMatchObject([{ name: "v1.0.0", status: "differs" }]);
+    expect(vi.mocked(emitEvent).mock.calls).toEqual([
+      ["tag:changed", { profileId: "p1", repoId: "repo-1", refreshPreview: true, previewOnly: true }],
+      ["graph:changed", { repoId: "repo-1" }]
+    ]);
+    vi.mocked(emitEvent).mockClear();
+    expect((await bus.dispatch("repo:tagStatus", { repoId: "repo-1" })).ok).toBe(true);
+    expect(emitEvent).not.toHaveBeenCalled();
+  });
+
   it("checks automatically only when stale, and adopting a tag repaints the graph", async () => {
     const { local, oldHead, newHead } = fixture();
     register(local);
@@ -107,7 +125,7 @@ describe("published tag handlers", () => {
     expect(git(local, "rev-parse", "v1.0.0")).toBe(newHead);
     // A tag-only change moves no branch counter, so the graph is told directly.
     expect(emitEvent).toHaveBeenCalledWith("graph:changed", { repoId: "repo-1" });
-    expect(emitEvent).toHaveBeenCalledWith("repo:changed", { profileId: "p1", repoIds: ["repo-1"] });
+    expect(emitEvent).toHaveBeenCalledWith("tag:changed", { profileId: "p1", repoId: "repo-1", refreshPreview: true });
   });
 
   // A Take offered from a stale mark (origin re-cut again after the check)
@@ -132,7 +150,7 @@ describe("published tag handlers", () => {
     });
     expect(refused.ok ? "adopted" : refused.error.code).toBe("local_tag_changed");
     expect(emitEvent).toHaveBeenCalledWith("graph:changed", { repoId: "repo-1" });
-    expect(emitEvent).toHaveBeenCalledWith("repo:changed", { profileId: "p1", repoIds: ["repo-1"] });
+    expect(emitEvent).toHaveBeenCalledWith("tag:changed", { profileId: "p1", repoId: "repo-1", refreshPreview: true });
   });
 
   it("never lists a remote with tagOpt=--no-tags on its own, but does when asked", async () => {

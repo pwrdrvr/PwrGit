@@ -20,7 +20,7 @@ import type {
   RepoRefs,
   Worktree
 } from "@pwrgit/shared";
-import { dispatch } from "../../lib/pwrgit";
+import { dispatch, subscribe } from "../../lib/pwrgit";
 import { RefreshGlyph } from "../../lib/RefreshGlyph";
 import { SwitchGlyph } from "../../lib/SwitchGlyph";
 import {
@@ -252,7 +252,7 @@ export function RepoRefsSections({
       published,
       onConfirmed: () => setTakingTag(tag.name)
     });
-    // tag:adoptRemote announces repo:changed, which reloads these rows.
+    // tag:adoptRemote announces tag:changed, which reloads these rows.
     setTakingTag(null);
   };
   // Which branch row holds the group's single tab stop. A cursor, not a
@@ -286,6 +286,14 @@ export function RepoRefsSections({
   useEffect(() => {
     void load();
   }, [load, repo]);
+
+  useEffect(() => {
+    return subscribe("tag:changed", (event) => {
+      if (event.profileId === repo.profileId && event.repoId === repo.id && event.refreshPreview) {
+        void load();
+      }
+    });
+  }, [load, repo.id, repo.profileId]);
 
   /**
    * A toast's remote chip, landing here: open Remotes, open that remote, and
