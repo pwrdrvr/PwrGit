@@ -2951,6 +2951,158 @@ describe("WorktreeHeader keeps a fork up with its source", () => {
     );
     expect(showErrorToast).not.toHaveBeenCalled();
   });
+
+  it("shows multi-fork push targets in PullMenu and lets the user toggle individual remotes", async () => {
+    const multiForkStatus: ForkStatus = {
+      ...behindSource(),
+      source: {
+        ...behindSource().source!,
+        parent: "acme/sparkline",
+        syncTargets: [
+          {
+            remote: "origin",
+            branch: "main",
+            nameWithOwner: "org/sparkline",
+            tracked: true,
+            enabled: true,
+            pushBack: behindSource().source!.pushBack
+          },
+          {
+            remote: "personal",
+            branch: "main",
+            nameWithOwner: "me/sparkline",
+            tracked: false,
+            enabled: true,
+            pushBack: {
+              remote: "personal",
+              branch: "main",
+              ref: "refs/remotes/personal/main",
+              head: "c".repeat(40),
+              overwrites: 0,
+              adds: 10
+            }
+          }
+        ]
+      }
+    };
+    answer(multiForkStatus, {
+      "remote:setForkSyncRemote": ok({ remote: "personal", enabled: false })
+    });
+    await remount();
+
+    const caret = container.querySelector<HTMLButtonElement>(".wt-split__caret")!;
+    await act(async () => caret.click());
+
+    const checkboxes = [
+      ...document.querySelectorAll<HTMLButtonElement>('[role="menuitemcheckbox"]')
+    ];
+    expect(checkboxes).toHaveLength(2);
+    expect(checkboxes[0]?.getAttribute("aria-checked")).toBe("true");
+    expect(checkboxes[0]?.textContent).toContain("origin");
+    expect(checkboxes[0]?.textContent).toContain("org/sparkline");
+    expect(checkboxes[1]?.getAttribute("aria-checked")).toBe("true");
+    expect(checkboxes[1]?.textContent).toContain("personal");
+    expect(checkboxes[1]?.textContent).toContain("me/sparkline");
+
+    // Unchecking `personal` keeps the menu open, persists the opt-out, and
+    // updates the Sync route live.
+    await act(async () => {
+      checkboxes[1]!.click();
+      await settle();
+    });
+    expect(bridge.dispatch).toHaveBeenCalledWith("remote:setForkSyncRemote", {
+      repoId: repo.id,
+      remote: "personal",
+      enabled: false
+    });
+    const updated = [
+      ...document.querySelectorAll<HTMLButtonElement>('[role="menuitemcheckbox"]')
+    ];
+    expect(updated[1]?.getAttribute("aria-checked")).toBe("false");
+    expect(document.querySelector(".pull-menu")?.textContent).toContain(
+      "push them to origin."
+    );
+  });
+
+  it("highlights Pull and reports a behind sibling fork when local main is already up to date", async () => {
+    const siblingBehindOnly: ForkStatus = {
+      ...behindSource(),
+      source: {
+        ...behindSource().source!,
+        behind: 0,
+        pushBack: null,
+        syncTargets: [
+          {
+            remote: "origin",
+            branch: "main",
+            nameWithOwner: "org/sparkline",
+            tracked: true,
+            enabled: true,
+            pushBack: null
+          },
+          {
+            remote: "personal",
+            branch: "main",
+            nameWithOwner: "me/sparkline",
+            tracked: false,
+            enabled: true,
+            pushBack: {
+              remote: "personal",
+              branch: "main",
+              ref: "refs/remotes/personal/main",
+              head: "c".repeat(40),
+              overwrites: 0,
+              adds: 4
+            }
+          }
+        ]
+      }
+    };
+    answer(siblingBehindOnly);
+    await remount();
+    expect(container.querySelector(".sync-chip")?.textContent).toContain(
+      "↑4 to personal"
+    );
+    expect(pull()?.classList.contains("is-behind")).toBe(true);
+  });
+
+  it("formats multi-remote fork sync receipts for all-pushed and partial-diverged outcomes", async () => {
+    answer(behindSource(), {
+      "remote:syncFork": ok({
+        ...synced,
+        pushes: [
+          { outcome: "pushed", remote: "origin", branch: "main" },
+          { outcome: "pushed", remote: "personal", branch: "main" }
+        ]
+      })
+    });
+    await remount();
+    await act(async () => {
+      pull()?.click();
+      await settle();
+    });
+    expect(card()?.textContent).toContain(
+      "Fast-forwarded main to upstream/main · 10 commits · pushed to origin/main, personal/main"
+    );
+
+    answer(behindSource(), {
+      "remote:syncFork": ok({
+        ...synced,
+        pushes: [
+          { outcome: "pushed", remote: "origin", branch: "main" },
+          { outcome: "diverged", remote: "personal", branch: "main", overwrites: 2 }
+        ]
+      })
+    });
+    await act(async () => {
+      pull()?.click();
+      await settle();
+    });
+    expect(card()?.textContent).toContain("pushed to origin/main");
+    expect(card()?.textContent).toContain(
+      "personal/main has 2 commits upstream/main doesn't, so it was not pushed"
+    );
+  });
 });
 
 describe("WorktreeHeader offers a fork when this account cannot push", () => {

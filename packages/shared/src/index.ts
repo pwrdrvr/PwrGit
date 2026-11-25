@@ -9,6 +9,7 @@ export * from "./change-request-query";
 export * from "./search-name";
 export * from "./forge-remote";
 export * from "./fork-route";
+export * from "./fork-sync";
 export * from "./fork-tracking";
 export * from "./image";
 export * from "./protocol";

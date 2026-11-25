@@ -15,9 +15,13 @@ import {
   type BranchTrackingStatus,
   changeRequestMatch,
   changeRequestNumberQuery,
+  eligibleSiblingForkRemotes,
   forkTrackingRepair,
+  isForkSyncRemoteEnabled,
   isMergeQueueBranchName,
   isMergeQueueRemoteRef,
+  parseForgeRemote,
+  remoteForgeMetadata,
   type ChangeSet,
   CHANGE_LIST_LIMIT,
   type Commit,
@@ -25,10 +29,12 @@ import {
   type CommitStats,
   type DivergenceCommitAlignment,
   type DivergenceCommit,
+  type ForgeHostMap,
   type ForkDrift,
   type ForkPushBack,
   type ForkSourceTarget,
   type ForkStatus,
+  type ForkSyncTarget,
   type HookRun,
   type LocalBranchSummary,
   type OpenChangeRequest,
@@ -43,6 +49,7 @@ import {
   type RemoteBranchSummary,
   type RemoteDivergence,
   type RemoteEndpoint,
+  type RemoteForgeIdentity,
   type RemoteResetMode,
   type RemoteResetPreview,
   type RemoteResetSnapshot,
@@ -2686,6 +2693,138 @@ async function forkDrift(
   return { label: defaultRef.slice("refs/remotes/".length), behind };
 }
 
+/** Cached sibling-remote metadata and per-remote preferences for fork sync. */
+export type ForkStatusOptions = {
+  remoteIdentities?: readonly RemoteForgeIdentity[];
+  forkSyncPrefs?: ReadonlyMap<string, boolean>;
+  hosts?: ForgeHostMap;
+};
+
+/**
+ * Resolve one sibling fork remote's push target for `branchName` against
+ * `sourceRef`. Never invents a brand-new branch on a sibling fork that already
+ * has fetched refs and does not carry that branch.
+ */
+async function siblingForkSyncTarget(
+  git: GitExec,
+  cwd: string,
+  sibling: { remote: string; nameWithOwner: string },
+  branchName: string,
+  tracksDefault: boolean,
+  sourceRef: string,
+  enabled: boolean
+): Promise<ForkSyncTarget | null> {
+  const prefix = `refs/remotes/${sibling.remote}/`;
+  const candidates: Array<{ branch: string; ref: string }> = [
+    { branch: branchName, ref: `${prefix}${branchName}` }
+  ];
+  if (tracksDefault) {
+    const headRaw = await git(
+      ["symbolic-ref", "--quiet", `${prefix}HEAD`],
+      cwd
+    );
+    const sym =
+      headRaw.ok && headRaw.value.exitCode === 0
+        ? headRaw.value.stdout.trim()
+        : "";
+    if (sym.startsWith(prefix)) {
+      const defBranch = sym.slice(prefix.length);
+      if (defBranch !== branchName) {
+        candidates.push({ branch: defBranch, ref: sym });
+      }
+    }
+  }
+  for (const candidate of candidates) {
+    const revRaw = await git(
+      ["rev-parse", "--verify", "--quiet", `${candidate.ref}^{commit}`],
+      cwd
+    );
+    if (!revRaw.ok || revRaw.value.exitCode !== 0) continue;
+    const head = revRaw.value.stdout.trim();
+    if (head === "") continue;
+    const countRaw = await git(
+      ["rev-list", "--left-right", "--count", `${candidate.ref}...${sourceRef}`],
+      cwd
+    );
+    const counts = leftRightCounts(countRaw);
+    const pushBack: ForkPushBack | null =
+      counts === null || counts.left + counts.right === 0
+        ? null
+        : {
+            remote: sibling.remote,
+            branch: candidate.branch,
+            ref: candidate.ref,
+            head,
+            overwrites: counts.left,
+            adds: counts.right
+          };
+    return {
+      remote: sibling.remote,
+      branch: candidate.branch,
+      nameWithOwner: sibling.nameWithOwner,
+      tracked: false,
+      enabled,
+      pushBack
+    };
+  }
+  // If the sibling remote has never been fetched locally yet and this is the
+  // default branch, surface it as unfetched so fork sync fetches it first.
+  if (tracksDefault) {
+    const anyRef = await git(
+      ["for-each-ref", "--count=1", "--format=%(refname)", `refs/remotes/${sibling.remote}`],
+      cwd
+    );
+    if (anyRef.ok && anyRef.value.exitCode === 0 && anyRef.value.stdout.trim() === "") {
+      return {
+        remote: sibling.remote,
+        branch: branchName,
+        nameWithOwner: sibling.nameWithOwner,
+        tracked: false,
+        enabled,
+        pushBack: null,
+        unfetched: true
+      };
+    }
+  }
+  return null;
+}
+
+/**
+ * Verify that EVERY configured push URL on `remote` resolves to the exact
+ * forge repository `(hostname, nameWithOwner)` confirmed by the forge.
+ * Prevents a sibling fork sync push from accidentally writing to a second
+ * `pushurl` mirror or a re-pointed remote.
+ */
+export async function verifyRemotePushUrls(
+  git: GitExec,
+  cwd: string,
+  remote: string,
+  expected: { hostname: string; nameWithOwner: string },
+  hosts: ForgeHostMap = {}
+): Promise<boolean> {
+  const urls = await git(
+    ["remote", "get-url", "--push", "--all", "--", remote],
+    cwd
+  );
+  if (!urls.ok || urls.value.exitCode !== 0) return false;
+  const lines = urls.value.stdout
+    .trim()
+    .split("\n")
+    .map((line) => line.trim())
+    .filter((line) => line !== "");
+  if (lines.length === 0) return false;
+  const host = expected.hostname.toLowerCase();
+  const slug = expected.nameWithOwner.toLowerCase();
+  return lines.every((url) => {
+    const parsed = parseForgeRemote(url, hosts);
+    return (
+      parsed !== null &&
+      parsed.hostname.toLowerCase() === host &&
+      parsed.nameWithOwner.toLowerCase() === slug
+    );
+  });
+}
+
 /**
  * The checked-out branch against the fork's source, for the header. The same
  * resolution as the reset dialog's fork card, without the dialog's branch
@@ -2696,7 +2835,8 @@ export async function resolveForkStatus(
   git: GitExec,
   cwd: string,
   forkParent: ForkParentHint | null,
-  identity?: RepoIdentity
+  identity?: RepoIdentity,
+  options: ForkStatusOptions = {}
 ): Promise<Result<ForkStatus | null>> {
   const checkout = await resolveCheckedOutRef(git, cwd);
   if (!checkout.ok) {
@@ -2721,16 +2861,42 @@ export async function resolveForkStatus(
     .sort((a, b) => b.length - a.length);
   const tracked =
     upstreamRef === null ? null : splitRemoteRef(upstreamRef, longestFirst);
+  const remoteIdentities = options.remoteIdentities ?? [];
+  const hosts = options.hosts ?? {};
+  const prefs = options.forkSyncPrefs ?? new Map<string, boolean>();
+
+  // If `origin` is not a fork (e.g. `origin` is the read-only upstream) but
+  // the tracked remote has a confirmed forge parent, use that as the parent hint.
+  let effectiveParent = forkParent;
+  if (effectiveParent === null && tracked !== null) {
+    const trackedEndpoint = endpoints.value.find((e) => e.name === tracked.remote);
+    if (trackedEndpoint !== undefined) {
+      const trackedMeta = remoteForgeMetadata(
+        trackedEndpoint,
+        identity,
+        endpoints.value,
+        remoteIdentities,
+        hosts
+      );
+      if (trackedMeta?.parent !== undefined) {
+        effectiveParent = {
+          hostname: trackedMeta.hostname,
+          nameWithOwner: trackedMeta.parent
+        };
+      }
+    }
+  }
+
   const source = forkSourceRemote(
     endpoints.value,
     tracked?.remote ?? null,
-    forkParent
+    effectiveParent
   );
   if (source === null) {
     const repair = forkTrackingRepair(identity, endpoints.value, {
       name: checkout.value.branch,
       ...(tracked === null ? {} : { upstream: `${tracked.remote}/${tracked.name}` })
-    });
+    }, hosts);
     if (repair === null) return ok(null);
     const trackedTarget = upstreamRef === null || tracked === null
       ? null : await resetTargetOf(git, cwd, upstreamRef, tracked.remote);
@@ -2765,7 +2931,7 @@ export async function resolveForkStatus(
       git,
       cwd,
       source,
-      forkParent,
+      effectiveParent,
       tracked?.name ?? checkout.value.branch,
       tracksDefault,
       new Set(upstreamRef === null ? [] : [upstreamRef])
@@ -2791,10 +2957,74 @@ export async function resolveForkStatus(
       ? Promise.resolve(null)
       : forkDrift(git, cwd, defaultRef)
   ]);
+
+  let syncTargets: ForkSyncTarget[] | undefined;
+  if (target !== null) {
+    const targets: ForkSyncTarget[] = [];
+    const targetBranch =
+      pushBack?.branch ?? tracked?.name ?? checkout.value.branch;
+    if (trackedTarget !== null) {
+      const trackedEndpoint = endpoints.value.find(
+        (entry) => entry.name === trackedTarget.remote
+      );
+      const trackedMeta =
+        trackedEndpoint === undefined
+          ? null
+          : remoteForgeMetadata(
+              trackedEndpoint,
+              identity,
+              endpoints.value,
+              remoteIdentities,
+              hosts
+            );
+      targets.push({
+        remote: trackedTarget.remote,
+        branch: targetBranch,
+        ...(trackedMeta === null ? {} : { nameWithOwner: trackedMeta.nameWithOwner }),
+        tracked: true,
+        enabled: isForkSyncRemoteEnabled(trackedTarget.remote, prefs),
+        pushBack
+      });
+    }
+    const siblings = eligibleSiblingForkRemotes(endpoints.value, {
+      sourceRemote: source.remote,
+      trackedRemote: tracked?.remote ?? null,
+      identity,
+      remoteIdentities,
+      hosts
+    });
+    if (siblings.length > 0) {
+      const resolvedSiblings = await Promise.all(
+        siblings.map((sibling) =>
+          siblingForkSyncTarget(
+            git,
+            cwd,
+            sibling,
+            targetBranch,
+            tracksDefault,
+            target.ref,
+            isForkSyncRemoteEnabled(sibling.remote, prefs)
+          )
+        )
+      );
+      for (const item of resolvedSiblings) {
+        if (item !== null) targets.push(item);
+      }
+    }
+    if (targets.length > 0) syncTargets = targets;
+  }
+
   return ok({
     branch: checkout.value.branch,
     head: checkout.value.head,
-    source: target === null ? null : { ...target, pushBack },
+    source:
+      target === null
+        ? null
+        : {
+            ...target,
+            pushBack,
+            ...(syncTargets === undefined ? {} : { syncTargets })
+          },
     tracked: trackedTarget,
     drift
   });
@@ -2829,7 +3059,9 @@ export async function commitsSince(
 export async function forkFetchRemotes(
   git: GitExec,
   cwd: string,
-  forkParent: ForkParentHint | null
+  forkParent: ForkParentHint | null,
+  identity?: RepoIdentity,
+  options: ForkStatusOptions = {}
 ): Promise<string[] | null> {
   const [upstreamRaw, endpoints] = await Promise.all([
     git(["rev-parse", "--symbolic-full-name", "@{u}"], cwd),
@@ -2843,8 +3075,48 @@ export async function forkFetchRemotes(
     endpoints.value.map((endpoint) => endpoint.name).sort((a, b) => b.length - a.length)
   );
   if (tracked === null) return null;
-  const source = forkSourceRemote(endpoints.value, tracked.remote, forkParent);
-  return source === null ? null : [tracked.remote, source.remote];
+  const remoteIdentities = options.remoteIdentities ?? [];
+  const hosts = options.hosts ?? {};
+  const prefs = options.forkSyncPrefs ?? new Map<string, boolean>();
+  let effectiveParent = forkParent;
+  if (effectiveParent === null) {
+    const trackedEndpoint = endpoints.value.find((e) => e.name === tracked.remote);
+    if (trackedEndpoint !== undefined) {
+      const trackedMeta = remoteForgeMetadata(
+        trackedEndpoint,
+        identity,
+        endpoints.value,
+        remoteIdentities,
+        hosts
+      );
+      if (trackedMeta?.parent !== undefined) {
+        effectiveParent = {
+          hostname: trackedMeta.hostname,
+          nameWithOwner: trackedMeta.parent
+        };
+      }
+    }
+  }
+  const source = forkSourceRemote(endpoints.value, tracked.remote, effectiveParent);
+  if (source === null) return null;
+  const remotes = [tracked.remote];
+  const siblings = eligibleSiblingForkRemotes(endpoints.value, {
+    sourceRemote: source.remote,
+    trackedRemote: tracked.remote,
+    identity,
+    remoteIdentities,
+    hosts
+  });
+  for (const sibling of siblings) {
+    if (
+      isForkSyncRemoteEnabled(sibling.remote, prefs) &&
+      !remotes.includes(sibling.remote)
+    ) {
+      remotes.push(sibling.remote);
+    }
+  }
+  if (!remotes.includes(source.remote)) remotes.push(source.remote);
+  return remotes;
 }
 
 /**

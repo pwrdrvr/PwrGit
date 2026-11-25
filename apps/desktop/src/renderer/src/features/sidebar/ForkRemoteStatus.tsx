@@ -6,6 +6,7 @@ import {
   remoteMatchesForgeRepo,
   routedRemotes,
   trackedRemoteName,
+  type RemoteForgeIdentity,
   type Repo,
   type RepoIdentity,
   type RepoRefs,
@@ -119,11 +120,30 @@ export function remotesRoute(
   hosts: Parameters<typeof routedRemotes>[2]
 ): { lead: string; strip: Parameters<typeof RouteStrip>[0] } | null {
   if (identity?.parent === undefined) return null;
-  const rows = routedRemotes(identity, refs.remotes, hosts);
-  const fork = rows.find((row) => row.role === "fork");
+  const remoteIdentities: RemoteForgeIdentity[] = [];
+  for (const remote of refs.remotes) {
+    if (remote.viewerCanPush === undefined && remote.forkParent === undefined) continue;
+    const parsed = parseForgeRemote(remote.fetchUrl, hosts);
+    if (parsed === null) continue;
+    remoteIdentities.push({
+      hostname: parsed.hostname,
+      nameWithOwner: parsed.nameWithOwner,
+      ...(remote.viewerCanPush === undefined
+        ? {}
+        : { viewerCanPush: remote.viewerCanPush }),
+      ...(remote.forkParent === undefined ? {} : { parent: remote.forkParent }),
+      ...(remote.forkRoot === undefined ? {} : { root: remote.forkRoot })
+    });
+  }
+  const rows = routedRemotes(identity, refs.remotes, hosts, remoteIdentities);
+  const tracked = trackedRemoteName(branch.upstream, refs.remotes);
+  const forks = rows.filter((row) => row.role === "fork");
+  const fork =
+    forks.find((row) => row.name === tracked) ??
+    forks.find((row) => row.name === "origin") ??
+    forks[0];
   const original = rows.find((row) => row.role === "original");
   if (fork === undefined) return null;
-  const tracked = trackedRemoteName(branch.upstream, refs.remotes);
   const followsFork = tracked === fork.name;
   const followsOriginal = original !== undefined && tracked === original.name;
   if (!followsFork && !followsOriginal) return null;

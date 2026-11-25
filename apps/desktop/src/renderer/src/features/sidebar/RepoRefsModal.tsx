@@ -7,11 +7,13 @@ import {
   changeRequestNoun,
   changeRequestNumberQuery,
   changeRequestSigil,
+  parseForgeRemote,
   routedRemotes,
   type ForgeKind,
   type LocalBranchSummary,
   type PrSummary,
   type RemoteBranchSummary,
+  type RemoteForgeIdentity,
   type RemoteSummary,
   type Repo,
   type RepoRefs,
@@ -661,16 +663,54 @@ export function RepoRefsModal({
   const [parentDialogOpen, setParentDialogOpen] = useState(false);
   const [addingParent, setAddingParent] = useState(false);
   const addingParentRef = useRef(false);
+  const [togglingSyncRemote, setTogglingSyncRemote] = useState<string | null>(null);
   const forgeHosts = useForgeHostMap();
   const parentOffer = forkParentOffer(repo.identity, refs.remotes, forgeHosts);
   // What each remote is, from the fork the forge confirmed — not its name.
   const { remoteRoles, forkKnown } = useMemo(() => {
-    const rows = routedRemotes(repo.identity, refs.remotes, forgeHosts);
+    const remoteIdentities: RemoteForgeIdentity[] = [];
+    for (const remote of refs.remotes) {
+      if (remote.viewerCanPush === undefined && remote.forkParent === undefined) continue;
+      const parsed = parseForgeRemote(remote.fetchUrl, forgeHosts);
+      if (parsed === null) continue;
+      remoteIdentities.push({
+        hostname: parsed.hostname,
+        nameWithOwner: parsed.nameWithOwner,
+        ...(remote.viewerCanPush === undefined
+          ? {}
+          : { viewerCanPush: remote.viewerCanPush }),
+        ...(remote.forkParent === undefined ? {} : { parent: remote.forkParent }),
+        ...(remote.forkRoot === undefined ? {} : { root: remote.forkRoot })
+      });
+    }
+    const rows = routedRemotes(repo.identity, refs.remotes, forgeHosts, remoteIdentities);
     return {
       remoteRoles: new Map(rows.map((row) => [row.name, row])),
       forkKnown: rows.some((row) => row.role === "fork")
     };
   }, [repo.identity, refs.remotes, forgeHosts]);
+  const toggleForkSync = async (remoteName: string, enabled: boolean): Promise<void> => {
+    if (togglingSyncRemote !== null) return;
+    setTogglingSyncRemote(remoteName);
+    try {
+      const result = await dispatch("remote:setForkSyncRemote", {
+        repoId: repo.id,
+        remote: remoteName,
+        enabled
+      });
+      if (!result.ok) {
+        showErrorToast({
+          title: "Could not update fork sync remote",
+          message: result.error.message,
+          subject: { repoId: repo.id }
+        });
+        return;
+      }
+      await onRefresh();
+    } finally {
+      setTogglingSyncRemote(null);
+    }
+  };
   const remoteNames = useMemo(
     () => refs.remotes.map((remote) => remote.name),
     [refs.remotes]
@@ -1845,6 +1885,28 @@ export function RepoRefsModal({
                     <span>Default</span>
                     <code>{remote.defaultBranch ?? "Unknown"}</code>
                   </div>
+                  {remote.forkSyncEligible === true && (
+                    <label className="refs-remote-card__sync">
+                      <input
+                        type="checkbox"
+                        checked={remote.forkSyncEnabled !== false}
+                        disabled={togglingSyncRemote === remote.name}
+                        onChange={() =>
+                          void toggleForkSync(
+                            remote.name,
+                            remote.forkSyncEnabled === false
+                          )
+                        }
+                      />
+                      <span>
+                        <strong>Keep updated on fork sync</strong>
+                        <span>
+                          Push fast-forwardable commits from upstream to{" "}
+                          <code>{remote.name}</code> when syncing.
+                        </span>
+                      </span>
+                    </label>
+                  )}
                   <RemoteBranchList
                     repoId={repo.id}
                     repoName={repo.name}
@@ -1949,8 +2011,14 @@ function RemoteRoleTag({ role, name, forkKnown }: {
   forkKnown: boolean;
 }) {
   if (role?.role === "fork" || role?.role === "original") {
+    const label =
+      role.role === "original"
+        ? "The original"
+        : role.canPush === false
+          ? "Fork"
+          : "Your fork";
     return <>
-      <span className="refs-remote-role">{role.role === "fork" ? "Your fork" : "The original"}</span>
+      <span className="refs-remote-role">{label}</span>
       {role.nameWithOwner !== null && <span className="refs-remote-slug">{role.nameWithOwner}</span>}
     </>;
   }

@@ -9297,6 +9297,37 @@ button.agent-menu__item:hover {
   color: var(--text-muted);
   font: 500 10px/1.4 var(--font-mono);
 }
+.refs-remote-card__sync {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 9px 13px;
+  border-bottom: 1px solid var(--border-subtle);
+  cursor: pointer;
+}
+.refs-remote-card__sync input {
+  margin-top: 2px;
+  accent-color: var(--accent-bright);
+}
+.refs-remote-card__sync > span {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+.refs-remote-card__sync strong {
+  color: var(--text-primary);
+  font: 600 11px/1.3 var(--font-sans);
+}
+.refs-remote-card__sync > span > span {
+  color: var(--text-muted);
+  font: 500 10.5px/1.4 var(--font-sans);
+}
+.refs-remote-card__sync code {
+  font-family: var(--font-mono);
+  font-size: 0.94em;
+  color: var(--text-secondary);
+}
 .refs-remote-branches {
   max-height: 280px;
   overflow: auto;
@@ -13620,6 +13651,67 @@ body.is-col-resizing {
   font-family: var(--font-mono);
   font-size: 0.94em;
   color: var(--text-secondary);
+}
+.pull-menu__section {
+  padding: 5px 9px 3px 29px;
+  font: 600 10px/1.3 var(--font-sans);
+  color: var(--text-muted);
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+}
+.pull-menu .pull-menu__target {
+  align-items: center;
+  gap: 8px;
+  padding-block: 5px;
+}
+.pull-menu__box {
+  flex: 0 0 14px;
+  width: 14px;
+  height: 14px;
+  border-radius: 3px;
+  border: 1px solid var(--border-strong);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--accent-on);
+  background: transparent;
+}
+.pull-menu__box.is-checked {
+  border-color: var(--accent);
+  background: var(--accent);
+}
+.pull-menu__target-label {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  min-width: 0;
+  flex: 1;
+  overflow: hidden;
+}
+.pull-menu__target-label code {
+  font: 600 11.5px/1.3 var(--font-mono);
+  color: var(--text-primary);
+  flex-shrink: 0;
+}
+.pull-menu__target-slug {
+  font: 500 10.5px/1.3 var(--font-mono);
+  color: var(--text-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.pull-menu__target-meta {
+  flex-shrink: 0;
+}
+.pull-menu__target-badge {
+  font: 600 10px/1 var(--font-mono);
+  color: var(--text-muted);
+}
+.pull-menu__target-badge.is-behind {
+  color: var(--accent);
+}
+.pull-menu__target-badge.is-warn {
+  color: var(--status-warning);
 }
 
 /* ---- Profile menu actions (New / Edit) ---- */

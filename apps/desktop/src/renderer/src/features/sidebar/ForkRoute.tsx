@@ -178,6 +178,8 @@ export function ForkRouteLine({ branch, original }: { branch: string; original: 
 /** One stop on a one-line route. */
 export type RouteStop = {
   text: string;
+  /** Additional chips drawn side-by-side at this stop (e.g. multiple forks pushed together). */
+  extra?: string[];
   kind: "repo" | "here" | "go";
 };
 
@@ -191,6 +193,14 @@ export function RouteLine({ stops, label }: { stops: RouteStop[]; label: string 
     {stops.map((stop, index) => <span key={`${index}:${stop.text}`} className="fork-route-line__step">
       {index > 0 && <span className="fork-route-line__to" aria-hidden="true"><i /></span>}
       <span className={stop.kind === "repo" ? "fork-route-line__node" : `fork-route-line__node fork-route-line__node--${stop.kind}`}>{stop.text}</span>
+      {stop.extra?.map((item) => (
+        <span
+          key={item}
+          className={stop.kind === "repo" ? "fork-route-line__node" : `fork-route-line__node fork-route-line__node--${stop.kind}`}
+        >
+          {item}
+        </span>
+      ))}
     </span>)}
   </span>;
 }

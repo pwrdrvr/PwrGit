@@ -4,10 +4,13 @@ import {
   toForgeHost,
   type ForgeHost,
   type ForgeHostMap,
+  type ForgeKind,
   type ForgeValueSource,
+  type RemoteForgeIdentity,
   type Repo,
   type RepoIdentity,
-  type RepoIdentityRefreshOutcome
+  type RepoIdentityRefreshOutcome,
+  type SiblingForkCandidate
 } from "@pwrgit/shared";
 import type { DB } from "../persistence/db";
 import {
@@ -16,6 +19,12 @@ import {
 } from "../persistence/json-string-list";
 import type { GitExec } from "../git/dugite";
 import { parseRemoteRows } from "../git/remote-list";
+import {
+  forgetRemoteIdentities,
+  pruneRemoteIdentities,
+  readRemoteIdentities,
+  writeRemoteIdentity
+} from "../git/fork-sync-remotes";
 import { logMain } from "../logs";
 import type { ForgeRepoRegistry } from "./repo-provider";
 
@@ -34,6 +43,9 @@ const FORGE_CONCURRENCY = 4;
  *  enough that an ordinary profile finishes in one pass rather than converging
  *  over several launches. Truncation is logged, never silent. */
 const REFRESH_BATCH = 200;
+/** Cap on sibling-remote forge lookups per repository so a checkout with dozens
+ *  of contributor remotes never turns one refresh into a CLI storm. */
+const MAX_SIBLING_REMOTE_LOOKUPS = 12;
 
 type IdentityLookup = {
   outcome: RepoIdentityRefreshOutcome;
@@ -73,6 +85,19 @@ export type RepoRemotes = {
   hostnames: string[];
 };
 
+type DetailedRepoRemotes = RepoRemotes & {
+  /** Non-`origin` remotes whose fetch URL and every push URL point to the same
+   *  claimed forge repository. Used to detect writable sibling forks. */
+  siblings: Array<{
+    remote: string;
+    host: ForgeKind;
+    hostname: string;
+    nameWithOwner: string;
+  }>;
+  /** True when the repository has a remote named `upstream`. */
+  hasUpstreamRemote: boolean;
+};
+
 /**
  * Read every remote of one repository, and pick `origin` out of them.
  *
@@ -90,12 +115,33 @@ export async function readRemotes(
   repo: Repo,
   hosts: ForgeHostMap = {}
 ): Promise<RepoRemotes> {
-  const empty: RepoRemotes = { origin: null, hostnames: [] };
+  const { origin, hostnames } = await readRemotesDetailed(git, repo, hosts);
+  return { origin, hostnames };
+}
+
+async function readRemotesDetailed(
+  git: GitExec,
+  repo: Repo,
+  hosts: ForgeHostMap = {}
+): Promise<DetailedRepoRemotes> {
+  const empty: DetailedRepoRemotes = {
+    origin: null,
+    hostnames: [],
+    siblings: [],
+    hasUpstreamRemote: false
+  };
   const result = await git(["remote", "-v"], repo.path);
   if (!result.ok || result.value.exitCode !== 0) return empty;
   let origin: OriginRef | null = null;
+  let hasUpstreamRemote = false;
   const hostnames = new Set<string>();
+  const byRemote = new Map<string, { fetchUrl?: string; pushUrls: string[] }>();
   for (const { name, url, direction } of parseRemoteRows(result.value.stdout)) {
+    if (name === "upstream") hasUpstreamRemote = true;
+    const entry = byRemote.get(name) ?? { pushUrls: [] };
+    if (direction === "fetch") entry.fetchUrl = url;
+    else entry.pushUrls.push(url);
+    byRemote.set(name, entry);
     const parsed = parseForgeRemote(url, hosts);
     if (parsed === null) continue;
     // Only hosts a product actually claims. "A git remote is never a source"
@@ -114,7 +160,29 @@ export async function readRemotes(
       };
     }
   }
-  return { origin, hostnames: [...hostnames].sort() };
+  const siblings: DetailedRepoRemotes["siblings"] = [];
+  for (const [name, entry] of byRemote) {
+    if (name === "origin" || entry.fetchUrl === undefined) continue;
+    const fetch = parseForgeRemote(entry.fetchUrl, hosts);
+    if (fetch === null || !isForgeKind(fetch.host)) continue;
+    const pushUrls = entry.pushUrls.length > 0 ? entry.pushUrls : [entry.fetchUrl];
+    const allPushMatch = pushUrls.every((pushUrl) => {
+      const parsed = parseForgeRemote(pushUrl, hosts);
+      return (
+        parsed !== null &&
+        parsed.hostname === fetch.hostname &&
+        parsed.nameWithOwner.toLowerCase() === fetch.nameWithOwner.toLowerCase()
+      );
+    });
+    if (!allPushMatch) continue;
+    siblings.push({
+      remote: name,
+      host: fetch.host,
+      hostname: fetch.hostname,
+      nameWithOwner: fetch.nameWithOwner
+    });
+  }
+  return { origin, hostnames: [...hostnames].sort(), siblings, hasUpstreamRemote };
 }
 
 /** One FIFO semaphore per service, shared by every refresh invocation. */
@@ -144,6 +212,7 @@ export class IdentityService {
   private readonly remoteSlots = new IdentitySlots(REMOTE_CONCURRENCY);
   private readonly forgeSlots = new IdentitySlots(FORGE_CONCURRENCY);
   private readonly refreshing = new Map<string, Promise<IdentityLookup>>();
+  private readonly siblingRefreshing = new Map<string, Promise<boolean>>();
   /**
    * Per-repo "do not ask again before" stamps. Two maps, not one, because the
    * two reasons recover differently and merging them gets both wrong.
@@ -331,7 +400,7 @@ export class IdentityService {
         if (ongoing !== undefined) {
           return ongoing.then(({ outcome }) => ({ outcome }));
         }
-        const lookup = this.lookup(repo, stored.get(repo.id));
+        const lookup = this.lookup(repo, stored.get(repo.id), options.force === true);
         this.refreshing.set(repo.id, lookup);
         return lookup.finally(() => {
           if (this.refreshing.get(repo.id) === lookup) {
@@ -348,7 +417,8 @@ export class IdentityService {
 
   private async lookup(
     repo: Repo,
-    previous: RepoIdentity | undefined
+    previous: RepoIdentity | undefined,
+    force = false
   ): Promise<IdentityLookup> {
     const unavailable: IdentityLookup = {
       outcome: {
@@ -357,9 +427,10 @@ export class IdentityService {
         ...(previous === undefined ? {} : { identity: previous })
       }
     };
-    const { origin, hostnames } = await this.remoteSlots.run(() =>
-      readRemotes(this.git, repo, this.hosts.overrides())
-    );
+    const { origin, hostnames, siblings, hasUpstreamRemote } =
+      await this.remoteSlots.run(() =>
+        readRemotesDetailed(this.git, repo, this.hosts.overrides())
+      );
     // `isForgeKind`, not a comparison against `other`: the check is "did a
     // product claim this host", and the guard is the one the lint points at.
     if (origin === null || !isForgeKind(origin.host)) return unavailable;
@@ -461,16 +532,155 @@ export class IdentityService {
     this.authRetryAfter.delete(origin.repoId);
     this.gateRetryAfter.delete(origin.repoId);
     this.write(origin.repoId, identity);
+
+    // Refresh sibling remote forge identities on fork-capable repos so
+    // multi-fork sync knows which other remotes the user can push to.
+    let siblingsChanged = false;
+    const mayHaveSiblingForks =
+      identity.visibility !== "unknown" &&
+      (identity.parent !== undefined ||
+        identity.viewerCanPush === false ||
+        hasUpstreamRemote);
+    const keepKeys = new Set<string>();
+    const excluded = new Set<string>([origin.nameWithOwner.toLowerCase()]);
+    if (identity.parent !== undefined) {
+      excluded.add(identity.parent.nameWithOwner.toLowerCase());
+    }
+    if (identity.root !== undefined) {
+      excluded.add(identity.root.nameWithOwner.toLowerCase());
+    }
+    const candidates: SiblingForkCandidate[] = [];
+    if (mayHaveSiblingForks) {
+      for (const sibling of siblings) {
+        if (sibling.hostname.toLowerCase() !== origin.hostname.toLowerCase()) {
+          continue;
+        }
+        const slugLower = sibling.nameWithOwner.toLowerCase();
+        if (excluded.has(slugLower)) continue;
+        excluded.add(slugLower);
+        keepKeys.add(`${sibling.hostname.toLowerCase()}\0${slugLower}`);
+        if (candidates.length < MAX_SIBLING_REMOTE_LOOKUPS) {
+          candidates.push(sibling);
+        }
+      }
+    }
+    if (pruneRemoteIdentities(this.db, repo.id, keepKeys)) {
+      siblingsChanged = true;
+    }
+    if (candidates.length > 0) {
+      if (await this.refreshSiblingCandidates(repo.id, candidates, force)) {
+        siblingsChanged = true;
+      }
+    }
+
     return {
       outcome: {
         repoId: repo.id,
         status: identity.visibility === "unknown" ? "unknown" : "resolved",
         identity
       },
-      ...(sameIdentity(previous, identity) ? {} : {
-        change: { repoId: repo.id, identity }
-      })
+      ...(sameIdentity(previous, identity) && !siblingsChanged
+        ? {}
+        : {
+            change: { repoId: repo.id, identity }
+          })
     };
+  }
+
+  /**
+   * Look up and cache forge metadata for uncached/stale sibling remotes on a
+   * repository whose `origin` identity is already fresh. Coalesced per repo so
+   * repeated `remote:forkStatus` reads never pile up forge CLI calls.
+   */
+  async ensureRemoteIdentities(
+    repoId: string,
+    candidates: readonly SiblingForkCandidate[]
+  ): Promise<boolean> {
+    if (candidates.length === 0 || this.backedOff(repoId)) return false;
+    const existing = this.siblingRefreshing.get(repoId);
+    if (existing !== undefined) return existing;
+    const work = this.refreshSiblingCandidates(
+      repoId,
+      candidates.slice(0, MAX_SIBLING_REMOTE_LOOKUPS),
+      false
+    ).finally(() => {
+      if (this.siblingRefreshing.get(repoId) === work) {
+        this.siblingRefreshing.delete(repoId);
+      }
+    });
+    this.siblingRefreshing.set(repoId, work);
+    return work;
+  }
+
+  private async refreshSiblingCandidates(
+    repoId: string,
+    candidates: readonly SiblingForkCandidate[],
+    force: boolean
+  ): Promise<boolean> {
+    const stored = new Map<string, RemoteForgeIdentity>();
+    for (const row of readRemoteIdentities(this.db, repoId)) {
+      stored.set(
+        `${row.hostname.toLowerCase()}\0${row.nameWithOwner.toLowerCase()}`,
+        row
+      );
+    }
+    let changed = false;
+    await Promise.all(
+      candidates.map(async (candidate) => {
+        const key = `${candidate.hostname.toLowerCase()}\0${candidate.nameWithOwner.toLowerCase()}`;
+        const prev = stored.get(key);
+        if (!force && prev?.fetchedAt !== undefined) {
+          const age = Date.now() - Date.parse(`${prev.fetchedAt}Z`);
+          const ttl =
+            prev.viewerCanPush === undefined
+              ? IDENTITY_RETRY_MS
+              : IDENTITY_TTL_MS;
+          if (Number.isFinite(age) && age <= ttl) return;
+        }
+        const gate = this.hosts.isEnabled(candidate.hostname);
+        if (!gate.enabled) return;
+        const provider = this.forges.get(candidate.host, candidate.hostname);
+        if (provider === null) return;
+        try {
+          const repository = await this.forgeSlots.run(() =>
+            provider.viewRepo(candidate.nameWithOwner)
+          );
+          const next: RemoteForgeIdentity = {
+            hostname: repository.hostname,
+            nameWithOwner: repository.nameWithOwner,
+            ...(repository.viewerCanPush === undefined
+              ? {}
+              : { viewerCanPush: repository.viewerCanPush }),
+            ...(repository.parent === undefined
+              ? {}
+              : { parent: repository.parent.nameWithOwner }),
+            ...(repository.root === undefined
+              ? {}
+              : { root: repository.root.nameWithOwner })
+          };
+          writeRemoteIdentity(this.db, repoId, next);
+          if (!sameRemoteIdentity(prev, next)) changed = true;
+        } catch (cause) {
+          if (provider.isAuthError(cause)) {
+            this.authRetryAfter.set(repoId, Date.now() + IDENTITY_RETRY_MS);
+            return;
+          }
+          logMain(
+            "debug",
+            "forge",
+            `sibling remote identity lookup failed for ${candidate.nameWithOwner}:`,
+            provider.errorMessage(cause)
+          );
+          const fallback: RemoteForgeIdentity = {
+            hostname: candidate.hostname,
+            nameWithOwner: candidate.nameWithOwner
+          };
+          writeRemoteIdentity(this.db, repoId, fallback);
+          if (!sameRemoteIdentity(prev, fallback)) changed = true;
+        }
+      })
+    );
+    return changed;
   }
 
   /**
@@ -509,6 +719,7 @@ export class IdentityService {
     this.authRetryAfter.delete(repoId);
     this.gateRetryAfter.delete(repoId);
     this.db.prepare("DELETE FROM repo_identity WHERE repo_id = ?").run(repoId);
+    forgetRemoteIdentities(this.db, repoId);
   }
 
   private write(repoId: string, identity: RepoIdentity): void {
@@ -586,4 +797,18 @@ function sameHostnames(
 ): boolean {
   if (a === undefined || b === undefined) return a === b;
   return a.length === b.length && a.every((host, index) => host === b[index]);
+}
+
+function sameRemoteIdentity(
+  a: RemoteForgeIdentity | undefined,
+  b: RemoteForgeIdentity
+): boolean {
+  return (
+    a !== undefined &&
+    a.hostname.toLowerCase() === b.hostname.toLowerCase() &&
+    a.nameWithOwner.toLowerCase() === b.nameWithOwner.toLowerCase() &&
+    a.viewerCanPush === b.viewerCanPush &&
+    a.parent?.toLowerCase() === b.parent?.toLowerCase() &&
+    a.root?.toLowerCase() === b.root?.toLowerCase()
+  );
 }

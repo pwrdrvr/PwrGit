@@ -26,6 +26,18 @@ export type PullMenuRow = {
   onSelect: () => void;
 };
 
+/** One writable fork remote toggleable inside the Pull menu when multiple forks exist. */
+export type PullMenuSyncTarget = {
+  remote: string;
+  branch: string;
+  nameWithOwner?: string;
+  tracked: boolean;
+  enabled: boolean;
+  behind: number;
+  diverged: boolean;
+  onToggle: () => void;
+};
+
 /**
  * The arrow half of a split Pull, and the menu it opens.
  *
@@ -51,6 +63,7 @@ export function PullMenu({
   note,
   actions,
   choices,
+  syncTargets,
   checked,
   kept
 }: {
@@ -60,6 +73,8 @@ export function PullMenu({
   note?: ReactNode;
   actions: PullMenuRow[];
   choices: PullMenuRow[];
+  /** Writable fork remotes to push synced commits to (shown when 2+ exist). */
+  syncTargets?: PullMenuSyncTarget[];
   /** The `key` of the choice Pull will run. */
   checked: string;
   /** The `key` of the choice kept for this repository, or null while the
@@ -192,6 +207,52 @@ export function PullMenu({
                 {row(item, true)}
               </FragmentWithSep>
             ))}
+            {syncTargets !== undefined && syncTargets.length >= 2 && (
+              <>
+                <div className="pop-menu__sep" role="separator" />
+                <div className="pull-menu__section">Push synced commits to</div>
+                {syncTargets.map((target) => (
+                  <button
+                    key={target.remote}
+                    type="button"
+                    className="pop-menu__item pull-menu__target"
+                    role="menuitemcheckbox"
+                    aria-checked={target.enabled}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      e.preventDefault();
+                      target.onToggle();
+                    }}
+                  >
+                    <span
+                      className={`pull-menu__box${target.enabled ? " is-checked" : ""}`}
+                      aria-hidden="true"
+                    >
+                      {target.enabled && <CheckGlyph />}
+                    </span>
+                    <span className="pull-menu__target-label">
+                      <code>{target.remote}</code>
+                      {target.nameWithOwner !== undefined && (
+                        <span className="pull-menu__target-slug">
+                          {target.nameWithOwner}
+                        </span>
+                      )}
+                    </span>
+                    <span className="pull-menu__target-meta">
+                      {target.diverged ? (
+                        <span className="pull-menu__target-badge is-warn">diverged</span>
+                      ) : target.behind > 0 ? (
+                        <span className="pull-menu__target-badge is-behind">
+                          ↑{target.behind}
+                        </span>
+                      ) : target.tracked ? (
+                        <span className="pull-menu__target-badge">tracked</span>
+                      ) : null}
+                    </span>
+                  </button>
+                ))}
+              </>
+            )}
           </div>,
           document.body
         )}
