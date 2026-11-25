@@ -724,7 +724,7 @@ export function RepoRefsModal({
   useEffect(() => {
     if (tab !== "tags" && !counting) return;
     return subscribe("tag:changed", (event) => {
-      if (event.profileId === repo.profileId && event.repoId === repo.id) {
+      if (!event.previewOnly && event.profileId === repo.profileId && event.repoId === repo.id) {
         setTagEpoch((value) => value + 1);
       }
     });
@@ -1923,7 +1923,6 @@ export function RepoRefsModal({
             repo={repo}
             name={detailsTag}
             now={now}
-            onChanged={tagsChanged}
             onClose={() => setDetailsTag(null)}
           />
         )}

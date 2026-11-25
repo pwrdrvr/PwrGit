@@ -19,14 +19,11 @@ export function TagDetailsDialog({
   repo,
   name,
   now,
-  onChanged,
   onClose
 }: {
   repo: Repo;
   name: string;
   now: number;
-  /** The local tag moved (a restore) or a remote was listed. */
-  onChanged: () => void;
   onClose: () => void;
 }) {
   const [details, setDetails] = useState<TagDetails | null>(null);
@@ -50,7 +47,9 @@ export function TagDetailsDialog({
   useEffect(() => {
     void load();
     const off = subscribe("tag:changed", (event) => {
-      if (event.profileId === repo.profileId && event.repoId === repo.id) void load();
+      if (!event.previewOnly && event.refreshPreview && event.profileId === repo.profileId && event.repoId === repo.id) {
+        void load();
+      }
     });
     return () => {
       off();
@@ -72,8 +71,6 @@ export function TagDetailsDialog({
       });
       return;
     }
-    onChanged();
-    await load();
   };
 
   const restore = async (ref: string, objectId: string): Promise<void> => {
@@ -106,8 +103,6 @@ export function TagDetailsDialog({
       return;
     }
     showInfoToast({ title: `Restored ${name}`, message: short(result.value.objectId), subject: { repoId: repo.id } });
-    onChanged();
-    await load();
   };
 
   const local = details?.local ?? null;

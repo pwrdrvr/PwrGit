@@ -39,9 +39,9 @@ export function registerTagHandlers(bus: CommandBus, db: DB): void {
       .get(repoId) as RepoRow | undefined;
 
   const tagSources = tagSourcesFor(db);
-  /** Local tags moved: the sidebar's tag rows and the graph's chips. */
-  const tagsMoved = (repoId: string, profileId: string): void => {
-    emitEvent("tag:changed", { profileId, repoId, refreshPreview: true });
+  /** Invalidate the tag UI and graph chips when the source or comparison changes. */
+  const tagsMoved = (repoId: string, profileId: string, options: { previewOnly?: true } = {}): void => {
+    emitEvent("tag:changed", { profileId, repoId, refreshPreview: true, ...options });
     emitEvent("graph:changed", { repoId });
   };
 
@@ -58,7 +58,7 @@ export function registerTagHandlers(bus: CommandBus, db: DB): void {
     const { differsChanged, ...value } = page.value;
     // The sidebar's "N tags differ" line, its rows and the lineage chips
     // read the stored comparison.
-    if (differsChanged) tagsMoved(req.repoId, repo.profile_id);
+    if (differsChanged) tagsMoved(req.repoId, repo.profile_id, { previewOnly: true });
     return ok(value);
   });
 

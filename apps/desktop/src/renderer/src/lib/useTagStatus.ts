@@ -1,9 +1,11 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
+  TAG_PAGE_MAX,
   TAG_PAGE_SIZE,
   type TagSourceState,
   type TagStatusCounts,
   type TagStatusFilter,
+  type TagStatusPage,
   type TagStatusRow
 } from "@pwrgit/shared";
 import { dispatch } from "./pwrgit";
@@ -23,8 +25,8 @@ export type TagStatusSearch = {
 
 /**
  * Debounced, paged Tags tab: local tags compared with the published remote's
- * stored snapshot. Main filters and compares; only one page crosses IPC, and
- * nothing here reaches the network.
+ * stored snapshot. Main filters and compares; IPC reads stay within the
+ * server's page limit, and nothing here reaches the network.
  */
 export function useTagStatus({
   repoId,
@@ -39,7 +41,7 @@ export function useTagStatus({
   filter: TagStatusFilter;
   pageSize?: number;
   enabled?: boolean;
-  /** Increment after a mutation or a fresh listing to restart at page zero. */
+  /** Increment after a mutation or listing to refresh the loaded range. */
   refreshKey?: number;
 }): TagStatusSearch {
   const [rows, setRows] = useState<TagStatusRow[]>([]);
@@ -49,6 +51,7 @@ export function useTagStatus({
   const [loading, setLoading] = useState(enabled);
   const [error, setError] = useState<string | null>(null);
   const generation = useRef(0);
+  const requestedEnd = useRef(pageSize);
   const mounted = useRef(true);
 
   useEffect(() => {
@@ -58,45 +61,59 @@ export function useTagStatus({
     };
   }, []);
 
-  const fetchPage = useCallback(
-    async (offset: number, append: boolean): Promise<void> => {
+  const fetchRange = useCallback(
+    async (start: number, end: number, preserveRows: boolean): Promise<void> => {
       const stamp = ++generation.current;
       setLoading(true);
-      const result = await dispatch("repo:tagStatus", {
-        repoId,
-        filter,
-        query,
-        offset,
-        limit: pageSize
-      });
-      if (!mounted.current || stamp !== generation.current) return;
-      setLoading(false);
-      if (!result.ok) {
-        setError(result.error.message.split("\n")[0] ?? "Load failed");
-        if (!append) {
-          setRows([]);
-          setTotal(0);
+      const nextRows: TagStatusRow[] = [];
+      let offset = start;
+      let page: TagStatusPage;
+      do {
+        const result = await dispatch("repo:tagStatus", {
+          repoId, filter, query, offset, limit: Math.min(end - offset, TAG_PAGE_MAX)
+        });
+        if (!mounted.current || stamp !== generation.current) return;
+        if (!result.ok) {
+          setLoading(false);
+          setError(result.error.message.split("\n")[0] ?? "Load failed");
+          if (!preserveRows) {
+            setRows([]);
+            setTotal(0);
+          }
+          return;
         }
-        return;
-      }
+        page = result.value;
+        nextRows.push(...page.rows);
+        offset += page.rows.length;
+        if (page.rows.length === 0) break;
+      } while (offset < Math.min(end, page.total));
+
+      // Publish the range together so later rows stay mounted and focusable
+      // while earlier pages are being read.
+      requestedEnd.current = Math.max(pageSize, offset);
+      setLoading(false);
       setError(null);
-      setTotal(result.value.total);
-      setCounts(result.value.counts ?? null);
-      setSource(result.value.source ?? null);
+      setTotal(page.total);
+      setCounts(page.counts ?? null);
+      setSource(page.source ?? null);
       setRows((previous) =>
-        append ? [...previous, ...result.value.rows] : result.value.rows
+        start === 0 ? nextRows : [...previous, ...nextRows]
       );
     },
-    // refreshKey restarts the search; it is never read.
-    [filter, pageSize, query, refreshKey, repoId]
+    [filter, pageSize, query, repoId]
   );
+  const previousSearch = useRef<typeof fetchRange | null>(null);
 
   useEffect(() => {
     if (!enabled) {
+      previousSearch.current = null;
       generation.current += 1;
       setLoading(false);
       return;
     }
+    const refresh = previousSearch.current === fetchRange;
+    previousSearch.current = fetchRange;
+    if (!refresh) requestedEnd.current = pageSize;
     // Loading starts when the search is enabled, not when the debounce fires:
     // between those two moments there are no rows and no request, and callers
     // read `!loading && rows.length === 0` as "nothing matches".
@@ -106,14 +123,18 @@ export function useTagStatus({
     // `loading` and show its rows as this query's results.
     generation.current += 1;
     setLoading(true);
-    const timer = setTimeout(() => void fetchPage(0, false), SEARCH_DEBOUNCE_MS);
+    const timer = setTimeout(
+      () => void fetchRange(0, requestedEnd.current, refresh),
+      SEARCH_DEBOUNCE_MS
+    );
     return () => clearTimeout(timer);
-  }, [enabled, fetchPage]);
+  }, [enabled, fetchRange, pageSize, refreshKey]);
 
   const loadMore = useCallback(() => {
     if (loading) return;
-    void fetchPage(rows.length, true);
-  }, [fetchPage, loading, rows.length]);
+    requestedEnd.current = rows.length + pageSize;
+    void fetchRange(rows.length, requestedEnd.current, true);
+  }, [fetchRange, loading, pageSize, rows.length]);
 
   return {
     rows,

@@ -2,12 +2,16 @@
 
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
+import fc from "fast-check";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   ok,
+  TAG_PAGE_MAX,
+  TAG_PAGE_SIZE,
   type EventPayload,
   type RepoRefs,
   type Repo,
+  type TagDetails,
   type TagSourceState,
   type TagStatusPage,
   type TagStatusRow,
@@ -29,7 +33,10 @@ vi.mock("../shell/dialogs", async (importOriginal) => ({
   ...(await importOriginal<typeof import("../shell/dialogs")>()),
   confirmDialog: confirmDialogMock
 }));
-vi.mock("../../lib/copyText", () => ({ copyText: vi.fn() }));
+vi.mock("../../lib/copyText", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../../lib/copyText")>()),
+  copyText: vi.fn()
+}));
 
 import { RepoRefsModal } from "./RepoRefsModal";
 
@@ -189,6 +196,7 @@ describe("RepoRefsModal Tags tab — published tags", () => {
     const reads = calls("repo:tagStatus").length;
     await publish({ ...event, profileId: "another-profile" });
     await publish({ ...event, repoId: "another-repo" });
+    await publish({ ...event, previewOnly: true });
     expect(calls("repo:tagStatus")).toHaveLength(reads);
 
     await publish(event);
@@ -198,6 +206,86 @@ describe("RepoRefsModal Tags tab — published tags", () => {
     await publish({ ...event, refreshPreview: false });
     expect(container.querySelector(".refs-tag-source")?.textContent).toContain("Couldn’t reach origin");
     expect(calls("tag:refreshRemote")).toHaveLength(0);
+  });
+
+  async function checkLoadedPages(pages: number): Promise<void> {
+    const shown = pages * TAG_PAGE_SIZE;
+    const tags = Array.from({ length: shown + 10 }, (_, i): TagStatusRow => ({
+      name: `release-${i}`, status: "same", local: local(`release-${i}`, id("a")), published: null
+    }));
+    dispatchMock.mockImplementation((channel: string, req: { offset: number; limit: number }) => {
+      if (channel !== "repo:tagStatus") return Promise.resolve(ok(null));
+      return Promise.resolve(ok({
+        ...answer, rows: tags.slice(req.offset, req.offset + Math.min(req.limit, TAG_PAGE_MAX)), total: tags.length
+      }));
+    });
+    await open();
+    for (let i = 1; i < pages; i++) await click(button(container, "Load more"));
+    const focusedName = `release-${shown - 1}`;
+    const focused = rowOf(focusedName);
+    focused.focus();
+    expect(document.activeElement).toBe(focused);
+
+    for (const error of ["Timed out", null]) {
+      answer = page({ error, checkedAt: new Date().toISOString() });
+      await act(async () => tagListeners.forEach((listener) => listener({
+        profileId: repo.profileId, repoId: repo.id, refreshPreview: error === null
+      })));
+      await act(async () => vi.advanceTimersByTime(250));
+      expect(rowOf(focusedName)).toBe(focused);
+      expect(document.activeElement).toBe(focused);
+      expect(container.querySelector(".refs-page-footer")?.textContent).toContain(`Showing ${shown} of ${tags.length}`);
+      expect(container.querySelector(".refs-tag-source")?.textContent?.includes("Couldn’t reach origin")).toBe(error !== null);
+    }
+    await click(button(container, "Load more"));
+    expect(rowOf(`release-${tags.length - 1}`)).toBeDefined();
+  }
+
+  it("keeps the focused row beyond the server page limit during a failed check and recovery", async () => {
+    await checkLoadedPages(TAG_PAGE_MAX / TAG_PAGE_SIZE + 1);
+  });
+
+  it("retains the loaded prefix across checks at any generated page depth", async () => {
+    await fc.assert(fc.asyncProperty(fc.integer({ min: 2, max: 6 }), checkLoadedPages).afterEach(async () => {
+      await act(async () => root.unmount());
+      root = createRoot(container);
+      answer = page();
+    }), { numRuns: 8 });
+  });
+
+  it.each(["Check", "Restore"])("%s refreshes the open tag details once", async (action) => {
+    const name = "v1.2.3";
+    let details: TagDetails = {
+      name,
+      local: local(name, id("b")),
+      remotes: [{ remote: "origin", published: true, checkedAt: null, value: null }],
+      replaced: [{
+        ref: `refs/pwrgit/replaced-tags/1/${name}`, objectId: id("c"), targetId: id("c"),
+        kind: "lightweight", replacedAt: new Date().toISOString()
+      }]
+    };
+    confirmDialogMock.mockResolvedValue(true);
+    dispatchMock.mockImplementation((channel: string) => {
+      if (channel === "repo:tagStatus") return Promise.resolve(ok(answer));
+      if (channel === "tag:details") return Promise.resolve(ok(details));
+      if (channel === "tag:refreshRemote" || channel === "tag:restoreReplaced") {
+        details = { ...details, local: local(name, id("d")) };
+        tagListeners.forEach((listener) => listener({
+          profileId: repo.profileId, repoId: repo.id, refreshPreview: true
+        }));
+        return Promise.resolve(ok({ objectId: id("d") }));
+      }
+      return Promise.resolve(ok(null));
+    });
+    await open();
+    await click(button(rowOf(name), `Actions for tag ${name}`));
+    await click(button(document.body, "Compare sources…"));
+    const dialog = container.querySelector(".refs-tag-details")!;
+    expect(dialog).toBeTruthy();
+    expect(calls("tag:details")).toHaveLength(1);
+    await click(button(dialog, action));
+    expect(dialog.textContent).toContain(id("d").slice(0, 12));
+    expect(calls("tag:details")).toHaveLength(2);
   });
 
   it("does nothing when the confirm is declined", async () => {

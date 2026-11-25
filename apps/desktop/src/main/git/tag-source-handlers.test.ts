@@ -79,6 +79,24 @@ afterEach(() => {
 });
 
 describe("published tag handlers", () => {
+  it("only invalidates the preview and graph when a Tags read learns the comparison", async () => {
+    const { local, newHead } = fixture();
+    register(local);
+    tagSourcesFor(db).store.recordListing("repo-1", "origin", git(local, "remote", "get-url", "origin"), [{
+      name: "v1.0.0", objectId: newHead, targetId: newHead, annotated: false
+    }], Date.now());
+
+    const result = await bus.dispatch("repo:tagStatus", { repoId: "repo-1", filter: "differs" });
+    expect(result.ok && result.value.rows).toMatchObject([{ name: "v1.0.0", status: "differs" }]);
+    expect(vi.mocked(emitEvent).mock.calls).toEqual([
+      ["tag:changed", { profileId: "p1", repoId: "repo-1", refreshPreview: true, previewOnly: true }],
+      ["graph:changed", { repoId: "repo-1" }]
+    ]);
+    vi.mocked(emitEvent).mockClear();
+    expect((await bus.dispatch("repo:tagStatus", { repoId: "repo-1" })).ok).toBe(true);
+    expect(emitEvent).not.toHaveBeenCalled();
+  });
+
   it("checks automatically only when stale, and adopting a tag repaints the graph", async () => {
     const { local, oldHead, newHead } = fixture();
     register(local);

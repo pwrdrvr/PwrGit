@@ -2875,8 +2875,9 @@ export interface Events {
    */
   "repo:changed": { profileId: ProfileId; repoIds?: RepoId[] };
   /** Tag rows or listing metadata changed. Only open tag surfaces re-read.
-   *  A successful listing also refreshes the local Tags preview and summary. */
-  "tag:changed": { profileId: ProfileId; repoId: RepoId; refreshPreview: boolean };
+   *  A successful listing also refreshes the local Tags preview and summary.
+   *  A page that updated the stored comparison only needs to notify the preview. */
+  "tag:changed": { profileId: ProfileId; repoId: RepoId; refreshPreview: boolean; previewOnly?: true };
   /** Find my repositories, while it walks: folders opened, repositories so
    *  far. Throttled in main; correlated by `searchId`. */
   "repo:searchProgress": RepoSearchProgress;
