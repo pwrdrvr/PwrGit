@@ -17,6 +17,7 @@ import {
   hoverTooltip,
   useViewportTooltip
 } from "../../lib/useViewportTooltip";
+import { SectionChevron } from "../sidebar/SectionChevron";
 
 const shortSha = (sha: string | undefined): string => sha?.slice(0, 8) ?? "—";
 
@@ -48,15 +49,103 @@ function checkoutTone(state: SubmoduleCheckoutState): string {
   return "danger";
 }
 
-function snapshotHasConcern(snapshot: SubmoduleSnapshot): boolean {
+/**
+ * Only active local work in a submodule (dirty child checkout, checkout moved
+ * off the parent pin, staged pin move, or gitlink conflict) warrants automatic
+ * attention in Changes. Passive repository states like uninitialized optional
+ * submodules or unmapped vendored gitlinks leave `git status` clean and stay
+ * collapsed until the user asks to inspect them.
+ */
+export function submoduleHasActiveChange(submodule: SubmoduleStatus): boolean {
+  const stagedPinMoved =
+    submodule.indexCommit !== undefined &&
+    submodule.indexCommit !== submodule.pinnedCommit;
+  const hasConflict = submodule.issues.some(
+    (problem) => problem.code === "index_conflict"
+  );
   return (
-    snapshot.issues.length > 0 ||
-    snapshot.submodules.some(
-      (submodule) =>
-        submodule.dirty === true ||
-        submodule.issues.length > 0 ||
-        (submodule.relation !== "at_pin" && submodule.relation !== "unknown")
-    )
+    submodule.dirty === true ||
+    stagedPinMoved ||
+    hasConflict ||
+    (submodule.relation !== "at_pin" && submodule.relation !== "unknown")
+  );
+}
+
+export function snapshotHasActiveChange(snapshot: SubmoduleSnapshot): boolean {
+  return snapshot.submodules.some(submoduleHasActiveChange);
+}
+
+function summaryBadgeFor(
+  snapshot: SubmoduleSnapshot | null,
+  error: string | null
+): { label: string; tone: "warn" | "danger" | "muted" } | null {
+  if (error !== null) return { label: "Scan failed", tone: "danger" };
+  if (snapshot === null) return null;
+
+  const activeCount = snapshot.submodules.filter(submoduleHasActiveChange).length;
+  if (activeCount > 0) {
+    return { label: `${activeCount} changed`, tone: "warn" };
+  }
+
+  const issueRows = snapshot.submodules.filter(
+    (submodule) => submodule.issues.length > 0
+  );
+  if (issueRows.length === 0 && snapshot.issues.length === 0) return null;
+
+  if (snapshot.issues.length === 0) {
+    if (
+      issueRows.every(
+        (submodule) =>
+          submodule.issues.some(
+            (problem) => problem.code === "gitmodules_entry_missing"
+          ) &&
+          submodule.issues.every(
+            (problem) =>
+              problem.code === "gitmodules_entry_missing" ||
+              problem.code === "checkout_uninitialized"
+          )
+      )
+    ) {
+      return { label: `${issueRows.length} unconfigured`, tone: "muted" };
+    }
+    if (
+      issueRows.every((submodule) =>
+        submodule.issues.every(
+          (problem) => problem.code === "checkout_uninitialized"
+        )
+      )
+    ) {
+      return { label: `${issueRows.length} uninitialized`, tone: "muted" };
+    }
+    if (
+      issueRows.every((submodule) =>
+        submodule.issues.every(
+          (problem) => problem.code === "checkout_deinitialized"
+        )
+      )
+    ) {
+      return { label: `${issueRows.length} deinitialized`, tone: "muted" };
+    }
+  }
+
+  const total = issueRows.length + snapshot.issues.length;
+  return {
+    label: `${total} ${total === 1 ? "notice" : "notices"}`,
+    tone: "muted"
+  };
+}
+
+function renderSubmodulePath(path: string) {
+  const slash = path.lastIndexOf("/");
+  if (slash < 0) {
+    return <span className="submodule-row__leaf">{path}</span>;
+  }
+  return (
+    <>
+      <span className="submodule-row__dir">{path.slice(0, slash)}</span>
+      <span className="submodule-row__sep">/</span>
+      <span className="submodule-row__leaf">{path.slice(slash + 1)}</span>
+    </>
   );
 }
 
@@ -66,32 +155,43 @@ function SubmoduleRow({ submodule }: { submodule: SubmoduleStatus }) {
   const stagedPinMoved =
     submodule.indexCommit !== undefined &&
     submodule.indexCommit !== submodule.pinnedCommit;
-  const hasConcern =
-    submodule.issues.length > 0 ||
-    submodule.dirty === true ||
-    (submodule.relation !== "at_pin" && submodule.relation !== "unknown");
+  const activeChange = submoduleHasActiveChange(submodule);
+  const showRelationChip =
+    submodule.checkoutState === "checked_out" ||
+    submodule.relation !== "unknown";
+  const seenRemedies = new Set<string>();
+  const renderedIssues = submodule.issues.map((problem) => {
+    const remedy =
+      problem.remedy !== undefined && !seenRemedies.has(problem.remedy)
+        ? problem.remedy
+        : undefined;
+    if (remedy !== undefined) seenRemedies.add(remedy);
+    return { problem, remedy };
+  });
 
   return (
     <details
       className="submodule-row"
       style={{ "--submodule-depth": submodule.depth } as CSSProperties}
-      open={hasConcern || undefined}
+      open={activeChange || undefined}
     >
       <summary className="submodule-row__summary">
         <span
           className="submodule-row__path"
           {...hoverTooltip(tip, submodule.path)}
         >
-          {submodule.path}
+          {renderSubmodulePath(submodule.path)}
         </span>
         {submodule.dirty === true && (
           <span className="submodule-chip submodule-chip--warn">Dirty</span>
         )}
-        <span
-          className={`submodule-chip submodule-chip--${relationTone(submodule.relation)}`}
-        >
-          {RELATION_LABEL[submodule.relation]}
-        </span>
+        {showRelationChip && (
+          <span
+            className={`submodule-chip submodule-chip--${relationTone(submodule.relation)}`}
+          >
+            {RELATION_LABEL[submodule.relation]}
+          </span>
+        )}
         <span
           className={`submodule-chip submodule-chip--${checkoutTone(submodule.checkoutState)}`}
         >
@@ -181,17 +281,15 @@ function SubmoduleRow({ submodule }: { submodule: SubmoduleStatus }) {
           </span>
         )}
 
-        {submodule.issues.length > 0 && (
+        {renderedIssues.length > 0 && (
           <ul className="submodule-issues">
-            {submodule.issues.map((problem, index) => (
+            {renderedIssues.map(({ problem, remedy }, index) => (
               <li
                 className={`submodule-issue submodule-issue--${problem.severity}`}
                 key={`${problem.code}-${index}`}
               >
                 <span>{problem.message}</span>
-                {problem.remedy !== undefined && (
-                  <small>{problem.remedy}</small>
-                )}
+                {remedy !== undefined && <small>{remedy}</small>}
               </li>
             ))}
           </ul>
@@ -212,6 +310,7 @@ export function SubmodulePanel({
   const [snapshot, setSnapshot] = useState<SubmoduleSnapshot | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [userExpanded, setUserExpanded] = useState<boolean | null>(null);
   // Ignore an older request that resolves after a worktree switch or refresh.
   const requestRef = useRef(0);
   // One scan per selected worktree at a time. A PwrGit mutation can emit both
@@ -240,7 +339,7 @@ export function SubmodulePanel({
           if (result.ok) {
             setSnapshot(result.value);
             setError(null);
-            onConcernChange?.(snapshotHasConcern(result.value));
+            onConcernChange?.(snapshotHasActiveChange(result.value));
           } else {
             setError(result.error.message);
             onConcernChange?.(true);
@@ -263,6 +362,7 @@ export function SubmodulePanel({
   useEffect(() => {
     setSnapshot(null);
     setError(null);
+    setUserExpanded(null);
     onConcernChange?.(false);
     load();
     const offWorktree = subscribe("worktree:changed", (event) => {
@@ -290,17 +390,37 @@ export function SubmodulePanel({
     return null;
   }
 
+  const defaultExpanded =
+    error !== null || (snapshot !== null && snapshotHasActiveChange(snapshot));
+  const expanded = userExpanded ?? defaultExpanded;
+  const summaryBadge = summaryBadgeFor(snapshot, error);
+
   return (
     <section className="submodule-panel" aria-label="Submodules">
-      <div className="submodule-panel__head">
-        <span>Submodules</span>
-        {snapshot !== null && (
-          <span className="submodule-panel__count">
-            {snapshot.submodules.length}
-          </span>
-        )}
-        <span className="submodule-panel__spacer" />
+      <div className={`submodule-panel__head${expanded ? " is-open" : ""}`}>
         <button
+          type="button"
+          className="submodule-panel__toggle"
+          aria-expanded={expanded}
+          onClick={() => setUserExpanded(!expanded)}
+        >
+          <SectionChevron open={expanded} />
+          <span>Submodules</span>
+          {snapshot !== null && (
+            <span className="submodule-panel__count">
+              {snapshot.submodules.length}
+            </span>
+          )}
+          {summaryBadge !== null && (
+            <span
+              className={`submodule-chip submodule-chip--${summaryBadge.tone}`}
+            >
+              {summaryBadge.label}
+            </span>
+          )}
+        </button>
+        <button
+          type="button"
           className="submodule-panel__refresh"
           /* Busy is aria-disabled, not `disabled`: Chromium blurs an element
              the moment it becomes disabled, so refreshing from the keyboard
@@ -319,36 +439,41 @@ export function SubmodulePanel({
         </button>
       </div>
 
-      {error !== null && (
-        <div className="submodule-panel__error" role="alert">
-          <strong>Submodule scan failed.</strong>
-          <span>{error}</span>
-          <small>
-            Parent status is still available. Open Logs for the Git diagnostic.
-          </small>
-        </div>
-      )}
+      {expanded && (
+        <>
+          {error !== null && (
+            <div className="submodule-panel__error" role="alert">
+              <strong>Submodule scan failed.</strong>
+              <span>{error}</span>
+              <small>
+                Parent status is still available. Open Logs for the Git
+                diagnostic.
+              </small>
+            </div>
+          )}
 
-      {snapshot?.issues.map((problem, index) => (
-        <div
-          className={`submodule-panel__error submodule-panel__error--${problem.severity}`}
-          role={problem.severity === "error" ? "alert" : "status"}
-          key={`${problem.code}-${index}`}
-        >
-          <span>{problem.message}</span>
-          {problem.remedy !== undefined && <small>{problem.remedy}</small>}
-        </div>
-      ))}
+          {snapshot?.issues.map((problem, index) => (
+            <div
+              className={`submodule-panel__error submodule-panel__error--${problem.severity}`}
+              role={problem.severity === "error" ? "alert" : "status"}
+              key={`${problem.code}-${index}`}
+            >
+              <span>{problem.message}</span>
+              {problem.remedy !== undefined && <small>{problem.remedy}</small>}
+            </div>
+          ))}
 
-      {snapshot?.submodules.map((submodule) => (
-        <SubmoduleRow submodule={submodule} key={submodule.path} />
-      ))}
+          {snapshot?.submodules.map((submodule) => (
+            <SubmoduleRow submodule={submodule} key={submodule.path} />
+          ))}
 
-      {snapshot !== null && snapshot.submodules.length > 0 && (
-        <p className="submodule-panel__legend">
-          Pins come from Git’s 160000 entries. URL and branch are .gitmodules
-          hints.
-        </p>
+          {snapshot !== null && snapshot.submodules.length > 0 && (
+            <p className="submodule-panel__legend">
+              Pins come from Git’s 160000 entries. URL and branch are
+              .gitmodules hints.
+            </p>
+          )}
+        </>
       )}
     </section>
   );

@@ -12563,23 +12563,51 @@ button.ref-chip:focus-visible {
 /* ---- Submodules: read-only gitlink/config/checkout audit ---- */
 
 .submodule-panel {
-  margin: 0 0 14px;
-  border: 1px solid var(--border-default);
+  margin: 12px 0 0;
+  border: 1px solid var(--border-subtle);
   border-radius: var(--radius-lg);
   background: var(--bg-panel);
   overflow: hidden;
 }
 .submodule-panel__head {
-  min-height: 34px;
-  padding: 7px 9px 7px 11px;
+  min-height: 32px;
+  padding: 4px 6px 4px 4px;
   display: flex;
   align-items: center;
-  gap: 7px;
+  gap: 4px;
+}
+.submodule-panel__head.is-open {
   border-bottom: 1px solid var(--border-subtle);
+}
+.submodule-panel__toggle {
+  flex: 1;
+  min-width: 0;
+  min-height: 24px;
+  padding: 2px 6px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
   color: var(--text-secondary);
   font: 700 10px/1 var(--font-sans);
   letter-spacing: 0.07em;
   text-transform: uppercase;
+  cursor: pointer;
+  text-align: left;
+}
+.submodule-panel__toggle:hover {
+  background: var(--bg-panel-hover);
+  color: var(--text-primary);
+}
+.submodule-panel__toggle:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: -2px;
+}
+.submodule-panel__toggle .submodule-chip {
+  letter-spacing: 0;
+  text-transform: none;
 }
 .submodule-panel__count {
   min-width: 17px;
@@ -12592,9 +12620,6 @@ button.ref-chip:focus-visible {
   background: var(--bg-panel-elevated);
   color: var(--text-muted);
   font: 600 9px/1 var(--font-mono);
-}
-.submodule-panel__spacer {
-  flex: 1;
 }
 .submodule-panel__refresh {
   display: inline-flex;
@@ -12656,11 +12681,31 @@ button.ref-chip:focus-visible {
 .submodule-row__path {
   flex: 1;
   min-width: 0;
+  display: inline-flex;
+  align-items: baseline;
+  color: var(--text-primary);
+  font: 600 10.5px/1.25 var(--font-mono);
+}
+.submodule-row__dir {
+  flex: 0 1 auto;
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  color: var(--text-primary);
-  font: 600 10.5px/1.25 var(--font-mono);
+  color: var(--text-muted);
+  font-weight: 500;
+}
+.submodule-row__sep {
+  flex: 0 0 auto;
+  color: var(--text-subtle);
+  font-weight: 500;
+}
+.submodule-row__leaf {
+  flex: 0 0 auto;
+  max-width: 65%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .submodule-chip,
 .submodule-tag {

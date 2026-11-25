@@ -136,6 +136,106 @@ describe("SubmodulePanel", () => {
     expect(container.textContent).toContain("Reinitialize it from the parent");
   });
 
+  it("starts collapsed for passive unconfigured/uninitialized gitlinks and deduplicates shared remedies when expanded", async () => {
+    const sharedRemedy =
+      "Restore a matching .gitmodules entry with a reviewed URL before initializing, or remove the gitlink if it was added accidentally.";
+    const passiveSnapshot: SubmoduleSnapshot = {
+      truncated: false,
+      issues: [],
+      submodules: [
+        {
+          name: ".repos/alchemy-effect/submodules/distilled",
+          path: ".repos/alchemy-effect/submodules/distilled",
+          depth: 0,
+          pinnedCommit: "e02e9d405b8848909f4f746b61b12a663f631c7c",
+          indexCommit: "e02e9d405b8848909f4f746b61b12a663f631c7c",
+          checkoutState: "uninitialized",
+          relation: "unknown",
+          dirty: null,
+          detached: null,
+          pinnedTags: [],
+          issues: [
+            {
+              code: "gitmodules_entry_missing",
+              severity: "error",
+              message:
+                "The parent records a gitlink here, but .gitmodules has no matching path.",
+              remedy: sharedRemedy
+            },
+            {
+              code: "checkout_uninitialized",
+              severity: "warning",
+              message: "This submodule has not been initialized.",
+              remedy: sharedRemedy
+            }
+          ]
+        },
+        {
+          name: ".repos/alchemy-effect/submodules/floci",
+          path: ".repos/alchemy-effect/submodules/floci",
+          depth: 0,
+          pinnedCommit: "493909133db04153348eabc503f4e30cf0033d96",
+          indexCommit: "493909133db04153348eabc503f4e30cf0033d96",
+          checkoutState: "uninitialized",
+          relation: "unknown",
+          dirty: null,
+          detached: null,
+          pinnedTags: [],
+          issues: [
+            {
+              code: "gitmodules_entry_missing",
+              severity: "error",
+              message:
+                "The parent records a gitlink here, but .gitmodules has no matching path.",
+              remedy: sharedRemedy
+            },
+            {
+              code: "checkout_uninitialized",
+              severity: "warning",
+              message: "This submodule has not been initialized.",
+              remedy: sharedRemedy
+            }
+          ]
+        }
+      ]
+    };
+    dispatchMock.mockResolvedValueOnce(ok(passiveSnapshot));
+    const onConcernChange = vi.fn();
+
+    await act(async () => {
+      root.render(
+        <SubmodulePanel
+          worktreeId="worktree-1"
+          onConcernChange={onConcernChange}
+        />
+      );
+    });
+
+    const toggle = container.querySelector<HTMLButtonElement>(
+      ".submodule-panel__toggle"
+    );
+    expect(toggle?.getAttribute("aria-expanded")).toBe("false");
+    expect(onConcernChange).toHaveBeenLastCalledWith(false);
+    expect(container.textContent).toContain("2 unconfigured");
+    expect(container.querySelectorAll(".submodule-row")).toHaveLength(0);
+
+    await act(async () => toggle?.click());
+
+    expect(toggle?.getAttribute("aria-expanded")).toBe("true");
+    const rows = [
+      ...container.querySelectorAll<HTMLDetailsElement>(".submodule-row")
+    ];
+    expect(rows).toHaveLength(2);
+    expect(rows.every((row) => !row.open)).toBe(true);
+    expect(
+      rows.map((row) => row.querySelector(".submodule-row__leaf")?.textContent)
+    ).toEqual(["distilled", "floci"]);
+    expect(container.textContent).not.toContain("Unknown relation");
+    for (const row of rows) {
+      expect(row.querySelectorAll(".submodule-issue small")).toHaveLength(1);
+    }
+  });
+
   it("disappears after a successful scan finds no submodules or parent issues", async () => {
     dispatchMock.mockResolvedValue(
       ok({ submodules: [], truncated: false, issues: [] })

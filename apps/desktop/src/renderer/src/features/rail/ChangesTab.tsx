@@ -605,12 +605,6 @@ export function ChangesTab({
     return (
       <div className="changes-pane">
         <div className="changes-list">
-          {wtId !== null && (
-            <SubmodulePanel
-              worktreeId={wtId}
-              onConcernChange={receiveSubmoduleConcern}
-            />
-          )}
           <div className="changes-clean">
             <div className="changes-clean__icon">
               <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="var(--status-ok)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -624,10 +618,16 @@ export function ChangesTab({
             </div>
             <div className="changes-clean__sub">
               {hasSubmoduleConcern
-                ? "Submodule attention is listed above."
+                ? "Submodule changes are listed below."
                 : "Nothing to commit."}
             </div>
           </div>
+          {wtId !== null && (
+            <SubmodulePanel
+              worktreeId={wtId}
+              onConcernChange={receiveSubmoduleConcern}
+            />
+          )}
           {hookReceipts}
           {ignoredFooter}
         </div>
@@ -726,12 +726,6 @@ export function ChangesTab({
         </button>
       </div>
       <div className="changes-list">
-        {wtId !== null && (
-          <SubmodulePanel
-            worktreeId={wtId}
-            onConcernChange={receiveSubmoduleConcern}
-          />
-        )}
         {staged.length > 0 && (
           <>
             <div className="changes-section">
@@ -781,6 +775,12 @@ export function ChangesTab({
               />
             )}
           </>
+        )}
+        {wtId !== null && (
+          <SubmodulePanel
+            worktreeId={wtId}
+            onConcernChange={receiveSubmoduleConcern}
+          />
         )}
         {ignoredFooter}
       </div>
