@@ -1,5 +1,11 @@
 # Changelog
 
+## v0.63.1 - 2026-11-24
+
+- CPU diagnostics - Moved Chromium trace redaction out of the main app process so filtering trace data does not skew the main-process CPU profile.
+- Bulk sync - Reduced unnecessary repaints in the collapsed and hover progress bars for Pull Recent, and batched progress updates to reduce rendering during bulk sync.
+- Lineage - Reduced graph rerenders when incoming pull request data leaves the displayed commits unchanged.
+
 ## v0.63.0 - 2026-11-24
 
 - Forges - Added an account picker in Settings → Forges for GitHub hosts with multiple CLI sign-ins. Pin the account PwrGit uses for forge reads. If that account signs out, PwrGit shows how to reconnect or return to the active account.
