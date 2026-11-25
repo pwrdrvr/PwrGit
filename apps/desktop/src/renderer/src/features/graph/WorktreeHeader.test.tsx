@@ -3035,8 +3035,20 @@ describe("WorktreeHeader keeps a fork up with its source", () => {
     expect(checkboxes[1]?.textContent).toContain("personal");
     expect(checkboxes[1]?.textContent).toContain("me/sparkline");
 
+    // The menu's words and chips are what size it. A toggle that rewrites
+    // them reflows the menu and moves the checkbox out from under the
+    // pointer, so every toggle state must leave them exactly as they were.
+    const menuText = (): string | null | undefined =>
+      document.querySelector(".pull-menu")?.textContent;
+    const offChips = (): string[] =>
+      [...document.querySelectorAll(".pull-menu .fork-route-line__node--off")].map(
+        (chip) => chip.textContent ?? ""
+      );
+    const before = menuText();
+    expect(offChips()).toEqual([]);
+
     // Unchecking `personal` keeps the menu open, persists the opt-out, and
-    // updates the Sync route live.
+    // marks it off in the Sync route without reflowing the menu.
     await act(async () => {
       checkboxes[1]!.click();
       await settle();
@@ -3050,9 +3062,25 @@ describe("WorktreeHeader keeps a fork up with its source", () => {
       ...document.querySelectorAll<HTMLButtonElement>('[role="menuitemcheckbox"]')
     ];
     expect(updated[1]?.getAttribute("aria-checked")).toBe("false");
-    expect(document.querySelector(".pull-menu")?.textContent).toContain(
-      "push them to origin."
-    );
+    expect(offChips()).toEqual(["me/sparkline"]);
+    expect(menuText()).toBe(before);
+
+    // Every remaining toggle state holds the same invariant.
+    for (const [index, off] of [
+      [0, ["org/sparkline", "me/sparkline"]],
+      [1, ["org/sparkline"]],
+      [0, []]
+    ] as const) {
+      await act(async () => {
+        const boxes = document.querySelectorAll<HTMLButtonElement>(
+          '[role="menuitemcheckbox"]'
+        );
+        boxes[index]!.click();
+        await settle();
+      });
+      expect(offChips()).toEqual(off);
+      expect(menuText()).toBe(before);
+    }
   });
 
   it("highlights Pull and reports a behind sibling fork when local main is already up to date", async () => {

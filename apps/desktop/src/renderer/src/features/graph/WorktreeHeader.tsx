@@ -419,12 +419,25 @@ function pullMenuRows(
       target.pushBack.adds > 0 &&
       target.pushBack.overwrites === 0
   );
+  // With two or more forks the menu lists them as checkboxes under the
+  // choices. A toggle there must not change anything above it, or the
+  // menu reflows and the checkbox jumps out from under the pointer: every
+  // listed fork stays in the route (struck through when off), and the
+  // detail names "the forks checked below" rather than listing them.
+  const listed = (syncTargets?.length ?? 0) >= 2;
+  const routeTargets: Array<{ text: string; off?: boolean }> =
+    syncTargets === undefined
+      ? [{ text: repos.fork }]
+      : (listed ? syncTargets : enabledTargets).map((target) => ({
+          text: target.nameWithOwner ?? target.remote,
+          ...(target.enabled ? {} : { off: true })
+        }));
   const syncStops = [
     { text: repos.original, kind: "repo" as const },
     { text: branch, kind: "here" as const },
-    ...(enabledTargetNames.length === 0 ? [] : [{
-      text: enabledTargetNames[0]!,
-      ...(enabledTargetNames.length > 1 ? { extra: enabledTargetNames.slice(1) } : {}),
+    ...(routeTargets.length === 0 ? [] : [{
+      ...routeTargets[0]!,
+      ...(routeTargets.length > 1 ? { extra: routeTargets.slice(1) } : {}),
       kind: "go" as const
     }])
   ];
@@ -441,6 +454,20 @@ function pullMenuRows(
             {source.behind > 0 ? "them " : ""}to your fork.
           </>
         )
+      : listed
+        ? source.behind > 0
+          ? (
+              <>
+                Fast-forward <code>{branch}</code> {commits(source.behind)}, then
+                push them to each fork checked below.
+              </>
+            )
+          : (
+              <>
+                <code>{branch}</code> already has <code>{source.label}</code>; push
+                it to each fork checked below.
+              </>
+            )
       : enabledRemotes.length === 0
         ? (
             <>

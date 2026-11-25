@@ -77,9 +77,30 @@ test("renders multi-fork Pull menu targets and live toggle", async () => {
     });
   }
 
-  await checkboxes.nth(1).click();
-  await expect(checkboxes.nth(1)).toHaveAttribute("aria-checked", "false");
-  await expect(menu).toContainText("push them to origin.");
+  // The checklist sits under the route it edits. A toggle that reflowed the
+  // route moved every checkbox out from under the pointer (26px), so a second
+  // click landed on the neighbouring fork. Each toggle state must leave every
+  // checkbox where it was.
+  const rows = async (): Promise<number[]> =>
+    Promise.all(
+      [0, 1].map(async (i) => (await checkboxes.nth(i).boundingBox())?.y ?? NaN)
+    );
+  const at = await rows();
+  for (const [index, checked] of [
+    [1, "false"],
+    [0, "false"],
+    [1, "true"],
+    [0, "true"]
+  ] as const) {
+    await checkboxes.nth(index).click();
+    await expect(checkboxes.nth(index)).toHaveAttribute("aria-checked", checked);
+    expect(await rows()).toEqual(at);
+    if (shotsDir !== undefined && index === 1 && checked === "false") {
+      await page.locator(".shot-frame").screenshot({
+        path: join(shotsDir, "pull-menu-unchecked.png")
+      });
+    }
+  }
 });
 
 test("renders Remotes tab writable fork badges and opt-out toggles", async () => {
@@ -105,6 +126,18 @@ test("renders Remotes tab writable fork badges and opt-out toggles", async () =>
       path: join(shotsDir, "remotes-tab-after.png")
     });
   }
+
+  // The card's checkbox draws the house ring, not Chromium's 1px fallback.
+  await toggles.nth(0).focus();
+  await page.keyboard.press("Shift+Tab");
+  await page.keyboard.press("Tab");
+  await expect(toggles.nth(0)).toBeFocused();
+  expect(
+    await toggles.nth(0).evaluate((el) => {
+      const style = getComputedStyle(el);
+      return `${style.outlineStyle} ${style.outlineWidth}`;
+    })
+  ).toBe("solid 2px");
 
   await toggles.nth(1).click();
   await expect(toggles.nth(1)).not.toBeChecked();

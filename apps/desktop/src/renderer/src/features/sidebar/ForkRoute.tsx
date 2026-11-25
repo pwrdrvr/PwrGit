@@ -178,10 +178,17 @@ export function ForkRouteLine({ branch, original }: { branch: string; original: 
 /** One stop on a one-line route. */
 export type RouteStop = {
   text: string;
+  /** Drawn struck through: a destination that is listed but switched off. */
+  off?: boolean;
   /** Additional chips drawn side-by-side at this stop (e.g. multiple forks pushed together). */
-  extra?: string[];
+  extra?: Array<{ text: string; off?: boolean }>;
   kind: "repo" | "here" | "go";
 };
+
+function routeNodeClass(kind: RouteStop["kind"], off: boolean | undefined): string {
+  const base = kind === "repo" ? "fork-route-line__node" : `fork-route-line__node fork-route-line__node--${kind}`;
+  return off === true ? `${base} fork-route-line__node--off` : base;
+}
 
 /**
  * A route as a sentence of boxes with one-way arrows between them, for a row
@@ -192,13 +199,10 @@ export function RouteLine({ stops, label }: { stops: RouteStop[]; label: string 
   return <span className="fork-route-line fork-route-line--steps" role="img" aria-label={label}>
     {stops.map((stop, index) => <span key={`${index}:${stop.text}`} className="fork-route-line__step">
       {index > 0 && <span className="fork-route-line__to" aria-hidden="true"><i /></span>}
-      <span className={stop.kind === "repo" ? "fork-route-line__node" : `fork-route-line__node fork-route-line__node--${stop.kind}`}>{stop.text}</span>
+      <span className={routeNodeClass(stop.kind, stop.off)}>{stop.text}</span>
       {stop.extra?.map((item) => (
-        <span
-          key={item}
-          className={stop.kind === "repo" ? "fork-route-line__node" : `fork-route-line__node fork-route-line__node--${stop.kind}`}
-        >
-          {item}
+        <span key={item.text} className={routeNodeClass(stop.kind, item.off)}>
+          {item.text}
         </span>
       ))}
     </span>)}

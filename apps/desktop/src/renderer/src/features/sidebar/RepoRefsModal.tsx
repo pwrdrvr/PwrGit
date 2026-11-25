@@ -1901,8 +1901,8 @@ export function RepoRefsModal({
                       <span>
                         <strong>Keep updated on fork sync</strong>
                         <span>
-                          Push fast-forwardable commits from upstream to{" "}
-                          <code>{remote.name}</code> when syncing.
+                          Sync in the Pull menu also fast-forwards{" "}
+                          <code>{remote.name}</code> to the original&apos;s new commits.
                         </span>
                       </span>
                     </label>

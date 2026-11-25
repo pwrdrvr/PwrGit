@@ -210,7 +210,9 @@ export function PullMenu({
             {syncTargets !== undefined && syncTargets.length >= 2 && (
               <>
                 <div className="pop-menu__sep" role="separator" />
-                <div className="pull-menu__section">Push synced commits to</div>
+                <div className="pop-menu__heading" role="presentation">
+                  Push synced commits to
+                </div>
                 {syncTargets.map((target) => (
                   <button
                     key={target.remote}
