@@ -49,11 +49,13 @@ function Graph({ stack }: { stack: RepositoryStack }) {
 let cleanup: (() => void) | undefined;
 afterEach(() => {
   cleanup?.();
+  localStorage.clear();
   vi.restoreAllMocks();
 });
 async function render(stack: RepositoryStack, { writable = true, initial = false, recent = false, extra = false, listed, selectedKey = null, stacks = [stack] }:
   { writable?: boolean; initial?: boolean; recent?: boolean; extra?: boolean; listed?: readonly PrSummary[]; selectedKey?: string | null; stacks?: RepositoryStack[] } = {}) {
   cleanup?.();
+  localStorage.clear();
   const container = document.createElement("div");
   document.body.append(container);
   const root = createRoot(container);
@@ -122,6 +124,7 @@ test("R1 orders positions top-first with trunk immediately below position 1", as
     const popover = el.querySelector(".stack-popover")!;
     expect(order(popover, "[data-stack-position]")).toEqual(descending);
     expect(popover.querySelector(".stack-popover__list > :last-child")?.textContent).toContain("main");
+    await click(el.querySelector("[data-index] .ref-section__head"));
     const indexRow = el.querySelector("[data-index] [data-nav-anchor^='stack:']")!;
     // The Stacks row counts states (R8); its order lives in its accessible name.
     expect(indexRow.querySelector(".stack-train")).toBeNull();
@@ -176,10 +179,14 @@ test("R2 opens the stack view only after explicit stack navigation", async () =>
       if (gesture === "repo") { el = await render(withPr); open = false; }
       if (gesture === "back") { click(el.querySelector('[aria-label="Back to worktree"]')); open = false; }
       if (gesture === "index") {
+        const indexHead = el.querySelector("[data-index] .ref-section__head");
+        if (indexHead?.getAttribute("aria-expanded") === "false") await click(indexHead);
         click(el.querySelector("[data-index] [data-nav-anchor^='stack:']"));
         open = true;
       }
       if (gesture === "index hover") {
+        const indexHead = el.querySelector("[data-index] .ref-section__head");
+        if (indexHead?.getAttribute("aria-expanded") === "false") await click(indexHead);
         const row = el.querySelector("[data-index] [data-nav-anchor^='stack:']")!;
         const popover = el.querySelector(".stack-popover");
         act(() => row.dispatchEvent(new MouseEvent("mouseover", { bubbles: true })));
@@ -402,6 +409,7 @@ test("R8 a Stacks row counts states worst first, and a count marks exactly its m
         checksStillRunning: shape.running } } : layer;
     });
     const el = await render({ ...stack, layers });
+    await click(el.querySelector("[data-index] .ref-section__head"));
     const row = el.querySelector("[data-index] [data-nav-anchor^='stack:']")!;
     const counts = Array.from(row.querySelectorAll(".stack-tally__count"), count =>
       [count.getAttribute("data-bucket")!, Number(count.textContent)] as const);
@@ -519,4 +527,169 @@ test("a checkout-less chip prefers open membership and opens member URLs from a 
       container.remove();
     }
   }), { numRuns: 4 });
+});
+
+test("Stacks starts collapsed regardless of Pull requests state or PR presence, toggles interactively, and persists per repo", async () => {
+  const layerKind = fc.constantFrom<"none" | "local" | "remote">("none", "local", "remote");
+  const stackSpec = fc.array(layerKind, { minLength: 1, maxLength: 3 });
+  const stepArb = fc.constantFrom<"toggleStacks" | "togglePr" | "toggleRemote" | "remount">(
+    "toggleStacks", "togglePr", "toggleRemote", "remount"
+  );
+  await fc.assert(fc.asyncProperty(
+    fc.boolean(),
+    fc.boolean(),
+    fc.boolean(),
+    fc.constantFrom<string | undefined>(undefined, "0", "1"),
+    fc.array(stackSpec, { minLength: 1, maxLength: 4 }),
+    fc.array(stepArb, { minLength: 1, maxLength: 6 }),
+    async (hasForge, prOpen, remoteOpen, persisted, specs, steps) => {
+      localStorage.clear();
+      const testRepo: Repo = { ...repo, id: "stacks-persist" };
+      if (prOpen) localStorage.setItem(`pwrgit.changeRequestsOpen.${testRepo.id}`, "1");
+      if (remoteOpen) localStorage.setItem(`pwrgit.changeRequestsRemoteOpen.${testRepo.id}`, "1");
+      if (persisted !== undefined) localStorage.setItem(`pwrgit.stacksOpen.${testRepo.id}`, persisted);
+
+      let prNum = 100;
+      const entries: ChangeRequestEntry[] = [];
+      const stacks: RepositoryStack[] = specs.map((kinds, stackIndex) => {
+        const base = makeStack(kinds.length);
+        const layers: StackLayer[] = base.layers.map((layer, layerIndex) => {
+          const branch = `s${stackIndex}-b${layerIndex + 1}`;
+          const parent = layerIndex ? `s${stackIndex}-b${layerIndex}` : "main";
+          const kind = kinds[layerIndex];
+          if (kind === "none") return { ...layer, branch, parent };
+          const pr: PrSummary = { ...makePr(prNum++), headRefName: branch, baseRefName: parent };
+          entries.push({
+            pr,
+            forgeRepo: scope,
+            remote: "origin",
+            location: kind === "local"
+              ? { kind: "local", branch }
+              : { kind: "unfetched", branch, remote: "origin" },
+          });
+          return { ...layer, branch, parent, pr };
+        });
+        return { ...base, id: `stack-${stackIndex}`, layers };
+      });
+
+      const snapshot = { stacks, schemaVersion: 1, readOnly: false };
+      Object.assign(window, {
+        pwrgit: {
+          dispatch: async (name: string) => ok(name === "stack:list" ? snapshot : {
+            forge: hasForge ? "github" : null,
+            fetchedAt: 1,
+            truncated: false,
+            entries: hasForge ? entries : [],
+            remotes: hasForge
+              ? [{ forgeRepo: scope, name: "origin", path: "example/orbit", forge: "github", truncated: false, fetchedAt: 1 }]
+              : [],
+          }),
+          on: () => noop,
+        },
+      });
+
+      const host = document.createElement("div");
+      document.body.append(host);
+      let root = createRoot(host);
+      const mount = async () => {
+        await act(async () => root.render(
+          <ChangeRequestSelectionContext.Provider value={{ selectedKey: null, select: noop, clear: noop }}>
+            <StackNavigationContext.Provider value={{ pick: null, select: noop }}>
+              <RepoChangeRequestSection
+                repo={testRepo}
+                now={0}
+                focusedWorktree={null}
+                onRevealWorktree={noop}
+                onCreateWorktree={noop}
+                onOpenBrowser={noop}
+              />
+            </StackNavigationContext.Provider>
+          </ChangeRequestSelectionContext.Provider>
+        ));
+      };
+
+      const assertState = (expectedOpen: boolean, context: string) => {
+        const heading = host.querySelector<HTMLButtonElement>(".stack-sidebar .ref-section__head");
+        expect(heading, context).not.toBeNull();
+        expect(heading?.getAttribute("aria-disabled"), context).toBeNull();
+        expect(heading?.getAttribute("aria-expanded"), context).toBe(String(expectedOpen));
+        const rows = host.querySelectorAll(".stack-sidebar button[data-nav-anchor^='stack:']");
+        expect(rows, context).toHaveLength(expectedOpen ? stacks.length : 0);
+      };
+
+      try {
+        let expectedOpen = persisted === "1";
+        await mount();
+        assertState(expectedOpen, "initial mount");
+
+        for (const step of steps) {
+          if (step === "toggleStacks") {
+            await click(host.querySelector(".stack-sidebar .ref-section__head"));
+            expectedOpen = !expectedOpen;
+            expect(localStorage.getItem(`pwrgit.stacksOpen.${testRepo.id}`)).toBe(expectedOpen ? "1" : "0");
+          } else if (step === "togglePr") {
+            const prHead = host.querySelector(".ref-cr-section .ref-section__head");
+            if (prHead) await click(prHead);
+          } else if (step === "toggleRemote") {
+            const remoteBtn = host.querySelector(".ref-cr-subhead--toggle");
+            if (remoteBtn) await click(remoteBtn);
+          } else if (step === "remount") {
+            act(() => root.unmount());
+            root = createRoot(host);
+            await mount();
+          }
+          assertState(expectedOpen, `after ${step}`);
+        }
+      } finally {
+        act(() => root.unmount());
+        host.remove();
+      }
+    }
+  ), {
+    numRuns: 24,
+    examples: [
+      // PRs collapsed with local-PR stack
+      [true, false, false, undefined, [["local"]], ["toggleStacks", "remount"]],
+      // PRs open, Remote only collapsed, remote-only stack
+      [true, true, false, undefined, [["remote"]], ["toggleRemote", "togglePr"]],
+      // Stack with no PRs at all
+      [true, true, true, undefined, [["none"]], ["toggleStacks", "remount", "toggleStacks", "remount"]],
+    ],
+  });
+});
+
+test("Stacks persistence stays isolated per repository even when repo changes without remount", async () => {
+  localStorage.clear();
+  const repoA: Repo = { ...repo, id: "repo-a", name: "Repo A" };
+  const repoB: Repo = { ...repo, id: "repo-b", name: "Repo B" };
+  const stack = makeStack(1);
+  const host = document.createElement("div");
+  document.body.append(host);
+  const root = createRoot(host);
+  const mount = async (currentRepo: Repo) => {
+    await act(async () => root.render(
+      <StackNavigationContext.Provider value={{ pick: null, select: noop }}>
+        <StacksSidebar repo={currentRepo} stacks={[stack]} />
+      </StackNavigationContext.Provider>
+    ));
+  };
+  try {
+    await mount(repoA);
+    const head = () => host.querySelector<HTMLButtonElement>(".stack-sidebar .ref-section__head")!;
+    expect(head().getAttribute("aria-expanded")).toBe("false");
+    expect(head().getAttribute("aria-disabled")).toBeNull();
+    await click(head());
+    expect(head().getAttribute("aria-expanded")).toBe("true");
+    expect(localStorage.getItem("pwrgit.stacksOpen.repo-a")).toBe("1");
+
+    await mount(repoB);
+    expect(head().getAttribute("aria-expanded")).toBe("false");
+    expect(localStorage.getItem("pwrgit.stacksOpen.repo-b")).not.toBe("1");
+
+    await mount(repoA);
+    expect(head().getAttribute("aria-expanded")).toBe("true");
+  } finally {
+    act(() => root.unmount());
+    host.remove();
+  }
 });

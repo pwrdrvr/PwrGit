@@ -2,6 +2,7 @@ import { useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import type { ChangeRequestEntry, Repo, RepositoryStack, StackAction, StackPosition, Worktree } from "@pwrgit/shared";
 import { dispatch } from "../../lib/pwrgit";
 import { showErrorToast, showInfoToast } from "../../lib/toast";
+import { usePersistedOpen } from "../../lib/usePersistedState";
 import { hoverTooltip, useViewportTooltip } from "../../lib/useViewportTooltip";
 import { SectionGlyph, steppedTooltip } from "../sidebar/section-fit";
 import { SectionChevron } from "../sidebar/SectionChevron";
@@ -75,11 +76,11 @@ function StackTallyCard({ stack, bucket }: { stack: RepositoryStack; bucket?: St
   </div>;
 }
 
-export function StacksSidebar({ repo, stacks, shownStacks, writable = false, recoverEmpty }: {
-  repo: Repo; stacks: RepositoryStack[]; shownStacks?: ReadonlySet<string>; writable?: boolean; recoverEmpty?: () => void;
+export function StacksSidebar({ repo, stacks, writable = false, recoverEmpty }: {
+  repo: Repo; stacks: RepositoryStack[]; writable?: boolean; recoverEmpty?: () => void;
 }) {
   const navigation = useStackNavigation();
-  const [disclosure, setDisclosure] = useState<boolean>();
+  const [expanded, setExpanded] = usePersistedOpen(`pwrgit.stacksOpen.${repo.id}`);
   const tip = useViewportTooltip();
   const [recovering, setRecovering] = useState(false);
   if (!navigation) return null;
@@ -94,16 +95,14 @@ export function StacksSidebar({ repo, stacks, shownStacks, writable = false, rec
       }).finally(() => setRecovering(false));
     }}>Recover stack operation</button>
   </div> : null;
-  const noPRs = stacks.some(stack => stack.layers.every(layer => !layer.pr));
-  const expanded = noPRs || (disclosure ?? stacks.some(stack => !shownStacks?.has(stack.id)));
   return <div className="ref-section stack-sidebar">
     <div className="ref-section__head-wrap">
-      <button type="button" className="ref-section__head" aria-expanded={expanded} aria-disabled={noPRs || undefined}
+      <button type="button" className="ref-section__head" aria-expanded={expanded}
         {...steppedTooltip(tip, `Stacks · ${stacks.length}`)}
         onClick={event => {
           event.stopPropagation();
           tip.hide();
-          if (!noPRs) setDisclosure(!expanded);
+          setExpanded(!expanded);
         }}>
         <SectionChevron open={expanded} />
         <SectionGlyph kind="stacks" />
