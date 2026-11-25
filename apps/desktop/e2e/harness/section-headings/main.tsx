@@ -1,4 +1,4 @@
-import { StrictMode, useEffect, useState, type Dispatch, type ReactNode, type SetStateAction } from "react";
+import { StrictMode, useEffect, useLayoutEffect, useRef, useState, type Dispatch, type ReactNode, type SetStateAction } from "react";
 import { flushSync } from "react-dom";
 import { createRoot } from "react-dom/client";
 import { ok, type RepositoryStack } from "@pwrgit/shared";
@@ -8,6 +8,7 @@ import { ChangeRequestSelectionContext } from "../../../src/renderer/src/feature
 import { RepoRow } from "../../../src/renderer/src/features/sidebar/RepoRow";
 import { PullBadge } from "../../../src/renderer/src/features/sidebar/PullBadge";
 import { headingsFit, SECTION_FIT_STEPS } from "../../../src/renderer/src/features/sidebar/section-fit";
+import { useScrollportFitLadders } from "../../../src/renderer/src/lib/useFitLadder";
 import { useViewportTooltip } from "../../../src/renderer/src/lib/useViewportTooltip";
 import { HARNESS_NOW, HARNESS_REPOS, type HarnessRepo } from "./fixtures";
 import { headingRowProblems, repoRowProblems } from "./measure";
@@ -347,6 +348,91 @@ async function showTransientScrollbarCase(): Promise<ScrollbarReport> {
   };
 }
 
+/** Compare the height a parent reads during the commit with Chromium's settled fit. */
+async function readAnchorWhileScrollbarChanges() {
+  const fixture = document.createElement("div");
+  fixture.className = "harness-scrollbar-case";
+  document.body.prepend(fixture);
+  const root = createRoot(fixture);
+  const branchName = "feature/metrics";
+  let commit = { height: 0, stepped: false };
+
+  function measure(list: HTMLDivElement, anchor: HTMLElement) {
+    return {
+      height: anchor.getBoundingClientRect().top - list.getBoundingClientRect().top,
+      stepped: list.querySelector(".badge--source-row")!.classList.contains("fit-glyph")
+    };
+  }
+
+  function Probe({ expanded }: { expanded: boolean }) {
+    const list = useRef<HTMLDivElement>(null);
+    const flush = useScrollportFitLadders(list);
+    const anchor = useRef<HTMLDivElement>(null);
+    const tip = useViewportTooltip();
+    useLayoutEffect(() => {
+      const scrollport = list.current!;
+      flush();
+      commit = measure(scrollport, anchor.current!);
+    });
+    return (
+      <div className="sidebar__list" ref={list} style={{ width: 320, height: 110 }}>
+        <div className="wt-row">
+          {/* Reserve the branch's width to reproduce wrapping at the badge threshold. */}
+          <span className="wt-row__branch" style={{ flex: "0 0 auto" }}>{branchName}</span>
+          <PullBadge
+            pull={{ kind: "source", label: "upstream/main", behind: 24, ahead: 0, trackedAhead: 0, trackedBehind: 0 }}
+            branch={branchName} tip={tip} placement="row"
+          />
+        </div>
+        <div ref={anchor} data-test-anchor />
+        {expanded && <div style={{ height: 150 }} />}
+      </div>
+    );
+  }
+
+  try {
+    const render = (expanded: boolean) => flushSync(() => root.render(<Probe expanded={expanded} />));
+    render(false);
+    await afterResize();
+    const list = fixture.querySelector<HTMLDivElement>(".sidebar__list")!;
+    const branch = fixture.querySelector<HTMLElement>(".wt-row__branch")!;
+    const badge = fixture.querySelector<HTMLElement>(".badge--source-row")!;
+    const anchor = fixture.querySelector<HTMLElement>("[data-test-anchor]")!;
+    // Start just above the full-badge threshold. The forced classic scrollbar
+    // will narrow the untouched row by more than the four pixels of spare room.
+    let low = 90;
+    let high = 320;
+    while (high - low > 1) {
+      const width = Math.floor((low + high) / 2);
+      list.style.width = `${width}px`;
+      const badgeWraps = Math.abs(badge.offsetTop - branch.offsetTop) >= branch.offsetHeight;
+      if (branch.scrollWidth > branch.clientWidth || badgeWraps) low = width;
+      else high = width;
+    }
+    list.style.width = `${high + 4}px`;
+    await afterResize();
+    // Establish the parent's width snapshot at the settled wide width.
+    render(false);
+    const wideWidth = list.clientWidth;
+    const wideDepth = badge.classList.contains("fit-glyph");
+
+    const snapshot = async (expanded: boolean) => {
+      render(expanded);
+      const duringCommit = commit;
+      await afterResize();
+      return { commit: duringCommit, settled: measure(list, anchor), width: list.clientWidth };
+    };
+    const narrow = await snapshot(true);
+    const restored = await snapshot(false);
+    return { wideWidth, wideDepth, narrow, restored };
+  } finally {
+    root.unmount();
+    fixture.remove();
+  }
+}
+
+export type ScrollbarAnchorReport = Awaited<ReturnType<typeof readAnchorWhileScrollbarChanges>>;
+
 const harness = {
   ready: (async () => {
     // Load every face the headings draw before the first fit, so no step is
@@ -372,6 +458,7 @@ const harness = {
   })(),
   report,
   showTransientScrollbarCase,
+  readAnchorWhileScrollbarChanges,
   async benchmark(kind: "commit" | "resize", rounds: number): Promise<void> {
     const trees = [...document.querySelectorAll<HTMLElement>(".harness-scene .pane--sidebar")];
     const widths = trees.map((tree) => parseFloat(tree.style.width));

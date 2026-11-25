@@ -11,7 +11,7 @@ import {
 } from "@playwright/test";
 import { cleanEnv } from "./fixtures/electron-app";
 import { buildHarness } from "./harness/build";
-import type { SceneReport, ScrollbarReport } from "./harness/section-headings/main";
+import type { SceneReport, ScrollbarAnchorReport, ScrollbarReport } from "./harness/section-headings/main";
 
 /**
  * The sidebar's section headings at the widths a sidebar gives them.
@@ -272,4 +272,18 @@ test("full headings survive worktree badges briefly creating a scrollbar", async
   expect(result.widthWithLongBadges).toBeLessThan(result.fullWidth);
   expect(result.finalWidth).toBe(result.fullWidth);
   expect(result.headingSteps).toEqual([]);
+});
+
+test("a parent sees settled badge geometry in the commit that adds or removes a scrollbar", async () => {
+  const { wideWidth, wideDepth, narrow, restored } = await page.evaluate(() =>
+    (window as unknown as { __harness: { readAnchorWhileScrollbarChanges: () => Promise<ScrollbarAnchorReport> } })
+      .__harness.readAnchorWhileScrollbarChanges()
+  );
+  expect(wideDepth).toBe(false);
+  expect(narrow.width).toBeLessThan(wideWidth);
+  expect(narrow.settled.stepped).toBe(true);
+  expect(restored.width).toBe(wideWidth);
+  expect(restored.settled.stepped).toBe(false);
+  expect(narrow.commit).toEqual(narrow.settled);
+  expect(restored.commit).toEqual(restored.settled);
 });

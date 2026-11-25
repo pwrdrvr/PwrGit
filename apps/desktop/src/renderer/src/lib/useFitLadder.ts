@@ -253,6 +253,53 @@ function requestFit(ladder: Ladder): void {
 const watched = new Map<Element, Set<Ladder>>();
 let resizeObserver: ResizeObserver | null = null;
 
+/**
+ * Settle the rows of a scrollport before a layout effect reads their geometry.
+ * A scrollbar can change all their widths before ResizeObserver delivers.
+ */
+export function useScrollportFitLadders(ref: RefObject<HTMLElement | null>): () => void {
+  const lastWidth = useRef<number | undefined>(undefined);
+  const flush = useCallback(() => {
+    const scrollport = ref.current;
+    if (scrollport === null) {
+      flushFitLadders();
+      return;
+    }
+
+    const queueWidthChanges = (): void => {
+      const width = scrollport.clientWidth;
+      if (width === lastWidth.current) return;
+      lastWidth.current = width;
+      for (const [target, ladders] of watched) {
+        if (!scrollport.contains(target)) continue;
+        for (const ladder of ladders) pending.add(ladder);
+      }
+    };
+
+    queueWidthChanges();
+    if (pending.size === 0) return;
+    flushFitLadders();
+    // Settling a wrapped row can itself remove a scrollbar. Refit at the
+    // new width before the caller uses the heights from the first pass.
+    queueWidthChanges();
+    flushFitLadders();
+  }, [ref]);
+
+  useLayoutEffect(() => {
+    const scrollport = ref.current;
+    if (scrollport === null || typeof ResizeObserver === "undefined") return;
+    // Keep the width current across browser resizes between React commits.
+    const observer = new ResizeObserver(flush);
+    observer.observe(scrollport);
+    return () => {
+      observer.disconnect();
+      lastWidth.current = undefined;
+    };
+  }, [ref, flush]);
+
+  return flush;
+}
+
 function onFontsLoaded(): void {
   for (const ladders of watched.values()) {
     for (const ladder of ladders) pending.add(ladder);
