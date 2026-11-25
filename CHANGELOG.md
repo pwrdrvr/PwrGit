@@ -1,5 +1,10 @@
 # Changelog
 
+## v0.63.2 - 2026-11-25
+
+- Tags - Fixed background tag checks reloading the repository tree or resetting the page in an open tag list.
+- Sidebar - Reused worktree source badge sizing when the layout is unchanged and let the badges settle before restoring scroll position.
+
 ## v0.63.1 - 2026-11-24
 
 - CPU diagnostics - Moved Chromium trace redaction out of the main app process so filtering trace data does not skew the main-process CPU profile.
