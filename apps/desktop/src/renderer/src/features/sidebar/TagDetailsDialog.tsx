@@ -1,6 +1,6 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type { Repo, TagDetails } from "@pwrgit/shared";
-import { dispatch } from "../../lib/pwrgit";
+import { dispatch, subscribe } from "../../lib/pwrgit";
 import { showErrorToast, showInfoToast } from "../../lib/toast";
 import { useModal } from "../../lib/useModal";
 import { confirmDialog } from "../shell/dialogs";
@@ -33,9 +33,12 @@ export function TagDetailsDialog({
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const modalRef = useModal<HTMLDivElement>({ onClose });
+  const request = useRef(0);
 
   const load = useCallback(async (): Promise<void> => {
+    const stamp = ++request.current;
     const result = await dispatch("tag:details", { repoId: repo.id, name });
+    if (stamp !== request.current) return;
     if (!result.ok) {
       setError(result.error.message.split("\n")[0] ?? "Load failed");
       return;
@@ -46,7 +49,14 @@ export function TagDetailsDialog({
 
   useEffect(() => {
     void load();
-  }, [load]);
+    const off = subscribe("tag:changed", (event) => {
+      if (event.profileId === repo.profileId && event.repoId === repo.id) void load();
+    });
+    return () => {
+      off();
+      request.current += 1;
+    };
+  }, [load, repo.id, repo.profileId]);
 
   const check = async (remote: string): Promise<void> => {
     if (busy !== null) return;

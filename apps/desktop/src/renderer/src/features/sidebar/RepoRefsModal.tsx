@@ -24,7 +24,7 @@ import {
 import { shortWhen } from "../graph/graph-view";
 import { switchWorktreeToBranch } from "../shell/branchSwitch";
 import { confirmDialog } from "../shell/dialogs";
-import { dispatch } from "../../lib/pwrgit";
+import { dispatch, subscribe } from "../../lib/pwrgit";
 import { useFocusTrap } from "../../lib/useFocusTrap";
 import { showErrorToast, showInfoToast } from "../../lib/toast";
 import { useTagStatus } from "../../lib/useTagStatus";
@@ -721,6 +721,14 @@ export function RepoRefsModal({
     enabled: tab === "tags" || counting,
     refreshKey: tagEpoch
   });
+  useEffect(() => {
+    if (tab !== "tags" && !counting) return;
+    return subscribe("tag:changed", (event) => {
+      if (event.profileId === repo.profileId && event.repoId === repo.id) {
+        setTagEpoch((value) => value + 1);
+      }
+    });
+  }, [counting, repo.id, repo.profileId, tab]);
   const allWorktrees = useMemo(() => browserWorktrees(repo), [repo]);
   const worktreeCounts = useMemo(
     () => worktreeStatusCounts(allWorktrees, now),

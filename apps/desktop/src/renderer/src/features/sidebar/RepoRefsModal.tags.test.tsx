@@ -5,6 +5,7 @@ import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   ok,
+  type EventPayload,
   type RepoRefs,
   type Repo,
   type TagSourceState,
@@ -14,9 +15,13 @@ import {
 } from "@pwrgit/shared";
 
 const dispatchMock = vi.hoisted(() => vi.fn());
+const tagListeners = vi.hoisted(() => new Set<(event: EventPayload<"tag:changed">) => void>());
 vi.mock("../../lib/pwrgit", () => ({
   dispatch: dispatchMock,
-  subscribe: () => () => undefined
+  subscribe: (channel: string, listener: (event: EventPayload<"tag:changed">) => void) => {
+    if (channel === "tag:changed") tagListeners.add(listener);
+    return () => tagListeners.delete(listener);
+  }
 }));
 vi.mock("../../lib/toast", () => ({ showErrorToast: vi.fn(), showInfoToast: vi.fn() }));
 const confirmDialogMock = vi.hoisted(() => vi.fn());
@@ -168,6 +173,31 @@ describe("RepoRefsModal Tags tab — published tags", () => {
     expect(calls("tag:adoptRemote")[0]?.[1]).toEqual({
       repoId: "repo-1", name: "v1.2.3", remote: "origin", expectedRemoteObjectId: id("c"), expectedLocalObjectId: id("b")
     });
+  });
+
+  it("refreshes the open tag page on scoped check results, even at the same counts", async () => {
+    await open();
+    const remoteOnly = rows[4]!;
+    answer = { ...page({ checkedAt: new Date().toISOString() }), rows: [
+      ...rows.slice(0, 4), { ...remoteOnly, published: { ...remoteOnly.published!, targetId: id("2") } }
+    ] };
+    const publish = async (event: EventPayload<"tag:changed">): Promise<void> => {
+      await act(async () => tagListeners.forEach((listener) => listener(event)));
+      await act(async () => vi.advanceTimersByTime(250));
+    };
+    const event = { repoId: repo.id, profileId: repo.profileId, refreshPreview: true };
+    const reads = calls("repo:tagStatus").length;
+    await publish({ ...event, profileId: "another-profile" });
+    await publish({ ...event, repoId: "another-repo" });
+    expect(calls("repo:tagStatus")).toHaveLength(reads);
+
+    await publish(event);
+    expect(rowOf("legacy/import").textContent).toContain(id("2").slice(0, 12));
+    expect(container.querySelector(".refs-tag-source")?.textContent).not.toContain("checked 4 min ago");
+    answer = { ...answer, source: { ...answer.source!, error: "Timed out" } };
+    await publish({ ...event, refreshPreview: false });
+    expect(container.querySelector(".refs-tag-source")?.textContent).toContain("Couldn’t reach origin");
+    expect(calls("tag:refreshRemote")).toHaveLength(0);
   });
 
   it("does nothing when the confirm is declined", async () => {

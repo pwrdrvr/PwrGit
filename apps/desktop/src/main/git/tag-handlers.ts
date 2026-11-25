@@ -41,7 +41,7 @@ export function registerTagHandlers(bus: CommandBus, db: DB): void {
   const tagSources = tagSourcesFor(db);
   /** Local tags moved: the sidebar's tag rows and the graph's chips. */
   const tagsMoved = (repoId: string, profileId: string): void => {
-    emitEvent("repo:changed", { profileId, repoIds: [repoId] });
+    emitEvent("tag:changed", { profileId, repoId, refreshPreview: true });
     emitEvent("graph:changed", { repoId });
   };
 
@@ -146,15 +146,10 @@ export function registerTagHandlers(bus: CommandBus, db: DB): void {
     // The sidebar's "N tags differ" line reads a stored count; a new local
     // name can differ from the publisher's. Name+id only, no network.
     await tagSources.recountPublisher(execGit, req.repoId, repo.path);
-    emitEvent("repo:changed", {
-      profileId: repo.profile_id,
-      repoIds: [req.repoId]
-    });
     // The lineage graph chips one prominent tag per commit and caches that map
-    // with the lanes for LANE_TTL_MS. `repo:changed` only reaches the sidebar,
-    // so without this the tag the user just made at a visible commit stays
-    // invisible in the graph for up to 30 seconds.
-    emitEvent("graph:changed", { repoId: req.repoId });
+    // with the lanes for LANE_TTL_MS. Refresh both the preview and the graph
+    // so the new tag appears at once.
+    tagsMoved(req.repoId, repo.profile_id);
     return created;
   });
 
@@ -170,12 +165,8 @@ export function registerTagHandlers(bus: CommandBus, db: DB): void {
     if (!deleted.ok) return deleted;
     logMain("info", "tag", `deleted local tag ${req.name}`);
     await tagSources.recountPublisher(execGit, req.repoId, repo.path);
-    emitEvent("repo:changed", {
-      profileId: repo.profile_id,
-      repoIds: [req.repoId]
-    });
     // Same reason as tag:create — a deleted tag must lose its chip too.
-    emitEvent("graph:changed", { repoId: req.repoId });
+    tagsMoved(req.repoId, repo.profile_id);
     return ok(null);
   });
 

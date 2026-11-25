@@ -107,7 +107,7 @@ describe("published tag handlers", () => {
     expect(git(local, "rev-parse", "v1.0.0")).toBe(newHead);
     // A tag-only change moves no branch counter, so the graph is told directly.
     expect(emitEvent).toHaveBeenCalledWith("graph:changed", { repoId: "repo-1" });
-    expect(emitEvent).toHaveBeenCalledWith("repo:changed", { profileId: "p1", repoIds: ["repo-1"] });
+    expect(emitEvent).toHaveBeenCalledWith("tag:changed", { profileId: "p1", repoId: "repo-1", refreshPreview: true });
   });
 
   // A Take offered from a stale mark (origin re-cut again after the check)
@@ -132,7 +132,7 @@ describe("published tag handlers", () => {
     });
     expect(refused.ok ? "adopted" : refused.error.code).toBe("local_tag_changed");
     expect(emitEvent).toHaveBeenCalledWith("graph:changed", { repoId: "repo-1" });
-    expect(emitEvent).toHaveBeenCalledWith("repo:changed", { profileId: "p1", repoIds: ["repo-1"] });
+    expect(emitEvent).toHaveBeenCalledWith("tag:changed", { profileId: "p1", repoId: "repo-1", refreshPreview: true });
   });
 
   it("never lists a remote with tagOpt=--no-tags on its own, but does when asked", async () => {
