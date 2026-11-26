@@ -21,10 +21,12 @@ function render(overrides: Partial<PrSummary> = {}): string {
 }
 
 describe("PrStatusCard", () => {
-  it("uses each forge's own word and reference form", () => {
+  it("uses each forge's own word, repo path, and number chip sigil", () => {
     const github = render({ forge: "github", repoPath: "pwrdrvr/PwrGit" });
     expect(github).toContain("Pull request");
-    expect(github).toContain("pwrdrvr/PwrGit#121");
+    expect(github).toContain("pr-status-card__number-chip");
+    expect(github).toContain(">pwrdrvr/PwrGit<");
+    expect(github).toContain(">#121<");
 
     const gitlab = render({
       forge: "gitlab",
@@ -32,8 +34,15 @@ describe("PrStatusCard", () => {
       number: 4
     });
     expect(gitlab).toContain("Merge request");
-    // `!4` is what GitLab itself shows, and what pastes back into it.
-    expect(gitlab).toContain("pwrdrvr/qa/forge/PwrGit-Test!4");
+    expect(gitlab).toContain(">pwrdrvr/qa/forge/PwrGit-Test<");
+    // `!4` is what GitLab itself shows, rendered in its own chip so a long
+    // nested group path can never truncate it away.
+    expect(gitlab).toContain(">!4<");
+  });
+
+  it("omits the repository line when repoPath is absent or blank", () => {
+    expect(render()).not.toContain("pr-status-card__repo");
+    expect(render({ repoPath: "   " })).not.toContain("pr-status-card__repo");
   });
 
   it("falls back to the app's neutral term for a row with no forge stamp", () => {

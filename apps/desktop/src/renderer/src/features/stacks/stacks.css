@@ -383,13 +383,14 @@
 /* 9a: the PR hover card's Stack section. The card's own section rhythm, with
    a short spine through the nodes; this PR's row is marked. */
 .stack-card-section { --stack-node-fill: var(--bg-menu); --stack-lane: var(--lane-1); }
-.stack-card-section__title { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; }
-.stack-card-section__where { flex: none; color: var(--text-muted); font: 500 10px/1 var(--font-mono); letter-spacing: 0; text-transform: none; }
+.stack-card-section__title { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 2px 10px; line-height: 1.25; }
+.stack-card-section__title > span:first-child { min-width: 0; overflow-wrap: anywhere; }
+.stack-card-section__where { flex: 0 1 auto; min-width: 0; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-muted); font: 500 10px/1.25 var(--font-mono); letter-spacing: 0; text-transform: none; }
 .stack-card-section__list { margin: 0; padding: 0; list-style: none; }
 .stack-card-section__list li {
   position: relative;
   display: grid;
-  grid-template-columns: 11px 24px minmax(0, 1fr);
+  grid-template-columns: 11px minmax(24px, auto) minmax(0, 1fr);
   gap: 5px;
   align-items: center;
   min-height: 18px;
@@ -409,7 +410,7 @@
 .stack-card-section__list li:first-child::before { top: 50%; }
 .stack-card-section__list li.stack-card-section__trunk::before { bottom: 50%; }
 .stack-card-section__list .stack-node-wrap { --stack-node-size: 7px; position: relative; z-index: 1; width: 11px; height: 11px; }
-.stack-card-section__n { color: var(--text-muted); font: 500 9.5px/1 var(--font-mono); }
+.stack-card-section__n { color: var(--text-muted); font: 500 9.5px/1 var(--font-mono); white-space: nowrap; }
 .stack-card-section__t { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .stack-card-section__list li.is-current { background: var(--bg-hover-strong); color: var(--text-primary); font-weight: 600; }
 .stack-card-section__list li.is-current .stack-card-section__n { color: var(--accent-bright); }
