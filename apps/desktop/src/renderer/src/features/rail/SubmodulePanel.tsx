@@ -75,6 +75,14 @@ export function snapshotHasActiveChange(snapshot: SubmoduleSnapshot): boolean {
   return snapshot.submodules.some(submoduleHasActiveChange);
 }
 
+function snapshotHasParentError(snapshot: SubmoduleSnapshot): boolean {
+  return snapshot.issues.some((problem) => problem.severity === "error");
+}
+
+function snapshotNeedsAttention(snapshot: SubmoduleSnapshot): boolean {
+  return snapshotHasActiveChange(snapshot) || snapshotHasParentError(snapshot);
+}
+
 /**
  * A submodule that is checked out locally without error-severity issues.
  * The header count shows working submodules only so it never double-counts
@@ -129,7 +137,7 @@ function nonWorkingLabel(nonWorking: SubmoduleStatus[]): string {
     return `${count} deinitialized`;
   }
   if (
-    nonWorking.some((submodule) =>
+    nonWorking.every((submodule) =>
       submodule.issues.some((problem) => problem.severity === "error")
     )
   ) {
@@ -146,14 +154,26 @@ function summaryBadgesFor(
   if (snapshot === null) return [];
 
   const badges: SummaryBadge[] = [];
+  const parentErrorCount = snapshot.issues.filter(
+    (problem) => problem.severity === "error"
+  ).length;
   const working = snapshot.submodules.filter(submoduleIsWorking);
   const nonWorking = snapshot.submodules.filter(
     (submodule) => !submoduleIsWorking(submodule)
   );
-  const activeWorking = working.filter(submoduleHasActiveChange).length;
+  const activeCount = snapshot.submodules.filter(
+    submoduleHasActiveChange
+  ).length;
 
-  if (activeWorking > 0) {
-    badges.push({ label: `${activeWorking} changed`, tone: "warn" });
+  if (parentErrorCount > 0) {
+    badges.push({
+      label:
+        parentErrorCount === 1 ? "1 error" : `${parentErrorCount} errors`,
+      tone: "danger"
+    });
+  }
+  if (activeCount > 0) {
+    badges.push({ label: `${activeCount} changed`, tone: "warn" });
   }
   if (nonWorking.length > 0) {
     badges.push({ label: nonWorkingLabel(nonWorking), tone: "muted" });
@@ -377,7 +397,7 @@ export function SubmodulePanel({
           if (result.ok) {
             setSnapshot(result.value);
             setError(null);
-            onConcernChange?.(snapshotHasActiveChange(result.value));
+            onConcernChange?.(snapshotNeedsAttention(result.value));
           } else {
             setError(result.error.message);
             onConcernChange?.(true);
@@ -429,7 +449,7 @@ export function SubmodulePanel({
   }
 
   const defaultExpanded =
-    error !== null || (snapshot !== null && snapshotHasActiveChange(snapshot));
+    error !== null || (snapshot !== null && snapshotNeedsAttention(snapshot));
   const expanded = userExpanded ?? defaultExpanded;
   const workingCount =
     snapshot === null
@@ -444,7 +464,10 @@ export function SubmodulePanel({
           type="button"
           className="submodule-panel__toggle"
           aria-expanded={expanded}
-          onClick={() => setUserExpanded(!expanded)}
+          onClick={() => {
+            const next = !expanded;
+            setUserExpanded(next === defaultExpanded ? null : next);
+          }}
         >
           <SectionChevron open={expanded} />
           <span>Submodules</span>

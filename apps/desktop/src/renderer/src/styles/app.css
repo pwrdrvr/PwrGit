@@ -12573,7 +12573,7 @@ button.ref-chip:focus-visible {
   min-height: 32px;
   padding: 4px 6px 4px 4px;
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   gap: 4px;
 }
 .submodule-panel__head.is-open {
@@ -12588,8 +12588,9 @@ button.ref-chip:focus-visible {
   border-radius: var(--radius-sm);
   background: transparent;
   display: inline-flex;
+  flex-wrap: wrap;
   align-items: center;
-  gap: 6px;
+  gap: 4px 6px;
   color: var(--text-secondary);
   font: 700 10px/1 var(--font-sans);
   letter-spacing: 0.07em;
@@ -12622,16 +12623,18 @@ button.ref-chip:focus-visible {
   font: 600 9px/1 var(--font-mono);
 }
 .submodule-panel__refresh {
+  flex: 0 0 auto;
   display: inline-flex;
   align-items: center;
   gap: 5px;
-  min-height: 22px;
+  min-height: 24px;
   padding: 0 7px;
   border: 1px solid transparent;
   border-radius: var(--radius-sm);
   background: transparent;
   color: var(--text-muted);
   font: 600 9px/1 var(--font-sans);
+  white-space: nowrap;
   cursor: pointer;
   letter-spacing: 0;
   text-transform: none;
@@ -12706,6 +12709,9 @@ button.ref-chip:focus-visible {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+.submodule-row__leaf:only-child {
+  max-width: 100%;
 }
 .submodule-chip,
 .submodule-tag {

@@ -82,6 +82,32 @@ test("keeps passive submodules collapsed below Changes while auto-expanding acti
         activeChange.locator(".submodule-panel").getByText("Ahead of pin", { exact: true })
       ).toBeVisible();
 
+      // Verify multiple header badges wrap cleanly and never overlap Refresh,
+      // and root-level paths without slashes are not capped at 65% width.
+      const refreshBox = await activeChange
+        .locator(".submodule-panel__refresh")
+        .boundingBox();
+      expect(refreshBox).not.toBeNull();
+      const activeChips = activeChange.locator(
+        ".submodule-panel__toggle .submodule-chip"
+      );
+      await expect(activeChips).toHaveCount(2);
+      for (let i = 0; i < 2; i++) {
+        const chipBox = await activeChips.nth(i).boundingBox();
+        expect(chipBox).not.toBeNull();
+        expect(chipBox!.x + chipBox!.width).toBeLessThanOrEqual(
+          refreshBox!.x + 1
+        );
+      }
+      const rootLeaf = activeChange
+        .locator(".submodule-row")
+        .nth(1)
+        .locator(".submodule-row__leaf");
+      const rootLeafOverflow = await rootLeaf.evaluate(
+        (el) => el.scrollWidth > el.clientWidth
+      );
+      expect(rootLeafOverflow).toBe(false);
+
       if (shots) {
         await page.mouse.move(0, 0);
         await expect(page.getByRole("tooltip")).toHaveCount(0);

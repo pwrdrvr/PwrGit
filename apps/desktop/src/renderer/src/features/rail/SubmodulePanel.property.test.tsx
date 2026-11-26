@@ -181,16 +181,40 @@ const submoduleScenarioArb: fc.Arbitrary<SubmoduleStatus> = fc
     };
   });
 
+const parentIssueArb: fc.Arbitrary<SubmoduleIssue[]> = fc.constantFrom<
+  SubmoduleIssue[]
+>(
+  [],
+  [
+    {
+      code: "inspect_failed",
+      severity: "error",
+      message: "Git could not parse .gitmodules.",
+      remedy: "Repair .gitmodules, then refresh the submodule scan."
+    }
+  ],
+  [
+    {
+      code: "scan_truncated",
+      severity: "warning",
+      message: "The submodule scan reached its safety limit."
+    }
+  ]
+);
+
 const snapshotArb: fc.Arbitrary<SubmoduleSnapshot> = fc
-  .uniqueArray(submoduleScenarioArb, {
-    minLength: 1,
-    maxLength: 4,
-    selector: (row) => row.path
+  .record({
+    submodules: fc.uniqueArray(submoduleScenarioArb, {
+      minLength: 1,
+      maxLength: 4,
+      selector: (row) => row.path
+    }),
+    issues: parentIssueArb
   })
-  .map((submodules) => ({
+  .map(({ submodules, issues }) => ({
     submodules,
-    truncated: false,
-    issues: []
+    truncated: issues.some((problem) => problem.code === "scan_truncated"),
+    issues
   }));
 
 let container: HTMLDivElement;
@@ -225,36 +249,63 @@ describe("SubmodulePanel quiet-by-default properties", () => {
           );
         });
 
-        const expectActive = snapshot.submodules.some(hasActiveLocalChange);
+        const activeCount = snapshot.submodules.filter(hasActiveLocalChange).length;
+        const parentErrorCount = snapshot.issues.filter(
+          (problem) => problem.severity === "error"
+        ).length;
+        const expectAttention = activeCount > 0 || parentErrorCount > 0;
         const workingCount = snapshot.submodules.filter(isWorkingSubmodule).length;
-        const nonWorkingCount = snapshot.submodules.length - workingCount;
+        const nonWorking = snapshot.submodules.filter(
+          (submodule) => !isWorkingSubmodule(submodule)
+        );
+        const nonWorkingCount = nonWorking.length;
         const toggle = container.querySelector<HTMLButtonElement>(
           ".submodule-panel__toggle"
         );
         expect(toggle).not.toBeNull();
-        expect(toggle?.getAttribute("aria-expanded")).toBe(String(expectActive));
+        expect(toggle?.getAttribute("aria-expanded")).toBe(
+          String(expectAttention)
+        );
         expect(
           container.querySelector(".submodule-panel__count")?.textContent
         ).toBe(String(workingCount));
-        if (nonWorkingCount > 0) {
-          const headerChips = [
-            ...container.querySelectorAll(".submodule-panel__toggle .submodule-chip")
-          ].map((el) => el.textContent?.trim() ?? "");
-          expect(
-            headerChips.some((label) =>
-              label.startsWith(`${nonWorkingCount} `) && !label.endsWith(" changed")
-            )
-          ).toBe(true);
+        const headerChips = [
+          ...container.querySelectorAll(".submodule-panel__toggle .submodule-chip")
+        ].map((el) => el.textContent?.trim() ?? "");
+        if (parentErrorCount > 0) {
+          expect(headerChips).toContain(
+            parentErrorCount === 1 ? "1 error" : `${parentErrorCount} errors`
+          );
         }
-        expect(onConcernChange).toHaveBeenLastCalledWith(expectActive);
+        if (activeCount > 0) {
+          expect(headerChips).toContain(`${activeCount} changed`);
+        }
+        if (nonWorkingCount > 0) {
+          const nonWorkingChip = headerChips.find(
+            (label) =>
+              label.startsWith(`${nonWorkingCount} `) &&
+              !label.endsWith(" changed") &&
+              !label.endsWith(" error") &&
+              !label.endsWith(" errors")
+          );
+          expect(nonWorkingChip).toBeDefined();
+          // Never label a mixed passive+error set as all "failing".
+          const allNonWorkingHaveError = nonWorking.every((submodule) =>
+            submodule.issues.some((problem) => problem.severity === "error")
+          );
+          if (!allNonWorkingHaveError) {
+            expect(nonWorkingChip).not.toBe(`${nonWorkingCount} failing`);
+          }
+        }
+        expect(onConcernChange).toHaveBeenLastCalledWith(expectAttention);
 
         const rowsBeforeClick = container.querySelectorAll(".submodule-row");
         expect(rowsBeforeClick.length).toBe(
-          expectActive ? snapshot.submodules.length : 0
+          expectAttention ? snapshot.submodules.length : 0
         );
 
         // Expand if collapsed so we can verify row-level properties for every snapshot.
-        if (!expectActive) {
+        if (!expectAttention) {
           await act(async () => toggle?.click());
         }
 

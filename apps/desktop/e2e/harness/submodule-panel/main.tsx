@@ -88,6 +88,29 @@ const ACTIVE_SNAPSHOT: SubmoduleSnapshot = {
       configuredUrl: "https://example.test/acme/core.git",
       initializedUrl: "https://example.test/acme/core.git",
       issues: []
+    },
+    {
+      name: "protocol-buffers-schema",
+      path: "protocol-buffers-schema",
+      depth: 0,
+      pinnedCommit: "4444444444444444444444444444444444444444",
+      indexCommit: "4444444444444444444444444444444444444444",
+      checkoutState: "deinitialized",
+      relation: "unknown",
+      dirty: null,
+      detached: null,
+      pinnedTags: [],
+      configuredUrl: "https://example.test/acme/protocol-buffers-schema.git",
+      issues: [
+        {
+          code: "checkout_deinitialized",
+          severity: "warning",
+          message:
+            "This submodule was deinitialized; its Git data is still retained locally.",
+          remedy:
+            "Reinitialize it from the parent after reviewing the configured URL."
+        }
+      ]
     }
   ]
 };

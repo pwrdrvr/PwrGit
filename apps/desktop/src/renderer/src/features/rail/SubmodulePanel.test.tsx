@@ -297,6 +297,128 @@ describe("SubmodulePanel", () => {
     ).toBe("2 failing");
   });
 
+  it("auto-expands and surfaces a danger badge for parent .gitmodules parse errors even when gitlinks exist", async () => {
+    const sha = "1111111111111111111111111111111111111111";
+    const parseErrorSnapshot: SubmoduleSnapshot = {
+      truncated: false,
+      issues: [
+        {
+          code: "inspect_failed",
+          severity: "error",
+          message: "fatal: bad config line 3 in file .gitmodules",
+          remedy: "Repair .gitmodules, then refresh the submodule scan."
+        }
+      ],
+      submodules: [
+        {
+          name: "modules/vendor",
+          path: "modules/vendor",
+          depth: 0,
+          pinnedCommit: sha,
+          indexCommit: sha,
+          checkoutState: "uninitialized",
+          relation: "unknown",
+          dirty: null,
+          detached: null,
+          pinnedTags: [],
+          issues: [
+            {
+              code: "gitmodules_entry_missing",
+              severity: "error",
+              message:
+                "The parent records a gitlink here, but .gitmodules has no matching path."
+            },
+            {
+              code: "checkout_uninitialized",
+              severity: "warning",
+              message: "This submodule has not been initialized."
+            }
+          ]
+        }
+      ]
+    };
+    dispatchMock.mockResolvedValueOnce(ok(parseErrorSnapshot));
+    const onConcernChange = vi.fn();
+
+    await act(async () => {
+      root.render(
+        <SubmodulePanel
+          worktreeId="worktree-1"
+          onConcernChange={onConcernChange}
+        />
+      );
+    });
+
+    const toggle = container.querySelector<HTMLButtonElement>(
+      ".submodule-panel__toggle"
+    );
+    expect(toggle?.getAttribute("aria-expanded")).toBe("true");
+    expect(onConcernChange).toHaveBeenLastCalledWith(true);
+    expect(
+      container.querySelector(".submodule-panel__toggle .submodule-chip--danger")
+        ?.textContent
+    ).toBe("1 error");
+    expect(container.textContent).toContain("bad config line 3 in file .gitmodules");
+  });
+
+  it("re-enables auto-expand after inspecting and re-collapsing a passive panel", async () => {
+    const sha = "1111111111111111111111111111111111111111";
+    const passive: SubmoduleSnapshot = {
+      truncated: false,
+      issues: [],
+      submodules: [
+        {
+          name: "api",
+          path: "modules/api",
+          depth: 0,
+          pinnedCommit: sha,
+          indexCommit: sha,
+          checkedOutCommit: sha,
+          checkoutState: "checked_out",
+          relation: "at_pin",
+          dirty: false,
+          detached: true,
+          pinnedTags: [],
+          configuredUrl: "../api.git",
+          issues: []
+        }
+      ]
+    };
+    const dirty: SubmoduleSnapshot = {
+      ...passive,
+      submodules: [{ ...passive.submodules[0]!, dirty: true }]
+    };
+    dispatchMock
+      .mockResolvedValueOnce(ok(passive))
+      .mockResolvedValueOnce(ok(dirty));
+
+    await act(async () => {
+      root.render(<SubmodulePanel worktreeId="worktree-1" />);
+    });
+
+    const toggle = container.querySelector<HTMLButtonElement>(
+      ".submodule-panel__toggle"
+    );
+    expect(toggle?.getAttribute("aria-expanded")).toBe("false");
+
+    // Inspect and then collapse back to the passive default state.
+    await act(async () => toggle?.click());
+    expect(toggle?.getAttribute("aria-expanded")).toBe("true");
+    await act(async () => toggle?.click());
+    expect(toggle?.getAttribute("aria-expanded")).toBe("false");
+
+    // A later active change on the same worktree must still auto-expand.
+    const changesHandler = subscribeMock.mock.calls.find(
+      ([channel]) => channel === "changes:changed"
+    )?.[1] as ((event: { worktreeId: string }) => void) | undefined;
+    await act(async () => {
+      changesHandler?.({ worktreeId: "worktree-1" });
+    });
+
+    expect(toggle?.getAttribute("aria-expanded")).toBe("true");
+    expect(container.textContent).toContain("1 changed");
+  });
+
   it("disappears after a successful scan finds no submodules or parent issues", async () => {
     dispatchMock.mockResolvedValue(
       ok({ submodules: [], truncated: false, issues: [] })
