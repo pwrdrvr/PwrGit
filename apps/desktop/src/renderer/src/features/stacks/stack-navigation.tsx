@@ -1,7 +1,8 @@
 import type { CSSProperties } from "react";
-import { createContext, useCallback, useContext, useEffect, useMemo, useState, useSyncExternalStore } from "react";
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { stackPositionForPr, type PrSummary, type RepositoryStack, type StackAction, type StackPosition, type StackSnapshot } from "@pwrgit/shared";
 import { dispatch, subscribe } from "../../lib/pwrgit";
+import { samePayload } from "../../lib/samePayload";
 
 export type StackPick = { repoId: string; stack: RepositoryStack; action?: StackAction; branch?: string | undefined };
 export type StackLaneColors = {
@@ -33,7 +34,7 @@ const known = new Map<string, StackSnapshot>();
 const listeners = new Set<() => void>();
 let knownVersion = 0;
 function remember(repoId: string, snapshot: StackSnapshot) {
-  if (known.get(repoId) === snapshot) return;
+  if (samePayload(known.get(repoId), snapshot)) return;
   known.set(repoId, snapshot);
   knownVersion += 1;
   for (const listener of listeners) listener();
@@ -89,6 +90,8 @@ function readSnapshot(repoId: string, profileId: string, fresh = false): Read {
 
 export function useStackSnapshot(repoId: string | undefined, profileId: string | undefined) {
   const [answer, setAnswer] = useState<{ repoId: string; profileId: string; snapshot: StackSnapshot }>();
+  const answerRef = useRef(answer);
+  answerRef.current = answer;
   const [revision, setRevision] = useState(0);
   const refresh = useCallback(() => setRevision(value => value + 1), []);
   useEffect(() => {
@@ -101,7 +104,18 @@ export function useStackSnapshot(repoId: string | undefined, profileId: string |
       void readSnapshot(repoId, profileId, fresh).then(result => {
         if (!live || generation !== stamp || !result.ok) return;
         remember(repoId, result.value);
-        setAnswer({ repoId, profileId, snapshot: result.value });
+        const current = answerRef.current;
+        if (
+          current !== undefined &&
+          current.repoId === repoId &&
+          current.profileId === profileId &&
+          samePayload(current.snapshot, result.value)
+        ) {
+          return;
+        }
+        const next = { repoId, profileId, snapshot: result.value };
+        answerRef.current = next;
+        setAnswer(next);
       }).catch(() => undefined);
     };
     const invalidate = (payload: { repoId: string }) => {

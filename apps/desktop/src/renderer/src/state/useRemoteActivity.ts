@@ -1,6 +1,7 @@
-import { useEffect, useMemo, useState, useSyncExternalStore } from "react";
+import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
 import type { RemoteActivity, RemoteActivityKind } from "@pwrgit/shared";
 import { dispatch, subscribe, windowProfileId } from "../lib/pwrgit";
+import { samePayload } from "../lib/samePayload";
 
 /**
  * Live remote Git operations, as one renderer-wide store.
@@ -27,20 +28,25 @@ function mine(next: RemoteActivity[]): RemoteActivity[] {
   );
 }
 
+function publish(next: RemoteActivity[]): void {
+  const scoped = mine(next);
+  if (samePayload(activities, scoped)) return;
+  activities = scoped;
+  notify();
+}
+
 function start(): void {
   if (started) return;
   started = true;
   subscribe("remote:activity", (event) => {
     receivedLive = true;
-    activities = mine(event.activities);
-    notify();
+    publish(event.activities);
   });
   // A window that opened mid-operation has missed every event so far, and the
   // next one may be minutes away — a silent fetch emits nothing at all.
   void dispatch("remote:activities", undefined).then((result) => {
     if (!result.ok || receivedLive) return;
-    activities = mine(result.value);
-    notify();
+    publish(result.value);
   });
 }
 
@@ -59,18 +65,43 @@ export function useRemoteActivities(): RemoteActivity[] {
   return useSyncExternalStore(subscribeStore, getSnapshot, getSnapshot);
 }
 
+/** Subscribe to a derived activity slice without re-rendering when other
+ *  repositories or worktrees emit progress updates. */
+function useSelectedRemoteActivity(
+  select: (all: RemoteActivity[]) => RemoteActivity | null
+): RemoteActivity | null {
+  const cached = useRef<{
+    source: RemoteActivity[];
+    select: (all: RemoteActivity[]) => RemoteActivity | null;
+    value: RemoteActivity | null;
+  } | null>(null);
+  const getSelected = useCallback((): RemoteActivity | null => {
+    const source = activities;
+    const prev = cached.current;
+    if (prev !== null && prev.source === source && prev.select === select) {
+      return prev.value;
+    }
+    const next = select(source);
+    const value =
+      prev !== null && samePayload(prev.value, next) ? prev.value : next;
+    cached.current = { source, select, value };
+    return value;
+  }, [select]);
+  return useSyncExternalStore(subscribeStore, getSelected, getSelected);
+}
+
 /** The operation running against one checkout, if any. */
 export function useRemoteActivityFor(
   worktreeId: string | null
 ): RemoteActivity | null {
-  const all = useRemoteActivities();
-  return useMemo(
-    () =>
+  const select = useCallback(
+    (all: RemoteActivity[]): RemoteActivity | null =>
       worktreeId === null
         ? null
         : (all.find((activity) => activity.worktreeId === worktreeId) ?? null),
-    [all, worktreeId]
+    [worktreeId]
   );
+  return useSelectedRemoteActivity(select);
 }
 
 /**
@@ -88,9 +119,8 @@ export function useRepoRemoteActivity(
   repoId: string | null,
   kind: RemoteActivityKind | null
 ): RemoteActivity | null {
-  const all = useRemoteActivities();
-  return useMemo(
-    () =>
+  const select = useCallback(
+    (all: RemoteActivity[]): RemoteActivity | null =>
       repoId === null || kind === null
         ? null
         : (all.find(
@@ -99,8 +129,9 @@ export function useRepoRemoteActivity(
               activity.worktreeId === null &&
               activity.kind === kind
           ) ?? null),
-    [all, kind, repoId]
+    [kind, repoId]
   );
+  return useSelectedRemoteActivity(select);
 }
 
 /**

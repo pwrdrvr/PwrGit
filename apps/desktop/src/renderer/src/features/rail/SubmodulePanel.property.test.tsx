@@ -421,4 +421,44 @@ describe("SubmodulePanel quiet-by-default properties", () => {
       { numRuns: 6 }
     );
   });
+
+  it("resets loading state and hides empty panel cleanly across worktree switches", async () => {
+    const emptySnapshot: SubmoduleSnapshot = {
+      submodules: [],
+      truncated: false,
+      issues: []
+    };
+    const pending: Array<(res: ReturnType<typeof ok<SubmoduleSnapshot>>) => void> = [];
+    mocks.dispatch.mockImplementation((command: string) => {
+      if (command === "submodules:list") {
+        return new Promise((resolve) => pending.push(resolve));
+      }
+      return Promise.resolve(ok(null));
+    });
+
+    await act(async () => {
+      root.render(<SubmodulePanel worktreeId="wt-1" />);
+    });
+    expect(pending).toHaveLength(1);
+    await act(async () => {
+      pending.shift()!(ok(structuredClone(emptySnapshot)));
+    });
+    expect(container.querySelector(".submodule-panel")).toBeNull();
+
+    // Switching worktrees must enter loading while submodules:list is in flight
+    // (marking Refresh aria-busy/aria-disabled) and still hide once an equal empty snapshot settles.
+    await act(async () => {
+      root.render(<SubmodulePanel worktreeId="wt-2" />);
+    });
+    expect(pending).toHaveLength(1);
+    const refreshBtn = container.querySelector<HTMLButtonElement>(".submodule-panel__refresh");
+    expect(refreshBtn).not.toBeNull();
+    expect(refreshBtn?.getAttribute("aria-disabled")).toBe("true");
+    expect(refreshBtn?.getAttribute("aria-busy")).toBe("true");
+
+    await act(async () => {
+      pending.shift()!(ok(structuredClone(emptySnapshot)));
+    });
+    expect(container.querySelector(".submodule-panel")).toBeNull();
+  });
 });

@@ -9,7 +9,47 @@ import {
 const FIT_OVERLAY = "data-fit-overlay";
 const FIT_TEXT_COLUMNS = "data-fit-text-columns";
 
-function affectsFit({ type, target, addedNodes, removedNodes }: MutationRecord): boolean {
+/** State classes that only alter paint, opacity, shadow, or compositor
+ *  transforms and never change an element's layout width or height. */
+const PAINT_ONLY_CLASSES = new Set([
+  "is-nav-flash",
+  "is-selected",
+  "is-multiselected",
+  "holds-selection",
+  "is-open",
+  "is-dragging",
+  "is-drop-target",
+  "is-drop-before",
+  "is-drop-after",
+  "is-pinned",
+  "is-focused",
+  "is-context-open",
+  "is-arrangeable"
+]);
+
+/** True when a MutationRecord can change box geometry (ignoring class toggles
+ *  that only add/remove paint-only state tokens). */
+export function mutationAffectsFit(record: MutationRecord): boolean {
+  if (record.type === "attributes" && record.attributeName === "class") {
+    const before = new Set((record.oldValue ?? "").split(/\s+/).filter(Boolean));
+    const after = new Set(
+      record.target instanceof Element
+        ? [...record.target.classList]
+        : []
+    );
+    for (const token of before) {
+      if (!after.has(token) && !PAINT_ONLY_CLASSES.has(token)) return true;
+    }
+    for (const token of after) {
+      if (!before.has(token) && !PAINT_ONLY_CLASSES.has(token)) return true;
+    }
+    return false;
+  }
+  return true;
+}
+
+function affectsFit(record: MutationRecord): boolean {
+  const { type, target, addedNodes, removedNodes } = record;
   const element = target instanceof Element ? target : target.parentElement;
   // These roots stay out of flow. Their contents can still lay out and paint,
   // and any resulting scrollbar-width change is delivered by ResizeObserver.
@@ -19,6 +59,7 @@ function affectsFit({ type, target, addedNodes, removedNodes }: MutationRecord):
       (node) => !(node instanceof Element && node.hasAttribute(FIT_OVERLAY))
     );
   }
+  if (!mutationAffectsFit(record)) return false;
   // Only character edits are covered. The owner supplies a different column
   // count whenever the text width changes, and the attribute triggers a fit.
   return type !== "characterData" || !element?.hasAttribute(FIT_TEXT_COLUMNS);
@@ -110,9 +151,10 @@ export function useFitLadder(
         subtree: true,
         childList: true,
         characterData: true,
+        attributeOldValue: true,
         attributeFilter: attributes
       });
-      if (row !== box) observer.observe(row, { attributeFilter: attributes });
+      if (row !== box) observer.observe(row, { attributeOldValue: true, attributeFilter: attributes });
       // An inherited text-size or font change can leave the box width intact.
       observer.observe(document.documentElement, {
         attributeFilter: ["data-sidebar-text", "data-density", "style"]
@@ -157,18 +199,21 @@ export function useContentStepLadder(
     const previous = observed.current;
     if (previous?.row === row) {
       // Ancestor layout effects can flush fits to read final row geometry.
-      if (previous.observer.takeRecords().length > 0) refit();
+      if (previous.observer.takeRecords().some(mutationAffectsFit)) refit();
       return;
     }
 
     previous?.observer.disconnect();
     observed.current = null;
     if (row === null) return;
-    const observer = new MutationObserver(refit);
+    const observer = new MutationObserver((changes) => {
+      if (changes.some(mutationAffectsFit)) refit();
+    });
     observer.observe(row, {
       subtree: true,
       childList: true,
       characterData: true,
+      attributeOldValue: true,
       attributeFilter: ["class", "style", "hidden", "width", "height"]
     });
     // Inherited text changes can change the fit without resizing the row.
@@ -221,6 +266,11 @@ function fitRows(active: Fit[]): void {
     }
   }
   for (const fit of rows) fit.afterFit?.();
+}
+
+/** True when any fit ladder has queued a measurement. */
+export function hasPendingFitLadders(): boolean {
+  return pending.size > 0;
 }
 
 /** Complete the pending fits for a caller reading geometry in a layout effect. */

@@ -1,5 +1,6 @@
 import { useCallback, useReducer, useRef } from "react";
 import type { DragEventHandler, PointerEventHandler } from "react";
+import { samePayload } from "../../lib/samePayload";
 import { retainOrder } from "./hover-stable-order";
 
 /**
@@ -77,6 +78,16 @@ export function useHoverStableOrder<T>(params: {
   const release = useCallback(() => {
     if (!holding.current) return;
     holding.current = false;
+    const shownIds = retainOrder(frozen.current.ids, latest.current.ids);
+    const sameIds =
+      shownIds.length === latest.current.ids.length &&
+      shownIds.every((id, index) => id === latest.current.ids[index]);
+    const sameContext = samePayload(
+      frozen.current.context,
+      latest.current.context
+    );
+    frozen.current = latest.current;
+    if (sameIds && sameContext) return;
     // The render this schedules is the only thing that reveals the newest
     // order: the parent's props may not change at all when the pointer leaves.
     showLatest();

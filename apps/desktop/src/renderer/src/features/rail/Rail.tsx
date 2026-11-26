@@ -7,6 +7,7 @@ import type {
   WorktreeState
 } from "@pwrgit/shared";
 import { dispatch, subscribe } from "../../lib/pwrgit";
+import { samePayload } from "../../lib/samePayload";
 import { OperationBanner } from "./OperationBanner";
 import { RebaseTab } from "./RebaseTab";
 import { ChangesTab } from "./ChangesTab";
@@ -97,12 +98,17 @@ export function Rail({
   // rest of the rail never waits on it. Blocking the file list on an extra
   // git round-trip would tax every worktree switch for a rare state.
   const [operation, setOperation] = useState<OperationState | null>(null);
+  const operationRef = useRef(operation);
+  operationRef.current = operation;
   const latestRequest = useRef(0);
 
   const refreshOperation = useCallback((): void => {
     const request = ++latestRequest.current;
     if (worktreeId === null) {
-      setOperation(null);
+      if (operationRef.current !== null) {
+        operationRef.current = null;
+        setOperation(null);
+      }
       return;
     }
     void dispatch("operation:state", { worktreeId }).then((result) => {
@@ -112,12 +118,18 @@ export function Rail({
       // contention, a failed spawn) must not take the banner — and with it the
       // only in-app Abort/Continue — away mid-operation. Switching worktrees
       // clears it explicitly below, so this cannot leak across checkouts.
-      if (result.ok) setOperation(result.value);
+      if (result.ok && !samePayload(operationRef.current, result.value)) {
+        operationRef.current = result.value;
+        setOperation(result.value);
+      }
     });
   }, [worktreeId]);
 
   useEffect(() => {
-    setOperation(null);
+    if (operationRef.current !== null) {
+      operationRef.current = null;
+      setOperation(null);
+    }
     refreshOperation();
     if (worktreeId === null) return;
     const offWorktree = subscribe("worktree:changed", (event) => {

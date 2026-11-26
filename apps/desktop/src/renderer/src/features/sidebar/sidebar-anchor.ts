@@ -187,6 +187,12 @@ export function releaseSidebarAnchor(): void {
   pin = null;
 }
 
+/** Whether a sidebar anchor pin is active (even before its target row has been
+ *  found), so Sidebar knows whether to flush scrollport fits synchronously. */
+export function hasSidebarAnchor(now: number = Date.now()): boolean {
+  return pin !== null && pin.until > now;
+}
+
 /** Whether a hold is in force and has its row, so the caller's own reveal
  *  scroll must stand down rather than undo it. */
 export function sidebarAnchorHeld(now: number = Date.now()): boolean {

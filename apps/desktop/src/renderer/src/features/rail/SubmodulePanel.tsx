@@ -12,6 +12,7 @@ import type {
   SubmoduleStatus
 } from "@pwrgit/shared";
 import { dispatch, subscribe } from "../../lib/pwrgit";
+import { samePayload } from "../../lib/samePayload";
 import { RefreshGlyph } from "../../lib/RefreshGlyph";
 import {
   hoverTooltip,
@@ -366,8 +367,14 @@ export function SubmodulePanel({
   onConcernChange?: (hasConcern: boolean) => void;
 }) {
   const [snapshot, setSnapshot] = useState<SubmoduleSnapshot | null>(null);
+  const snapshotRef = useRef(snapshot);
+  snapshotRef.current = snapshot;
   const [loading, setLoading] = useState(true);
+  const loadingRef = useRef(loading);
+  loadingRef.current = loading;
   const [error, setError] = useState<string | null>(null);
+  const errorRef = useRef(error);
+  errorRef.current = error;
   const [userExpanded, setUserExpanded] = useState<boolean | null>(null);
   // Ignore an older request that resolves after a worktree switch or refresh.
   const requestRef = useRef(0);
@@ -390,24 +397,43 @@ export function SubmodulePanel({
       while (true) {
         pendingRefreshRef.current = false;
         const request = ++requestRef.current;
-        setLoading(true);
+        if (snapshotRef.current === null && !loadingRef.current) {
+          loadingRef.current = true;
+          setLoading(true);
+        }
         try {
           const result = await dispatch("submodules:list", { worktreeId });
           if (request !== requestRef.current) return;
           if (result.ok) {
-            setSnapshot(result.value);
-            setError(null);
+            if (!samePayload(snapshotRef.current, result.value)) {
+              snapshotRef.current = result.value;
+              setSnapshot(result.value);
+            }
+            if (errorRef.current !== null) {
+              errorRef.current = null;
+              setError(null);
+            }
             onConcernChange?.(snapshotNeedsAttention(result.value));
           } else {
-            setError(result.error.message);
+            if (errorRef.current !== result.error.message) {
+              errorRef.current = result.error.message;
+              setError(result.error.message);
+            }
             onConcernChange?.(true);
           }
         } catch (cause) {
           if (request !== requestRef.current) return;
-          setError(cause instanceof Error ? cause.message : String(cause));
+          const message = cause instanceof Error ? cause.message : String(cause);
+          if (errorRef.current !== message) {
+            errorRef.current = message;
+            setError(message);
+          }
           onConcernChange?.(true);
         }
-        setLoading(false);
+        if (loadingRef.current) {
+          loadingRef.current = false;
+          setLoading(false);
+        }
         if (!pendingRefreshRef.current) {
           inFlightRef.current = false;
           return;
@@ -418,6 +444,8 @@ export function SubmodulePanel({
   }, [onConcernChange, worktreeId]);
 
   useEffect(() => {
+    snapshotRef.current = null;
+    errorRef.current = null;
     setSnapshot(null);
     setError(null);
     setUserExpanded(null);

@@ -1,10 +1,10 @@
 // @vitest-environment jsdom
-import { act } from "react";
+import { act, Profiler } from "react";
 import { createRoot } from "react-dom/client";
 import fc from "fast-check";
 import { ok } from "@pwrgit/shared";
 import { expect, test, vi } from "vitest";
-import { useStackSnapshot } from "./stack-navigation";
+import { useStackPositionForPr, useStackSnapshot } from "./stack-navigation";
 
 test("invalidation during a shared stack read publishes only a post-event snapshot", async () => {
   vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
@@ -60,4 +60,59 @@ test("invalidation during a shared stack read publishes only a post-event snapsh
     vi.unstubAllGlobals();
     vi.useRealTimers();
   }
+});
+
+test("equivalent stack snapshots on focus or invalidation cause zero extra commits", async () => {
+  await fc.assert(
+    fc.asyncProperty(
+      fc.integer({ min: 1, max: 6 }),
+      async (focusCount) => {
+        const container = document.createElement("div");
+        const root = createRoot(container);
+        const repoId = `repo-eq-${focusCount}`;
+        const snapshot = { schemaVersion: 1, readOnly: false, stacks: [] };
+        vi.stubGlobal("pwrgit", {
+          dispatch: () => Promise.resolve(ok(structuredClone(snapshot))),
+          on: () => () => undefined
+        });
+        let viewerCommits = 0;
+        let chipCommits = 0;
+        function Viewer() {
+          useStackSnapshot(repoId, "profile");
+          return null;
+        }
+        function Chip() {
+          useStackPositionForPr(repoId, { number: 12 });
+          return null;
+        }
+        try {
+          await act(async () =>
+            root.render(
+              <>
+                <Profiler id="viewer" onRender={() => { viewerCommits += 1; }}>
+                  <Viewer />
+                </Profiler>
+                <Profiler id="chip" onRender={() => { chipCommits += 1; }}>
+                  <Chip />
+                </Profiler>
+              </>
+            )
+          );
+          const baseViewer = viewerCommits;
+          const baseChip = chipCommits;
+          for (let i = 0; i < focusCount; i++) {
+            await act(async () => {
+              window.dispatchEvent(new Event("focus"));
+            });
+          }
+          expect(viewerCommits).toBe(baseViewer);
+          expect(chipCommits).toBe(baseChip);
+        } finally {
+          await act(async () => root.unmount());
+          vi.unstubAllGlobals();
+        }
+      }
+    ),
+    { numRuns: 12, seed: 2026112608 }
+  );
 });

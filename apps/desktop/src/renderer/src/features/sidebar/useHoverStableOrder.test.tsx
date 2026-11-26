@@ -1,7 +1,8 @@
 // @vitest-environment jsdom
 
-import { act, StrictMode } from "react";
+import { act, Profiler, StrictMode } from "react";
 import { createRoot, type Root } from "react-dom/client";
+import fc from "fast-check";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import { useHoverStableOrder } from "./useHoverStableOrder";
@@ -210,5 +211,58 @@ describe("useHoverStableOrder", () => {
     expect(rows()).toEqual(["a", "b", "c"]);
     strict({ ids: ["c", "b", "a"], scope: "All" });
     expect(rows()).toEqual(["c", "b", "a"]);
+  });
+
+  it("skips re-rendering on pointer leave when order and context did not diverge", () => {
+    fc.assert(
+      fc.property(
+        fc.array(
+          fc.record({
+            mutateOrder: fc.boolean(),
+            mutateContext: fc.boolean()
+          }),
+          { minLength: 1, maxLength: 10 }
+        ),
+        (cycles) => {
+          let commits = 0;
+          let currentIds = ["a", "b", "c"];
+          let currentContext = "ctx-0";
+
+          const draw = (): void => {
+            act(() =>
+              root.render(
+                <Profiler id="hover-order" onRender={() => { commits += 1; }}>
+                  <List ids={currentIds} context={currentContext} />
+                </Profiler>
+              )
+            );
+          };
+
+          draw();
+          for (let i = 0; i < cycles.length; i++) {
+            const { mutateOrder, mutateContext } = cycles[i]!;
+            pointer("pointerover");
+            if (mutateOrder) {
+              currentIds = [...currentIds].reverse();
+            }
+            if (mutateContext) {
+              currentContext = `ctx-${i + 1}`;
+            }
+            if (mutateOrder || mutateContext) draw();
+
+            const commitsBeforeLeave = commits;
+            pointer("pointerout", { relatedTarget: document.body });
+            const expectedExtra = mutateOrder || mutateContext ? 1 : 0;
+            expect(commits - commitsBeforeLeave).toBe(expectedExtra);
+            expect(rows()).toEqual(currentIds);
+            expect(shownContext()).toBe(currentContext);
+          }
+
+          act(() => root.unmount());
+          root = createRoot(container);
+        }
+      ),
+      { numRuns: 20, seed: 2026112610 }
+    );
   });
 });

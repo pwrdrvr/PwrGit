@@ -21,6 +21,7 @@ import type {
   Worktree
 } from "@pwrgit/shared";
 import { dispatch, subscribe } from "../../lib/pwrgit";
+import { samePayload } from "../../lib/samePayload";
 import { RefreshGlyph } from "../../lib/RefreshGlyph";
 import { SwitchGlyph } from "../../lib/SwitchGlyph";
 import {
@@ -264,10 +265,12 @@ export function RepoRefsSections({
   // A ref, so a caller's inline callback does not re-run the load.
   const onBranchesRef = useRef(onBranches);
   onBranchesRef.current = onBranches;
+  const refsRef = useRef(refs);
+  refsRef.current = refs;
   const loadRef = useRef(0);
   const load = useCallback(async () => {
     const request = ++loadRef.current;
-    setLoading(true);
+    if (refsRef.current === null) setLoading(true);
     setError(null);
     const result = await dispatch("repo:refs", { repoId: repo.id });
     // Reloads can overlap (a burst of changes to this repository); only the
@@ -275,8 +278,14 @@ export function RepoRefsSections({
     if (request !== loadRef.current) return;
     setLoading(false);
     if (result.ok) {
-      setRefs(result.value);
-      onBranchesRef.current?.(result.value.branches);
+      const previous = refsRef.current;
+      if (!samePayload(previous, result.value)) {
+        refsRef.current = result.value;
+        setRefs(result.value);
+      }
+      if (!samePayload(previous?.branches, result.value.branches)) {
+        onBranchesRef.current?.(result.value.branches);
+      }
     } else setError(result.error.message.split("\n")[0]);
   }, [repo.id]);
 

@@ -242,6 +242,15 @@ describe("Rail operation banner", () => {
 
     expect(container.querySelector(".op-banner")).toBeNull();
   });
+
+  it("keeps OperationBanner visible when switching between two worktrees with identical active operations", async () => {
+    mocks.dispatch.mockImplementation(() => Promise.resolve(ok(structuredClone(midRebase))));
+    await render({ worktree: { id: "worktree-1", dirty: 0 } as Worktree });
+    expect(container.querySelector(".op-banner")).not.toBeNull();
+
+    await render({ worktree: { id: "worktree-2", dirty: 0 } as Worktree });
+    expect(container.querySelector(".op-banner")).not.toBeNull();
+  });
 });
 
 const stash = (hash: string, name: string): StashEntry => ({

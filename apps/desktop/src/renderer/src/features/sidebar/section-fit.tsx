@@ -7,7 +7,7 @@ import { ChangeRequestGlyph } from "../../lib/ChangeRequestGlyph";
 import { RemoteGlyph } from "../../lib/RemoteGlyph";
 import { TagGlyph } from "../../lib/TagGlyph";
 import { WorktreeGlyph } from "../../lib/WorktreeGlyph";
-import { useStepLadder } from "../../lib/useFitLadder";
+import { mutationAffectsFit, useStepLadder } from "../../lib/useFitLadder";
 import { gatedTooltip, type TooltipHandle } from "../../lib/useViewportTooltip";
 
 /**
@@ -90,12 +90,15 @@ export function SectionHeading({
   const observer = useRef<MutationObserver | null>(null);
   const watchHeading = useCallback((row: HTMLDivElement | null) => {
     if (row === null) return;
-    const changes = new MutationObserver(refit);
+    const changes = new MutationObserver((records) => {
+      if (records.some(mutationAffectsFit)) refit();
+    });
     observer.current = changes;
     changes.observe(row, {
       subtree: true,
       childList: true,
       characterData: true,
+      attributeOldValue: true,
       attributeFilter: ["class", "style", "hidden", "width", "height", "data-rank", "data-fold"]
     });
     refit();
@@ -108,7 +111,7 @@ export function SectionHeading({
   useLayoutEffect(() => {
     // Sidebar can flush fits for an anchor before the observer callback.
     // The ladder writes its classes outside the observed heading.
-    if (observer.current?.takeRecords().length) refit();
+    if (observer.current?.takeRecords().some(mutationAffectsFit)) refit();
   });
   return <div className={className} ref={watchHeading}>{children}</div>;
 }
