@@ -1,6 +1,7 @@
 import {
   useEffect,
   useLayoutEffect,
+  useRef,
   useState,
   useSyncExternalStore,
   type FocusEvent as ReactFocusEvent,
@@ -715,6 +716,27 @@ function createTooltipStore(
 const getServerSnapshot = (): TooltipSnapshot => EMPTY_SNAPSHOT;
 const getServerVisible = (): boolean => false;
 
+const TOOLTIP_LAYER_ATTR = "data-viewport-tooltip-layer";
+
+/**
+ * Shared full-viewport portal container for plain tooltips (`contain: strict`).
+ * Keeping plain tooltip mount/unmount inside a fixed, layout- and paint-
+ * contained overlay prevents hover tooltips from invalidating `document.body`
+ * layout or repainting `#document` / sibling panes.
+ */
+function plainTooltipPortalTarget(): HTMLElement {
+  let layer = document.body.querySelector<HTMLElement>(
+    `:scope > [${TOOLTIP_LAYER_ATTR}]`
+  );
+  if (layer === null) {
+    layer = document.createElement("div");
+    layer.setAttribute(TOOLTIP_LAYER_ATTR, "");
+    layer.className = "viewport-tooltip-layer";
+    document.body.appendChild(layer);
+  }
+  return layer;
+}
+
 function ViewportTooltipHost({
   store,
   className,
@@ -731,18 +753,33 @@ function ViewportTooltipHost({
     store.getSnapshot,
     getServerSnapshot
   );
+  const placedRef = useRef<{
+    state: TooltipState;
+    left: number;
+    top: number;
+  } | null>(null);
 
-  // Measure after paint and clamp the tooltip into the viewport. Generic
-  // tooltips re-measure after content updates; interactive cards stay put.
+  // Measure and clamp the tooltip into the viewport before paint. Generic
+  // tooltips re-measure after content updates and translate into place without
+  // mutating left/top or triggering a second React commit; interactive cards
+  // stay put once anchored and only re-render when a hover bridge changes.
   useLayoutEffect(() => {
-    if (!state) return;
-    // An interactive card should feel anchored when its live data arrives,
-    // rather than jumping as it remeasures under a stationary pointer.
-    if (interactive && state.left !== undefined && state.top !== undefined) {
+    if (!state) {
+      placedRef.current = null;
       return;
     }
     const el = store.tooltipRef.current;
     if (!el) return;
+    // An interactive card should feel anchored when its live data arrives,
+    // rather than jumping as it remeasures under a stationary pointer.
+    if (interactive && state.left !== undefined && state.top !== undefined) {
+      el.style.left = `${state.left}px`;
+      el.style.top = `${state.top}px`;
+      el.style.visibility = "";
+      placedRef.current = { state, left: state.left, top: state.top };
+      return;
+    }
+    if (placedRef.current?.state === state) return;
     const rect = el.getBoundingClientRect();
     const { left, top } = placeViewportTooltip({
       target: state.targetRect,
@@ -750,36 +787,54 @@ function ViewportTooltipHost({
       viewport: { width: window.innerWidth, height: window.innerHeight },
       ...(state.anchor === undefined ? {} : { anchor: state.anchor })
     });
-    if (state.left !== left || state.top !== top) {
-      // Only a card placed against its trigger gets a bridge. A
-      // pointer-anchored card opens beside the cursor, over the trigger's own
-      // row, so there is no gap between the two to cross.
-      const style =
-        interactive && state.anchor === undefined
-          ? getComputedStyle(el)
-          : undefined;
-      const bridge =
-        style === undefined
-          ? undefined
-          : bridgeBetween(
-              {
-                left,
-                top,
-                right: left + rect.width,
-                bottom: top + rect.height
-              },
-              state.targetRect,
-              {
-                top: parseFloat(style.borderTopWidth) || 0,
-                bottom: parseFloat(style.borderBottomWidth) || 0
-              }
-            );
+    placedRef.current = { state, left, top };
+    if (!interactive) {
+      el.style.transform = `translate(${left}px, ${top}px)`;
+      el.style.visibility = "";
+      return;
+    }
+    el.style.left = `${left}px`;
+    el.style.top = `${top}px`;
+    el.style.visibility = "";
+    // Only a card placed against its trigger gets a bridge. A
+    // pointer-anchored card opens beside the cursor, over the trigger's own
+    // row, so there is no gap between the two to cross.
+    const style =
+      state.anchor === undefined ? getComputedStyle(el) : undefined;
+    const bridge =
+      style === undefined
+        ? undefined
+        : bridgeBetween(
+            {
+              left,
+              top,
+              right: left + rect.width,
+              bottom: top + rect.height
+            },
+            state.targetRect,
+            {
+              top: parseFloat(style.borderTopWidth) || 0,
+              bottom: parseFloat(style.borderBottomWidth) || 0
+            }
+          );
+    const sameBridge =
+      bridge === state.bridge ||
+      (bridge !== undefined &&
+        state.bridge !== undefined &&
+        bridge.side === state.bridge.side &&
+        bridge.height === state.bridge.height &&
+        bridge.left === state.bridge.left &&
+        bridge.right === state.bridge.right);
+    if (!sameBridge) {
       store.setPlaced({
         ...state,
         left,
         top,
         ...(bridge === undefined ? {} : { bridge })
       });
+    } else {
+      state.left = left;
+      state.top = top;
     }
   }, [interactive, state, store]);
 
@@ -930,6 +985,27 @@ function ViewportTooltipHost({
 
   if (!state || typeof document === "undefined") return null;
 
+  const placed = placedRef.current?.state === state ? placedRef.current : null;
+  const tooltipStyle = interactive
+    ? {
+        position: "fixed" as const,
+        left: state.left ?? placed?.left,
+        top: state.top ?? placed?.top,
+        visibility:
+          state.left === undefined && placed === null
+            ? ("hidden" as const)
+            : undefined
+      }
+    : {
+        position: "absolute" as const,
+        left: 0,
+        top: 0,
+        ...(placed === null
+          ? {}
+          : { transform: `translate(${placed.left}px, ${placed.top}px)` }),
+        visibility: placed === null ? ("hidden" as const) : undefined
+      };
+
   return createPortal(
     <div
       ref={store.tooltipRef}
@@ -937,12 +1013,7 @@ function ViewportTooltipHost({
       aria-label={interactive ? label : undefined}
       className={className}
       data-viewport-tooltip=""
-      style={{
-        position: "fixed",
-        left: state.left,
-        top: state.top,
-        visibility: state.left === undefined ? "hidden" : undefined
-      }}
+      style={tooltipStyle}
       {...(interactive
         ? {
             onMouseEnter: store.enterInteractiveTooltip,
@@ -970,7 +1041,7 @@ function ViewportTooltipHost({
       )}
       {state.content}
     </div>,
-    document.body
+    interactive ? document.body : plainTooltipPortalTarget()
   );
 }
 

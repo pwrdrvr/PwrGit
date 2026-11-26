@@ -292,9 +292,6 @@
   background: transparent;
   color: var(--text-muted);
   cursor: pointer;
-  transition:
-    color 80ms ease,
-    background 80ms ease;
 }
 .contributions-nav:hover {
   color: var(--text-primary);
