@@ -346,7 +346,11 @@ export function LineageGraph({
   dataRef.current = data;
   const [scope, setScope] = useState<Scope>("active");
   const [loading, setLoading] = useState(true);
+  const loadingRef = useRef(loading);
+  loadingRef.current = loading;
   const [loadError, setLoadError] = useState<string | null>(null);
+  const loadErrorRef = useRef(loadError);
+  loadErrorRef.current = loadError;
   const [branchPrGeneration, setBranchPrGeneration] = useState(0);
   const [flash, setFlash] = useState<string | null>(null);
   const [branchesOpen, setBranchesOpen] = useState(false);
@@ -382,6 +386,8 @@ export function LineageGraph({
   >({});
   /** Commit authors by person key, as main's people store knows them. */
   const [people, setPeople] = useState<Record<string, CommitAuthorPerson>>({});
+  const peopleRef = useRef(people);
+  peopleRef.current = people;
   /** The byline whose person card is open: its row, and the name its label reads. */
   const [openPerson, setOpenPerson] = useState<{
     hash: string;
@@ -434,10 +440,10 @@ export function LineageGraph({
   const acceptPeople = useCallback(
     (incoming: Record<string, CommitAuthorPerson>): void => {
       if (Object.keys(incoming).length === 0) return;
-      setPeople((current) => {
-        const merged = mergeCommitAuthorPeople(current, incoming);
-        return samePayload(current, merged) ? current : merged;
-      });
+      const merged = mergeCommitAuthorPeople(peopleRef.current, incoming);
+      if (samePayload(peopleRef.current, merged)) return;
+      peopleRef.current = merged;
+      setPeople(merged);
     },
     []
   );
@@ -476,15 +482,22 @@ export function LineageGraph({
     let loadSequence = 0;
     const load = (source: LineageRefreshSource): void => {
       const sequence = ++loadSequence;
-      setLoadError(null);
+      if (loadErrorRef.current !== null) {
+        loadErrorRef.current = null;
+        setLoadError(null);
+      }
       const force = source !== "view";
       markLineageRefresh(repoId, source, "request");
       void dispatch("graph:lanes", { worktreeId, scope, force, ...(revealHash === undefined ? {} : { revealHash }) }).then((r) => {
         if (!active || sequence !== loadSequence) return;
         if (!r.ok) {
           const message = r.error.message.split("\n")[0];
+          loadErrorRef.current = message;
           setLoadError(message);
-          setLoading(false);
+          if (loadingRef.current) {
+            loadingRef.current = false;
+            setLoading(false);
+          }
           // Keyed: every `graph:changed` for the repo reloads, and a
           // worktree whose folder is gone fails each time the same way.
           showErrorToast({
@@ -509,8 +522,14 @@ export function LineageGraph({
         }
         const publish = (): void => {
           markLineageRefresh(repoId, source, "publish");
-          setData((current) => samePayload(current, graph) ? current : graph);
-          setLoading(false);
+          if (!samePayload(dataRef.current, graph)) {
+            dataRef.current = graph;
+            setData(graph);
+          }
+          if (loadingRef.current) {
+            loadingRef.current = false;
+            setLoading(false);
+          }
         };
         // Registering who is on screen is all the graph does about people:
         // main answers from its store at once, and decides on its own clock
