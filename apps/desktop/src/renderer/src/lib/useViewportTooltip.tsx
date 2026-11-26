@@ -1,11 +1,11 @@
 import {
-  useCallback,
   useEffect,
   useLayoutEffect,
-  useRef,
   useState,
+  useSyncExternalStore,
   type FocusEvent as ReactFocusEvent,
   type MouseEvent as ReactMouseEvent,
+  type ReactElement,
   type ReactNode
 } from "react";
 import { createPortal, flushSync } from "react-dom";
@@ -322,6 +322,13 @@ type ViewportTooltipOptions = {
   /** Interactive cards remain open while the pointer moves from their target. */
   interactive?: boolean;
   /**
+   * Subscribe the calling component to open/close transitions so reactive
+   * effects or render logic reading `tip.visible` re-run on visibility flips.
+   * Callers that only render `tip.tooltipNode` omit this so hovering triggers
+   * never re-renders the owner tree.
+   */
+  trackVisibility?: boolean;
+  /**
    * Accessible name for an interactive card. Every consumer names the thing it
    * is actually showing: this hook serves the commit card and the PR/MR card,
    * so a hard-coded name would mis-announce one of them.
@@ -423,44 +430,307 @@ const rectOf = (rect: DOMRect): TooltipRect => ({
   bottom: rect.bottom
 });
 
-/**
- * A hover/focus tooltip rendered into a portal so it escapes clipping
- * ancestors. Pointer-anchored callers get a card beside the cursor; generic
- * callers retain target-centred placement. Interactive cards give the pointer
- * a brief grace period to cross into the card and keep their first placement
- * through content updates. Dismisses on window blur or any scroll. Callers
- * own show/hide and render `tooltipNode`. Content can be a structured card,
- * not just a text string.
- */
-export function useViewportTooltip(
-  className = "viewport-tooltip",
-  {
-    interactive = false,
-    label = "Commit context",
-    onPointerWithin
-  }: ViewportTooltipOptions = {}
-): ViewportTooltip {
-  const tooltipRef = useRef<HTMLDivElement>(null);
-  /** The element this tooltip was opened from, for returning focus. */
-  const targetRef = useRef<HTMLElement | null>(null);
-  /** A trigger whose tooltip Escape dismissed, until the pointer or focus
-   * leaves it. Without this the card reopens the instant focus returns. */
-  const dismissedTargetRef = useRef<HTMLElement | null>(null);
-  /** What each trigger last showed, so leaving a nested trigger can restore
-   *  the enclosing one. Weak so a removed row is not held alive by it. */
-  const contentByTargetRef = useRef(new WeakMap<HTMLElement, ReactNode>());
-  const dismissTimerRef = useRef<number | undefined>(undefined);
-  const pointerInInteractiveTooltipRef = useRef(false);
-  /** Set by `setSticky`; read by the two dismissals the pointer owns. */
-  const stickyRef = useRef(false);
-  /** The trigger a `pin` holds the card on, and whether one does. */
-  const pinnedTargetRef = useRef<HTMLElement | null>(null);
-  const [pinned, setPinned] = useState(false);
-  // Latched: the caller passes a fresh closure every render, and the only
-  // things that read it are event handlers registered once.
-  const onPointerWithinRef = useRef(onPointerWithin);
-  onPointerWithinRef.current = onPointerWithin;
-  const [state, setState] = useState<TooltipState | undefined>(undefined);
+type TooltipSnapshot = {
+  state: TooltipState | undefined;
+  pinned: boolean;
+};
+
+const EMPTY_SNAPSHOT: TooltipSnapshot = { state: undefined, pinned: false };
+
+type TooltipStore = {
+  interactive: boolean;
+  onPointerWithin: ((within: boolean) => void) | undefined;
+  tooltipRef: { current: HTMLDivElement | null };
+  targetRef: { current: HTMLElement | null };
+  dismissedTargetRef: { current: HTMLElement | null };
+  pinnedTargetRef: { current: HTMLElement | null };
+  pointerInInteractiveTooltipRef: { current: boolean };
+  stickyRef: { current: boolean };
+  getSnapshot: () => TooltipSnapshot;
+  isVisible: () => boolean;
+  subscribe: (listener: () => void) => () => void;
+  subscribeVisibility: (listener: () => void) => () => void;
+  setPlaced: (next: TooltipState) => void;
+  cancelScheduledHide: () => void;
+  enterInteractiveTooltip: () => void;
+  leaveInteractiveTooltip: () => void;
+  show: (
+    target: HTMLElement,
+    content: ReactNode,
+    anchor?: TooltipAnchor
+  ) => boolean;
+  update: (content: ReactNode) => void;
+  hide: () => void;
+  hideFrom: (event: { relatedTarget: EventTarget | null }) => void;
+  blurFrom: (event: { relatedTarget: EventTarget | null }) => void;
+  pin: (target: HTMLElement, content: ReactNode) => boolean;
+  scheduleHide: () => void;
+  setSticky: (sticky: boolean) => void;
+  focusFirst: () => boolean;
+};
+
+function createTooltipStore(
+  interactive: boolean,
+  onPointerWithin: ((within: boolean) => void) | undefined
+): TooltipStore {
+  let snapshot: TooltipSnapshot = EMPTY_SNAPSHOT;
+  let dismissTimer: number | undefined;
+  const contentByTarget = new WeakMap<HTMLElement, ReactNode>();
+  const listeners = new Set<() => void>();
+  const visibilityListeners = new Set<() => void>();
+
+  const tooltipRef: { current: HTMLDivElement | null } = { current: null };
+  const targetRef: { current: HTMLElement | null } = { current: null };
+  const dismissedTargetRef: { current: HTMLElement | null } = { current: null };
+  const pinnedTargetRef: { current: HTMLElement | null } = { current: null };
+  const pointerInInteractiveTooltipRef = { current: false };
+  const stickyRef = { current: false };
+
+  const emit = (nextState: TooltipState | undefined, nextPinned: boolean): void => {
+    const prev = snapshot;
+    if (prev.state === nextState && prev.pinned === nextPinned) return;
+    const wasVisible = prev.state !== undefined;
+    const nowVisible = nextState !== undefined;
+    snapshot =
+      nextState === undefined && !nextPinned
+        ? EMPTY_SNAPSHOT
+        : { state: nextState, pinned: nextPinned };
+    for (const listener of listeners) listener();
+    if (wasVisible !== nowVisible) {
+      for (const listener of visibilityListeners) listener();
+    }
+  };
+
+  const cancelScheduledHide = (): void => {
+    if (dismissTimer === undefined) return;
+    window.clearTimeout(dismissTimer);
+    dismissTimer = undefined;
+  };
+
+  const hide = (): void => {
+    cancelScheduledHide();
+    pointerInInteractiveTooltipRef.current = false;
+    stickyRef.current = false;
+    pinnedTargetRef.current = null;
+    // The card is going, so the pointer is not in it by any reading a user
+    // would give — and `leaveInteractiveTooltip` cannot say so once the node
+    // is gone. Whichever channel reports pointer state has to be the one that
+    // resets it, or a caller pausing on it stays paused with the pointer
+    // nowhere near.
+    store.onPointerWithin?.(false);
+    emit(undefined, false);
+  };
+
+  const setSticky = (sticky: boolean): void => {
+    stickyRef.current = sticky;
+    if (!sticky) return;
+    // Pinning while a dismissal is already counting down has to call it off,
+    // or the card the user just clicked open would leave 400ms later.
+    cancelScheduledHide();
+    // And it clears the Escape latch. That flag exists to stop a *focus
+    // restore* reopening a hover card the user just dismissed; a click or
+    // Enter on the trigger is neither, and it is the same trigger, so left
+    // set it would make `show` refuse the card the user just asked for while
+    // the caller went on believing it had one.
+    dismissedTargetRef.current = null;
+  };
+
+  const scheduleHide = (): void => {
+    if (stickyRef.current) return;
+    if (!store.interactive) {
+      hide();
+      return;
+    }
+    cancelScheduledHide();
+    dismissTimer = window.setTimeout(() => {
+      dismissTimer = undefined;
+      emit(undefined, snapshot.pinned);
+    }, INTERACTIVE_DISMISS_DELAY_MS);
+  };
+
+  const show = (
+    target: HTMLElement,
+    content: ReactNode,
+    anchor?: TooltipAnchor
+  ): boolean => {
+    // Escape dismissed this exact trigger and the user has not left it yet.
+    // Returning focus to the trigger re-fires its focus handler, which would
+    // otherwise reopen what they just dismissed.
+    if (dismissedTargetRef.current === target) return false;
+    // A gated open (`hoverIntent`) captures its trigger and shows it a dwell
+    // later, by which time a graph row can have unmounted. A detached
+    // element's rect is all zeros, which would place the card at the viewport
+    // origin beside nothing — and, with no trigger left to fire `mouseleave`,
+    // leave it there. There is nothing to anchor to, so there is nothing to show.
+    if (!target.isConnected) return false;
+    // A pinned card is the user's. Hovering another trigger of the same
+    // tooltip on the way to it must not swap it out.
+    const pinnedOn = pinnedTargetRef.current;
+    if (pinnedOn !== null && pinnedOn !== target && pinnedOn.isConnected) {
+      return false;
+    }
+    cancelScheduledHide();
+    pointerInInteractiveTooltipRef.current = false;
+    targetRef.current = target;
+    contentByTarget.set(target, content);
+    emit(
+      {
+        content,
+        targetRect: rectOf(target.getBoundingClientRect()),
+        ...(anchor === undefined ? {} : { anchor })
+      },
+      snapshot.pinned
+    );
+    return true;
+  };
+
+  const hideFrom = (event: { relatedTarget: EventTarget | null }): void => {
+    // Where the pointer went. If it is still inside a trigger that has shown
+    // a card before — the row this tag or path sits in — that card is what
+    // should be on screen now, because its own `mouseenter` will not fire
+    // again for a descendant it never lost the pointer to.
+    const to = event.relatedTarget;
+    // A pinned card stays where the user put it.
+    if (stickyRef.current) return;
+    // Straight onto the card (its bridge, usually): the card's own
+    // `mouseleave` decides from here.
+    if (
+      store.interactive &&
+      to instanceof Node &&
+      tooltipRef.current?.contains(to) === true
+    ) {
+      return;
+    }
+    if (to instanceof HTMLElement) {
+      for (let el: HTMLElement | null = to; el !== null; el = el.parentElement) {
+        const remembered = contentByTarget.get(el);
+        if (remembered !== undefined) {
+          show(el, remembered);
+          return;
+        }
+      }
+    }
+    // An interactive card gets the grace period it promises: the pointer may
+    // be on its way there. A plain tooltip just goes.
+    if (store.interactive) scheduleHide();
+    else hide();
+  };
+
+  const blurFrom = (event: { relatedTarget: EventTarget | null }): void => {
+    if (stickyRef.current) return;
+    if (store.interactive) {
+      const to = event.relatedTarget;
+      if (to instanceof Node && tooltipRef.current?.contains(to) === true) return;
+      // A press on a control that does not take focus blurs to nothing. The
+      // pointer being on the card is the same answer.
+      if (pointerInInteractiveTooltipRef.current) return;
+    }
+    hide();
+  };
+
+  const pin = (target: HTMLElement, content: ReactNode): boolean => {
+    // Re-pinning from a new trigger is a new request; let `show` take it.
+    pinnedTargetRef.current = null;
+    // So is a click on a trigger whose card Escape just dismissed: the latch
+    // only stops a focus restore from reopening it. `setSticky` clears it
+    // too, but only after `show`, which would already have refused.
+    dismissedTargetRef.current = null;
+    if (!show(target, content)) return false;
+    pinnedTargetRef.current = target;
+    setSticky(true);
+    emit(snapshot.state, true);
+    return true;
+  };
+
+  const update = (content: ReactNode): void => {
+    if (snapshot.state === undefined) return;
+    emit({ ...snapshot.state, content }, snapshot.pinned);
+  };
+
+  const enterInteractiveTooltip = (): void => {
+    pointerInInteractiveTooltipRef.current = true;
+    cancelScheduledHide();
+    store.onPointerWithin?.(true);
+  };
+
+  const leaveInteractiveTooltip = (): void => {
+    pointerInInteractiveTooltipRef.current = false;
+    scheduleHide();
+    store.onPointerWithin?.(false);
+  };
+
+  const focusFirst = (): boolean => {
+    const card = tooltipRef.current;
+    const target =
+      card?.querySelector<HTMLElement>("[data-focus-first]") ??
+      card?.querySelector<HTMLElement>(
+        "button:not(:disabled), [href], input:not(:disabled), select:not(:disabled), textarea:not(:disabled), [tabindex]:not([tabindex='-1'])"
+      );
+    if (target === undefined || target === null) return false;
+    target.focus();
+    return true;
+  };
+
+  const store: TooltipStore = {
+    interactive,
+    onPointerWithin,
+    tooltipRef,
+    targetRef,
+    dismissedTargetRef,
+    pinnedTargetRef,
+    pointerInInteractiveTooltipRef,
+    stickyRef,
+    getSnapshot: () => snapshot,
+    isVisible: () => snapshot.state !== undefined,
+    subscribe: (listener) => {
+      listeners.add(listener);
+      return () => {
+        listeners.delete(listener);
+      };
+    },
+    subscribeVisibility: (listener) => {
+      visibilityListeners.add(listener);
+      return () => {
+        visibilityListeners.delete(listener);
+      };
+    },
+    setPlaced: (next) => emit(next, snapshot.pinned),
+    cancelScheduledHide,
+    enterInteractiveTooltip,
+    leaveInteractiveTooltip,
+    show,
+    update,
+    hide,
+    hideFrom,
+    blurFrom,
+    pin,
+    scheduleHide,
+    setSticky,
+    focusFirst
+  };
+
+  return store;
+}
+
+const getServerSnapshot = (): TooltipSnapshot => EMPTY_SNAPSHOT;
+const getServerVisible = (): boolean => false;
+
+function ViewportTooltipHost({
+  store,
+  className,
+  interactive,
+  label
+}: {
+  store: TooltipStore;
+  className: string;
+  interactive: boolean;
+  label: string;
+}): ReactElement | null {
+  const { state, pinned } = useSyncExternalStore(
+    store.subscribe,
+    store.getSnapshot,
+    getServerSnapshot
+  );
 
   // Measure after paint and clamp the tooltip into the viewport. Generic
   // tooltips re-measure after content updates; interactive cards stay put.
@@ -471,7 +741,7 @@ export function useViewportTooltip(
     if (interactive && state.left !== undefined && state.top !== undefined) {
       return;
     }
-    const el = tooltipRef.current;
+    const el = store.tooltipRef.current;
     if (!el) return;
     const rect = el.getBoundingClientRect();
     const { left, top } = placeViewportTooltip({
@@ -504,165 +774,14 @@ export function useViewportTooltip(
                 bottom: parseFloat(style.borderBottomWidth) || 0
               }
             );
-      setState({
+      store.setPlaced({
         ...state,
         left,
         top,
         ...(bridge === undefined ? {} : { bridge })
       });
     }
-  }, [interactive, state]);
-
-  const cancelScheduledHide = useCallback((): void => {
-    if (dismissTimerRef.current === undefined) return;
-    window.clearTimeout(dismissTimerRef.current);
-    dismissTimerRef.current = undefined;
-  }, []);
-
-  const hide = useCallback((): void => {
-    cancelScheduledHide();
-    pointerInInteractiveTooltipRef.current = false;
-    stickyRef.current = false;
-    pinnedTargetRef.current = null;
-    setPinned(false);
-    // The card is going, so the pointer is not in it by any reading a user
-    // would give — and `leaveInteractiveTooltip` cannot say so once the node
-    // is gone. Whichever channel reports pointer state has to be the one that
-    // resets it, or a caller pausing on it stays paused with the pointer
-    // nowhere near.
-    onPointerWithinRef.current?.(false);
-    setState(undefined);
-  }, [cancelScheduledHide]);
-
-  const setSticky = useCallback((sticky: boolean): void => {
-    stickyRef.current = sticky;
-    if (!sticky) return;
-    // Pinning while a dismissal is already counting down has to call it off,
-    // or the card the user just clicked open would leave 400ms later.
-    cancelScheduledHide();
-    // And it clears the Escape latch. That flag exists to stop a *focus
-    // restore* reopening a hover card the user just dismissed; a click or
-    // Enter on the trigger is neither, and it is the same trigger, so left
-    // set it would make `show` refuse the card the user just asked for while
-    // the caller went on believing it had one.
-    dismissedTargetRef.current = null;
-  }, [cancelScheduledHide]);
-
-  const scheduleHide = useCallback((): void => {
-    if (stickyRef.current) return;
-    if (!interactive) {
-      hide();
-      return;
-    }
-    cancelScheduledHide();
-    dismissTimerRef.current = window.setTimeout(() => {
-      dismissTimerRef.current = undefined;
-      setState(undefined);
-    }, INTERACTIVE_DISMISS_DELAY_MS);
-  }, [cancelScheduledHide, hide, interactive]);
-
-  useEffect(() => {
-    return () => cancelScheduledHide();
-  }, [cancelScheduledHide]);
-
-  const show = useCallback((
-    target: HTMLElement,
-    content: ReactNode,
-    anchor?: TooltipAnchor
-  ): boolean => {
-    // Escape dismissed this exact trigger and the user has not left it yet.
-    // Returning focus to the trigger re-fires its focus handler, which would
-    // otherwise reopen what they just dismissed.
-    if (dismissedTargetRef.current === target) return false;
-    // A gated open (`hoverIntent`) captures its trigger and shows it a dwell
-    // later, by which time a graph row can have unmounted. A detached
-    // element's rect is all zeros, which would place the card at the viewport
-    // origin beside nothing — and, with no trigger left to fire `mouseleave`,
-    // leave it there. There is nothing to anchor to, so there is nothing to show.
-    if (!target.isConnected) return false;
-    // A pinned card is the user's. Hovering another trigger of the same
-    // tooltip on the way to it must not swap it out.
-    const pinnedOn = pinnedTargetRef.current;
-    if (pinnedOn !== null && pinnedOn !== target && pinnedOn.isConnected) {
-      return false;
-    }
-    cancelScheduledHide();
-    pointerInInteractiveTooltipRef.current = false;
-    targetRef.current = target;
-    contentByTargetRef.current.set(target, content);
-    setState({
-      content,
-      targetRect: rectOf(target.getBoundingClientRect()),
-      ...(anchor === undefined ? {} : { anchor })
-    });
-    return true;
-  }, [cancelScheduledHide]);
-
-  const hideFrom = useCallback((event: {
-    relatedTarget: EventTarget | null;
-  }): void => {
-    // Where the pointer went. If it is still inside a trigger that has shown
-    // a card before — the row this tag or path sits in — that card is what
-    // should be on screen now, because its own `mouseenter` will not fire
-    // again for a descendant it never lost the pointer to.
-    const to = event.relatedTarget;
-    // A pinned card stays where the user put it.
-    if (stickyRef.current) return;
-    // Straight onto the card (its bridge, usually): the card's own
-    // `mouseleave` decides from here.
-    if (
-      interactive &&
-      to instanceof Node &&
-      tooltipRef.current?.contains(to) === true
-    ) {
-      return;
-    }
-    if (to instanceof HTMLElement) {
-      for (let el: HTMLElement | null = to; el !== null; el = el.parentElement) {
-        const remembered = contentByTargetRef.current.get(el);
-        if (remembered !== undefined) {
-          show(el, remembered);
-          return;
-        }
-      }
-    }
-    // An interactive card gets the grace period it promises: the pointer may
-    // be on its way there. A plain tooltip just goes.
-    if (interactive) scheduleHide();
-    else hide();
-  }, [hide, interactive, scheduleHide, show]);
-
-  const blurFrom = useCallback((event: {
-    relatedTarget: EventTarget | null;
-  }): void => {
-    if (stickyRef.current) return;
-    if (interactive) {
-      const to = event.relatedTarget;
-      if (to instanceof Node && tooltipRef.current?.contains(to) === true) return;
-      // A press on a control that does not take focus blurs to nothing. The
-      // pointer being on the card is the same answer.
-      if (pointerInInteractiveTooltipRef.current) return;
-    }
-    hide();
-  }, [hide, interactive]);
-
-  const pin = useCallback((target: HTMLElement, content: ReactNode): boolean => {
-    // Re-pinning from a new trigger is a new request; let `show` take it.
-    pinnedTargetRef.current = null;
-    // So is a click on a trigger whose card Escape just dismissed: the latch
-    // only stops a focus restore from reopening it. `setSticky` clears it
-    // too, but only after `show`, which would already have refused.
-    dismissedTargetRef.current = null;
-    if (!show(target, content)) return false;
-    pinnedTargetRef.current = target;
-    setPinned(true);
-    setSticky(true);
-    return true;
-  }, [setSticky, show]);
-
-  const update = useCallback((content: ReactNode): void => {
-    setState((current) => (current ? { ...current, content } : current));
-  }, []);
+  }, [interactive, state, store]);
 
   const visible = state !== undefined;
   useEffect(() => {
@@ -682,8 +801,8 @@ export function useViewportTooltip(
       // dismissal. Scrolling the trigger itself away is: the card is fixed in
       // the viewport, so it would stay put with nothing beside it. "Why?"
       // sits at the foot of the scrolling Changes list.
-      if (stickyRef.current) {
-        const pinnedOn = pinnedTargetRef.current;
+      if (store.stickyRef.current) {
+        const pinnedOn = store.pinnedTargetRef.current;
         const scroller = event.target;
         if (
           pinnedOn !== null &&
@@ -691,19 +810,19 @@ export function useViewportTooltip(
           scroller !== document &&
           scroller.contains(pinnedOn)
         ) {
-          hide();
+          store.hide();
         }
         return;
       }
-      if (interactive && pointerInInteractiveTooltipRef.current) return;
+      if (interactive && store.pointerInInteractiveTooltipRef.current) return;
       if (
         interactive &&
-        tooltipRef.current !== null &&
-        tooltipRef.current.contains(document.activeElement)
+        store.tooltipRef.current !== null &&
+        store.tooltipRef.current.contains(document.activeElement)
       ) {
         return;
       }
-      hide();
+      store.hide();
     };
     // WCAG 2.1 SC 1.4.13: content shown on hover must be dismissible without
     // moving the pointer or focus. Hovering elsewhere is not a substitute —
@@ -719,10 +838,10 @@ export function useViewportTooltip(
       // A keyboard user may have tabbed into the card. Dismissing it must not
       // drop them at the top of the document — send them back to the trigger
       // they opened it from.
-      const card = tooltipRef.current;
+      const card = store.tooltipRef.current;
       const leavingFocusBehind =
         card !== null && card.contains(document.activeElement);
-      const trigger = targetRef.current;
+      const trigger = store.targetRef.current;
       // Dismiss always; claim only a card the keyboard summoned, so an Escape
       // meant for the surface underneath still reaches it. Why, and why
       // `:focus-visible` rather than `:focus`: "A hover card claims Escape
@@ -730,7 +849,7 @@ export function useViewportTooltip(
       const summonedByKeyboard =
         leavingFocusBehind || trigger?.matches(":focus-visible") === true;
       if (summonedByKeyboard) event.preventDefault();
-      hide();
+      store.hide();
       // The dismissal is released by the trigger's own exit, listened for
       // here rather than folded into hide()/scheduleHide(): restoring focus
       // below blurs a control inside the card, and the card's blur handler
@@ -743,9 +862,9 @@ export function useViewportTooltip(
       // trigger lives in. Latching it there pins a removed element, and
       // `parentNode` keeps its whole detached subtree alive with it.
       if (summonedByKeyboard && trigger !== null) {
-        dismissedTargetRef.current = trigger;
+        store.dismissedTargetRef.current = trigger;
         const release = (): void => {
-          dismissedTargetRef.current = null;
+          store.dismissedTargetRef.current = null;
           trigger.removeEventListener("mouseleave", release);
           trigger.removeEventListener("blur", release);
         };
@@ -760,35 +879,37 @@ export function useViewportTooltip(
     // goes even when pinned: a card is anchored to its trigger, and `hide()`
     // always wins. Watched only while a card is up.
     const observer = new MutationObserver(() => {
-      const trigger = targetRef.current;
-      if (trigger !== null && !trigger.isConnected) hide();
+      const trigger = store.targetRef.current;
+      if (trigger !== null && !trigger.isConnected) store.hide();
     });
     observer.observe(document, { childList: true, subtree: true });
     const onDismissHover = (event: Event) => {
       const inside = (event as CustomEvent<HTMLElement | undefined>).detail;
-      if (!stickyRef.current && !tooltipRef.current?.contains(inside ?? null)) hide();
+      if (!store.stickyRef.current && !store.tooltipRef.current?.contains(inside ?? null)) {
+        store.hide();
+      }
     };
     window.addEventListener("pwrgit:dismiss-hover-tooltips", onDismissHover);
-    window.addEventListener("blur", hide);
+    window.addEventListener("blur", store.hide);
     window.addEventListener("scroll", onScroll, { capture: true });
     window.addEventListener("keydown", onKeyDown);
     return () => {
       observer.disconnect();
       window.removeEventListener("pwrgit:dismiss-hover-tooltips", onDismissHover);
-      window.removeEventListener("blur", hide);
+      window.removeEventListener("blur", store.hide);
       window.removeEventListener("scroll", onScroll, { capture: true });
       window.removeEventListener("keydown", onKeyDown);
     };
-  }, [visible, hide, interactive]);
+  }, [interactive, store, visible]);
 
   // A pinned card is a click-opened overlay, so Escape on it goes through the
   // same owner as every menu and dialog: claimed, so the diff pane under it
   // does not close too, and focus handed back to the trigger.
   useDismissable({
     open: pinned,
-    onDismiss: hide,
-    triggerRef: pinnedTargetRef,
-    surfaceRef: tooltipRef
+    onDismiss: store.hide,
+    triggerRef: store.pinnedTargetRef,
+    surfaceRef: store.tooltipRef
   });
 
   // A pinned card closes on a press anywhere but itself and its trigger. The
@@ -799,95 +920,123 @@ export function useViewportTooltip(
     const onPointerDown = (event: MouseEvent): void => {
       const target = event.target;
       if (!(target instanceof Node)) return;
-      if (tooltipRef.current?.contains(target) === true) return;
-      if (pinnedTargetRef.current?.contains(target) === true) return;
-      hide();
+      if (store.tooltipRef.current?.contains(target) === true) return;
+      if (store.pinnedTargetRef.current?.contains(target) === true) return;
+      store.hide();
     };
     window.addEventListener("mousedown", onPointerDown, true);
     return () => window.removeEventListener("mousedown", onPointerDown, true);
-  }, [hide, pinned]);
+  }, [pinned, store]);
 
-  const enterInteractiveTooltip = useCallback((): void => {
-    pointerInInteractiveTooltipRef.current = true;
-    cancelScheduledHide();
-    onPointerWithinRef.current?.(true);
-  }, [cancelScheduledHide]);
+  if (!state || typeof document === "undefined") return null;
 
-  const leaveInteractiveTooltip = useCallback((): void => {
-    pointerInInteractiveTooltipRef.current = false;
-    scheduleHide();
-    onPointerWithinRef.current?.(false);
-  }, [scheduleHide]);
+  return createPortal(
+    <div
+      ref={store.tooltipRef}
+      role={interactive ? "dialog" : "tooltip"}
+      aria-label={interactive ? label : undefined}
+      className={className}
+      data-viewport-tooltip=""
+      style={{
+        position: "fixed",
+        left: state.left,
+        top: state.top,
+        visibility: state.left === undefined ? "hidden" : undefined
+      }}
+      {...(interactive
+        ? {
+            onMouseEnter: store.enterInteractiveTooltip,
+            onMouseLeave: store.leaveInteractiveTooltip,
+            onFocusCapture: store.cancelScheduledHide,
+            onBlurCapture: store.scheduleHide
+          }
+        : {})}
+    >
+      {state.bridge !== undefined && (
+        <div
+          data-tooltip-bridge=""
+          aria-hidden="true"
+          style={{
+            position: "absolute",
+            left: state.bridge.left,
+            right: state.bridge.right,
+            height: state.bridge.height,
+            pointerEvents: "auto",
+            ...(state.bridge.side === "below"
+              ? { top: "100%" }
+              : { bottom: "100%" })
+          }}
+        />
+      )}
+      {state.content}
+    </div>,
+    document.body
+  );
+}
 
-  const focusFirst = useCallback((): boolean => {
-    const card = tooltipRef.current;
-    const target =
-      card?.querySelector<HTMLElement>("[data-focus-first]") ??
-      card?.querySelector<HTMLElement>(
-        "button:not(:disabled), [href], input:not(:disabled), select:not(:disabled), textarea:not(:disabled), [tabindex]:not([tabindex='-1'])"
-      );
-    if (target === undefined || target === null) return false;
-    target.focus();
-    return true;
-  }, []);
+/**
+ * A hover/focus tooltip rendered into a portal so it escapes clipping
+ * ancestors. Pointer-anchored callers get a card beside the cursor; generic
+ * callers retain target-centred placement. Interactive cards give the pointer
+ * a brief grace period to cross into the card and keep their first placement
+ * through content updates. Dismisses on window blur or any scroll. Callers
+ * own show/hide and render `tooltipNode`. Content can be a structured card,
+ * not just a text string.
+ *
+ * State lives inside `ViewportTooltipHost` rather than the caller so hovering
+ * triggers never re-renders large owner subtrees (`Sidebar`, `TitleBar`,
+ * `WorktreeHeader`, `Rail`). Callers that branch on `visible` pass
+ * `trackVisibility: true` to subscribe to open/close flips only.
+ */
+export function useViewportTooltip(
+  className = "viewport-tooltip",
+  {
+    interactive = false,
+    trackVisibility = interactive,
+    label = "Commit context",
+    onPointerWithin
+  }: ViewportTooltipOptions = {}
+): ViewportTooltip {
+  const [store] = useState(() =>
+    createTooltipStore(interactive, onPointerWithin)
+  );
+  store.interactive = interactive;
+  store.onPointerWithin = onPointerWithin;
 
-  const tooltipNode =
-    state && typeof document !== "undefined"
-      ? createPortal(
-          <div
-            ref={tooltipRef}
-            role={interactive ? "dialog" : "tooltip"}
-            aria-label={interactive ? label : undefined}
-            className={className}
-            data-viewport-tooltip=""
-            style={{
-              position: "fixed",
-              left: state.left,
-              top: state.top,
-              visibility: state.left === undefined ? "hidden" : undefined
-            }}
-            {...(interactive
-              ? {
-                  onMouseEnter: enterInteractiveTooltip,
-                  onMouseLeave: leaveInteractiveTooltip,
-                  onFocusCapture: cancelScheduledHide,
-                  onBlurCapture: scheduleHide
-                }
-              : {})}
-          >
-            {state.bridge !== undefined && (
-              <div
-                data-tooltip-bridge=""
-                aria-hidden="true"
-                style={{
-                  position: "absolute",
-                  left: state.bridge.left,
-                  right: state.bridge.right,
-                  height: state.bridge.height,
-                  pointerEvents: "auto",
-                  ...(state.bridge.side === "below"
-                    ? { top: "100%" }
-                    : { bottom: "100%" })
-                }}
-              />
-            )}
-            {state.content}
-          </div>,
-          document.body
-        )
-      : null;
+  const trackedVisible = useSyncExternalStore(
+    trackVisibility ? store.subscribeVisibility : noopSubscribe,
+    trackVisibility ? store.isVisible : getServerVisible,
+    getServerVisible
+  );
+
+  useEffect(() => {
+    return () => store.cancelScheduledHide();
+  }, [store]);
+
+  const tooltipNode = (
+    <ViewportTooltipHost
+      store={store}
+      className={className}
+      interactive={interactive}
+      label={label}
+    />
+  );
 
   return {
-    show,
-    update,
-    hide,
-    hideFrom,
-    blurFrom,
-    pin,
-    scheduleHide,
-    setSticky,
-    focusFirst,
-    visible,
+    show: store.show,
+    update: store.update,
+    hide: store.hide,
+    hideFrom: store.hideFrom,
+    blurFrom: store.blurFrom,
+    pin: store.pin,
+    scheduleHide: store.scheduleHide,
+    setSticky: store.setSticky,
+    focusFirst: store.focusFirst,
+    get visible() {
+      return trackVisibility ? trackedVisible : store.isVisible();
+    },
     tooltipNode
   };
 }
+
+const noopSubscribe = (): (() => void) => () => undefined;

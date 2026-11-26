@@ -1,13 +1,17 @@
 import { dispatch } from "../../lib/pwrgit";
 import {
+  memo,
   useCallback,
   useEffect,
   useLayoutEffect,
   useMemo,
   useRef,
   useState,
+  type ComponentProps,
   type KeyboardEvent as ReactKeyboardEvent,
-  type MouseEvent as ReactMouseEvent
+  type MouseEvent as ReactMouseEvent,
+  type ReactNode,
+  type RefObject
 } from "react";
 import type {
   CloneRepository,
@@ -35,7 +39,11 @@ import {
   useViewportTooltip
 } from "../../lib/useViewportTooltip";
 import { useRelativeClock } from "../../lib/useRelativeClock";
-import { useScrollportFitLadders } from "../../lib/useFitLadder";
+import {
+  hasPendingFitLadders,
+  useScrollportFitLadders
+} from "../../lib/useFitLadder";
+import { samePayload } from "../../lib/samePayload";
 import { ContextMenu, type MenuItem } from "../shell/ContextMenu";
 import { forkMenuLabel, worktreeMenuItems } from "../shell/worktree-menu-items";
 import { openResetToRemote } from "../graph/reset-to-remote";
@@ -56,6 +64,7 @@ import { LiveSidebarToolbar } from "./SidebarToolbar";
 import { settleSidebarReveal, useSidebarReveal } from "./sidebar-reveal";
 import {
   applySidebarAnchor,
+  hasSidebarAnchor,
   keepSidebarAnchorForSelection,
   releaseSidebarAnchor,
   sidebarAnchorHeld,
@@ -512,10 +521,17 @@ export function Sidebar({
     if (selectedWorktreeId !== null) keepSidebarAnchorForSelection();
   }, [selectedWorktreeId]);
   useLayoutEffect(() => {
-    // A commit can change the scrollbar before ResizeObserver runs. The
-    // anchor and any pending jump need the row heights at the new width.
-    flushSidebarFits();
-    applySidebarAnchor(listRef.current);
+    // A commit can change the scrollbar before ResizeObserver runs. Only flush
+    // synchronously when an anchor needs settled heights or a ladder already
+    // queued work; ResizeObserver still catches scrollbar-width changes before
+    // paint without forcing a scrollport layout read on unrelated commits.
+    const anchored = hasSidebarAnchor();
+    if (anchored || hasPendingFitLadders()) {
+      flushSidebarFits();
+    }
+    if (anchored) {
+      applySidebarAnchor(listRef.current);
+    }
   });
 
   // ---- Repository index (RepoIndex.tsx, repo-index.ts) ----
@@ -1253,21 +1269,80 @@ export function Sidebar({
    * (`RepoRow`'s `after`), never as a child of the `tree` itself.
    */
   const seamLabelled = !grouped && shownRest.length > 0;
-  const pinSeam = (
-    <div
-      className={`repo-seam${seamLabelled ? "" : " repo-seam--bare"}${
-        seamAim === null ? "" : " is-drop-target"
-      }`}
-      aria-hidden="true"
-      {...seamDropProps}
-    >
-      {(seamLabelled || seamAim !== null) && (
-        <span>
-          {seamAim === "unpin" ? "Unpin" : seamAim === "pin" ? "Pin" : "Repositories"}
-        </span>
-      )}
-    </div>
+  const seamDropPropsRef = useRef(seamDropProps);
+  seamDropPropsRef.current = seamDropProps;
+  const pinSeam = useMemo(
+    () => (
+      <div
+        className={`repo-seam${seamLabelled ? "" : " repo-seam--bare"}${
+          seamAim === null ? "" : " is-drop-target"
+        }`}
+        aria-hidden="true"
+        onDragOver={(e) => seamDropPropsRef.current.onDragOver?.(e)}
+        onDragLeave={(e) => seamDropPropsRef.current.onDragLeave?.(e)}
+        onDrop={(e) => seamDropPropsRef.current.onDrop?.(e)}
+      >
+        {(seamLabelled || seamAim !== null) && (
+          <span>
+            {seamAim === "unpin" ? "Unpin" : seamAim === "pin" ? "Pin" : "Repositories"}
+          </span>
+        )}
+      </div>
+    ),
+    [seamAim, seamLabelled]
   );
+
+  const repoRowCallbacksRef = useRef<SidebarRepoRowCallbacks>(null!);
+  repoRowCallbacksRef.current = {
+    onLocateTag,
+    toggleExpand,
+    toggleRepoPin,
+    onRefreshRepo,
+    onRefreshPullRequest,
+    handleRowClick,
+    handleRowContext,
+    onSetWorktreePin,
+    onSetBranchPin,
+    onRemoveWorktree,
+    removeSelectedForRepo: (repo) =>
+      void onRemoveWorktrees(removableIds(repo, batch.idsFor(repo.id))),
+    clearSel,
+    cycleSort,
+    reorderRepoWorktrees: (repoId, ids) => {
+      setOrderByRepo((prev) => ({ ...prev, [repoId]: ids }));
+      onPersistOrder(repoId, ids);
+    },
+    openNewWorktree: (repo) => setNewWorktree({ repo }),
+    onForkCheckout,
+    onOpenRepoSetup,
+    openCleanUpBranches: (repo) =>
+      setMaintenance({ repo: { id: repo.id, name: repo.name } }),
+    openPruneWorktrees: () => setMaintenance({ worktrees: true }),
+    hideRepo,
+    openRemoveRepo: (repo) => setRemoving(repo),
+    revealWorktree: (repo, worktreeId) => {
+      const worktree = repo.worktrees.find(
+        (candidate) => candidate.id === worktreeId
+      );
+      if (worktree === undefined) return;
+      clearSel();
+      onSelectWorktree(repo, worktree);
+    },
+    createWorktreeFromRef: (repo, branch, newBranch, startPoint, changeRequest) =>
+      setNewWorktree({
+        repo,
+        initialBranch: branch,
+        initialNewBranch: newBranch,
+        ...(startPoint === undefined ? {} : { startPoint }),
+        ...(changeRequest === undefined ? {} : { changeRequest })
+      }),
+    moveRepo,
+    closeIndexMenu,
+    getDragProps: (repoId) => repoDrag.rowProps(repoId, true),
+    handleRepoKeyDown,
+    setFocusedRepoId,
+    isPostDragClick: repoDrag.isPostDragClick
+  };
 
   const renderRepo = (repo: Repo, index: number, list: Repo[]) => {
     // Live, not held — unlike the row's position. The selected tint below
@@ -1281,89 +1356,34 @@ export function Sidebar({
       lens === "Focused"
         ? focusReasonForRepo(repo, focusContext, now)
         : null;
+    const containsSelection = repo.id === holderRepoId;
     return (
-      <RepoRow
-        onLocateTag={onLocateTag}
+      <MemoizedRepoRow
         key={repo.id}
         posinset={index + 1}
         setsize={list.length}
         repo={repo}
         expanded={expanded.has(repo.id)}
-        containsSelection={repo.id === holderRepoId}
-        selectedWorktreeId={selectedWorktreeId}
+        containsSelection={containsSelection}
+        selectedWorktreeId={containsSelection ? selectedWorktreeId : null}
         selectedIds={batch.idsFor(repo.id)}
         sort={sortByRepo[repo.id] ?? "recent"}
         customOrder={orderByRepo[repo.id]}
         now={now}
         focused={lens === "Focused"}
         focusContext={held.context}
-        {...(focusReason === null ? {} : { focusReason })}
-        onToggleExpand={() => toggleExpand(repo)}
-        onToggleRepoPin={() => toggleRepoPin(repo)}
+        focusReason={focusReason}
         refreshing={refreshingRepoIds.has(repo.id)}
-        onRefreshWorktrees={() => onRefreshRepo(repo)}
-        onRefreshPullRequest={(branch) =>
-          onRefreshPullRequest(repo.id, branch)
-        }
-        onSelectWorktree={(w, e, orderedIds) =>
-          handleRowClick(repo, w, e, orderedIds)
-        }
-        onContextWorktree={(w, e, orderedIds) =>
-          handleRowContext(repo, w, e, orderedIds)
-        }
-        onToggleWorktreePin={onSetWorktreePin}
-        onToggleBranchPin={(branch, pinned) =>
-          onSetBranchPin(repo.id, branch, pinned)
-        }
-        onRemoveWorktree={onRemoveWorktree}
-        onRemoveSelected={() => void onRemoveWorktrees(removableIds(repo, batch.idsFor(repo.id)))}
-        onClearSelected={clearSel}
-        onCycleSort={() => cycleSort(repo.id)}
-        onReorder={(ids) => {
-          setOrderByRepo((prev) => ({ ...prev, [repo.id]: ids }));
-          onPersistOrder(repo.id, ids);
-        }}
-        onNewWorktree={() => setNewWorktree({ repo })}
-        onForkRepo={() => onForkCheckout(repo)}
-        onOpenSetup={() => onOpenRepoSetup?.(repo)}
-        onCleanUpBranches={() =>
-          setMaintenance({ repo: { id: repo.id, name: repo.name } })
-        }
-        onPruneWorktrees={() => setMaintenance({ worktrees: true })}
-        onHideRepo={() => hideRepo(repo)}
-        onRemoveRepo={() => setRemoving(repo)}
-        onRevealWorktree={(worktreeId) => {
-          const worktree = repo.worktrees.find(
-            (candidate) => candidate.id === worktreeId
-          );
-          if (worktree === undefined) return;
-          clearSel();
-          onSelectWorktree(repo, worktree);
-        }}
-        onCreateWorktreeFromRef={(branch, newBranch, startPoint, changeRequest) =>
-          setNewWorktree({
-            repo,
-            initialBranch: branch,
-            initialNewBranch: newBranch,
-            ...(startPoint === undefined ? {} : { startPoint }),
-            ...(changeRequest === undefined ? {} : { changeRequest })
-          })
-        }
         arrangeable={repoLeads(repo)}
         moveRoom={moveRoomOf(repo.id)}
-        onMoveRepo={(direction) => moveRepo(repo.id, direction)}
         indexMenu={indexMenu?.repoId === repo.id ? indexMenu : null}
-        onIndexMenuClose={closeIndexMenu}
         showPinVia={lens === "Pinned"}
         after={repo.id === lastShownPinId ? pinSeam : undefined}
-        dragProps={repoDrag.rowProps(repo.id, true)}
         dragging={repoDrag.dragId === repo.id}
         dropPosition={lineTarget?.id === repo.id ? lineTarget.position : null}
         focusable={repoTabStopId === repo.id}
-        onRowKeyDown={(event) => handleRepoKeyDown(repo, event)}
-        onRowFocus={() => setFocusedRepoId(repo.id)}
-        isPostDragClick={repoDrag.isPostDragClick}
         platform={platform}
+        callbacksRef={repoRowCallbacksRef}
       />
     );
   };
@@ -1758,3 +1778,237 @@ export function Sidebar({
     </FinishedAfterDaysContext.Provider>
   );
 }
+
+type RepoRowProps = ComponentProps<typeof RepoRow>;
+
+type SidebarRepoRowCallbacks = {
+  onLocateTag: RepoRowProps["onLocateTag"];
+  toggleExpand: (repo: Repo) => void;
+  toggleRepoPin: (repo: Repo) => void;
+  onRefreshRepo: (repo: Repo) => void;
+  onRefreshPullRequest: (repoId: string, branch: string) => void;
+  handleRowClick: (
+    repo: Repo,
+    worktree: Worktree,
+    e: SelectionModifiers,
+    orderedIds: string[]
+  ) => void;
+  handleRowContext: (
+    repo: Repo,
+    worktree: Worktree,
+    e: ReactMouseEvent,
+    orderedIds: string[]
+  ) => void;
+  onSetWorktreePin: (worktreeId: string, pinned: boolean) => void;
+  onSetBranchPin: (repoId: string, branch: string, pinned: boolean) => void;
+  onRemoveWorktree: (worktreeId: string) => void;
+  removeSelectedForRepo: (repo: Repo) => void;
+  clearSel: () => void;
+  cycleSort: (repoId: string) => void;
+  reorderRepoWorktrees: (repoId: string, ids: string[]) => void;
+  openNewWorktree: (repo: Repo) => void;
+  onForkCheckout: (repo: Repo) => void;
+  onOpenRepoSetup: ((repo: Repo) => void) | undefined;
+  openCleanUpBranches: (repo: Repo) => void;
+  openPruneWorktrees: () => void;
+  hideRepo: (repo: Repo) => void;
+  openRemoveRepo: (repo: Repo) => void;
+  revealWorktree: (repo: Repo, worktreeId: string) => void;
+  createWorktreeFromRef: (
+    repo: Repo,
+    branch: string,
+    newBranch: boolean,
+    startPoint?: string,
+    changeRequest?: OpenChangeRequest
+  ) => void;
+  moveRepo: (repoId: string, direction: "up" | "down") => boolean;
+  closeIndexMenu: () => void;
+  getDragProps: (repoId: string) => RepoRowProps["dragProps"];
+  handleRepoKeyDown: (repo: Repo, event: ReactKeyboardEvent) => void;
+  setFocusedRepoId: (repoId: string) => void;
+  isPostDragClick: () => boolean;
+};
+
+type MemoizedRepoRowProps = {
+  posinset: number;
+  setsize: number;
+  repo: Repo;
+  expanded: boolean;
+  containsSelection: boolean;
+  selectedWorktreeId: string | null;
+  selectedIds: ReadonlySet<string>;
+  sort: WorktreeSort;
+  customOrder: string[] | undefined;
+  now: number;
+  focused: boolean;
+  focusContext: RepoRowProps["focusContext"];
+  focusReason: RepoRowProps["focusReason"] | null;
+  refreshing: boolean;
+  arrangeable: boolean;
+  moveRoom: { up: boolean; down: boolean } | undefined;
+  indexMenu: RepoRowProps["indexMenu"];
+  showPinVia: boolean;
+  after: ReactNode;
+  dragging: boolean;
+  dropPosition: RepoRowProps["dropPosition"];
+  focusable: boolean;
+  platform: string | undefined;
+  callbacksRef: RefObject<SidebarRepoRowCallbacks>;
+};
+
+function sameStringSet(
+  a: ReadonlySet<string>,
+  b: ReadonlySet<string>
+): boolean {
+  if (a === b) return true;
+  if (a.size !== b.size) return false;
+  for (const item of a) {
+    if (!b.has(item)) return false;
+  }
+  return true;
+}
+
+function areMemoizedRepoRowPropsEqual(
+  prev: MemoizedRepoRowProps,
+  next: MemoizedRepoRowProps
+): boolean {
+  return (
+    prev.repo === next.repo &&
+    prev.posinset === next.posinset &&
+    prev.setsize === next.setsize &&
+    prev.expanded === next.expanded &&
+    prev.containsSelection === next.containsSelection &&
+    prev.selectedWorktreeId === next.selectedWorktreeId &&
+    sameStringSet(prev.selectedIds, next.selectedIds) &&
+    prev.sort === next.sort &&
+    samePayload(prev.customOrder, next.customOrder) &&
+    prev.now === next.now &&
+    prev.focused === next.focused &&
+    (!next.focused ||
+      !next.expanded ||
+      samePayload(prev.focusContext, next.focusContext)) &&
+    samePayload(prev.focusReason, next.focusReason) &&
+    prev.refreshing === next.refreshing &&
+    prev.arrangeable === next.arrangeable &&
+    prev.moveRoom?.up === next.moveRoom?.up &&
+    prev.moveRoom?.down === next.moveRoom?.down &&
+    prev.indexMenu === next.indexMenu &&
+    prev.showPinVia === next.showPinVia &&
+    prev.after === next.after &&
+    prev.dragging === next.dragging &&
+    prev.dropPosition === next.dropPosition &&
+    prev.focusable === next.focusable &&
+    prev.platform === next.platform
+  );
+}
+
+const MemoizedRepoRow = memo(function MemoizedRepoRow({
+  posinset,
+  setsize,
+  repo,
+  expanded,
+  containsSelection,
+  selectedWorktreeId,
+  selectedIds,
+  sort,
+  customOrder,
+  now,
+  focused,
+  focusContext,
+  focusReason,
+  refreshing,
+  arrangeable,
+  moveRoom,
+  indexMenu,
+  showPinVia,
+  after,
+  dragging,
+  dropPosition,
+  focusable,
+  platform,
+  callbacksRef
+}: MemoizedRepoRowProps) {
+  const cb = callbacksRef;
+  const dragProps: RepoRowProps["dragProps"] = {
+    draggable: true,
+    onDragStart: (e) => cb.current.getDragProps(repo.id).onDragStart?.(e),
+    onDragOver: (e) => cb.current.getDragProps(repo.id).onDragOver?.(e),
+    onDragLeave: (e) => cb.current.getDragProps(repo.id).onDragLeave?.(e),
+    onDrop: (e) => cb.current.getDragProps(repo.id).onDrop?.(e),
+    onDragEnd: (e) => cb.current.getDragProps(repo.id).onDragEnd?.(e)
+  };
+  return (
+    <RepoRow
+      onLocateTag={(repoId, tag) => cb.current.onLocateTag?.(repoId, tag)}
+      posinset={posinset}
+      setsize={setsize}
+      repo={repo}
+      expanded={expanded}
+      containsSelection={containsSelection}
+      selectedWorktreeId={selectedWorktreeId}
+      selectedIds={selectedIds}
+      sort={sort}
+      customOrder={customOrder}
+      now={now}
+      focused={focused}
+      focusContext={focusContext}
+      {...(focusReason === null || focusReason === undefined ? {} : { focusReason })}
+      onToggleExpand={() => cb.current.toggleExpand(repo)}
+      onToggleRepoPin={() => cb.current.toggleRepoPin(repo)}
+      refreshing={refreshing}
+      onRefreshWorktrees={() => cb.current.onRefreshRepo(repo)}
+      onRefreshPullRequest={(branch) =>
+        cb.current.onRefreshPullRequest(repo.id, branch)
+      }
+      onSelectWorktree={(w, e, orderedIds) =>
+        cb.current.handleRowClick(repo, w, e, orderedIds)
+      }
+      onContextWorktree={(w, e, orderedIds) =>
+        cb.current.handleRowContext(repo, w, e, orderedIds)
+      }
+      onToggleWorktreePin={(worktreeId, pinned) =>
+        cb.current.onSetWorktreePin(worktreeId, pinned)
+      }
+      onToggleBranchPin={(branch, pinned) =>
+        cb.current.onSetBranchPin(repo.id, branch, pinned)
+      }
+      onRemoveWorktree={(worktreeId) => cb.current.onRemoveWorktree(worktreeId)}
+      onRemoveSelected={() => cb.current.removeSelectedForRepo(repo)}
+      onClearSelected={() => cb.current.clearSel()}
+      onCycleSort={() => cb.current.cycleSort(repo.id)}
+      onReorder={(ids) => cb.current.reorderRepoWorktrees(repo.id, ids)}
+      onNewWorktree={() => cb.current.openNewWorktree(repo)}
+      onForkRepo={() => cb.current.onForkCheckout(repo)}
+      onOpenSetup={() => cb.current.onOpenRepoSetup?.(repo)}
+      onCleanUpBranches={() => cb.current.openCleanUpBranches(repo)}
+      onPruneWorktrees={() => cb.current.openPruneWorktrees()}
+      onHideRepo={() => cb.current.hideRepo(repo)}
+      onRemoveRepo={() => cb.current.openRemoveRepo(repo)}
+      onRevealWorktree={(worktreeId) => cb.current.revealWorktree(repo, worktreeId)}
+      onCreateWorktreeFromRef={(branch, newBranch, startPoint, changeRequest) =>
+        cb.current.createWorktreeFromRef(
+          repo,
+          branch,
+          newBranch,
+          startPoint,
+          changeRequest
+        )
+      }
+      arrangeable={arrangeable}
+      {...(moveRoom === undefined ? {} : { moveRoom })}
+      onMoveRepo={(direction) => cb.current.moveRepo(repo.id, direction)}
+      {...(indexMenu === undefined ? {} : { indexMenu })}
+      onIndexMenuClose={() => cb.current.closeIndexMenu()}
+      showPinVia={showPinVia}
+      after={after}
+      dragProps={dragProps}
+      dragging={dragging}
+      dropPosition={dropPosition}
+      focusable={focusable}
+      onRowKeyDown={(event) => cb.current.handleRepoKeyDown(repo, event)}
+      onRowFocus={() => cb.current.setFocusedRepoId(repo.id)}
+      isPostDragClick={() => cb.current.isPostDragClick()}
+      {...(platform === undefined ? {} : { platform })}
+    />
+  );
+}, areMemoizedRepoRowPropsEqual);

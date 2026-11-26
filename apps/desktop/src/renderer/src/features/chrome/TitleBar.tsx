@@ -8,7 +8,7 @@ import {
   shortcutLabel
 } from "../../lib/platform";
 import { SearchGlyph } from "../../lib/SearchGlyph";
-import { useStepLadder } from "../../lib/useFitLadder";
+import { useContentStepLadder } from "../../lib/useFitLadder";
 import { CopyTarget } from "../shell/CopyTarget";
 import { BranchSwitcher } from "../graph/BranchSwitcher";
 import { AppMenuBar } from "./AppMenuBar";
@@ -112,7 +112,7 @@ export function TitleBar({
   // out of room and a crumb is cut short, and only then do the crumbs shrink
   // (3a). Measured, never a
   // window-width breakpoint.
-  useStepLadder(stripRef, () => stripHasRoom(stripRef.current), JUMP_FIT_STEPS);
+  useContentStepLadder(stripRef, () => stripHasRoom(stripRef.current), JUMP_FIT_STEPS);
 
   return (
     <>

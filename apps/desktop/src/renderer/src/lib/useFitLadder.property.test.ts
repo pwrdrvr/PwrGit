@@ -4,7 +4,7 @@ import fc from "fast-check";
 import { act, createElement, useLayoutEffect, useRef } from "react";
 import { createRoot } from "react-dom/client";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
-import { flushFitLadders, useFitLadder, useStepLadder } from "./useFitLadder";
+import { flushFitLadders, useContentStepLadder, useFitLadder, useStepLadder } from "./useFitLadder";
 
 class TestResizeObserver {
   static active = new Set<TestResizeObserver>();
@@ -354,4 +354,64 @@ it("fits in-flow changes while ignoring overlay and same-column updates, even in
     }
     await act(() => root.render(null));
   }), { numRuns: 20 });
+});
+
+it("useContentStepLadder ignores paint-only state class toggles while refitting layout changes", async () => {
+  const PAINT_ONLY_CLASSES = [
+    "is-nav-flash",
+    "is-selected",
+    "is-multiselected",
+    "holds-selection",
+    "is-open",
+    "is-dragging",
+    "is-drop-target",
+    "is-pinned",
+    "is-arrangeable"
+  ] as const;
+
+  let reads = 0;
+  function ContentRow() {
+    const ref = useRef<HTMLDivElement>(null);
+    useContentStepLadder(ref, () => {
+      reads += 1;
+      return true;
+    }, STEPS);
+    return createElement(
+      "div",
+      { ref, className: "repo-row" },
+      createElement("span", { className: "chev" }),
+      createElement("span", { className: "name" }, "repo")
+    );
+  }
+
+  await fc.assert(
+    fc.asyncProperty(
+      fc.array(fc.constantFrom(...PAINT_ONLY_CLASSES), { minLength: 1, maxLength: 8 }),
+      async (toggles) => {
+        reads = 0;
+        await act(() => root.render(createElement(ContentRow)));
+        expect(reads).toBeGreaterThan(0);
+        const row = host.firstElementChild as HTMLElement;
+        const chev = row.firstElementChild as HTMLElement;
+
+        reads = 0;
+        await act(() => {
+          for (const cls of toggles) {
+            row.classList.toggle(cls);
+            chev.classList.toggle(cls);
+          }
+        });
+        expect(reads).toBe(0);
+
+        // A layout-affecting text change still triggers a refit.
+        await act(() => {
+          row.lastElementChild!.textContent = "longer-repository-name";
+        });
+        expect(reads).toBeGreaterThan(0);
+
+        await act(() => root.render(null));
+      }
+    ),
+    { numRuns: 15, seed: 2026112611 }
+  );
 });

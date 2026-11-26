@@ -389,10 +389,12 @@ export function LineageGraph({
   } | null>(null);
   const now = useRelativeClock();
   const commitContext = useViewportTooltip("commit-context-card", {
-    interactive: true
+    interactive: true,
+    trackVisibility: true
   });
   const personCard = useViewportTooltip("person-card", {
     interactive: true,
+    trackVisibility: true,
     label: openPerson === null ? "Author" : `Author: ${openPerson.name}`
   });
   /** The graph chrome's own card — the branch menu, the locate button, the
