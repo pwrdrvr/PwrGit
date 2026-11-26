@@ -180,6 +180,10 @@ export function useFolderIdentity(options: {
   }, [active, profileId]);
 
   const refresh = useCallback(() => load.current(), []);
-  const accept = useCallback((next: FolderIdentityReport) => setReport(next), []);
+  const accept = useCallback((next: FolderIdentityReport) => {
+    if (samePayload(reportRef.current, next)) return;
+    reportRef.current = next;
+    setReport(next);
+  }, []);
   return { report, refresh, accept };
 }

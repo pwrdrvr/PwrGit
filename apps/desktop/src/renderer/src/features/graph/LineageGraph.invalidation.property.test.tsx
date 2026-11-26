@@ -222,4 +222,56 @@ describe("LineageGraph pr:changed invalidation invariants", () => {
       { numRuns: 10, seed: 2026112607 }
     );
   });
+
+  it("clears Loading history… when reloading after an initial graph:lanes failure", async () => {
+    let attempt = 0;
+    const recoveredGraph = makeGraph(makePr(7, "open"));
+    mocks.dispatch.mockImplementation((name: string) => {
+      if (name === "graph:lanes") {
+        attempt += 1;
+        if (attempt === 1) {
+          return Promise.resolve({
+            ok: false as const,
+            error: { code: "git_failed", message: "transient error" }
+          });
+        }
+        return Promise.resolve(ok(structuredClone(recoveredGraph)));
+      }
+      if (name === "people:replaceInterest") return Promise.resolve(ok({}));
+      if (name === "pr:replaceVisibleCommits") return Promise.resolve(ok({}));
+      return Promise.resolve(ok(null));
+    });
+
+    const renderGraph = (worktreeId: string) =>
+      act(async () => {
+        root.render(
+          <LineageGraph
+            repoId="repo-1"
+            repoName="repo-1"
+            worktreeId={worktreeId}
+            worktreePath={`/sandbox/repo-1/${worktreeId}`}
+            viewingBranch="feat-1"
+            activeEmail="test@example.test"
+            selectedCommits={new Set()}
+            focusedCommit={null}
+            revealCommit={null}
+            tidyOffered={false}
+            onEditHistory={() => undefined}
+            onCommitsChange={() => undefined}
+            onOpenCommit={() => undefined}
+            onRevealWorktree={() => undefined}
+            onRevealCreatedWorktree={() => undefined}
+          />
+        );
+      });
+
+    await renderGraph("wt-1");
+    expect(container.textContent).not.toContain("Loading history");
+
+    // Switching worktree while data is still null re-enters loading and must
+    // sync loadingRef so a fast resolved graph:lanes clears Loading history….
+    await renderGraph("wt-2");
+    expect(container.textContent).not.toContain("Loading history");
+    expect(container.textContent).toContain("Feature work");
+  });
 });

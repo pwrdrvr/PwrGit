@@ -365,6 +365,8 @@ it("useContentStepLadder ignores paint-only state class toggles while refitting 
     "is-open",
     "is-dragging",
     "is-drop-target",
+    "is-drop-before",
+    "is-drop-after",
     "is-pinned",
     "is-arrangeable"
   ] as const;

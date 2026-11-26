@@ -444,6 +444,8 @@ export function SubmodulePanel({
   }, [onConcernChange, worktreeId]);
 
   useEffect(() => {
+    snapshotRef.current = null;
+    errorRef.current = null;
     setSnapshot(null);
     setError(null);
     setUserExpanded(null);

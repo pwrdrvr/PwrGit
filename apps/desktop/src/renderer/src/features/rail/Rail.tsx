@@ -126,7 +126,10 @@ export function Rail({
   }, [worktreeId]);
 
   useEffect(() => {
-    setOperation(null);
+    if (operationRef.current !== null) {
+      operationRef.current = null;
+      setOperation(null);
+    }
     refreshOperation();
     if (worktreeId === null) return;
     const offWorktree = subscribe("worktree:changed", (event) => {

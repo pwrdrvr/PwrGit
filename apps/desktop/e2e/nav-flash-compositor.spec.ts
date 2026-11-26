@@ -128,10 +128,35 @@ test("nav-flash animates on a compositor opacity layer and bulk-sync bar isolate
     await new Promise<void>((r) => requestAnimationFrame(() => requestAnimationFrame(() => r())));
   });
 
-  const traceEvents: Array<{ name: string; args?: { data?: { nodeName?: string } } }> = [];
+  // Resolve backendNodeIds for the backdrop and progress bar so Paint events
+  // are matched by Chromium's nodeId (plus nodeName when present), and verify
+  // that Paint events actually fire for the bar update rather than passing vacuously.
+  const { root: modalRoot } = await session.send("DOM.getDocument");
+  const { nodeId: backdropNodeId } = await session.send("DOM.querySelector", {
+    nodeId: modalRoot.nodeId,
+    selector: ".bulk-sync-backdrop"
+  });
+  const { node: backdropNode } = await session.send("DOM.describeNode", {
+    nodeId: backdropNodeId,
+    depth: 0
+  });
+  const { nodeId: barNodeId } = await session.send("DOM.querySelector", {
+    nodeId: modalRoot.nodeId,
+    selector: ".bulk-sync__bar"
+  });
+  const { node: barNode } = await session.send("DOM.describeNode", {
+    nodeId: barNodeId,
+    depth: 0
+  });
+
+  type PaintTraceEvent = {
+    name: string;
+    args?: { data?: { nodeId?: number; nodeName?: string } };
+  };
+  const traceEvents: PaintTraceEvent[] = [];
   session.on("Tracing.dataCollected", (chunk: { value?: unknown[] }) => {
     for (const item of chunk.value ?? []) {
-      traceEvents.push(item as { name: string; args?: { data?: { nodeName?: string } } });
+      traceEvents.push(item as PaintTraceEvent);
     }
   });
   await session.send("Tracing.start", { categories: "devtools.timeline" });
@@ -146,10 +171,20 @@ test("nav-flash animates on a compositor opacity layer and bulk-sync bar isolate
   await session.send("Tracing.end");
   await done;
 
-  // Verify the expanded dialog progress bar contains its layout and paint so
-  // bar updates never force repaints of the modal backdrop behind it.
-  const paintRoots = traceEvents
-    .filter((e) => e.name === "Paint")
-    .map((e) => e.args?.data?.nodeName ?? "");
-  expect(paintRoots.filter((name) => name.includes("overlay-backdrop"))).toHaveLength(0);
+  // Verify the expanded dialog progress bar actually painted during the update
+  // AND contained its layout/paint so the backdrop behind it never repainted.
+  const paintEvents = traceEvents.filter((e) => e.name === "Paint");
+  expect(paintEvents.length).toBeGreaterThan(0);
+  const barPaints = paintEvents.filter(
+    (e) =>
+      e.args?.data?.nodeId === barNode.backendNodeId ||
+      (e.args?.data?.nodeName ?? "").includes("bulk-sync__bar")
+  );
+  expect(barPaints.length).toBeGreaterThan(0);
+  const backdropPaints = paintEvents.filter(
+    (e) =>
+      e.args?.data?.nodeId === backdropNode.backendNodeId ||
+      (e.args?.data?.nodeName ?? "").includes("overlay-backdrop")
+  );
+  expect(backdropPaints).toHaveLength(0);
 });

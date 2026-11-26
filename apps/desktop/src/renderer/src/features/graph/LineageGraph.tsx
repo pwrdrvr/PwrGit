@@ -558,7 +558,10 @@ export function LineageGraph({
         });
       });
     };
-    if (dataRef.current === null) setLoading(true);
+    if (dataRef.current === null && !loadingRef.current) {
+      loadingRef.current = true;
+      setLoading(true);
+    }
     // A plain worktree/scope switch reuses the repo's cached lanes (fast); a
     // repo-scoped graph invalidation forces a recompute. Lane data is shared
     // across sibling worktrees, so filtering this event to one worktree would
@@ -613,8 +616,8 @@ export function LineageGraph({
         });
       if (!affectsMembership) return;
       setBranchPrGeneration((generation) => generation + 1);
-      setData((current) => {
-        if (current === null) return current;
+      const current = dataRef.current;
+      if (current !== null) {
         let changed = false;
         const branches = { ...current.branches };
         for (const [branch, pr] of entries) {
@@ -626,8 +629,12 @@ export function LineageGraph({
           branches[branch] = next;
           changed = true;
         }
-        return changed ? { ...current, branches } : current;
-      });
+        if (changed) {
+          const updated = { ...current, branches };
+          dataRef.current = updated;
+          setData(updated);
+        }
+      }
     });
   }, [repoId]);
 

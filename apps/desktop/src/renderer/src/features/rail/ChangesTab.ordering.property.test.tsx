@@ -190,4 +190,59 @@ describe("ChangesTab async ordering and equivalence properties", () => {
       { numRuns: 15, seed: 2026112606 }
     );
   });
+
+  it("retains ignored summary when switching between worktrees with identical ignored payloads", async () => {
+    const ignoredPayload: IgnoredSummary = {
+      count: 3,
+      rules: [
+        {
+          source: ".git/info/exclude",
+          line: 1,
+          pattern: "*.tmp",
+          count: 3,
+          destination: "exclude"
+        }
+      ],
+      worktreeCount: 1
+    };
+    mocks.dispatch.mockImplementation((name: string) => {
+      if (name === "changes:list") return Promise.resolve(ok(emptyChanges()));
+      if (name === "changes:ignoredSummary") return Promise.resolve(ok(structuredClone(ignoredPayload)));
+      return Promise.resolve(ok(null));
+    });
+
+    const renderWt = (id: string) =>
+      act(async () => {
+        root.render(
+          <ChangesTab
+            worktree={{
+              id,
+              repoId: "repo-1",
+              path: `/sandbox/repo-1/${id}`,
+              branch: "main",
+              dirty: 0,
+              ahead: 0,
+              behind: 0,
+              behindDefault: 0,
+              defaultBranch: "main",
+              mergedIntoDefault: false,
+              divergedFromDefault: false,
+              isDefaultBranch: true,
+              isPrimary: id === "wt-1",
+              pinned: false
+            }}
+            activeEmail="test@example.test"
+            activeFile={null}
+            onOpenDiff={() => undefined}
+            onOpenFileInsight={() => undefined}
+          />
+        );
+      });
+
+    await renderWt("wt-1");
+    expect(container.textContent).toContain("3 untracked files hidden by ignore rules");
+
+    await renderWt("wt-2");
+    expect(container.textContent).toContain("3 untracked files hidden by ignore rules");
+  });
 });

@@ -280,6 +280,7 @@ export function RepoRefsSections({
     if (result.ok) {
       const previous = refsRef.current;
       if (!samePayload(previous, result.value)) {
+        refsRef.current = result.value;
         setRefs(result.value);
       }
       if (!samePayload(previous?.branches, result.value.branches)) {

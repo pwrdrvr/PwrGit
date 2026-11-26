@@ -458,6 +458,88 @@ describe("state-hook ordering and structural stability properties", () => {
     );
   });
 
+  it("useRepoTree keeps reposRef, loadStateRef, and removalProgressRef synchronized across same-tick writers", async () => {
+    const initial = [makeRepo("repo-0", ["main"]), makeRepo("repo-1", ["main"])];
+    const repoListResolvers: Array<(res: Result<Repo[]>) => void> = [];
+    let removeResolve!: (res: Result<{ removed: string[]; dirty: string[]; failed: [] }>) => void;
+
+    mocks.dispatch.mockImplementation((name: string, payload?: { repoIds?: string[] }) => {
+      if (name === "repo:list") {
+        if (payload?.repoIds !== undefined) {
+          const refreshed = makeRepo("repo-0", ["main"]);
+          refreshed.worktrees[0]!.behind = 4;
+          return Promise.resolve(ok([refreshed]));
+        }
+        return new Promise<Result<Repo[]>>((resolve) => {
+          repoListResolvers.push(resolve);
+        });
+      }
+      if (name === "worktree:removeMany") {
+        return new Promise<Result<{ removed: string[]; dirty: string[]; failed: [] }>>((resolve) => {
+          removeResolve = resolve;
+        });
+      }
+      return Promise.resolve(ok(null));
+    });
+
+    let tree!: UseRepoTree;
+    function Probe({ profileId }: { profileId: string | null }) {
+      tree = useRepoTree(profileId);
+      return null;
+    }
+
+    // 1. Null profile → active profile with an immediate repo:list resolution must
+    // transition loadState cleanly to "ready" (never wedge in "loading").
+    await act(async () => root.render(<Probe profileId={null} />));
+    expect(tree.loadState.status).toBe("ready");
+    expect(tree.repos).toEqual([]);
+
+    await act(async () => {
+      root.render(<Probe profileId="personal" />);
+    });
+    expect(repoListResolvers.length).toBe(1);
+    await act(async () => {
+      repoListResolvers.shift()!(ok(structuredClone(initial)));
+    });
+    expect(tree.loadState.status).toBe("ready");
+    expect(tree.repos).toHaveLength(2);
+
+    // 2. Same-tick setRepoPin + persistRepoOrder must preserve BOTH mutations.
+    await act(async () => {
+      tree.setRepoPin("repo-0", true);
+      tree.persistRepoOrder(["repo-1", "repo-0"]);
+    });
+    expect(tree.repos.find((r) => r.id === "repo-0")?.pinned).toBe(true);
+    expect(tree.repos.find((r) => r.id === "repo-0")?.order).toBe(1);
+    expect(tree.repos.find((r) => r.id === "repo-1")?.order).toBe(0);
+
+    // 3. Same-tick reloadChanged + pr:changed must preserve BOTH updates.
+    const nextPr = makePr(999, "open");
+    await act(async () => {
+      emit("repo:changed", { profileId: "personal", repoIds: ["repo-0"] });
+      await Promise.resolve();
+      emit("pr:changed", { repoId: "repo-1", prs: { main: nextPr } });
+    });
+    expect(tree.repos.find((r) => r.id === "repo-0")?.worktrees[0]?.behind).toBe(4);
+    expect(tree.repos.find((r) => r.id === "repo-1")?.worktrees[0]?.pr?.number).toBe(999);
+
+    // 4. removeWorktrees: pre-commit worktree:removed advances done, and a late
+    // worktree:removed after finally clears progress never resurrects the toast.
+    let removalPromise!: Promise<unknown>;
+    await act(async () => {
+      removalPromise = tree.removeWorktrees(["repo-0-wt-0"], { confirmed: true });
+      emit("worktree:removed", { worktreeId: "repo-0-wt-0" });
+    });
+    expect(tree.removalProgress).toEqual({ done: 1, total: 1 });
+
+    await act(async () => {
+      removeResolve(ok({ removed: ["repo-0-wt-0"], dirty: [], failed: [] }));
+      await removalPromise;
+      emit("worktree:removed", { worktreeId: "repo-0-wt-0" });
+    });
+    expect(tree.removalProgress).toBeNull();
+  });
+
   it("useCommitIdentity and useHiddenRepos skip commits on equivalent focus/reload replies", async () => {
     const identityPayload: CommitIdentityInspection = makeIdentityInspection();
     const hiddenPayload: HiddenRepo[] = [

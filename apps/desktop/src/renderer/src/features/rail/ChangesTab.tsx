@@ -373,9 +373,11 @@ export function ChangesTab({
     setMenu(null);
     setIgnoreTarget(null);
     setCommitOutcome(null);
+    ignoredRef.current = null;
     setIgnored(null);
     setHasSubmoduleConcern(false);
     if (wtId === null) {
+      changesRef.current = null;
       setChanges(null);
       return;
     }
