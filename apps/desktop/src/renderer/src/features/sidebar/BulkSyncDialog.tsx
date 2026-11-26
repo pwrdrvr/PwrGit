@@ -1,4 +1,5 @@
 import {
+  memo,
   useCallback,
   useEffect,
   useLayoutEffect,
@@ -22,7 +23,8 @@ import { displayPath } from "../../lib/platform";
 import { useModal } from "../../lib/useModal";
 import {
   hoverTooltip,
-  useViewportTooltip
+  useViewportTooltip,
+  type TooltipHandle
 } from "../../lib/useViewportTooltip";
 import { MinimizeGlyph } from "../../lib/MinimizeGlyph";
 import { BulkSyncStatus, type BulkSyncStatusPhase } from "./BulkSyncStatus";
@@ -441,6 +443,15 @@ export function BulkSyncDialog({
   onClose: () => void;
 }) {
   const tip = useViewportTooltip();
+  const tipHandle = useMemo<TooltipHandle>(
+    () => ({
+      show: tip.show,
+      hide: tip.hide,
+      hideFrom: tip.hideFrom,
+      blurFrom: tip.blurFrom
+    }),
+    [tip.blurFrom, tip.hide, tip.hideFrom, tip.show]
+  );
   const repoSnapshot = useRef(repos).current;
   const repoIdsRef = useRef(repoIds);
   // The repository that started last, and the path line last drawn, so the
@@ -592,29 +603,33 @@ export function BulkSyncDialog({
   onProgressRef.current = onProgress;
   // Primitives only, so a parent re-render that changes nothing reports
   // nothing, and the report cannot loop through the parent's state.
+  // While the modal dialog covers the toolbar, omit intermediate path/inFlight
+  // churn so the hidden toolbar does not repaint on every repo_started tick;
+  // minimizing or running hidden/toast immediately publishes the full live fold.
   const { success, partial, skipped, failed, cancelled } = outcomeCounts;
   const inFlightCount = runningRepos.length;
+  const latestProgressRef = useRef<BulkSyncLiveProgress>({
+    counts: { success, partial, skipped, failed, cancelled },
+    inFlight: inFlightCount,
+    queued: queuedCount,
+    startedAt,
+    path: livePath
+  });
+  latestProgressRef.current = {
+    counts: { success, partial, skipped, failed, cancelled },
+    inFlight: inFlightCount,
+    queued: queuedCount,
+    startedAt,
+    path: livePath
+  };
+  const modalOpen = view === "dialog";
+  const toolbarProgressKey = modalOpen
+    ? `${success}:${partial}:${skipped}:${failed}:${cancelled}:${inFlightCount > 0 ? 1 : 0}`
+    : `${success}:${partial}:${skipped}:${failed}:${cancelled}:${inFlightCount}:${queuedCount}:${livePath ?? ""}`;
   useEffect(() => {
     if (!running || replayRef.current !== undefined) return;
-    onProgressRef.current?.({
-      counts: { success, partial, skipped, failed, cancelled },
-      inFlight: inFlightCount,
-      queued: queuedCount,
-      startedAt,
-      path: livePath
-    });
-  }, [
-    running,
-    success,
-    partial,
-    skipped,
-    failed,
-    cancelled,
-    inFlightCount,
-    queuedCount,
-    startedAt,
-    livePath
-  ]);
+    onProgressRef.current?.(latestProgressRef.current);
+  }, [running, startedAt, modalOpen, toolbarProgressKey]);
 
   const onFinishedRef = useRef(onFinished);
   onFinishedRef.current = onFinished;
@@ -784,68 +799,17 @@ export function BulkSyncDialog({
           {error !== null && <div className="modal__error">{error}</div>}
 
           <div className="bulk-sync__repos" aria-label="Repository results">
-            {ordered.map(({ repo, progress: state }) => {
-              const pathLabel = displayPath(repo.path, platform);
-              const result = state?.phase === "complete" ? state.result : null;
-              const status = repoStatus(state, mode);
-              const stateClass =
-                state?.phase === "running"
-                  ? "running"
-                  : result === null
-                    ? "queued"
-                    : result.outcome;
-              return (
-                <article
-                  className={`bulk-sync__repo is-${stateClass}`}
-                  key={repo.id}
-                >
-                  <div className="bulk-sync__repo-head">
-                    <div>
-                      <strong>{repo.name}</strong>
-                      <small
-                        className="selectable"
-                        {...hoverTooltip(tip, pathLabel)}
-                      >
-                        {pathLabel}
-                      </small>
-                    </div>
-                    <span className={`bulk-sync__repo-status is-${stateClass}`}>
-                      {status}
-                    </span>
-                  </div>
-                  {result === null ? (
-                    state?.phase === "running" ? (
-                      <>
-                        <p role="status">{state.detail ?? "Preparing repository…"}</p>
-                        {state.worktreePath !== undefined && (
-                          <small className="bulk-sync__worktree-path selectable">{state.worktreePath}</small>
-                        )}
-                        {mode === "soft-pull" && state.totalWorktrees !== undefined && (
-                          <p>{state.worktrees.length} of {state.totalWorktrees} worktrees checked</p>
-                        )}
-                        {(state.remotes.length > 0 || state.worktrees.length > 0) && (
-                          <details className="bulk-sync__completed">
-                            <summary>Completed tasks ({state.remotes.length + state.worktrees.length})</summary>
-                            <RepoResultDetails result={state} includeAll />
-                          </details>
-                        )}
-                        <div className="bulk-sync__recent">
-                          <RepoResultDetails result={{
-                            remotes: state.worktrees.length === 0 ? state.remotes.slice(-3) : [],
-                            worktrees: state.worktrees.slice(-3)
-                          }} includeAll />
-                        </div>
-                      </>
-                    ) : <p>Queued</p>
-                  ) : (
-                    <>
-                      <p>{repoSummary(result, mode)}</p>
-                      <RepoResultDetails result={result} />
-                    </>
-                  )}
-                </article>
-              );
-            })}
+            {ordered.map(({ repo, progress: state }) => (
+              <BulkSyncRepoCard
+                key={repo.id}
+                repoName={repo.name}
+                repoPath={repo.path}
+                state={state}
+                mode={mode}
+                platform={platform}
+                tip={tipHandle}
+              />
+            ))}
           </div>
 
           <div className="modal__actions">
@@ -867,6 +831,92 @@ export function BulkSyncDialog({
     </ModalSurface>
   );
 }
+
+/** One repository card in the expanded dialog, memoized so progress ticks only
+ *  re-render repositories whose state reference actually changed. */
+const BulkSyncRepoCard = memo(function BulkSyncRepoCard({
+  repoName,
+  repoPath,
+  state,
+  mode,
+  platform,
+  tip
+}: {
+  repoName: string;
+  repoPath: string;
+  state: RepoProgress | undefined;
+  mode: BulkSyncMode;
+  platform: string;
+  tip: TooltipHandle;
+}) {
+  const pathLabel = displayPath(repoPath, platform);
+  const result = state?.phase === "complete" ? state.result : null;
+  const status = repoStatus(state, mode);
+  const stateClass =
+    state?.phase === "running"
+      ? "running"
+      : result === null
+        ? "queued"
+        : result.outcome;
+  return (
+    <article className={`bulk-sync__repo is-${stateClass}`}>
+      <div className="bulk-sync__repo-head">
+        <div>
+          <strong>{repoName}</strong>
+          <small className="selectable" {...hoverTooltip(tip, pathLabel)}>
+            {pathLabel}
+          </small>
+        </div>
+        <span className={`bulk-sync__repo-status is-${stateClass}`}>
+          {status}
+        </span>
+      </div>
+      {result === null ? (
+        state?.phase === "running" ? (
+          <>
+            <p role="status">{state.detail ?? "Preparing repository…"}</p>
+            {state.worktreePath !== undefined && (
+              <small className="bulk-sync__worktree-path selectable">
+                {state.worktreePath}
+              </small>
+            )}
+            {mode === "soft-pull" && state.totalWorktrees !== undefined && (
+              <p>
+                {state.worktrees.length} of {state.totalWorktrees} worktrees
+                checked
+              </p>
+            )}
+            {(state.remotes.length > 0 || state.worktrees.length > 0) && (
+              <details className="bulk-sync__completed">
+                <summary>
+                  Completed tasks ({state.remotes.length + state.worktrees.length})
+                </summary>
+                <RepoResultDetails result={state} includeAll />
+              </details>
+            )}
+            <div className="bulk-sync__recent">
+              <RepoResultDetails
+                result={{
+                  remotes:
+                    state.worktrees.length === 0 ? state.remotes.slice(-3) : [],
+                  worktrees: state.worktrees.slice(-3)
+                }}
+                includeAll
+              />
+            </div>
+          </>
+        ) : (
+          <p>Queued</p>
+        )
+      ) : (
+        <>
+          <p>{repoSummary(result, mode)}</p>
+          <RepoResultDetails result={result} />
+        </>
+      )}
+    </article>
+  );
+});
 
 /**
  * The dialog's frame. Its own component so `useModal` — Escape, the focus
