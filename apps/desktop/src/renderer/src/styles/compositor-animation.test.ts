@@ -46,4 +46,9 @@ describe("compositor animations and dialog containment", () => {
     expect(reposBody).toMatch(/\bcontain\s*:\s*layout\s+paint\s+style\b/);
     expect(cardBody).toMatch(/\bcontent-visibility\s*:\s*auto\b/);
   });
+
+  it("stops pseudo-element animations such as ::before stripes under prefers-reduced-motion", () => {
+    const reducedBlock = /@media\s*\(\s*prefers-reduced-motion\s*:\s*reduce\s*\)\s*\{([\s\S]*?)\n\}/.exec(css)?.[1] ?? "";
+    expect(reducedBlock).toMatch(/\*\s*,\s*\*::before\s*,\s*\*::after\s*\{[^}]*animation\s*:\s*none\s*!important/);
+  });
 });

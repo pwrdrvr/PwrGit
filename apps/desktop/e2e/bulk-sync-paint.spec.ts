@@ -57,12 +57,17 @@ const toastBar = ".bulk-sync-toast__bar";
 const toastInFlight = `${toastBar} > .is-in-flight`;
 const hoverBar = ".sync-run-card__bar";
 const flexTransition = "flex-grow 320ms ease";
+// Keep the compact-bar opt-in benchmarks reproducing the pre-fix non-composited
+// background-position stripe repaints (app.css now composites dialog stripes
+// via ::before transform).
+const legacyStripeKeyframes = "@keyframes bulk-sync-legacy-stripes { to { background-position: 8.485px 0; } }";
+const legacyStripeAnimation = "bulk-sync-legacy-stripes 900ms linear infinite";
 
 function applyAutomaticBenchmarkStyles(page: Page, stationary: boolean, animateWidths: boolean) {
   // Set the width transition independently of the stripe and the shipped
   // compact-bar CSS, so each control changes only its intended variable.
   return page.addStyleTag({ content: `
-    ${stationary ? "" : `${inFlight}:not(.is-empty) { animation: bulk-sync-stripes 900ms linear infinite; }`}
+    ${stationary ? "" : `${legacyStripeKeyframes}\n${inFlight}:not(.is-empty) { animation: ${legacyStripeAnimation}; }`}
     .bulk-sync__bar${toolbarBar} > i { transition: ${animateWidths ? flexTransition : "none"}; }
   ` });
 }
@@ -120,7 +125,7 @@ test("the automatic-pull benchmark controls stripe motion and width transitions 
   const segment = page.locator(inFlight);
   for (const [stationary, animateWidths] of [[false, true], [true, true], [false, false]] as const) {
     const style = await applyAutomaticBenchmarkStyles(page, stationary, animateWidths);
-    await expect(segment).toHaveCSS("animation-name", stationary ? "none" : "bulk-sync-stripes");
+    await expect(segment).toHaveCSS("animation-name", stationary ? "none" : "bulk-sync-legacy-stripes");
     expect(await segment.evaluate((node) => getComputedStyle(node).transitionProperty))
       .toBe(animateWidths ? "flex-grow" : "none");
     await style.evaluate((node) => { node.parentNode?.removeChild(node); });
@@ -360,8 +365,9 @@ hoverBenchmark("measures the open Pull Recent hover card while steady and advanc
         // Restore only the hover bar's old CSS. The stripe-only variant
         // isolates the transition cost during the same progress workload.
         await page.addStyleTag({ content: `
+          ${scenario === "baseline" ? legacyStripeKeyframes : ""}
           .bulk-sync__bar${hoverBar} > .is-in-flight:not(.is-empty) {
-            animation: ${scenario === "baseline" ? "bulk-sync-stripes 900ms linear infinite" : "none"};
+            animation: ${scenario === "baseline" ? legacyStripeAnimation : "none"};
           }
           .bulk-sync__bar${hoverBar} > i { transition: ${flexTransition}; }
         ` });
@@ -441,7 +447,8 @@ manualBenchmark("measures collapsed Pull Recent by phase", async ({ harness: { a
       const staticStripe = scenario === "steady-static" || scenario.startsWith("static");
       const noFlex = scenario.includes("flex");
       await page.addStyleTag({ content: `
-        ${toastInFlight}:not(.is-empty) { animation: ${staticStripe ? "none" : "bulk-sync-stripes 900ms linear infinite"}; }
+        ${staticStripe ? "" : legacyStripeKeyframes}
+        ${toastInFlight}:not(.is-empty) { animation: ${staticStripe ? "none" : legacyStripeAnimation}; }
         .bulk-sync__bar${toastBar} > i { transition: ${noFlex ? "none" : flexTransition}; }
         .bulk-sync__bar${toolbarBar} > i { transition: ${scenario === "static-no-compact-flex" ? "none" : flexTransition}; }
       ` });
