@@ -11300,9 +11300,11 @@ button.commit-byline:focus-visible {
    `ch` resolves against the element's own font, and neither element draws
    text. Both take `.commit-msg`'s size and weight so 14ch is fourteen
    characters of subject. */
+:root {
+  --lane-clip-limit: clamp(16px, calc(100cqi - 204px - 14ch), 160px);
+}
 .graph-lanes-clip,
 .lane-scrollbar {
-  --lane-clip-limit: clamp(16px, calc(100cqi - 204px - 14ch), 160px);
   max-width: var(--lane-clip-limit);
   font-size: 12.5px;
   font-weight: 600;
@@ -11329,7 +11331,8 @@ button.commit-byline:focus-visible {
      the transparent space around macOS's horizontal scrollbar. Resolve
      overflow in the same layout as the clips, rounding to the scrollport's
      CSS pixel width. A collapsed bar still lets the browser clamp its scroll
-     position to zero when all lanes fit. */
+     position to zero when all lanes fit. Lineage sets this flag directly
+     when the graph already exceeds the gutter cap. */
   --lane-scrollable: max(0, sign(var(--lane-track-width) - round(nearest, var(--lane-clip-limit), 1px)));
   flex-shrink: 0;
   overflow-x: auto;

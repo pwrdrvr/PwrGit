@@ -60,7 +60,8 @@ import {
   type GraphRowVM,
   gutterWidth,
   LANE_W,
-  laneColor
+  laneColor,
+  MAX_GUTTER_LANES
 } from "./GraphRow";
 import { shortWhen } from "./graph-view";
 import { markLineageRefresh, type LineageRefreshSource } from "./lineage-refresh-trace";
@@ -1421,7 +1422,11 @@ export function LineageGraph({
           className="lane-scrollbar"
           ref={laneBarRef}
           {...hoverTooltip(tip, "Scroll the lane gutter — commits stay put")}
-          style={{ width: gutterW, "--lane-track-width": `${prLandingLayout.laneCount * LANE_W}px` } as CSSProperties}
+          style={{
+            width: gutterW,
+            "--lane-track-width": `${prLandingLayout.laneCount * LANE_W}px`,
+            "--lane-scrollable": prLandingLayout.laneCount > MAX_GUTTER_LANES ? 1 : undefined
+          } as CSSProperties}
           onScroll={(e) => syncLaneScroll(e.currentTarget)}
         >
           <div />
