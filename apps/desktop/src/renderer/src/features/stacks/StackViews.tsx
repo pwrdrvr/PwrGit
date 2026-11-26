@@ -3,7 +3,7 @@ import type { ChangeRequestEntry, Repo, RepositoryStack, StackAction, StackPosit
 import { dispatch } from "../../lib/pwrgit";
 import { showErrorToast, showInfoToast } from "../../lib/toast";
 import { hoverTooltip, useViewportTooltip } from "../../lib/useViewportTooltip";
-import { SectionGlyph, steppedTooltip } from "../sidebar/section-fit";
+import { SectionGlyph, SectionHeading, steppedTooltip } from "../sidebar/section-fit";
 import { SectionChevron } from "../sidebar/SectionChevron";
 import { prefersReducedMotion } from "../../lib/reducedMotion";
 import { StackBranchActions } from "./StackToolbar";
@@ -97,7 +97,7 @@ export function StacksSidebar({ repo, stacks, shownStacks, writable = false, rec
   const noPRs = stacks.some(stack => stack.layers.every(layer => !layer.pr));
   const expanded = noPRs || (disclosure ?? stacks.some(stack => !shownStacks?.has(stack.id)));
   return <div className="ref-section stack-sidebar">
-    <div className="ref-section__head-wrap">
+    <SectionHeading>
       <button type="button" className="ref-section__head" aria-expanded={expanded} aria-disabled={noPRs || undefined}
         {...steppedTooltip(tip, `Stacks · ${stacks.length}`)}
         onClick={event => {
@@ -110,7 +110,7 @@ export function StacksSidebar({ repo, stacks, shownStacks, writable = false, rec
         <span className="ref-section__label">Stacks</span>
         <span className="ref-section__count">{stacks.length}</span>
       </button>
-    </div>
+    </SectionHeading>
     {expanded && stacks.map(stack => {
       const selected = navigation.pick?.repoId === repo.id && navigation.pick.stack.id === stack.id;
       const next = stackNextAction(stack, writable);

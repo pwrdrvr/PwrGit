@@ -66,15 +66,15 @@ import { useListReorder } from "./useListReorder";
 import { PinIcon, WorktreeRow } from "./WorktreeRow";
 import { PinnedBranchRow, pinnedBranchRowId } from "./PinnedBranchRow";
 import { RepoRefsSections, type RefsBrowserRequest } from "./RepoRefsSections";
-import { useContentStepLadder, useStepLadder } from "../../lib/useFitLadder";
+import { useContentStepLadder } from "../../lib/useFitLadder";
 import { WorktreeGlyph } from "../../lib/WorktreeGlyph";
 import {
-  headingsFit,
   REPO_ROW_FIT_STEPS,
   RefitSectionsProvider,
-  SECTION_FIT_STEPS,
   SectionGlyph,
-  steppedTooltip
+  SectionHeading,
+  steppedTooltip,
+  useSectionHeadingLadder
 } from "./section-fit";
 import type { CreateWorktreeFromRef } from "./RepoChangeRequestSection";
 import { useChangeRequestSelection } from "../change-request/change-request-selection";
@@ -320,15 +320,8 @@ export function RepoRow({
   );
   // One ladder for every heading in this block, measured on the width the
   // tree gives it: a quiet repository keeps its words where a busy one steps
-  // down (3a). The sections re-render on their own state and call `refit`.
-  // The block gives the headings their width. Only watch it while the
-  // disclosure is open and there are sections to fit.
-  const refitSections = useStepLadder(
-    sectionsRef,
-    () => headingsFit(sectionsRef.current),
-    SECTION_FIT_STEPS,
-    { observe: () => blockRef.current }
-  );
+  // down (3a).
+  const refitSections = useSectionHeadingLadder(sectionsRef, blockRef, expanded);
   /** "Manage remotes…", Finished and View all ask `RepoRefsSections` to open
    *  its browser, which needs refs only that component loads — so the ask is
    *  held here until it mounts and has them. */
@@ -1152,7 +1145,7 @@ export function RepoRow({
               treeitems inside still belong to the group above. */}
           <div className="repo-sections" ref={sectionsRef}>
             <RefitSectionsProvider value={refitSections}>
-              <div className="wt-section__head">
+              <SectionHeading className="wt-section__head">
                 <button
                   className="wt-section__toggle"
                   aria-expanded={worktreesOpen}
@@ -1218,7 +1211,7 @@ export function RepoRow({
                 >
                   {SORT_LABEL[customOrder !== undefined ? "custom" : sort]}
                 </button>
-              </div>
+              </SectionHeading>
 
               {worktreesOpen && (
                 <div className="wt-section__body">

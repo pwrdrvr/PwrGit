@@ -49,8 +49,8 @@ import { SectionChevron } from "./SectionChevron";
 import {
   foldChips,
   SectionGlyph,
+  SectionHeading,
   steppedTooltip,
-  useRefitSections,
   type FoldableChip
 } from "./section-fit";
 import {
@@ -179,9 +179,6 @@ export function RepoRefsSections({
    *  marks beside these rows moved off (`lib/AGENTS.md`), and two tooltip
    *  styles in one 320px column is the part a user actually notices. */
   const tip = useViewportTooltip();
-  // Counts land on this component's own state, after the repository row
-  // has rendered; the block's heading ladder has to hear about it.
-  useRefitSections();
   /**
    * Show known forges even when their integration is switched off.
    *
@@ -642,7 +639,7 @@ export function RepoRefsSections({
             `aria-expanded`, so open and closed were indistinguishable to
             anything not looking at the pixels (SC 4.1.2). The Worktrees toggle
             in RepoRow already did this correctly; these two did not. */}
-        <div
+        <SectionHeading
           className={`ref-section__head-wrap${
             summary === null ? "" : " ref-section__head-wrap--on"
           }`}
@@ -726,7 +723,7 @@ export function RepoRefsSections({
               <span className="ref-section__on-text">{summary}</span>
             </span>
           )}
-        </div>
+        </SectionHeading>
         {openSections.has("branches") && (
           <div className="ref-section__body">
             {/* A nested group, not bare rows: RepoRow opens ONE `role="group"`
@@ -874,7 +871,7 @@ export function RepoRefsSections({
       <div className="ref-section">
         {/* A heading row like the others, so the block's fit test and the
             row's own clip reach it too. */}
-        <div className="ref-section__head-wrap">
+        <SectionHeading>
           <button
             className="ref-section__head"
             aria-expanded={openSections.has("tags")}
@@ -892,7 +889,7 @@ export function RepoRefsSections({
               {pending ? "…" : (tagCount ?? 0)}
             </span>
           </button>
-        </div>
+        </SectionHeading>
         {openSections.has("tags") && (
           <div className="ref-section__body">
             {refs?.previewTags.map((tag) => {
@@ -1037,7 +1034,7 @@ export function RepoRefsSections({
       </div>
 
       <div className="ref-section" ref={remotesRef}>
-        <div className="ref-section__head-wrap">
+        <SectionHeading>
           <button
             className="ref-section__head"
             aria-expanded={openSections.has("remotes")}
@@ -1079,7 +1076,7 @@ export function RepoRefsSections({
           >
             <RefreshGlyph />
           </button>
-        </div>
+        </SectionHeading>
         {openSections.has("remotes") && (
           <div className="ref-section__body">
             {refs?.remotes.map((remote) => {
