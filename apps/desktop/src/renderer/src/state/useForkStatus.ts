@@ -1,6 +1,7 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { ForkStatus } from "@pwrgit/shared";
 import { dispatch, subscribe } from "../lib/pwrgit";
+import { samePayload } from "../lib/samePayload";
 
 /**
  * The checked-out branch against its counterpart on the fork's source, kept
@@ -27,6 +28,8 @@ export function useForkStatus(
     key: string;
     status: ForkStatus | null;
   } | null>(null);
+  const readRef = useRef(read);
+  readRef.current = read;
 
   useEffect(() => {
     let active = true;
@@ -37,7 +40,18 @@ export function useForkStatus(
         // Only the newest read lands: an older one resolving late would put
         // back the count a sync just cleared.
         if (!active || mine !== request) return;
-        setRead({ key, status: result.ok ? result.value : null });
+        const nextStatus = result.ok ? result.value : null;
+        const current = readRef.current;
+        if (
+          current !== null &&
+          current.key === key &&
+          samePayload(current.status, nextStatus)
+        ) {
+          return;
+        }
+        const next = { key, status: nextStatus };
+        readRef.current = next;
+        setRead(next);
       });
     };
     load();

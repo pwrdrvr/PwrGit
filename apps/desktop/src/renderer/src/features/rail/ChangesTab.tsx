@@ -11,6 +11,7 @@ import { copyText } from "../../lib/copyText";
 import { fileStatusChipProps } from "../../lib/fileStatus";
 import { thisMachineNoun } from "../../lib/platform";
 import { dispatch, subscribe } from "../../lib/pwrgit";
+import { samePayload } from "../../lib/samePayload";
 import { showErrorToast } from "../../lib/toast";
 import { ContextMenu } from "../shell/ContextMenu";
 import { confirmDialog, notifyDialog } from "../shell/dialogs";
@@ -322,7 +323,11 @@ export function ChangesTab({
   const tip = useViewportTooltip();
   const explainTip = useViewportTooltip("viewport-tooltip discovery-explain-popover", { interactive: true, label: "Git discovery" });
   const [changes, setChanges] = useState<ChangeSet | null>(null);
+  const changesRef = useRef(changes);
+  changesRef.current = changes;
   const [ignored, setIgnored] = useState<IgnoredSummary | null>(null);
+  const ignoredRef = useRef(ignored);
+  ignoredRef.current = ignored;
   const [ignoreTarget, setIgnoreTarget] = useState<{ path: string; directory: boolean } | null>(null);
   const [commitOutcome, setCommitOutcome] = useState<{ hooks: HookRun[] } | { error: PwrGitError; amend: boolean } | null>(null);
   const [committing, setCommitting] = useState(false);
@@ -375,15 +380,24 @@ export function ChangesTab({
       return;
     }
     let active = true;
+    let request = 0;
     const load = (): void => {
+      const mine = ++request;
       void dispatch("changes:list", { worktreeId: wtId }).then((r) => {
-        if (!active) return;
+        if (!active || mine !== request) return;
         // A refusal (the checkout is gone) must not leave the previous
         // selection's files on screen under this worktree's name.
-        setChanges(r.ok ? r.value : null);
+        const next = r.ok ? r.value : null;
+        if (samePayload(changesRef.current, next)) return;
+        changesRef.current = next;
+        setChanges(next);
       });
       void dispatch("changes:ignoredSummary", { worktreeId: wtId }).then((r) => {
-        if (active) setIgnored(r.ok ? r.value : null);
+        if (!active || mine !== request) return;
+        const next = r.ok ? r.value : null;
+        if (samePayload(ignoredRef.current, next)) return;
+        ignoredRef.current = next;
+        setIgnored(next);
       });
     };
     load();

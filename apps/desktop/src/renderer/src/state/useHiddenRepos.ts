@@ -1,6 +1,7 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type { HiddenRepo } from "@pwrgit/shared";
 import { dispatch, subscribe } from "../lib/pwrgit";
+import { samePayload } from "../lib/samePayload";
 
 const HIDDEN_RELOAD_DEBOUNCE_MS = 150;
 
@@ -15,18 +16,26 @@ export function useHiddenRepos(profileId: string | null | undefined): {
   reload: () => void;
 } {
   const [hidden, setHidden] = useState<HiddenRepo[]>([]);
+  const hiddenRef = useRef(hidden);
+  hiddenRef.current = hidden;
   const [tick, setTick] = useState(0);
   const reload = useCallback(() => setTick((n) => n + 1), []);
 
   useEffect(() => {
     if (profileId === undefined) {
-      setHidden([]);
+      if (hiddenRef.current.length > 0) {
+        hiddenRef.current = [];
+        setHidden([]);
+      }
       return;
     }
     let live = true;
     void dispatch("repo:hiddenList", profileId === null ? {} : { profileId }).then(
       (result) => {
-        if (live && result.ok) setHidden(result.value);
+        if (live && result.ok && !samePayload(hiddenRef.current, result.value)) {
+          hiddenRef.current = result.value;
+          setHidden(result.value);
+        }
       }
     );
     return () => {

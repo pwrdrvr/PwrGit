@@ -8,8 +8,19 @@ const listeners = new Set<() => void>();
 let now = Date.now();
 let timer: ReturnType<typeof setTimeout> | undefined;
 
+function minuteBucket(timestamp: number): number {
+  return Math.floor(timestamp / MINUTE_MS);
+}
+
 function notify(): void {
   now = Date.now();
+  for (const listener of listeners) listener();
+}
+
+function catchUp(): void {
+  const current = Date.now();
+  if (minuteBucket(current) === minuteBucket(now)) return;
+  now = current;
   for (const listener of listeners) listener();
 }
 
@@ -27,12 +38,13 @@ function scheduleNextTick(): void {
 
 function onWindowFocus(): void {
   // Background windows can have their timers throttled. Catch up before the
-  // user sees the window again rather than waiting for the next scheduled tick.
-  notify();
+  // user sees the window again when a minute boundary passed while away,
+  // without re-rendering every timestamp consumer on same-minute focus churn.
+  catchUp();
 }
 
 function onVisibilityChange(): void {
-  if (document.visibilityState === "visible") notify();
+  if (document.visibilityState === "visible") catchUp();
 }
 
 function start(): void {

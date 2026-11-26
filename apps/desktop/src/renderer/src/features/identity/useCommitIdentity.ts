@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { CommitIdentityInspection, FolderIdentityReport, MachineGitIdentity } from "@pwrgit/shared";
 import { dispatch, subscribe } from "../../lib/pwrgit";
+import { samePayload } from "../../lib/samePayload";
 
 /**
  * Who a commit in this checkout will be recorded as, resolved by Git.
@@ -21,10 +22,15 @@ export function useCommitIdentity(
   refresh: () => void;
 } {
   const [inspection, setInspection] = useState<CommitIdentityInspection | null>(null);
+  const inspectionRef = useRef(inspection);
+  inspectionRef.current = inspection;
   const load = useRef<() => void>(() => undefined);
 
   useEffect(() => {
-    setInspection(null);
+    if (inspectionRef.current !== null) {
+      inspectionRef.current = null;
+      setInspection(null);
+    }
     if (worktreeId === null) {
       load.current = () => undefined;
       return;
@@ -38,10 +44,16 @@ export function useCommitIdentity(
           if (!live || request !== sequence) return;
           // A refusal (the checkout went missing) drops back to the provisional
           // footer rather than keeping another state's answer on screen.
-          setInspection(result.ok ? result.value : null);
+          const next = result.ok ? result.value : null;
+          if (samePayload(inspectionRef.current, next)) return;
+          inspectionRef.current = next;
+          setInspection(next);
         })
         .catch(() => {
-          if (live && request === sequence) setInspection(null);
+          if (live && request === sequence && inspectionRef.current !== null) {
+            inspectionRef.current = null;
+            setInspection(null);
+          }
         });
     };
     load.current = run;
@@ -78,6 +90,8 @@ export function useMachineIdentity(): {
   refresh: () => void;
 } {
   const [machine, setMachine] = useState<MachineGitIdentity | null>(null);
+  const machineRef = useRef(machine);
+  machineRef.current = machine;
   const load = useRef<() => void>(() => undefined);
 
   useEffect(() => {
@@ -87,7 +101,10 @@ export function useMachineIdentity(): {
       const request = ++sequence;
       void dispatch("identity:machine", {})
         .then((result) => {
-          if (live && request === sequence && result.ok) setMachine(result.value);
+          if (live && request === sequence && result.ok && !samePayload(machineRef.current, result.value)) {
+            machineRef.current = result.value;
+            setMachine(result.value);
+          }
         })
         .catch(() => undefined);
     };
@@ -127,6 +144,8 @@ export function useFolderIdentity(options: {
 }): FolderIdentityState {
   const { active, profileId } = options;
   const [report, setReport] = useState<FolderIdentityReport | null>(null);
+  const reportRef = useRef(report);
+  reportRef.current = report;
   const load = useRef<() => void>(() => undefined);
 
   useEffect(() => {
@@ -140,7 +159,10 @@ export function useFolderIdentity(options: {
       const request = ++sequence;
       void dispatch("identity:folders", profileId === undefined ? {} : { profileId })
         .then((result) => {
-          if (live && request === sequence && result.ok) setReport(result.value);
+          if (live && request === sequence && result.ok && !samePayload(reportRef.current, result.value)) {
+            reportRef.current = result.value;
+            setReport(result.value);
+          }
         })
         .catch(() => undefined);
     };

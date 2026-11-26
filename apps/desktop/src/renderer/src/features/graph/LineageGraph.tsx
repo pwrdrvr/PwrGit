@@ -35,6 +35,7 @@ import { useFitLadder } from "../../lib/useFitLadder";
 import { useMenuNavigation } from "../../lib/useMenuNavigation";
 import { useHoverIntent } from "../../lib/hoverIntent";
 import { dispatch, subscribe } from "../../lib/pwrgit";
+import { samePayload } from "../../lib/samePayload";
 import { takePublishedTag } from "../sidebar/take-published-tag";
 import { showErrorToast, showInfoToast } from "../../lib/toast";
 import { useRelativeClock } from "../../lib/useRelativeClock";
@@ -95,23 +96,6 @@ export function consumeBranchPrInvalidation(
     force,
     consumedGeneration: force ? generation : consumedGeneration
   };
-}
-
-// Lane, PR and people replies are structured-cloned IPC data. Preserve array
-// and record order: some graph consumers iterate refs in that order.
-function samePayload(a: unknown, b: unknown): boolean {
-  if (a === b) return true;
-  if (a === null || b === null || typeof a !== "object" || typeof b !== "object") return false;
-  if (Array.isArray(a)) {
-    return Array.isArray(b) && a.length === b.length && a.every((item, i) => samePayload(item, b[i]));
-  }
-  if (Array.isArray(b)) return false;
-  const left = a as Record<string, unknown>;
-  const right = b as Record<string, unknown>;
-  const rightKeys = Object.keys(right);
-  const leftKeys = Object.keys(left);
-  return leftKeys.length === rightKeys.length &&
-    leftKeys.every((key, i) => key === rightKeys[i] && samePayload(left[key], right[key]));
 }
 
 /**
@@ -358,6 +342,8 @@ export function LineageGraph({
     return { positions, oldBases };
   }, [stacks]);
   const [data, setData] = useState<LaneGraph | null>(null);
+  const dataRef = useRef(data);
+  dataRef.current = data;
   const [scope, setScope] = useState<Scope>("active");
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -551,7 +537,7 @@ export function LineageGraph({
         });
       });
     };
-    setLoading(true);
+    if (dataRef.current === null) setLoading(true);
     // A plain worktree/scope switch reuses the repo's cached lanes (fast); a
     // repo-scoped graph invalidation forces a recompute. Lane data is shared
     // across sibling worktrees, so filtering this event to one worktree would
@@ -591,19 +577,28 @@ export function LineageGraph({
   useEffect(() => {
     return subscribe("pr:changed", (event) => {
       if (event.repoId !== repoId) return;
+      const entries = Object.entries(event.prs);
+      if (entries.length === 0) return;
       // Active membership depends on merged PR state for squash/rebase branches.
-      // Re-run the branch query after a fresh association lands so a branch
-      // cannot remain drawn merely because it lacks an ancestry merge edge.
-      if (Object.keys(event.prs).length > 0) {
-        setBranchPrGeneration((generation) => generation + 1);
-      }
+      // Re-run the branch query after a fresh association lands — or for a
+      // branch not yet in `data.branches` — while skipping equivalent deltas
+      // that match what the loaded graph already holds.
+      const snapshot = dataRef.current;
+      const affectsMembership =
+        snapshot === null ||
+        entries.some(([branch, pr]) => {
+          const info = snapshot.branches[branch];
+          return info === undefined || !samePayload(info.pr ?? null, pr);
+        });
+      if (!affectsMembership) return;
+      setBranchPrGeneration((generation) => generation + 1);
       setData((current) => {
         if (current === null) return current;
         let changed = false;
         const branches = { ...current.branches };
-        for (const [branch, pr] of Object.entries(event.prs)) {
+        for (const [branch, pr] of entries) {
           const info = branches[branch];
-          if (info === undefined) continue;
+          if (info === undefined || samePayload(info.pr ?? null, pr)) continue;
           const next = { ...info };
           if (pr === null) delete next.pr;
           else next.pr = pr;

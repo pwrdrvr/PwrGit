@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { claimWorktreeOwnership, type Repo, type Res } from "@pwrgit/shared";
 import { confirmDialog, notifyDialog } from "../features/shell/dialogs";
 import { dispatch, subscribe } from "../lib/pwrgit";
+import { samePayload } from "../lib/samePayload";
 import { showErrorToast, showInfoToast } from "../lib/toast";
 import {
   LOADING_READ_STATE,
@@ -10,6 +11,22 @@ import {
 } from "./readState";
 
 export type RemovalProgress = { done: number; total: number };
+
+/** Keep unchanged repository objects across full `repo:list` reloads so
+ *  unchanged rows and expanded `RepoRefsSections` keep their identity. */
+function reuseUnchangedRepos(current: Repo[], next: Repo[]): Repo[] {
+  if (current.length === 0) return next;
+  const byId = new Map(current.map((repo) => [repo.id, repo]));
+  let sameArray = current.length === next.length;
+  const reused = next.map((repo, index) => {
+    const previous = byId.get(repo.id);
+    const kept =
+      previous !== undefined && samePayload(previous, repo) ? previous : repo;
+    if (sameArray && kept !== current[index]) sameArray = false;
+    return kept;
+  });
+  return sameArray ? current : reused;
+}
 
 /**
  * Swap re-read repositories into the tree by id. Every other repository keeps
@@ -118,10 +135,14 @@ export function useRepoTree(activeProfileId: string | null): UseRepoTree {
   reposRef.current = repos;
   const [loadState, setLoadState] =
     useState<ReadState>(LOADING_READ_STATE);
+  const loadStateRef = useRef(loadState);
+  loadStateRef.current = loadState;
   const mountedRef = useRef(false);
   const requestRef = useRef(0);
   const [removalProgress, setRemovalProgress] =
     useState<RemovalProgress | null>(null);
+  const removalProgressRef = useRef(removalProgress);
+  removalProgressRef.current = removalProgress;
   const [refreshingRepoIds, setRefreshingRepoIds] = useState<Set<string>>(
     new Set()
   );
@@ -153,8 +174,15 @@ export function useRepoTree(activeProfileId: string | null): UseRepoTree {
     const r = await dispatch("repo:list", { profileId: activeProfileId });
     if (!mountedRef.current || request !== requestRef.current) return;
     if (r.ok) {
-      setRepos(r.value);
-      setLoadState(READY_READ_STATE);
+      const next = reuseUnchangedRepos(reposRef.current, r.value);
+      if (next !== reposRef.current) {
+        reposRef.current = next;
+        setRepos(next);
+      }
+      if (loadStateRef.current.status !== READY_READ_STATE.status) {
+        loadStateRef.current = READY_READ_STATE;
+        setLoadState(READY_READ_STATE);
+      }
       const asked = identityAskedRef.current;
       if (asked === null) {
         identityAskedRef.current = new Set(r.value.map((repo) => repo.id));
@@ -258,18 +286,28 @@ export function useRepoTree(activeProfileId: string | null): UseRepoTree {
   // during a long batch delete, and it advances the progress counter.
   useEffect(() => {
     return subscribe("worktree:removed", ({ worktreeId }) => {
-      setRepos((rs) =>
-        rs.map((r) => {
-          if (!r.worktrees.some((w) => w.id === worktreeId)) return r;
-          return {
-            ...r,
-            worktrees: r.worktrees.filter((w) => w.id !== worktreeId)
-          };
-        })
-      );
-      setRemovalProgress((p) =>
-        p === null ? p : { ...p, done: p.done + 1 }
-      );
+      const current = reposRef.current;
+      let changed = false;
+      const next = current.map((r) => {
+        if (!r.worktrees.some((w) => w.id === worktreeId)) return r;
+        changed = true;
+        return {
+          ...r,
+          worktrees: r.worktrees.filter((w) => w.id !== worktreeId)
+        };
+      });
+      if (changed) {
+        reposRef.current = next;
+        setRepos(next);
+      }
+      if (removalProgressRef.current !== null) {
+        const nextProgress = {
+          ...removalProgressRef.current,
+          done: removalProgressRef.current.done + 1
+        };
+        removalProgressRef.current = nextProgress;
+        setRemovalProgress(nextProgress);
+      }
     });
   }, []);
 
@@ -279,22 +317,29 @@ export function useRepoTree(activeProfileId: string | null): UseRepoTree {
     return subscribe("pr:changed", ({ repoId, prs }) => {
       const has = (b: string): boolean =>
         Object.prototype.hasOwnProperty.call(prs, b);
-      setRepos((rs) =>
-        rs.map((r) => {
-          if (r.id !== repoId) return r;
-          return {
-            ...r,
-            worktrees: r.worktrees.map((w) => {
-              if (!has(w.branch)) return w;
-              const pr = prs[w.branch];
-              const next = { ...w };
-              if (pr) next.pr = pr;
-              else delete next.pr;
-              return next;
-            })
-          };
-        })
-      );
+      const current = reposRef.current;
+      let repoChanged = false;
+      const nextRepos = current.map((r) => {
+        if (r.id !== repoId) return r;
+        let worktreesChanged = false;
+        const worktrees = r.worktrees.map((w) => {
+          if (!has(w.branch)) return w;
+          const pr = prs[w.branch] ?? null;
+          if (samePayload(w.pr ?? null, pr)) return w;
+          worktreesChanged = true;
+          const next = { ...w };
+          if (pr) next.pr = pr;
+          else delete next.pr;
+          return next;
+        });
+        if (!worktreesChanged) return r;
+        repoChanged = true;
+        return { ...r, worktrees };
+      });
+      if (repoChanged) {
+        reposRef.current = nextRepos;
+        setRepos(nextRepos);
+      }
     });
   }, []);
 
@@ -307,39 +352,63 @@ export function useRepoTree(activeProfileId: string | null): UseRepoTree {
       const byRepo = new Map(
         identities.map(({ repoId, identity }) => [repoId, identity])
       );
-      setRepos((rs) =>
-        rs.map((r) => {
-          const identity = byRepo.get(r.id);
-          return identity === undefined ? r : { ...r, identity };
-        })
-      );
+      const current = reposRef.current;
+      let changed = false;
+      const next = current.map((r) => {
+        const identity = byRepo.get(r.id);
+        if (identity === undefined || samePayload(r.identity, identity)) {
+          return r;
+        }
+        changed = true;
+        return { ...r, identity };
+      });
+      if (changed) {
+        reposRef.current = next;
+        setRepos(next);
+      }
     });
   }, []);
 
   const setRepoPin = useCallback((repoId: string, pinned: boolean) => {
-    setRepos((rs) =>
-      rs.map((r) => {
-        if (r.id !== repoId) return r;
-        // Mirror the main process, which drops custom_order on unpin (see
-        // RepoIndexer.setRepoPinned) — otherwise the optimistic row keeps a
-        // stale index until the next reload and sorts by it on re-pin.
-        if (pinned) return { ...r, pinned };
-        const { order: _dropped, ...rest } = r;
-        return { ...rest, pinned };
-      })
-    );
+    const current = reposRef.current;
+    let changed = false;
+    const next = current.map((r) => {
+      if (r.id !== repoId) return r;
+      if (r.pinned === pinned && (pinned || r.order === undefined)) return r;
+      changed = true;
+      // Mirror the main process, which drops custom_order on unpin (see
+      // RepoIndexer.setRepoPinned) — otherwise the optimistic row keeps a
+      // stale index until the next reload and sorts by it on re-pin.
+      if (pinned) return { ...r, pinned };
+      const { order: _dropped, ...rest } = r;
+      return { ...rest, pinned };
+    });
+    if (changed) {
+      reposRef.current = next;
+      setRepos(next);
+    }
     void dispatch("repo:setPin", { repoId, pinned });
   }, []);
 
   const setWorktreePin = useCallback((worktreeId: string, pinned: boolean) => {
-    setRepos((rs) =>
-      rs.map((r) => ({
+    const current = reposRef.current;
+    let changed = false;
+    const next = current.map((r) => {
+      if (!r.worktrees.some((w) => w.id === worktreeId && w.pinned !== pinned)) {
+        return r;
+      }
+      changed = true;
+      return {
         ...r,
         worktrees: r.worktrees.map((w) =>
           w.id === worktreeId ? { ...w, pinned } : w
         )
-      }))
-    );
+      };
+    });
+    if (changed) {
+      reposRef.current = next;
+      setRepos(next);
+    }
     void dispatch("worktree:setPin", { worktreeId, pinned });
   }, []);
 
