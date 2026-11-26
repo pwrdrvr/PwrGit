@@ -708,6 +708,26 @@ test("a narrow Lineage publish lays out the gutter and reveals lanes without rea
   await window.keyboard.press("Escape");
   await expect(bar).toBeVisible();
   await expect.poll(offsets).toEqual(beforeDiff);
+  await expect.soft.poll(visibleDot, { timeout: 2_000 }).toBe(true);
+
+  // A scroll notification queued before the pane hides can arrive while
+  // the native bar reports zero. The plotted lanes must still track the bar.
+  const interruptedPan = await head.evaluate(async (row) => {
+    const pane = row.closest<HTMLElement>(".graph-wrap")!;
+    const bar = pane.querySelector<HTMLElement>(".lane-scrollbar")!;
+    const clip = row.querySelector(".graph-lanes-clip")!;
+    const lanes = row.querySelector(".graph-lanes")!;
+    const start = bar.scrollLeft;
+    const x = lanes.getBoundingClientRect().left;
+    clip.dispatchEvent(new WheelEvent("wheel", { bubbles: true, cancelable: true, deltaX: 8 }));
+    const display = pane.style.display;
+    pane.style.display = "none";
+    await new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve())));
+    pane.style.display = display;
+    return { pan: bar.scrollLeft - start, shift: x - lanes.getBoundingClientRect().left };
+  });
+  expect.soft(interruptedPan.pan).toBeGreaterThan(0);
+  expect.soft(interruptedPan.shift).toBeCloseTo(interruptedPan.pan);
 
   await native.evaluate((win) => win.setSize(1360, 720));
   await expect(bar).toBeHidden();

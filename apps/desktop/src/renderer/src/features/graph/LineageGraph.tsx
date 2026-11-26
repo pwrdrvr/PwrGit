@@ -1099,9 +1099,13 @@ export function LineageGraph({
 
   const gutterW = gutterWidth(prLandingLayout.laneCount);
   const hasRows = vms.length > 0;
-  const syncLaneScroll = (scrollLeft: number): void => {
-    cardRef.current?.style.setProperty("--lane-scroll", `${-scrollLeft}px`);
-  };
+  const syncLaneScroll = useCallback((bar: HTMLDivElement): void => {
+    const offset = bar.scrollLeft;
+    // A queued scroll event can arrive while Lineage is behind a diff. The
+    // hidden bar reports zero but keeps its scroll position for reopening.
+    if (offset === 0 && bar.scrollWidth === 0) return;
+    cardRef.current?.style.setProperty("--lane-scroll", `${-offset}px`);
+  }, []);
 
   // The scrollbar is laid out with the rows, so even the first reveal can pan.
   // The browser clamps the position to the available horizontal scroll range.
@@ -1109,7 +1113,7 @@ export function LineageGraph({
     const bar = laneBarRef.current;
     if (bar === null) return;
     bar.scrollLeft = lane === 0 ? 0 : (lane + 0.5) * LANE_W - bar.clientWidth / 2;
-    syncLaneScroll(bar.scrollLeft);
+    syncLaneScroll(bar);
   };
 
   const locateHash = (hash: string): void => {
@@ -1238,11 +1242,12 @@ export function LineageGraph({
       const bar = laneBarRef.current;
       if (bar === null || bar.scrollWidth <= bar.clientWidth) return;
       bar.scrollLeft += e.deltaX;
+      syncLaneScroll(bar);
       e.preventDefault();
     };
     card.addEventListener("wheel", onWheel, { passive: false });
     return () => card.removeEventListener("wheel", onWheel);
-  }, [hasRows]);
+  }, [hasRows, syncLaneScroll]);
 
   const shown = data?.shownBranches.length ?? 0;
   const matched = data?.matchedBranches ?? shown;
@@ -1417,7 +1422,7 @@ export function LineageGraph({
           ref={laneBarRef}
           {...hoverTooltip(tip, "Scroll the lane gutter — commits stay put")}
           style={{ width: gutterW, "--lane-track-width": `${prLandingLayout.laneCount * LANE_W}px` } as CSSProperties}
-          onScroll={(e) => syncLaneScroll(e.currentTarget.scrollLeft)}
+          onScroll={(e) => syncLaneScroll(e.currentTarget)}
         >
           <div />
         </div>
