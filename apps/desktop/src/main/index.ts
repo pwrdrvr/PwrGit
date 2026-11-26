@@ -1395,7 +1395,11 @@ if (!gotSingleInstanceLock) {
       refresher,
       worktreeOperations,
       settings,
-      openPrService
+      openPrService,
+      (repoId) => identityService.read([repoId]).get(repoId),
+      () => forgeHosts.overrides(),
+      (repoId, candidates) =>
+        identityService.ensureRemoteIdentities(repoId, candidates)
     );
     registerTagHandlers(bus, db);
     const refreshIdentity = (
@@ -1442,7 +1446,9 @@ if (!gotSingleInstanceLock) {
         const provider = forges.get(identity.host, identity.hostname);
         return provider === null ? null : provider.viewRepo(nameWithOwner);
       },
-      () => BrowserWindow.getFocusedWindow() !== null
+      () => BrowserWindow.getFocusedWindow() !== null,
+      (repoId, candidates) =>
+        identityService.ensureRemoteIdentities(repoId, candidates)
     );
     const bulkSyncHandlers = registerBulkSyncHandlers(
       bus,

@@ -336,6 +336,30 @@ export type ForkPushBack = {
 };
 
 /**
+ * One writable fork remote that fork sync can push the source's tip to:
+ * the branch's tracked remote (`tracked: true`) and any sibling fork of the
+ * same upstream the forge confirms the signed-in account can push to.
+ */
+export type ForkSyncTarget = {
+  /** Local remote nickname, e.g. `origin` or `huntharo`. */
+  remote: string;
+  /** Target branch name on that remote, e.g. `main`. */
+  branch: string;
+  /** Forge instance that confirmed this destination, when known. */
+  hostname?: string;
+  /** Confirmed forge `owner/name` for this remote, when known. */
+  nameWithOwner?: string;
+  /** True for the checked-out branch's tracked remote; false for sibling forks. */
+  tracked: boolean;
+  /** Whether fork sync pushes to this remote (true by default; user can opt out). */
+  enabled: boolean;
+  /** Non-null when this remote's fetched tip differs from the source. */
+  pushBack: ForkPushBack | null;
+  /** True when the remote has no fetched refs locally yet. */
+  unfetched?: boolean;
+};
+
+/**
  * The checked-out branch's counterpart on the repository this fork came from:
  * `upstream/main` for a `main` that tracks `origin/main`.
  */
@@ -347,6 +371,9 @@ export type ForkSourceTarget = ResetTargetSuggestion & {
   /** Null when the branch tracks nothing, or its tracked tip already equals
    *  this one. */
   pushBack: ForkPushBack | null;
+  /** All writable fork remotes eligible for fork sync push (tracked first,
+   *  then confirmed writable sibling forks in remote order). */
+  syncTargets?: ForkSyncTarget[];
 };
 
 /**
@@ -428,6 +455,10 @@ export type ForkSyncPush =
   /** It has commits the source lacks, so only a forced push could match it.
    *  The sync never forces; the reset dialog's leased push is the way. */
   | { outcome: "diverged"; remote: string; branch: string; overwrites: number }
+  /** The sibling could not be fetched and its tracking refs were not used. */
+  | { outcome: "fetch_failed"; remote: string; branch: string; message: string }
+  /** The user stopped this step. Completed work stands. */
+  | { outcome: "stopped"; remote: string; branch: string }
   /** The push itself failed; the local fast-forward stands. */
   | { outcome: "failed"; remote: string; branch: string; message: string }
   /** Pull's "only" choice: the tracked branch was left where it is. */
@@ -447,6 +478,8 @@ export type ForkSyncOutcome = {
   /** Verified recovery commit retained in Stashes after restoring local work. */
   recoveryStash?: string;
   push: ForkSyncPush;
+  /** Push outcomes across every enabled fork sync target in order. */
+  pushes?: ForkSyncPush[];
 };
 
 /**
@@ -519,12 +552,14 @@ export type PushPublishTarget = {
  *  side; the fork seed reads the fetch side, because that is the one the
  *  identity service reads — a push URL pointed elsewhere is a mirror, and
  *  seeding a fork from the mirror would fork the wrong project. */
-export type RemoteEndpoint = Pick<RemoteSummary, "name" | "fetchUrl" | "pushUrl">;
+export type RemoteEndpoint = Pick<RemoteSummary, "name" | "fetchUrl" | "pushUrl" | "pushUrls">;
 
 export type RemoteSummary = {
   name: string;
   fetchUrl: string;
   pushUrl: string;
+  /** Additional push destinations when Git reports multiple URLs, including the first. */
+  pushUrls?: string[];
   /** Branch name relative to the remote, when its symbolic HEAD is known. */
   defaultBranch?: string;
   skipFetchAll: boolean;
@@ -543,6 +578,16 @@ export type RemoteSummary = {
   previewBranches: RemoteBranchSummary[];
   /** Total branches on this remote, of which `previewBranches` is a prefix. */
   branchCount: number;
+  /** Confirmed forge write access for this remote, when known. */
+  viewerCanPush?: boolean;
+  /** Confirmed forge parent slug (`owner/name`) for this remote, when it is a fork. */
+  forkParent?: string;
+  /** Confirmed forge root slug (`owner/name`) when distinct from `forkParent`. */
+  forkRoot?: string;
+  /** True when this remote is eligible for multi-remote fork sync push. */
+  forkSyncEligible?: boolean;
+  /** Whether fork sync pushes to this remote (default true when eligible). */
+  forkSyncEnabled?: boolean;
 };
 
 /** One page of `repo:remoteBranches`, newest commit first. */
@@ -1517,6 +1562,16 @@ export type ForgeHost = ForgeKind | "other";
  *  it is what an unauthenticated, unreachable, or unsupported forge answers,
  *  and rendering it as "public" would be a lie about where code can go. */
 export type RepoVisibility = "public" | "private" | "internal" | "unknown";
+
+/** Cached forge facts for one remote repository beyond `origin`'s `RepoIdentity`. */
+export type RemoteForgeIdentity = {
+  hostname: string;
+  nameWithOwner: string;
+  viewerCanPush?: boolean;
+  parent?: string;
+  root?: string;
+  fetchedAt?: string;
+};
 
 /** One end of a fork relationship. */
 export type ForgeRepoRef = {

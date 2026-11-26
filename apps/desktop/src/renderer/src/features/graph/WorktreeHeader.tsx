@@ -19,6 +19,8 @@ import type {
   ForkSourceTarget,
   ForkStatus,
   ForkSyncOutcome,
+  ForkSyncPush,
+  ForkSyncTarget,
   PushPublishTarget,
   PwrGitError,
   RemoteDivergence,
@@ -45,7 +47,11 @@ import { forkMenuLabel } from "../shell/worktree-menu-items";
 import { GitLfsChip } from "./GitLfsChip";
 import type { RepositorySetupPage } from "../sidebar/RepositorySetupSheet";
 import { PullDivergenceDialog } from "./PullDivergenceDialog";
-import { PullMenu, type PullMenuRow } from "./PullMenu";
+import {
+  PullMenu,
+  type PullMenuRow,
+  type PullMenuSyncTarget
+} from "./PullMenu";
 import {
   forkMovedOn,
   readMovedOnAnswer,
@@ -275,6 +281,31 @@ function commits(count: number): string {
   return `${count} commit${count === 1 ? "" : "s"}`;
 }
 
+function andList(items: readonly string[]): string {
+  if (items.length <= 1) return items[0] ?? "";
+  if (items.length === 2) return `${items[0]} and ${items[1]}`;
+  return `${items.slice(0, -1).join(", ")}, and ${items[items.length - 1]}`;
+}
+
+/** Enabled non-tracked fork remotes behind the source with no local-only commits. */
+function behindSiblingSyncTargets(
+  targets: readonly ForkSyncTarget[] | undefined
+): Array<ForkSyncTarget & { pushBack: NonNullable<ForkSyncTarget["pushBack"]> }> {
+  if (targets === undefined) return [];
+  return targets.filter(
+    (
+      target
+    ): target is ForkSyncTarget & {
+      pushBack: NonNullable<ForkSyncTarget["pushBack"]>;
+    } =>
+      !target.tracked &&
+      target.enabled &&
+      target.pushBack !== null &&
+      target.pushBack.adds > 0 &&
+      target.pushBack.overwrites === 0
+  );
+}
+
 /**
  * The status chip on a branch the fork's source also carries, once the source
  * has moved on. The chip otherwise compares the branch with the one it tracks,
@@ -331,10 +362,12 @@ function forkPushTarget(fork: ForkStatus): {
 } | null {
   const { tracked, source } = fork;
   if (tracked === null) return null;
+  const target = source?.syncTargets?.find((entry) => entry.tracked && entry.remote === tracked.remote);
+  if (source?.syncTargets !== undefined && target?.enabled !== true) return null;
   return {
     remote: tracked.remote,
     branch:
-      source?.pushBack?.branch ?? tracked.label.slice(tracked.remote.length + 1),
+      target?.branch ?? source?.pushBack?.branch ?? tracked.label.slice(tracked.remote.length + 1),
     label: tracked.label,
     head: tracked.head
   };
@@ -374,6 +407,90 @@ function pullMenuRows(
       rebase review.
     </>
   );
+  const syncTargets = source.syncTargets;
+  const enabledTargets = (syncTargets ?? []).filter((target) => target.enabled);
+  const enabledTargetNames = syncTargets === undefined
+    ? [repos.fork]
+    : enabledTargets.map((target) => target.nameWithOwner ?? target.remote);
+  const enabledRemotes = enabledTargets.map((target) => target.remote);
+  const behindEnabledTargets = enabledTargets.filter(
+    (target) =>
+      target.pushBack !== null &&
+      target.pushBack.adds > 0 &&
+      target.pushBack.overwrites === 0
+  );
+  // With two or more forks the menu lists them as checkboxes under the
+  // choices. A toggle there must not change anything above it, or the
+  // menu reflows and the checkbox jumps out from under the pointer: every
+  // listed fork stays in the route (struck through when off), and the
+  // detail names "the forks checked below" rather than listing them.
+  const listed = (syncTargets?.length ?? 0) >= 2;
+  const routeTargets: Array<{ text: string; off?: boolean }> =
+    syncTargets === undefined
+      ? [{ text: repos.fork }]
+      : (listed ? syncTargets : enabledTargets).map((target) => ({
+          text: target.nameWithOwner ?? target.remote,
+          ...(target.enabled ? {} : { off: true })
+        }));
+  const syncStops = [
+    { text: repos.original, kind: "repo" as const },
+    { text: branch, kind: "here" as const },
+    ...(routeTargets.length === 0 ? [] : [{
+      ...routeTargets[0]!,
+      ...(routeTargets.length > 1 ? { extra: routeTargets.slice(1) } : {}),
+      kind: "go" as const
+    }])
+  ];
+  const syncRouteLabel = enabledTargetNames.length === 0
+    ? `${repos.original} to ${branch}`
+    : `${repos.original} to ${branch}, then to ${andList(enabledTargetNames)}`;
+  const syncDetail: ReactNode = own
+    ? stops
+    : syncTargets === undefined
+      ? (
+          <>
+            Fast-forward <code>{branch}</code>
+            {source.behind > 0 ? ` ${commits(source.behind)}` : ""}, then push{" "}
+            {source.behind > 0 ? "them " : ""}to your fork.
+          </>
+        )
+      : listed
+        ? source.behind > 0
+          ? (
+              <>
+                Fast-forward <code>{branch}</code> {commits(source.behind)}, then
+                push them to each fork checked below.
+              </>
+            )
+          : (
+              <>
+                <code>{branch}</code> already has <code>{source.label}</code>; push
+                it to each fork checked below.
+              </>
+            )
+      : enabledRemotes.length === 0
+        ? (
+            <>
+              Fast-forward <code>{branch}</code>
+              {source.behind > 0 ? ` ${commits(source.behind)}` : ""}. No fork
+              remotes are enabled for push.
+            </>
+          )
+        : source.behind === 0 && behindEnabledTargets.length > 0
+          ? (
+              <>
+                Push synced commits to{" "}
+                {andList(behindEnabledTargets.map((target) => target.remote))}.
+              </>
+            )
+          : (
+              <>
+                Fast-forward <code>{branch}</code>
+                {source.behind > 0 ? ` ${commits(source.behind)}` : ""}, then
+                push {source.behind > 0 ? "them " : ""}to{" "}
+                {andList(enabledRemotes)}.
+              </>
+            );
   // Each choice is a route; the refs in the titles name remotes, and the
   // line under each says which repositories those are. The details then
   // keep the counts and drop the refs they used to repeat.
@@ -386,25 +503,8 @@ function pullMenuRows(
           Sync with <code>{source.label}</code>
         </>
       ),
-      route: (
-        <RouteLine
-          label={`${repos.original} to ${branch}, then to ${repos.fork}`}
-          stops={[
-            { text: repos.original, kind: "repo" },
-            { text: branch, kind: "here" },
-            { text: repos.fork, kind: "go" }
-          ]}
-        />
-      ),
-      detail: own ? (
-        stops
-      ) : (
-        <>
-          Fast-forward <code>{branch}</code>
-          {source.behind > 0 ? ` ${commits(source.behind)}` : ""}, then push{" "}
-          {source.behind > 0 ? "them " : ""}to your fork.
-        </>
-      ),
+      route: <RouteLine label={syncRouteLabel} stops={syncStops} />,
+      detail: syncDetail,
       onSelect: () => on.pick("sync")
     },
     {
@@ -548,6 +648,13 @@ function pullTitle(choice: PullChoice, fork: ForkChoice | null): string {
   if (hasOwnCommits(fork)) {
     return `Pull · ${branch} has ${commits(source.ahead)} ${source.label} doesn't, so this stops for a rebase review`;
   }
+  if (choice === "sync" && source.syncTargets !== undefined) {
+    const enabled = source.syncTargets.filter((target) => target.enabled);
+    if (enabled.length === 0) {
+      return `Pull · fast-forward ${branch} to ${source.label}`;
+    }
+    return `Pull · fast-forward ${branch} to ${source.label}, then push to ${enabled.map((target) => `${target.remote}/${target.branch}`).join(", ")}`;
+  }
   return choice === "sync"
     ? `Pull · fast-forward ${branch} to ${source.label}, then push to ${tracked.label}`
     : `Pull · fast-forward ${branch} to ${source.label}; ${tracked.label} waits for Push`;
@@ -563,11 +670,101 @@ function forkSyncReceipt(
   outcome: ForkSyncOutcome,
   branch: string
 ): { summary: string; flash: Chip; stands: boolean } {
-  const moved = `Fast-forwarded ${branch} to ${outcome.source} · ${commits(outcome.arrived)}`;
-  const { push } = outcome;
   const restored = outcome.recoveryStash === undefined
     ? outcome.stashed ? " · local changes stashed and reapplied" : ""
     : " · local changes restored · recovery stash kept in Stashes";
+
+  if (outcome.pushes !== undefined && outcome.pushes.length >= 2) {
+    const lead =
+      outcome.arrived > 0
+        ? `Fast-forwarded ${branch} to ${outcome.source} · ${commits(outcome.arrived)}`
+        : `${branch} is up to date with ${outcome.source}`;
+    const pushed = outcome.pushes.filter(
+      (entry): entry is Extract<ForkSyncPush, { outcome: "pushed" }> =>
+        entry.outcome === "pushed"
+    );
+    const diverged = outcome.pushes.filter(
+      (entry): entry is Extract<ForkSyncPush, { outcome: "diverged" }> =>
+        entry.outcome === "diverged"
+    );
+    const failed = outcome.pushes.filter(
+      (entry): entry is Extract<ForkSyncPush, { outcome: "failed" }> =>
+        entry.outcome === "failed"
+    );
+    const fetchFailed = outcome.pushes.filter((entry) => entry.outcome === "fetch_failed");
+    const stopped = outcome.pushes.find((entry) => entry.outcome === "stopped");
+    const skipped = outcome.pushes.filter(
+      (entry): entry is Extract<ForkSyncPush, { outcome: "skipped" }> =>
+        entry.outcome === "skipped"
+    );
+    const parts: string[] = [lead];
+    if (pushed.length > 0) {
+      parts.push(
+        `pushed to ${pushed.map((entry) => `${entry.remote}/${entry.branch}`).join(", ")}`
+      );
+    }
+    for (const entry of diverged) {
+      parts.push(
+        `${entry.remote}/${entry.branch} has ${commits(entry.overwrites)} ${outcome.source} doesn't, so it was not pushed`
+      );
+    }
+    for (const entry of failed) {
+      parts.push(
+        `pushing ${entry.remote}/${entry.branch} failed — ${entry.message.split("\n")[0]}`
+      );
+    }
+    for (const entry of fetchFailed) {
+      parts.push(`fetching ${entry.remote} failed — ${entry.message.split("\n")[0]}`);
+    }
+    if (stopped !== undefined) parts.push(`sync stopped at ${stopped.remote}/${stopped.branch}`);
+    if (
+      pushed.length === 0 &&
+      diverged.length === 0 &&
+      failed.length === 0 &&
+      fetchFailed.length === 0 &&
+      stopped === undefined &&
+      skipped.length > 0
+    ) {
+      parts.push(
+        `${skipped.map((entry) => `${entry.remote}/${entry.branch}`).join(", ")} not pushed`
+      );
+    }
+    let summary = parts.join(" · ");
+    if (outcome.reappliedWithConflicts) {
+      return {
+        summary: `${summary} · your stashed changes came back with conflicts${outcome.recoveryStash === undefined ? "" : " · recovery stash kept in Stashes"}`,
+        flash: { text: "synced · resolve stash conflicts", tone: "warn" },
+        stands: true
+      };
+    }
+    summary += restored;
+    const standingDiverged =
+      diverged.length > 0 && (outcome.arrived > 0 || pushed.length > 0);
+    const stands = failed.length > 0 || fetchFailed.length > 0 || standingDiverged;
+    let flash: Chip = { text: `synced with ${outcome.source}`, tone: "ok" };
+    if (failed.length > 0) {
+      flash = { text: "synced · push failed", tone: "warn" };
+    } else if (fetchFailed.length > 0) {
+      flash = { text: "synced · sibling fetch failed", tone: "warn" };
+    } else if (standingDiverged) {
+      flash = {
+        text: pushed.length > 0 ? `synced · ${diverged.length} not pushed` : "pulled · not pushed",
+        tone: "warn"
+      };
+    } else if (stopped !== undefined) {
+      flash = { text: "sync stopped", tone: "muted" };
+    } else if (pushed.length === 0 && diverged.length === 0 && skipped.length > 0) {
+      flash = { text: `pulled ${outcome.source}`, tone: "ok" };
+    } else if (outcome.arrived === 0 && pushed.length === 0) {
+      flash = { text: "up to date", tone: "ok" };
+    }
+    return { summary, flash, stands };
+  }
+
+  const moved = outcome.arrived > 0
+    ? `Fast-forwarded ${branch} to ${outcome.source} · ${commits(outcome.arrived)}`
+    : `${branch} is up to date with ${outcome.source}`;
+  const { push } = outcome;
   // Nothing arrived and the fork's branch is ahead of the source: the sync had
   // nothing to do, and holding back a push it never had a reason to make is
   // not a problem to stand a red card over. A fork that moved on looks like
@@ -594,6 +791,10 @@ function forkSyncReceipt(
   } else if (push.outcome === "failed") {
     pushFailed = true;
     summary = `${moved}, but pushing ${push.remote}/${push.branch} failed — ${push.message.split("\n")[0]}`;
+  } else if (push.outcome === "fetch_failed") {
+    summary = `${moved} · fetching ${push.remote} failed — ${push.message.split("\n")[0]}`;
+  } else if (push.outcome === "stopped") {
+    summary = `${moved} · sync stopped at ${push.remote}/${push.branch}`;
   } else if (push.outcome === "skipped") {
     summary = `${moved} · ${push.remote}/${push.branch} not pushed`;
   }
@@ -605,17 +806,13 @@ function forkSyncReceipt(
     };
   }
   summary += restored;
-  return {
-    summary,
-    flash: pushFailed
-      ? { text: "synced · push failed", tone: "warn" }
-      : notPushed
-        ? { text: "pulled · not pushed", tone: "warn" }
-        : push.outcome === "skipped"
-          ? { text: `pulled ${outcome.source}`, tone: "ok" }
-          : { text: `synced with ${outcome.source}`, tone: "ok" },
-    stands: pushFailed || notPushed
-  };
+  let flash: Chip = { text: `synced with ${outcome.source}`, tone: "ok" };
+  if (pushFailed) flash = { text: "synced · push failed", tone: "warn" };
+  else if (push.outcome === "fetch_failed") flash = { text: "synced · sibling fetch failed", tone: "warn" };
+  else if (notPushed) flash = { text: "pulled · not pushed", tone: "warn" };
+  else if (push.outcome === "stopped") flash = { text: "sync stopped", tone: "muted" };
+  else if (push.outcome === "skipped") flash = { text: `pulled ${outcome.source}`, tone: "ok" };
+  return { summary, flash, stands: pushFailed || notPushed || push.outcome === "fetch_failed" };
 }
 
 type Busy = "fetch" | "pull" | "push" | null;
@@ -796,6 +993,28 @@ export function WorktreeHeader({
   const [movedOnAnswer, setMovedOnAnswer] = useState<MovedOnAnswer | null>(() =>
     readMovedOnAnswer(repo.id)
   );
+  // Optimistic toggle state for multi-fork sync checkboxes. A fresh
+  // `remote:forkStatus` read retires only the overrides it already agrees
+  // with: a read that predates a toggle's write (another toggle's change
+  // event, a background fetch) would otherwise flip that checkbox back.
+  const [syncTargetOverrides, setSyncTargetOverrides] = useState<
+    Record<string, boolean>
+  >({});
+  useEffect(() => {
+    setSyncTargetOverrides({});
+  }, [repo.id]);
+  useEffect(() => {
+    const targets = forkRead?.source?.syncTargets;
+    setSyncTargetOverrides((prev) => {
+      const pending = Object.entries(prev).filter(([remote, enabled]) => {
+        const fresh = targets?.find((target) => target.remote === remote);
+        return fresh !== undefined && fresh.enabled !== enabled;
+      });
+      return pending.length === Object.keys(prev).length
+        ? prev
+        : Object.fromEntries(pending);
+    });
+  }, [forkRead]);
   useEffect(() => {
     setPullChoice(readPullChoice(repo.id));
     setMovedOnAnswer(readMovedOnAnswer(repo.id));
@@ -1174,7 +1393,8 @@ export function WorktreeHeader({
     if (!current()) return { ok: true, value: undefined };
     if (!inspected.ok) return inspected;
     const pushTo =
-      push && fresh.ok && fresh.value !== null ? forkPushTarget(fresh.value) : null;
+      push && fresh.ok && fresh.value?.branch === inspected.value.branch &&
+      fresh.value.source?.ref === sourceRef ? forkPushTarget(fresh.value) : null;
     setDivergence(inspected.value);
     setDivergenceFork({ ref: sourceRef, pushTo });
     return { ok: true, value: undefined };
@@ -1426,7 +1646,24 @@ export function WorktreeHeader({
   // The live read is keyed to this checkout already (useForkStatus answers
   // undefined until it has read this one), so there is no stale-selection
   // case to guard.
-  const forkChoice = forkChoiceOf(forkStatus);
+  const rawForkChoice = forkChoiceOf(forkStatus);
+  const forkChoice: ForkChoice | null =
+    rawForkChoice === null
+      ? null
+      : rawForkChoice.source.syncTargets === undefined ||
+          Object.keys(syncTargetOverrides).length === 0
+        ? rawForkChoice
+        : {
+            ...rawForkChoice,
+            source: {
+              ...rawForkChoice.source,
+              syncTargets: rawForkChoice.source.syncTargets.map((target) =>
+                target.remote in syncTargetOverrides
+                  ? { ...target, enabled: syncTargetOverrides[target.remote]! }
+                  : target
+              )
+            }
+          };
   /** Pull is split: from the live read, or seeded from the stored source
    *  while that read is out. Only the live read can run anything. */
   const trackingRepair = forkStatus?.trackingRepair ?? null;
@@ -1435,8 +1672,28 @@ export function WorktreeHeader({
   // A repair-only dropdown has no source operation. Keep plain Pull usable
   // without discarding the repository's saved choice for after repair.
   const choice: PullChoice = sourceSplit ? pullChoice : "tracked";
-  const shownSource = forkStatus?.source ?? seed;
-  const localChip = baseChip(state, worktree, shownSource);
+  const shownSource = forkChoice?.source ?? forkStatus?.source ?? seed;
+  const siblingBehind =
+    choice === "sync" && movedOnAnswer !== "tracked"
+      ? behindSiblingSyncTargets(forkChoice?.source.syncTargets)
+      : [];
+  const rawLocalChip = baseChip(state, worktree, shownSource);
+  const localChip: Chip =
+    rawLocalChip.text === "up to date" && siblingBehind.length > 0
+      ? siblingBehind.length === 1
+        ? {
+            text: `↑${siblingBehind[0]!.pushBack.adds} to ${siblingBehind[0]!.remote}`,
+            tone: "source",
+            mid: `↑${siblingBehind[0]!.pushBack.adds} ${siblingBehind[0]!.remote}`,
+            short: `↑${siblingBehind[0]!.pushBack.adds}`
+          }
+        : {
+            text: `↑ to ${siblingBehind.length} forks`,
+            tone: "source",
+            mid: `↑ ${siblingBehind.length} forks`,
+            short: `↑${siblingBehind.length}`
+          }
+      : rawLocalChip;
   // "up to date" is only claimed once the remote has confirmed it. Until
   // then the chip says what is actually known.
   const checkKey = `${worktree.id}\0${worktree.branch}`;
@@ -1636,7 +1893,8 @@ export function WorktreeHeader({
   const pullHasWork =
     !split || runs === "tracked"
       ? behind > 0
-      : (shownSource?.behind ?? 0) > 0;
+      : (shownSource?.behind ?? 0) > 0 ||
+        (runs === "sync" && siblingBehind.length > 0);
   const pullTrigger = buttonTriggers(
     "pull",
     forkChoice === null && seed !== null && split
@@ -1769,6 +2027,44 @@ export function WorktreeHeader({
     }
     runPull(next, pullButton.current);
   };
+  const toggleSyncTarget = (target: ForkSyncTarget): void => {
+    const next = !target.enabled;
+    setSyncTargetOverrides((prev) => ({ ...prev, [target.remote]: next }));
+    void dispatch("remote:setForkSyncRemote", {
+      repoId: repo.id,
+      remote: target.remote,
+      enabled: next
+    }).then((result) => {
+      if (!result.ok) {
+        setSyncTargetOverrides((prev) => ({ ...prev, [target.remote]: target.enabled }));
+        showErrorToast({
+          title: "Could not update fork sync remote",
+          message: result.error.message,
+          subject: { repoId: repo.id }
+        });
+      }
+    });
+  };
+  const pullMenuSyncTargets: PullMenuSyncTarget[] | undefined =
+    forkChoice !== null &&
+    (forkChoice.source.syncTargets?.length ?? 0) >= 2 &&
+    movedOnAnswer !== "tracked"
+      ? forkChoice.source.syncTargets!.map((target) => ({
+          remote: target.remote,
+          branch: target.branch,
+          ...(target.nameWithOwner === undefined
+            ? {}
+            : { nameWithOwner: target.nameWithOwner }),
+          tracked: target.tracked,
+          enabled: target.enabled,
+          behind:
+            target.pushBack !== null && target.pushBack.overwrites === 0
+              ? target.pushBack.adds
+              : 0,
+          diverged: (target.pushBack?.overwrites ?? 0) > 0,
+          onToggle: () => toggleSyncTarget(target)
+        }))
+      : undefined;
   const pullMenu =
     trackingRepair !== null
       ? {
@@ -1895,7 +2191,15 @@ export function WorktreeHeader({
                     ? "The network could not confirm the remote branch. PwrGit will retry quietly."
                     : remoteUnverified
                       ? "Checking the remote branch for new commits."
-                      : chipExplanation(
+                      : rawLocalChip.text === "up to date" && siblingBehind.length > 0
+                        ? siblingBehind
+                            .map(
+                              (target) =>
+                                `${target.remote}/${target.branch}${target.nameWithOwner === undefined ? "" : ` (${target.nameWithOwner})`} is ${commits(target.pushBack.adds)} behind ${forkChoice?.source.label ?? "upstream"}`
+                            )
+                            .join(". ") +
+                          ". Pull (Sync) will fast-forward it."
+                        : chipExplanation(
                           state?.worktreeId === worktree.id ? state : null,
                           forkStatus ??
                             (seed === null ? null : { source: seed, tracked: null }),
@@ -2005,6 +2309,9 @@ export function WorktreeHeader({
                   disabled={running !== null || pullMenu === null}
                   checked={runs}
                   kept={movedOnUndecided ? null : choice}
+                  {...(pullMenuSyncTargets === undefined
+                    ? {}
+                    : { syncTargets: pullMenuSyncTargets })}
                   {...(pullMenu ?? { actions: [], choices: [] })}
                 />
               </div>

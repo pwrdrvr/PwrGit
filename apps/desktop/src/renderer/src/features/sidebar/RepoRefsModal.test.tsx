@@ -844,6 +844,124 @@ describe("parity with the sidebar's rows", () => {
     const items = [...document.querySelectorAll('[role="menuitem"]')].map((i) => i.textContent);
     expect(items).toEqual(["Copy branch name", "Copy origin/feature/x"]);
   });
+
+  it("labels writable and read-only sibling forks on the Remotes tab and toggles fork sync opt-out", async () => {
+    const onRefresh = vi.fn();
+    const forkRepo: Repo = {
+      ...repo,
+      identity: {
+        host: "github",
+        hostname: "github.com",
+        owner: "org",
+        name: "app",
+        nameWithOwner: "org/app",
+        visibility: "public",
+        viewerCanPush: true,
+        parent: { nameWithOwner: "acme/app", url: "https://github.com/acme/app" }
+      }
+    };
+    const multiRefs: RepoRefs = {
+      ...refs,
+      remotes: [
+        {
+          name: "origin",
+          fetchUrl: "git@github.com:org/app.git",
+          pushUrl: "git@github.com:org/app.git",
+          defaultBranch: "main",
+          skipFetchAll: false,
+          previewBranches: [],
+          branchCount: 1,
+          viewerCanPush: true,
+          forkParent: "acme/app",
+          forkSyncEligible: true,
+          forkSyncEnabled: true
+        },
+        {
+          name: "personal",
+          fetchUrl: "git@github.com:me/app.git",
+          pushUrl: "git@github.com:me/app.git",
+          defaultBranch: "main",
+          skipFetchAll: false,
+          previewBranches: [],
+          branchCount: 1,
+          viewerCanPush: true,
+          forkParent: "acme/app",
+          forkSyncEligible: true,
+          forkSyncEnabled: true
+        },
+        {
+          name: "coworker",
+          fetchUrl: "git@github.com:alice/app.git",
+          pushUrl: "git@github.com:alice/app.git",
+          defaultBranch: "main",
+          skipFetchAll: false,
+          previewBranches: [],
+          branchCount: 1,
+          viewerCanPush: false,
+          forkParent: "acme/app"
+        },
+        {
+          name: "upstream",
+          fetchUrl: "git@github.com:acme/app.git",
+          pushUrl: "git@github.com:acme/app.git",
+          defaultBranch: "main",
+          skipFetchAll: false,
+          previewBranches: [],
+          branchCount: 1
+        }
+      ]
+    };
+    const previous = dispatchMock.getMockImplementation()!;
+    dispatchMock.mockImplementation((channel, request) =>
+      channel === "remote:setForkSyncRemote"
+        ? Promise.resolve(ok({ remote: "personal", enabled: false }))
+        : previous(channel, request)
+    );
+
+    await act(async () =>
+      root.render(
+        <RepoRefsModal
+          repo={forkRepo}
+          refs={multiRefs}
+          now={0}
+          initialTab="remotes"
+          focusedWorktree={null}
+          onRefresh={onRefresh}
+          onRevealWorktree={() => undefined}
+          onCreateWorktree={() => undefined}
+          onClose={() => undefined}
+        />
+      )
+    );
+
+    const cards = [...container.querySelectorAll<HTMLElement>(".refs-remote-card")].filter(
+      (card) => !card.classList.contains("refs-fork-parent-offer")
+    );
+    expect(cards).toHaveLength(4);
+    expect(cards[0]?.textContent).toContain("Your fork");
+    expect(cards[0]?.textContent).toContain("org/app");
+    expect(cards[1]?.textContent).toContain("Your fork");
+    expect(cards[1]?.textContent).toContain("me/app");
+    expect(cards[2]?.textContent).toContain("Fork");
+    expect(cards[2]?.textContent).toContain("alice/app");
+    expect(cards[3]?.textContent).toContain("The original");
+
+    const toggles = [...container.querySelectorAll<HTMLInputElement>(".refs-remote-card__sync input")];
+    // Only the two writable forks (origin, personal) get the toggle.
+    expect(toggles).toHaveLength(2);
+    expect(toggles[0]?.checked).toBe(true);
+    expect(toggles[1]?.checked).toBe(true);
+
+    await act(async () => {
+      toggles[1]!.click();
+    });
+    expect(dispatchMock).toHaveBeenCalledWith("remote:setForkSyncRemote", {
+      repoId: forkRepo.id,
+      remote: "personal",
+      enabled: false
+    });
+    expect(onRefresh).toHaveBeenCalledOnce();
+  });
 });
 
 it.each(["tracked", "inferred", "busy", "read-only"] as const)("offers sidebar stack verbs in the refs menu only for writable tracked members (%s)", async mode => {

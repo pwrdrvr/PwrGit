@@ -1,10 +1,11 @@
 import { parseForgeRemote, remoteMatchesForgeRepo, type ForgeHostMap } from "./forge-remote";
-import type { RepoIdentity } from "./types";
+import type { RemoteForgeIdentity, RemoteSummary, RepoIdentity } from "./types";
 
 /**
  * What a remote is to the person reading it, rather than what it is called.
  *
- * `fork` is the repository `origin` names when the forge says it is a fork.
+ * `fork` is the repository `origin` names when the forge says it is a fork,
+ * or another remote the forge confirms is a fork of the same original.
  * `original` is that fork's parent, or a repository the forge says you can't
  * push to and which has no parent: the one a Fork… would copy. Everything
  * else is `other`, however it is named. A remote called `upstream` is not
@@ -18,12 +19,11 @@ export type RoutedRemote = {
   /** `owner/name` on a forge, or null when the URL names none. */
   nameWithOwner: string | null;
   role: RemoteRole;
-  /** The forge's answer about pushing. Known for the repository `origin`
-   *  names and nothing else, so it is absent on every other remote. */
+  /** The forge's answer about pushing, when confirmed for this remote. */
   canPush?: boolean;
 };
 
-type RemoteUrls = { name: string; fetchUrl: string; pushUrl: string };
+type RemoteUrls = { name: string; fetchUrl: string; pushUrl: string; pushUrls?: string[] };
 
 /**
  * Each remote labelled by what it is, for the surfaces that draw where a
@@ -38,7 +38,8 @@ type RemoteUrls = { name: string; fetchUrl: string; pushUrl: string };
 export function routedRemotes(
   identity: RepoIdentity | undefined,
   remotes: readonly RemoteUrls[],
-  hosts: ForgeHostMap = {}
+  hosts: ForgeHostMap = {},
+  remoteIdentities: readonly RemoteForgeIdentity[] = []
 ): RoutedRemote[] {
   const origin = remotes.find((remote) => remote.name === "origin");
   const current =
@@ -51,12 +52,27 @@ export function routedRemotes(
     current?.parent === undefined
       ? undefined
       : { hostname: current.hostname, nameWithOwner: current.parent.nameWithOwner };
+  const root =
+    current?.root === undefined
+      ? undefined
+      : { hostname: current.hostname, nameWithOwner: current.root.nameWithOwner };
+  const originalSlug =
+    parent?.nameWithOwner.toLowerCase() ??
+    (current !== undefined && current.viewerCanPush === false
+      ? current.nameWithOwner.toLowerCase()
+      : undefined);
+  const rootSlug = root?.nameWithOwner.toLowerCase();
+  const byKey = new Map<string, RemoteForgeIdentity>();
+  for (const entry of remoteIdentities) {
+    byKey.set(`${entry.hostname.toLowerCase()}\0${entry.nameWithOwner.toLowerCase()}`, entry);
+  }
   return remotes.map((remote): RoutedRemote => {
-    const slug = parseForgeRemote(remote.fetchUrl, hosts)?.nameWithOwner ?? null;
+    const parsedFetch = parseForgeRemote(remote.fetchUrl, hosts);
+    const slug = parsedFetch?.nameWithOwner ?? null;
     if (current !== undefined && remoteMatchesForgeRepo(remote.fetchUrl, current, hosts)) {
       const canPush =
         current.viewerCanPush !== undefined &&
-        remoteMatchesForgeRepo(remote.pushUrl, current, hosts)
+        (remote.pushUrls ?? [remote.pushUrl]).every((url) => remoteMatchesForgeRepo(url, current, hosts))
           ? { canPush: current.viewerCanPush }
           : {};
       if (parent !== undefined) {
@@ -70,6 +86,32 @@ export function routedRemotes(
     }
     if (parent !== undefined && remoteMatchesForgeRepo(remote.fetchUrl, parent, hosts)) {
       return { name: remote.name, nameWithOwner: parent.nameWithOwner, role: "original" };
+    }
+    if (parsedFetch !== null) {
+      const meta = byKey.get(
+        `${parsedFetch.hostname.toLowerCase()}\0${parsedFetch.nameWithOwner.toLowerCase()}`
+      );
+      if (meta !== undefined) {
+        const pushMatches = (remote.pushUrls ?? [remote.pushUrl]).every((url) =>
+          remoteMatchesForgeRepo(url, meta, hosts)
+        );
+        const canPush =
+          meta.viewerCanPush !== undefined && pushMatches
+            ? { canPush: meta.viewerCanPush }
+            : {};
+        const metaParent = meta.parent?.toLowerCase();
+        const metaRoot = meta.root?.toLowerCase();
+        const sameForkNetwork =
+          current?.hostname.toLowerCase() === meta.hostname.toLowerCase() &&
+          ((originalSlug !== undefined &&
+            (metaParent === originalSlug || metaRoot === originalSlug)) ||
+            (rootSlug !== undefined &&
+              (metaParent === rootSlug || metaRoot === rootSlug)));
+        if (sameForkNetwork) {
+          return { name: remote.name, nameWithOwner: meta.nameWithOwner, role: "fork", ...canPush };
+        }
+        return { name: remote.name, nameWithOwner: meta.nameWithOwner, role: "other", ...canPush };
+      }
     }
     return { name: remote.name, nameWithOwner: slug, role: "other" };
   });
@@ -92,4 +134,29 @@ export function trackedRemoteName(
     }
   }
   return best;
+}
+
+/**
+ * The forge facts `repo:refs` attached to each remote, as the identities
+ * `routedRemotes` reads: one per remote whose push access or fork parent is
+ * confirmed, keyed by the repository its fetch URL names.
+ */
+export function remoteForgeIdentitiesOf(
+  remotes: readonly Pick<RemoteSummary, "fetchUrl" | "viewerCanPush" | "forkParent" | "forkRoot">[],
+  hosts: ForgeHostMap = {}
+): RemoteForgeIdentity[] {
+  const identities: RemoteForgeIdentity[] = [];
+  for (const remote of remotes) {
+    if (remote.viewerCanPush === undefined && remote.forkParent === undefined) continue;
+    const parsed = parseForgeRemote(remote.fetchUrl, hosts);
+    if (parsed === null) continue;
+    identities.push({
+      hostname: parsed.hostname,
+      nameWithOwner: parsed.nameWithOwner,
+      ...(remote.viewerCanPush === undefined ? {} : { viewerCanPush: remote.viewerCanPush }),
+      ...(remote.forkParent === undefined ? {} : { parent: remote.forkParent }),
+      ...(remote.forkRoot === undefined ? {} : { root: remote.forkRoot })
+    });
+  }
+  return identities;
 }

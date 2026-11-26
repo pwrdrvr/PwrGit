@@ -85,6 +85,15 @@ describe("profile deletion persistence", () => {
            (repo_id, host, hostname, owner, name, visibility)
          VALUES ('repo-removed', 'github', 'github.com', 'acme', 'removed', 'private')`
       ).run();
+      db.prepare(
+        `INSERT INTO repo_remote_identity
+           (repo_id, hostname, slug_lower, name_with_owner, viewer_can_push, parent_slug)
+         VALUES ('repo-removed', 'github.com', 'me/removed', 'me/removed', 1, 'upstream/removed')`
+      ).run();
+      db.prepare(
+        `INSERT INTO fork_sync_remote_prefs (repo_id, remote, enabled)
+         VALUES ('repo-removed', 'me', 0)`
+      ).run();
       db.prepare("INSERT INTO app_meta (key, value) VALUES (?, ?), (?, ?)").run(
         `profile:${removed.id}:selected_repo_id`,
         "repo-removed",
@@ -109,6 +118,8 @@ describe("profile deletion persistence", () => {
         ["local_branches", "repo_id", "repo-removed"],
         ["remote_branch_index_state", "repo_id", "repo-removed"],
         ["repo_identity", "repo_id", "repo-removed"],
+        ["repo_remote_identity", "repo_id", "repo-removed"],
+        ["fork_sync_remote_prefs", "repo_id", "repo-removed"],
         ["clone_destinations", "profile_id", removed.id],
         ["profile_scan_state", "profile_id", removed.id],
         ["profile_scan_dirs", "profile_id", removed.id]
