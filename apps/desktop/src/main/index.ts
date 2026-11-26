@@ -30,8 +30,6 @@ import {
 } from "@pwrgit/shared";
 import { readAppIdentity, registerAppIdentityHandlers } from "./app-identity";
 import { registerAppDocumentHandlers } from "./app-document-handlers";
-import { registerAgentHandlers } from "./ai/agent-handlers";
-import { LocalAgentSession } from "./ai/agent-session";
 import { wireAppMenuBridge } from "./app-menu-bridge";
 import {
   trackWindowFrameState,
@@ -39,7 +37,7 @@ import {
 } from "./window-controls-bridge";
 import { linuxWindowIconPath } from "./window-icon";
 import { openAppDocumentWindow } from "./app-document-window";
-import { createQuitDrain, drainBeforeQuit } from "./bounded-shutdown";
+import { createQuitDrain } from "./bounded-shutdown";
 import { quitWithExitFailSafe } from "./quit-retry";
 import {
   initAutoUpdater,
@@ -185,11 +183,6 @@ import { createAuxiliaryWindowPlacer } from "./auxiliary-window-placement";
 import { createNativeThemeController } from "./native-theme";
 import { McpAccessError, McpPolicyStore } from "@pwrgit/mcp-server/access-policy";
 import { registerLocalAgentHandlers } from "./local-agents/local-agent-handlers";
-import { AcpModelCache } from "./ai/acp-model-cache";
-import { registerAiProviderHandlers } from "./ai/ai-provider-handlers";
-import { createAiProviderService } from "./ai/ai-provider-service";
-import { AiProviderSettingsStore } from "./ai/ai-provider-settings";
-import { CodexModelCache } from "./ai/codex-model-cache";
 import { ConsentBroker } from "./agent-access/consent-broker";
 import { createConsentWindow } from "./agent-access/consent-window";
 import { createDesktopMcpRunner } from "./agent-access/desktop-mcp-runner";
@@ -1582,42 +1575,6 @@ if (!gotSingleInstanceLock) {
     registerLocalAgentHandlers(bus, mcpPolicy, () => {
       emitEvent("localAgents:changed", mcpPolicy.snapshot());
     });
-    // Agents PwrGit hands work TO (Settings → AI Providers / AI Features) —
-    // the opposite direction from Local Agents above. Per profile, and
-    // nothing is probed until Settings asks or a job resolves its agent.
-    const aiProviderSettings = new AiProviderSettingsStore(db);
-    const aiProviders = createAiProviderService({
-      settings: aiProviderSettings,
-      onSettingsChanged: (snapshot) => emitEvent("aiProviders:changed", snapshot),
-      acpModelCache: new AcpModelCache(
-        join(app.getPath("userData"), "cache", "acp-models.json")
-      ),
-      codexModelCache: new CodexModelCache(
-        join(app.getPath("userData"), "cache", "codex-models.json")
-      ),
-      scratchDir: join(app.getPath("temp"), "pwrgit-agent"),
-      // Built-app E2E pins "nothing installed" so a spec never probes the
-      // developer's own CLIs. Packaged builds ignore it.
-      discoveryDisabled:
-        !app.isPackaged && process.env["PWRGIT_E2E_AGENT_UNAVAILABLE"] === "1"
-    });
-    registerAiProviderHandlers(bus, {
-      service: aiProviders,
-      store: aiProviderSettings,
-      profiles,
-      onChanged: (snapshot) => emitEvent("aiProviders:changed", snapshot)
-    });
-    // History editing and commit-message drafts run on whatever the profile's
-    // AI settings resolve: the AI switch, the agent, the model and the effort
-    // are all `resolveJob`'s answer, so this session discovers nothing itself
-    // and inherits the E2E seam above.
-    const agentHandlers = registerAgentHandlers(bus, db, {
-      session: new LocalAgentSession({
-        resolveJob: (input) => aiProviders.resolveJob(input),
-        tempRoot: join(app.getPath("temp"), "pwrgit-agent")
-      })
-    });
-    app.on("before-quit", () => aiProviders.dispose());
     // The loopback listener stays off until the operator turns it on: it is a
     // standing grant on their repositories, not a default.
     const mcpPolicyFile = join(app.getPath("userData"), "mcp-policy.json");
@@ -1660,26 +1617,20 @@ if (!gotSingleInstanceLock) {
         repoSearchHandlers.releaseWebContents(webContentsId);
         visibleRefresher.releaseWebContents(webContentsId);
         remoteTipChecker.releaseWebContents(webContentsId);
-        agentHandlers.releaseWebContents(webContentsId);
       }
     });
     const quitDrain = createQuitDrain({
       onDeadline: (remainingMs) => diagnostics.limitTraceShutdown(remainingMs),
       stop: async () => {
-        // Start independently, retaining the agent's existing 1.5s limit
-        // inside the shared 10s deadline rather than adding a serial wait.
         await Promise.allSettled([
           Promise.resolve().then(() => diagnostics.shutdown()),
-          Promise.resolve().then(() => startupCpu?.stop()),
-          drainBeforeQuit([() => agentHandlers.dispose()], 1_500)
+          Promise.resolve().then(() => startupCpu?.stop())
         ]);
       },
-      // Nothing recording and no agent open is the common quit: let it
-      // through in one pass instead of deferring for a flush with no work.
+      // Quit in one pass when there is no diagnostics work to flush.
       hasPendingWork: () =>
         diagnostics.hasPendingWork() ||
-        startupCpu?.isRecording() === true ||
-        agentHandlers.hasPendingWork(),
+        startupCpu?.isRecording() === true,
       // The drain re-issues this from a macrotask (quit-retry.ts), which is
       // what lets Electron finish the quit; the exit is only a safety net.
       resumeQuit: () =>

@@ -48,7 +48,7 @@ afterEach(() => {
   vi.clearAllMocks();
 });
 
-async function render(historyRange: HistoryRange | null, tidyOffered: boolean): Promise<void> {
+async function render(historyRange: HistoryRange | null): Promise<void> {
   await act(async () => {
     root.render(
       <CommitContextMenu
@@ -64,7 +64,6 @@ async function render(historyRange: HistoryRange | null, tidyOffered: boolean): 
         onSwitchBranch={() => undefined}
         onRevealWorktree={() => undefined}
         historyRange={historyRange}
-        tidyOffered={tidyOffered}
         onEditHistory={onEditHistory}
         onClose={() => undefined}
       />
@@ -86,29 +85,28 @@ describe("CommitContextMenu › Edit history from here", () => {
   const hashes = ["a".repeat(40), "b".repeat(40), commit.hash];
 
   it("names the run's size and hands the run to the chosen operation", async () => {
-    await render({ kind: "range", hashes, pushed: 0 }, true);
+    await render({ kind: "range", hashes, pushed: 0 });
     expect(headings()).toContain("Edit history from here");
     expect(entry("Reorder 3 commits…")).toBeDefined();
-    expect(entry("Tidy 3 commits with an agent…")).toBeDefined();
 
     act(() => entry("Squash 3 commits into one…")?.click());
     expect(onEditHistory).toHaveBeenCalledWith(hashes, "squash");
   });
 
   it("says nothing about pushing when the whole run is local", async () => {
-    await render({ kind: "range", hashes, pushed: 0 }, true);
+    await render({ kind: "range", hashes, pushed: 0 });
     expect(document.querySelector(".pop-menu__heading-hint")).toBeNull();
     expect(entry("Squash 3 commits into one…")?.hasAttribute("aria-describedby")).toBe(false);
   });
 
   it("warns once, under the heading, when the run holds pushed commits", async () => {
-    await render({ kind: "range", hashes, pushed: 2 }, true);
+    await render({ kind: "range", hashes, pushed: 2 });
     const hint = document.querySelector(".pop-menu__heading-hint");
     expect(hint?.textContent).toBe(
       "2 of these 3 are already pushed. Publishing the rewrite needs a force push."
     );
     // Every entry in the group is described by it; nothing outside is.
-    for (const label of ["Squash 3", "Reorder 3", "Tidy 3"]) {
+    for (const label of ["Squash 3", "Reorder 3"]) {
       expect(entry(label)?.getAttribute("aria-describedby")).toBe(hint?.id);
     }
     expect(entry("Copy short SHA")?.hasAttribute("aria-describedby")).toBe(false);
@@ -127,27 +125,13 @@ describe("CommitContextMenu › Edit history from here", () => {
     );
   });
 
-  it("leaves Tidy out where AI history editing is off", async () => {
-    await render({ kind: "range", hashes, pushed: 0 }, false);
-    expect(entry("Squash 3 commits into one…")).toBeDefined();
-    expect(entry("Tidy")).toBeUndefined();
-  });
-
-  it("shows a blocked run disabled, with the reason", async () => {
-    await render({ kind: "blocked", reason: "merge", count: 4 }, true);
-    const blocked = entry("Squash, reorder or tidy 4 commits");
-    expect(blocked?.disabled).toBe(true);
-    expect(blocked?.textContent).toContain("A merge sits between here and HEAD.");
-  });
-
-  it("does not name Tidy on a blocked run where AI is off", async () => {
-    await render({ kind: "blocked", reason: "root", count: 2 }, false);
+  it("describes Squash and Reorder on a blocked run", async () => {
+    await render({ kind: "blocked", reason: "root", count: 2 });
     expect(entry("Squash or reorder 2 commits")?.disabled).toBe(true);
-    expect(entry("Squash, reorder or tidy")).toBeUndefined();
   });
 
   it("offers nothing where there is no run", async () => {
-    await render(null, true);
+    await render(null);
     expect(headings()).not.toContain("Edit history from here");
     expect(entry("Squash")).toBeUndefined();
   });

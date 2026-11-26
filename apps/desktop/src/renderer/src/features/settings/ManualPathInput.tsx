@@ -40,12 +40,12 @@ export function ManualPathInput(props: {
   };
 
   return (
-    <div className="settings-ai-path">
+    <div className="settings-executable-path">
       <div className="settings-field__actions">
         <input
           aria-invalid={error !== null}
           aria-label={props.label}
-          className="settings-input settings-ai-path__input"
+          className="settings-input settings-executable-path__input"
           disabled={props.disabled}
           // "e.g.", because a bare example path reads as the value — and for
           // Codex it is often the very install already in use.

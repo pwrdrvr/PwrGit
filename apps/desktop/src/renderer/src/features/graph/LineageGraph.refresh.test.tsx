@@ -112,7 +112,7 @@ describe("LineageGraph refresh publication", () => {
         <LineageGraph repoId={repoId} repoName="Widgets" worktreeId={selectedWorktreeId}
           worktreePath="/synthetic/widget" viewingBranch="main" activeEmail=""
           selectedCommits={selected} focusedCommit={hash} revealCommit={null}
-          tidyOffered={false} onEditHistory={noop} onCommitsChange={search}
+          onEditHistory={noop} onCommitsChange={search}
           onOpenCommit={openCommit} onRevealWorktree={noop} onRevealCreatedWorktree={noop} />
       );
     };

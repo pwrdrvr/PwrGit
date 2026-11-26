@@ -1,54 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { createQuitDrain, drainBeforeQuit } from "./bounded-shutdown";
-
-describe("bounded quit drain", () => {
-  it("waits for diagnostics and agent cleanup", async () => {
-    let finishDiagnostics = (): void => undefined;
-    let finishAgent = (): void => undefined;
-    const diagnostics = vi.fn(
-      () =>
-        new Promise<void>((resolve) => {
-          finishDiagnostics = resolve;
-        })
-    );
-    const agent = vi.fn(
-      () =>
-        new Promise<void>((resolve) => {
-          finishAgent = resolve;
-        })
-    );
-
-    let drained = false;
-    const pending = drainBeforeQuit([diagnostics, agent], 10_000).then(() => {
-      drained = true;
-    });
-    await vi.waitFor(() => {
-      expect(diagnostics).toHaveBeenCalledOnce();
-      expect(agent).toHaveBeenCalledOnce();
-    });
-
-    finishDiagnostics();
-    await Promise.resolve();
-    expect(drained).toBe(false);
-    finishAgent();
-    await pending;
-    expect(drained).toBe(true);
-  });
-
-  it("returns at the deadline when a cleanup task hangs", async () => {
-    vi.useFakeTimers();
-    try {
-      const pending = drainBeforeQuit(
-        [() => new Promise<void>(() => undefined)],
-        1_500
-      );
-      await vi.advanceTimersByTimeAsync(1_500);
-      await expect(pending).resolves.toBeUndefined();
-    } finally {
-      vi.useRealTimers();
-    }
-  });
-});
+import { createQuitDrain } from "./bounded-shutdown";
 
 describe("quit diagnostics barrier", () => {
   beforeEach(() => vi.useFakeTimers());
@@ -279,27 +230,5 @@ describe("quit diagnostics barrier", () => {
     });
     void update.flushForUpdate();
     expect(update.beforeQuit(s.event)).toBe(true);
-  });
-
-  it("runs the agent's existing deadline alongside diagnostics", async () => {
-    let finishDiagnostics!: () => void;
-    const diagnostics = vi.fn(() => new Promise<void>((resolve) => { finishDiagnostics = resolve; }));
-    const agent = vi.fn(() => new Promise<void>(() => {}));
-    const resumeQuit = vi.fn();
-    const drain = createQuitDrain({
-      stop: async () => {
-        await Promise.allSettled([diagnostics(), drainBeforeQuit([agent], 1_500)]);
-      },
-      resumeQuit,
-      warn: vi.fn()
-    });
-    drain.beforeQuit({ preventDefault: vi.fn() });
-    await vi.advanceTimersByTimeAsync(1_500);
-    expect(agent).toHaveBeenCalledOnce();
-    expect(resumeQuit).not.toHaveBeenCalled();
-    finishDiagnostics();
-    await afterResumeHop();
-    expect(resumeQuit).toHaveBeenCalledOnce();
-    expect(vi.getTimerCount()).toBe(0);
   });
 });

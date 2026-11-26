@@ -15,13 +15,13 @@ test.afterEach(async () => {
   sandbox = null;
 });
 
-test("with AI off, the deterministic isolated rebase workflow is whole and usable", async () => {
+test("checks a manual Squash in isolation", async () => {
   sandbox = createGitSandbox();
-  const repo = sandbox.makeRepo("agent-fallback");
+  const repo = sandbox.makeRepo("csv-export");
   sandbox.commit(repo.path, "one.txt", "first focused change");
   sandbox.commit(repo.path, "two.txt", "second focused change");
 
-  handle = await launchApp({ agentUnavailable: true });
+  handle = await launchApp();
   const { window } = handle;
   await addRootAndExpand(window, handle, sandbox, repo.name);
   await branchRow(window, "main").first().click();
@@ -30,8 +30,6 @@ test("with AI off, the deterministic isolated rebase workflow is whole and usabl
   const oldest = window.locator(".graph-row", { hasText: "first focused change" });
   await expect(oldest).toBeVisible({ timeout: 20_000 });
   await oldest.locator(".commit-msg").click({ button: "right" });
-  // AI is off until the operator turns it on, and Tidy is an agent action
-  // from the start, so neither the menu nor the selection bar offers it.
   await expect(window.getByRole("menuitem", { name: "Reorder 2 commits…" })).toBeVisible();
   await expect(window.getByRole("menuitem", { name: /Tidy/ })).toHaveCount(0);
   await window.getByRole("menuitem", { name: "Squash 2 commits into one…" }).click();
@@ -39,13 +37,9 @@ test("with AI off, the deterministic isolated rebase workflow is whole and usabl
   await expect(window.locator(".selection-bar")).toContainText("Reorder");
   await expect(window.locator(".selection-bar")).not.toContainText("Tidy");
 
+  await expect(window.locator(".agent-chip")).toHaveCount(0);
   await expect(window.locator(".rebase-plan")).toContainText("pick");
   await expect(window.locator(".rebase-plan")).toContainText("squash");
-  // AI off is a dashed chip, not a warning and not an offer: the message box
-  // is Git's joined subjects and everything below it still works.
-  await expect(window.locator(".agent-chip")).toContainText("AI off");
-  await expect(window.locator(".msg-foot")).toContainText("Joined from 2 subjects");
-  await expect(window.locator(".msg-foot")).not.toContainText("Draft with an agent");
   await expect(window.locator(".msg-box__input")).toHaveValue(
     "first focused change\n\nsecond focused change"
   );

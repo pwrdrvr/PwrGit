@@ -93,13 +93,13 @@ function GitInstalls(props: {
   const tip = useViewportTooltip();
   return (
     <>
-      <ul className="settings-ai-installs" aria-label="Git installs">
+      <ul className="settings-git-installs" aria-label="Git installs">
         {props.status.candidates.map((candidate) => {
           const using = candidate.path === props.status.path;
           return (
-            <li key={candidate.path} className={`settings-ai-install${using ? " is-using" : ""}`}>
-              <span className="settings-ai-install__body">
-                <span className="settings-ai-install__path" {...hoverTooltip(tip, candidate.path)}>
+            <li key={candidate.path} className={`settings-git-install${using ? " is-using" : ""}`}>
+              <span className="settings-git-install__body">
+                <span className="settings-git-install__path" {...hoverTooltip(tip, candidate.path)}>
                   {candidate.path}
                 </span>
                 <MetaParts parts={rowParts(candidate)} />

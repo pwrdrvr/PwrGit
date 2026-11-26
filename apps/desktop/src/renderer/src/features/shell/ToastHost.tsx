@@ -3,7 +3,6 @@ import type { Repo, StartupCpuProfileCapturedEvent } from "@pwrgit/shared";
 import { AppUpdateToast } from "../update/AppUpdateToast";
 import { ReleaseNotesLink } from "../update/ReleaseNotesLink";
 import { RemoteActivityToast } from "../remote/RemoteActivityToast";
-import { CodexVersionNotice } from "../settings/CodexVersionNotice";
 import { GitIdentityNotice } from "../identity/GitIdentityNotice";
 import { dispatch, subscribe } from "../../lib/pwrgit";
 import { AppNoticeToast } from "./AppNoticeToast";
@@ -132,7 +131,6 @@ export function ToastHost({
           and must not be shoved around by it. */}
       <RemoteActivityToast selectedWorktreeId={selectedWorktreeId} />
       <GitIdentityNotice profile={profile} />
-      <CodexVersionNotice profileId={profileId} />
       <AppUpdateToast />
     </div>
   );

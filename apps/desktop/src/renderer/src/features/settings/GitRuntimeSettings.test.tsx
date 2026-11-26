@@ -123,9 +123,9 @@ function details(): string[] {
 }
 
 function rows(): Array<{ path: string; meta: string; action: string }> {
-  return Array.from(container.querySelectorAll(".settings-ai-install"), (row) => ({
-    path: row.querySelector(".settings-ai-install__path")?.textContent ?? "",
-    meta: row.querySelector(".settings-ai-install__meta")?.textContent ?? "",
+  return Array.from(container.querySelectorAll(".settings-git-install"), (row) => ({
+    path: row.querySelector(".settings-git-install__path")?.textContent ?? "",
+    meta: row.querySelector(".settings-git-install__meta")?.textContent ?? "",
     action: row.querySelector("button, .settings-card__chip")?.textContent ?? ""
   }));
 }
@@ -196,8 +196,8 @@ describe("GitRuntimeSettings", () => {
     await render();
 
     const parts = Array.from(
-      container.querySelectorAll(".settings-ai-install")[0]!.querySelectorAll(
-        ".settings-ai-install__meta-part"
+      container.querySelectorAll(".settings-git-install")[0]!.querySelectorAll(
+        ".settings-git-install__meta-part"
       ),
       (part) => part.textContent
     );

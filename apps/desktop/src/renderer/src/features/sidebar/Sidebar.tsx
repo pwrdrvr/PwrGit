@@ -116,7 +116,6 @@ import {
   SORT_CYCLE,
   type SelectionModifiers
 } from "./repo-view";
-import { AiFeaturesSwitch } from "./AiFeaturesSwitch";
 import { useHoverStableOrder } from "./useHoverStableOrder";
 import { useListReorder, type ListReorder } from "./useListReorder";
 import { FinishedAfterDaysContext, useFinishedAfterDaysSetting } from "./finished-after";
@@ -1638,13 +1637,9 @@ export function Sidebar({
         </div>
       </div>
 
-      {/* The profile's AI switch, under the list rather than in it: the tree
-          owns only rows, and this is a setting for the whole window. Off
-          until turned on — see AiFeaturesSwitch. */}
       {activeProfile !== null && (
         <HiddenReposButton profile={activeProfile} />
       )}
-      {activeProfile !== null && <AiFeaturesSwitch profile={activeProfile} />}
 
       {newWorktree !== null && (
         <NewWorktreeModal

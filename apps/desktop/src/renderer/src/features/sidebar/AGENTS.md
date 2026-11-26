@@ -101,13 +101,11 @@ Read [Repository maintenance
 dialog](../../../../../../../docs/guides/renderer-sidebar/maintenance.md#clones-is-combineds-step-4-and-the-offer-runs-it-alone)
 before changing the Clones step or its offer toast.
 
-## The sidebar footer holds the profile's AI switch
+## Sidebar overlays render in place
 
-`.sidebar__footer` carries `AiFeaturesSwitch`. **Do not portal a sidebar
-overlay to `<body>`.**
-Read [Sidebar tree rows and
-selection](../../../../../../../docs/guides/renderer-sidebar/tree-rows.md#the-sidebar-footer-holds-the-profiles-ai-switch)
-before changing the footer or adding a sidebar overlay.
+Render sidebar overlays inside the sidebar. Read [Sidebar tree rows and
+selection](../../../../../../../docs/guides/renderer-sidebar/tree-rows.md#sidebar-overlays-render-in-place)
+before adding a sidebar overlay.
 
 ## Three things pin, and a branch pin follows the branch
 

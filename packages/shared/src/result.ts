@@ -26,7 +26,6 @@ export type PwrGitErrorKind =
   | "repo" // repo/worktree discovery or lifecycle
   | "remote" // fetch/pull/push (network, credentials, non-fast-forward)
   | "rebase" // local history-editing / rebase tool
-  | "agent" // agent-kit / Codex / ACP
   | "profile"
   | "settings"
   | "persistence"

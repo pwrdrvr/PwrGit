@@ -286,7 +286,6 @@ export function LineageGraph({
   selectedCommits,
   focusedCommit,
   revealCommit,
-  tidyOffered,
   onEditHistory,
   onCommitsChange,
   onOpenCommit,
@@ -314,8 +313,6 @@ export function LineageGraph({
   focusedCommit: string | null;
   /** An explicit request to center and flash a commit. */
   revealCommit: { hash: string; requestId: number; tagName?: string; tagKind?: "annotated" | "lightweight" } | null;
-  /** AI history editing is on, so "Edit history from here" offers Tidy. */
-  tidyOffered: boolean;
   /** Select the run from HEAD down to a commit and open the rebase tool on
    *  one operation (the commit menu's "Edit history from here"). */
   onEditHistory: (hashes: string[], op: RebaseOperation) => void;
@@ -1537,7 +1534,6 @@ export function LineageGraph({
           onSwitchBranch={(target) => void switchToBranch(target)}
           onRevealWorktree={onRevealWorktree}
           historyRange={menuHistoryRange}
-          tidyOffered={tidyOffered}
           onEditHistory={onEditHistory}
           onClose={() => setCommitMenu(null)}
         />

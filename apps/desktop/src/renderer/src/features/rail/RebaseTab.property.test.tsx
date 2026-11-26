@@ -2,16 +2,14 @@
 
 /**
  * A model test for RebaseTab's async lifecycle (#541). Random sequences of
- * what an operator does — pick a selection, Check, Apply, Cancel a Tidy, the
+ * what an operator does — pick a selection, Check, Apply, the
  * branch moving under them, closing the tab — run against the real
- * component, while fc.scheduler decides when each Check, Apply and Tidy
+ * component, while fc.scheduler decides when each Check and Apply
  * response arrives. Rules, from the component's own promises:
  *
  * - "Applied locally" shows only for the selection whose Apply resolved.
  *   A late success must not land on a newer selection (or HEAD, or worktree).
  * - Clear (the 900 ms dismiss after Apply) fires only for that selection.
- * - "Codex is reading…" shows only while a Tidy request is outstanding and
- *   not cancelled. Explicit Cancel is terminal: never `requesting` after it.
  * - Once unmounted, nothing asks main for anything and nothing calls Clear.
  */
 
@@ -19,7 +17,7 @@ import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import fc from "fast-check";
 import { afterEach, beforeEach, describe, it, vi } from "vitest";
-import { err, ok, type AgentAvailability, type AgentJobStatus, type AiJobId } from "@pwrgit/shared";
+import { err, ok } from "@pwrgit/shared";
 
 const mocks = vi.hoisted(() => ({
   dispatch: vi.fn(),
@@ -31,7 +29,6 @@ vi.mock("../../lib/pwrgit", () => ({
   windowProfileId: () => "work"
 }));
 
-import { resetAgentStore } from "../agent/agent-store";
 import { RebaseTab } from "./RebaseTab";
 
 const h = (id: string): string => id.repeat(40);
@@ -48,35 +45,11 @@ const SELECTIONS = [
 ];
 const proof = { commitCount: 3, resultCount: 1, steps: 3, tree: "4c1f9e0".padEnd(40, "0"), durationMs: 600 };
 
-function job(jobId: AiJobId): AgentJobStatus {
-  return { jobId, state: "ready", message: "", providerName: "Codex", model: null, modelLabel: null, effort: null };
-}
-const ready: AgentAvailability = {
-  profileId: "work",
-  jobs: { commitMessage: job("commitMessage"), historyEditing: job("historyEditing") }
-};
-const proposalBase = {
-  providerId: "codex",
-  providerName: "Codex",
-  model: "gpt-5.5",
-  saw: {
-    source: "commits" as const,
-    commitCount: 3,
-    files: [],
-    budget: { used: 30, limit: 2000 },
-    styleSubjects: 20
-  },
-  style: { convention: "conventional" as const, matched: 18, sampled: 20 },
-  generatedAt: "2026-09-19T12:00:00.000Z",
-  note: null
-};
-
 type ApplyOutcome = "ok" | "signing_failed" | "git_failed";
 type CheckOutcome = "clean" | "conflict";
-type TidyOutcome = "ok" | "failed";
-type Outcomes = { apply: ApplyOutcome[]; check: CheckOutcome[]; tidy: TidyOutcome[] };
+type Outcomes = { apply: ApplyOutcome[]; check: CheckOutcome[] };
 
-type Props = { worktreeId: string; sourceHead: string; selection: number; op: "reorder" | "tidy" };
+type Props = { worktreeId: string; sourceHead: string; selection: number; op: "reorder" | "squash" };
 const keyOf = (p: Props): string => `${p.worktreeId}|${p.sourceHead}|${p.selection}|${p.op}`;
 
 type World = {
@@ -89,30 +62,19 @@ type World = {
   unmounted: boolean;
   /** Contexts in which an Apply that was issued there resolved ok. */
   appliedIn: Set<number>;
-  /** Tidy requests main has not answered yet, and whether they were cancelled. */
-  tidy: Map<string, { cancelled: boolean }>;
   violations: string[];
-  counts: { apply: number; check: number; tidy: number };
+  counts: { apply: number; check: number };
 };
 type Model = { unmounted: boolean };
 
 let world: World | null = null;
-
-function text(w: World): string {
-  return w.container.textContent ?? "";
-}
-
-function requesting(w: World): boolean {
-  return /Codex is (reading \d+ diffs|revising the plan)…/.test(text(w));
-}
 
 function buttonNamed(w: World, name: string): HTMLButtonElement | undefined {
   return [...w.container.querySelectorAll("button")].find((b) => b.textContent?.trim() === name);
 }
 
 async function settle(): Promise<void> {
-  // Requests the scheduler doesn't hold (graph:log, rebase:draft,
-  // availability) resolve in microtasks; let them and their renders land.
+  // Requests the scheduler doesn't hold (graph:log, rebase:draft) resolve in microtasks; let them and their renders land.
   for (let i = 0; i < 4; i++) await act(async () => undefined);
 }
 
@@ -139,9 +101,6 @@ function assertInvariants(w: World): void {
   if (w.container.querySelector(".rebase-applied") !== null && !w.appliedIn.has(w.context)) {
     throw new Error("shows Applied locally for a selection whose Apply never resolved");
   }
-  if (requesting(w) && ![...w.tidy.values()].some((r) => !r.cancelled)) {
-    throw new Error("shows a Tidy request in flight with none outstanding");
-  }
 }
 
 function route(w: World, outcomes: Outcomes): void {
@@ -153,27 +112,6 @@ function route(w: World, outcomes: Outcomes): void {
         return Promise.resolve(ok({ commits: log }));
       case "rebase:draft":
         return Promise.resolve(ok({ op: req["op"], valid: true, summary: "→ 1 commit", steps: [] }));
-      case "agent:availability":
-        return Promise.resolve(ok(ready));
-      case "agent:cancel": {
-        const pending = w.tidy.get(String(req["requestId"]));
-        if (pending !== undefined) pending.cancelled = true;
-        return Promise.resolve(ok({ cancelled: true }));
-      }
-      case "agent:tidyPlan": {
-        const id = String(req["requestId"]);
-        w.tidy.set(id, { cancelled: false });
-        const outcome = pick(outcomes.tidy, w.counts.tidy++);
-        const members = (req["commits"] as { hash: string }[]).map((c) => c.hash);
-        const value =
-          outcome === "ok"
-            ? ok({ ...proposalBase, requestId: id, program: { commits: [{ members, message: "feat: tidy" }] } })
-            : err({ kind: "agent", code: "failed", message: "Codex failed." });
-        return w.s.schedule(Promise.resolve(value), `tidyPlan ${outcome}`).then((v) => {
-          w.tidy.delete(id);
-          return v;
-        });
-      }
       case "rebase:check": {
         const n = w.counts.check++;
         const outcome = pick(outcomes.check, n);
@@ -235,9 +173,6 @@ class Click implements Command {
     if (el === undefined || el.disabled) return;
     await act(async () => el.click());
     await settle();
-    if (this.name === "Cancel" && requesting(w)) {
-      throw new Error("still requesting after Cancel");
-    }
     assertInvariants(w);
   }
   toString = () => `click ${this.name}`;
@@ -285,7 +220,7 @@ const commands = [
   fc
     .record({
       selection: fc.integer({ min: 0, max: SELECTIONS.length - 1 }),
-      op: fc.constantFrom("reorder" as const, "tidy" as const),
+      op: fc.constantFrom("reorder" as const, "squash" as const),
       worktreeId: fc.constantFrom("wt-1", "wt-2")
     })
     .map((next) => new Show(next, `select ${next.worktreeId} #${next.selection} ${next.op}`)),
@@ -297,8 +232,6 @@ const commands = [
   fc.constant(new Click("Apply", (w) => w.container.querySelector<HTMLButtonElement>(".rebase-apply") ?? undefined)),
   fc.constant(new Click("Apply", (w) => w.container.querySelector<HTMLButtonElement>(".rebase-apply") ?? undefined)),
   fc.constant(new Click("Apply unsigned", (w) => buttonNamed(w, "Apply without signing, this once"))),
-  fc.constant(new Click("Cancel", (w) => buttonNamed(w, "Cancel"))),
-  fc.constant(new Click("Tidy", (w) => buttonNamed(w, "Tidy") ?? buttonNamed(w, "Retry"))),
   fc.constant(new Deliver()),
   fc.constant(new Deliver()),
   fc.constant(new Deliver()),
@@ -309,8 +242,7 @@ const commands = [
 
 const outcomes = fc.record({
   apply: fc.array(fc.constantFrom<ApplyOutcome>("ok", "ok", "signing_failed", "git_failed"), { minLength: 1, maxLength: 4 }),
-  check: fc.array(fc.constantFrom<CheckOutcome>("clean", "clean", "conflict"), { minLength: 1, maxLength: 4 }),
-  tidy: fc.array(fc.constantFrom<TidyOutcome>("ok", "ok", "failed"), { minLength: 1, maxLength: 4 })
+  check: fc.array(fc.constantFrom<CheckOutcome>("clean", "clean", "conflict"), { minLength: 1, maxLength: 4 })
 });
 
 async function runScenario(
@@ -320,7 +252,6 @@ async function runScenario(
 ): Promise<void> {
   mocks.dispatch.mockReset();
   mocks.clear.mockReset();
-  resetAgentStore();
   const container = document.createElement("div");
   document.body.append(container);
   const w: World = {
@@ -331,9 +262,8 @@ async function runScenario(
     context: 0,
     unmounted: false,
     appliedIn: new Set(),
-    tidy: new Map(),
     violations: [],
-    counts: { apply: 0, check: 0, tidy: 0 }
+    counts: { apply: 0, check: 0 }
   };
   world = w;
   route(w, generated);
@@ -380,7 +310,7 @@ async function cleanup(): Promise<void> {
 }
 
 describe("RebaseTab async lifecycle (model)", () => {
-  it("never shows a stale Apply, a cancelled Tidy, or work after unmount", async () => {
+  it("never shows a stale Apply or work after unmount", async () => {
     await fc.assert(
       fc
         .asyncProperty(fc.scheduler(), outcomes, fc.commands(commands, { size: "+1", maxCommands: 30 }), runScenario)
@@ -398,7 +328,7 @@ describe("RebaseTab async lifecycle (shrunk counterexamples)", () => {
       // Each step has at most one response in flight, so the order is fixed.
       await runScenario(
         fc.sample(fc.scheduler(), { numRuns: 1 })[0] as fc.Scheduler,
-        { apply: ["ok"], check: ["clean"], tidy: ["ok"], ...generated },
+        { apply: ["ok"], check: ["clean"], ...generated },
         cmds
       );
     } finally {
@@ -407,12 +337,6 @@ describe("RebaseTab async lifecycle (shrunk counterexamples)", () => {
   };
   const check = new Click("Check", (w) => w.container.querySelector<HTMLButtonElement>(".rebase-check") ?? undefined);
   const apply = new Click("Apply", (w) => w.container.querySelector<HTMLButtonElement>(".rebase-apply") ?? undefined);
-  const cancel = new Click("Cancel", (w) => buttonNamed(w, "Cancel"));
-
-  it("select tidy, Cancel: no longer requesting", async () => {
-    await scenario([new Show({ op: "tidy" }, "select tidy"), cancel]);
-  });
-
   it("Check, Apply, select another range, Apply answers: not Applied there", async () => {
     await scenario([check, new Deliver(), apply, new Show({ selection: 1 }, "select #1"), new Deliver()]);
   });
@@ -423,15 +347,5 @@ describe("RebaseTab async lifecycle (shrunk counterexamples)", () => {
 
   it("Check, Apply, unmount: the late success schedules no Clear", async () => {
     await scenario([check, new Deliver(), apply, new Unmount()]);
-  });
-
-  // Not shrunk: written from the pre-#541 unmount cleanup, which left the
-  // check generation alone. Fails there with "dispatched agent:tidyPlan
-  // after unmount".
-  it("a conflicting Check answered after unmount asks for no revision", async () => {
-    await scenario(
-      [new Show({ op: "tidy" }, "select tidy"), new Deliver(), check, new Unmount(), new Deliver()],
-      { check: ["conflict"] }
-    );
   });
 });

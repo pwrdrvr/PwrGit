@@ -171,7 +171,6 @@ overrides:
   glob@13.0.6: 14.0.2
   minimatch@9.0.9: 11.0.1
   minimatch@10.2.6: 11.0.1
-  '@pwrdrvr/codex-app-server-protocol': 0.164.0
 
 pnpmfileChecksum: sha256-6JrELxlsVW7opQQ+dFd0cjpLErpO1bw1CGiaNCQPMn8=
 
@@ -224,24 +223,6 @@ importers:
       '@octokit/graphql':
         specifier: ^8.2.1
         version: 8.2.2
-      '@pwrdrvr/agent-acp':
-        specifier: ^0.17.0
-        version: 0.17.0(zod@4.6.7)
-      '@pwrdrvr/agent-client':
-        specifier: ^0.8.2
-        version: 0.8.2
-      '@pwrdrvr/agent-core':
-        specifier: ^0.2.0
-        version: 0.2.0
-      '@pwrdrvr/agent-transport':
-        specifier: ^0.1.8
-        version: 0.1.8
-      '@pwrdrvr/codex-app-server-protocol':
-        specifier: 0.164.0
-        version: 0.164.0
-      '@pwrdrvr/codex-discovery':
-        specifier: ^0.4.0
-        version: 0.4.0
       '@pwrgit/mcp-server':
         specifier: workspace:*
         version: link:../../packages/mcp-server
@@ -346,11 +327,6 @@ importers:
   packages/shared: {}
 
 packages:
-
-  '@agentclientprotocol/sdk@1.3.0':
-    resolution: {integrity: sha512-i3h/efaeuMUFAO1HSfo97QZQnnvMd7wWBYtBsdL6UMZg3a78sk3Ffya5Xu7C7tYsXomXoDXJBAzQF2PcFKAhIQ==}
-    peerDependencies:
-      zod: ^3.25.0 || ^4.0.0
 
   '@asamuzakjp/css-color@7.1.3':
     resolution: {integrity: sha512-1t1U8Cm3RBl9vh3RAZhjkPaduzLSvQJRToRrxpGR/eDRW99mOREleuu+mWfiFa795bUzjwht7NgphCKTs2ianQ==}
@@ -1248,25 +1224,6 @@ packages:
     resolution: {integrity: sha512-y+NCIRm2LvY4slUVWvGh1nujJ8RF/hEisIsq2mtUPgdQC4L701bq5hZGMhrpeXjACvwvO9tj5dJqhvM6TP9lbw==}
     engines: {node: '>=20'}
     hasBin: true
-
-  '@pwrdrvr/agent-acp@0.17.0':
-    resolution: {integrity: sha512-8Jf/A8CwC0ggmXwfgTP+HnDsJmP7v6xfK/YXbU7DkjcLNp81IU1qwmo0bGsH68ze9I0LV1MHW0i3bE+xK5Wn4w==}
-
-  '@pwrdrvr/agent-client@0.8.2':
-    resolution: {integrity: sha512-/g6jEVvRr+vH1iUThORoPUGuEXUN9B3iDWxPmsHmEiLbTo+Eni1YT4fgbL4xQsCcSD8N2g+rYZG4GwoPFoa2ww==}
-
-  '@pwrdrvr/agent-core@0.2.0':
-    resolution: {integrity: sha512-zTo7vJGekyZX2h9xWYiZfQvt+qKTPhuciWyCouow1shaKgg0Bn6B8S5lTRvMzxvT7feKOZ7zy/To2Cu6+1i1+A==}
-
-  '@pwrdrvr/agent-transport@0.1.8':
-    resolution: {integrity: sha512-pTXRXU3QdzaFw6nngPaZ9KYBVTW5tIxzsxcO6uyUQuS0Z8WLwZvhDaEyKBv4x5EQx4fsPoVQsRcMuu3blmnsNA==}
-
-  '@pwrdrvr/codex-app-server-protocol@0.164.0':
-    resolution: {integrity: sha512-5N21R7AtmB5xsJjqDuKN9vt5uYCc3nWXV/Mn4k7DqJ/xpQ5dj0LB6PKKKExaXB+wRb3faXiBCZfsFAWth4hg6g==}
-    engines: {node: '>=20'}
-
-  '@pwrdrvr/codex-discovery@0.4.0':
-    resolution: {integrity: sha512-5QDeGsSTN6Oo+X2eIA8qOf7anWTIcnNJJzyfD3qFoFZLGS0RvIsMbzK1UwiVZszO3zT9DH6U4umbz2KrIyBv7A==}
 
   '@rolldown/pluginutils@1.0.0-rc.3':
     resolution: {integrity: sha512-eybk3TjzzzV97Dlj5c+XrBFW57eTNhzod66y9HrBlzJ6NsCrWCp/2kaPS3K9wJmurBC0Tdw4yPjXKZqlznim3Q==}
@@ -3459,10 +3416,6 @@ packages:
 
 snapshots:
 
-  '@agentclientprotocol/sdk@1.3.0(zod@4.6.7)':
-    dependencies:
-      zod: 4.6.7
-
   '@asamuzakjp/css-color@7.1.3':
     dependencies:
       '@csstools/css-calc': 3.4.3(@csstools/css-parser-algorithms@4.0.2(@csstools/css-tokenizer@4.0.2))(@csstools/css-tokenizer@4.0.2)
@@ -4176,35 +4129,6 @@ snapshots:
   '@playwright/test@1.65.1':
     dependencies:
       playwright: 1.65.1
-
-  '@pwrdrvr/agent-acp@0.17.0(zod@4.6.7)':
-    dependencies:
-      '@agentclientprotocol/sdk': 1.3.0(zod@4.6.7)
-      '@pwrdrvr/agent-core': 0.2.0
-      '@pwrdrvr/agent-transport': 0.1.8
-    transitivePeerDependencies:
-      - zod
-
-  '@pwrdrvr/agent-client@0.8.2':
-    dependencies:
-      '@pwrdrvr/agent-core': 0.2.0
-      '@pwrdrvr/agent-transport': 0.1.8
-      '@pwrdrvr/codex-app-server-protocol': 0.164.0
-      '@pwrdrvr/codex-discovery': 0.4.0
-      zod: 4.6.7
-
-  '@pwrdrvr/agent-core@0.2.0': {}
-
-  '@pwrdrvr/agent-transport@0.1.8':
-    dependencies:
-      '@pwrdrvr/agent-core': 0.2.0
-
-  '@pwrdrvr/codex-app-server-protocol@0.164.0': {}
-
-  '@pwrdrvr/codex-discovery@0.4.0':
-    dependencies:
-      '@pwrdrvr/agent-core': 0.2.0
-      '@pwrdrvr/agent-transport': 0.1.8
 
   '@rolldown/pluginutils@1.0.0-rc.3': {}
 

@@ -121,52 +121,8 @@ render one answer from `git-settings-view.ts`.
   runs.** `offeredRelease` offers only a build newer than the one in use, so
   Latest never offers an older promoted build over a prerelease build in use.
 
-## AI Providers and AI Features are per profile, in a window that is not
-
-`AiProvidersSettings.tsx` has one card per provider (Codex, then ACP agents).
-`AiFeaturesSettings.tsx` has one card per section. Both read
-`AiProvidersContext`, which sits above the nav **and** the panes. Thus the nav
-dot and the card chip render one `describeAiProviders` answer
-(`ai-provider-status.ts`). PwrAgnt computed them separately and shipped a
-green dot over a broken card.
-
-- **The window picks a profile; the panes show it.** `SettingsWindow`
-  resolves: deep link `profile`, else the reader's pick, else the active
-  profile, else the first. The context is keyed by that id and drops every
-  answer when it changes. The picker is in each pane head, so nobody edits
-  another profile unawares.
-- **Settings probes on demand.** `request()` runs when an AI pane mounts or
-  the AI Providers group unfolds. Opening on General starts nothing. Main
-  serves from cache; Re-check and Refresh models force a probe.
-- **The launch notice probes Codex only when AI is enabled for its profile.**
-  `CodexVersionNotice` shares Settings' discovery service. Its version warning
-  is advisory; older models stay usable. Command and installer help live in
-  the notice and the AI Providers Codex card. AI Features shows one linking
-  line above the pickers, only while AI is on (every job runs on Codex).
-  Model-list keys include the binary's version, so an in-place upgrade
-  reloads the picker.
-- **Model probes start the agent.** `aiProviders:acpModels` starts the agent,
-  so only agents a job routes to are probed automatically
-  (`useInUseAcpModelProbes`). Others are probed only on "Check session".
-- **Show what runs, not what is stored.** The provider select and "Default
-  for" rows use `effectiveJobProvider`. A job that refuses ACP
-  (`AI_JOBS[job].acp === false`) offers only Codex and says why. A stored model
-  the backend does not list is cleared once, only against a loaded list (an
-  empty list can be a failed read).
-- **`update` returns the failure** (`null` on success), like `writeHost` in
-  Forges, so each field shows its own error.
-- **AI is off until someone turns it on, per profile.** The switch is at the
-  sidebar bottom (`sidebar/AiFeaturesSwitch.tsx`) and is AI Features' first
-  card. Both use `resolveAiToggleAction` (`ai-enablement.ts`), so
-  `AiConsentDialog` shows on the first switch-on only. Main refuses `enabled`
-  without `consentAcceptedAt`, so skipping the dialog cannot enable AI. Only
-  the sidebar checks readiness, on click; probing on mount would start `codex`
-  in every window at launch. **A feature that sends more data must update
-  `AiConsentDialog` before it ships**, because the dialog states what leaves
-  the machine.
-
-Deep links: `settings:open {page, sub?, profileId?}` opens or focuses the
+Deep links: `settings:open {page, sub?}` opens or focuses the
 window. A new window boots on `#settings?page=…` (`parseSettingsRouteHash`);
 an open one receives `settings:navigate`. Both are checked against
 `SETTINGS_PAGE_SUBS` in `@pwrgit/shared`, which also decides which nav rows
-expand. Main-side contract: `src/main/ai/AGENTS.md`.
+expand.

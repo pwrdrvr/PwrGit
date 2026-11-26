@@ -143,7 +143,7 @@ function BuildRows(props: {
   const { managed } = props;
   const running = managedInUse(managed);
   return (
-    <ul className="settings-ai-installs" aria-label="Downloaded builds">
+    <ul className="settings-git-installs" aria-label="Downloaded builds">
       {managed.builds.map((build) => {
         const using = running?.id === build.id;
         const candidate = props.runtime?.candidates.find((row) => row.managedId === build.id);
@@ -154,9 +154,9 @@ function BuildRows(props: {
           build.id === managed.previous ? "Previous, kept for rollback" : null
         ].filter((part) => part !== null);
         return (
-          <li key={build.id} className={`settings-ai-install${using ? " is-using" : ""}`}>
-            <span className="settings-ai-install__body">
-              <span className="settings-ai-install__path">{build.version}</span>
+          <li key={build.id} className={`settings-git-install${using ? " is-using" : ""}`}>
+            <span className="settings-git-install__body">
+              <span className="settings-git-install__path">{build.version}</span>
               <MetaParts parts={parts} />
             </span>
             {using ? (

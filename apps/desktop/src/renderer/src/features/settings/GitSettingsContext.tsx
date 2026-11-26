@@ -1,6 +1,5 @@
 // Settings › Git's two reads, held above the nav and the pane so a nav dot
-// and the card it points at are one answer (as `AiProvidersContext` does for
-// AI Providers).
+// and the card it points at are one answer.
 //
 // - `git:runtimeStatus` probes every Git it lists (a few short execs each),
 //   so it runs on demand: when the Git pane mounts or the Git group unfolds.

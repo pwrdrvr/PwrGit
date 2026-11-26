@@ -24,10 +24,6 @@ import type { NewRootChoice, RepoSearchProgress, RepoSearchResult, SuggestedRoot
 import type { ManagedGitProgress, ManagedGitStatus, ManagedGitTrack } from "./managed-git";
 import { STALE_AGE_DAYS, type WorktreeFinishedAfterDays } from "./prunable";
 import type {
-  AgentChoice,
-  AgentMessageDraft,
-  AgentTidyProposal,
-  AgentTidyRevision,
   BranchRef,
   RetrackMove,
   RetrackReview,
@@ -146,18 +142,6 @@ import type {
   McpAgentRolePatch,
   McpAgentSession
 } from "./mcp-policy";
-import type {
-  AcpAgentDiscovery,
-  AcpAgentModelList,
-  AgentAvailability,
-  AiProviderSettingsPatch,
-  AiProviderSettingsSnapshot,
-  BuiltInAcpAgentId,
-  CodexAuthProfileList,
-  CodexLoginResult,
-  CodexModelList,
-  CodexProviderDiscovery
-} from "./ai-providers";
 import type { SettingsRoute } from "./settings-pages";
 import type {
   HiddenRepo,
@@ -1172,7 +1156,7 @@ export interface Commands {
   };
   /**
    * Take a repository out of one profile's view without touching disk. The
-   * sidebar, lenses, counts, bulk sync, maintenance, ⌘K and the agent catalog
+   * sidebar, lenses, counts, bulk sync, maintenance and ⌘K
    * all leave it out from then on; a rescan still finds it, and still hides
    * it. Keyed by the repository's path, so the hide outlives its repo row.
    */
@@ -2439,7 +2423,7 @@ export interface Commands {
       worktreeId: string;
       commits: RebaseCommitRef[];
       op: RebaseOperation;
-      /** Required for `tidy`; for `squash` it carries the edited message. */
+      /** For Squash, carries the edited commit message. */
       program?: HistoryEditProgram;
     };
     res: RebasePlan;
@@ -2478,47 +2462,6 @@ export interface Commands {
       unsigned?: boolean;
     };
     res: null;
-  };
-
-  // Local agents author text and history proposals from data PwrGit sends
-  // them; they get no tools, no repo path, and no Git primitive. Every Tidy
-  // proposal still goes through rebase:check -> approvalToken -> rebase:apply,
-  // the sole route to a Git mutation. Which agent runs, and whether any may,
-  // is the AI provider settings' answer (`aiProviders:*`); these commands ask
-  // it and never discover on their own.
-  /** Each job's state for the window's profile. `refresh` re-probes. */
-  "agent:availability": {
-    req: { profileId: ProfileId; refresh?: boolean };
-    res: AgentAvailability;
-  };
-  /** A commit message for selected commits (Squash) or for staged changes
-   *  (the commit box). */
-  "agent:draftMessage": {
-    req: {
-      requestId: string;
-      worktreeId: string;
-      source:
-        | { kind: "commits"; commits: RebaseCommitRef[] }
-        | { kind: "staged" };
-      choice?: AgentChoice;
-    };
-    res: AgentMessageDraft;
-  };
-  /** A proposed history for the selected commits, or a revision of one whose
-   *  isolated check failed. */
-  "agent:tidyPlan": {
-    req: {
-      requestId: string;
-      worktreeId: string;
-      commits: RebaseCommitRef[];
-      revision?: AgentTidyRevision;
-      choice?: AgentChoice;
-    };
-    res: AgentTidyProposal;
-  };
-  "agent:cancel": {
-    req: { requestId: string };
-    res: { cancelled: boolean };
   };
 
   // Changes (U11 / U12)
@@ -2790,47 +2733,6 @@ export interface Commands {
    *  page. */
   "settings:open": { req: SettingsRoute; res: null };
 
-  // AI providers (Settings → AI Providers / AI Features) — the agents PwrGit
-  // hands work to, per profile. Every call names its profile because the
-  // Settings window is shared by all of them. Discovery answers from cache
-  // unless `force`; model lists answer from cache unless `refresh`.
-  "aiProviders:read": {
-    req: { profileId: ProfileId };
-    res: AiProviderSettingsSnapshot;
-  };
-  "aiProviders:update": {
-    req: { profileId: ProfileId; patch: AiProviderSettingsPatch };
-    res: AiProviderSettingsSnapshot;
-  };
-  "aiProviders:discoverCodex": {
-    req: { profileId: ProfileId; force?: boolean };
-    res: CodexProviderDiscovery;
-  };
-  "aiProviders:discoverAcp": {
-    req: { profileId: ProfileId; force?: boolean };
-    res: AcpAgentDiscovery;
-  };
-  "aiProviders:codexModels": {
-    req: { profileId: ProfileId; refresh?: boolean };
-    res: CodexModelList;
-  };
-  /** Spawns the agent on a cache miss — only the AI pages ask, and only for
-   *  agents a job is routed to or the operator refreshed. */
-  "aiProviders:acpModels": {
-    req: { profileId: ProfileId; agentId: BuiltInAcpAgentId; refresh?: boolean };
-    res: AcpAgentModelList;
-  };
-  "aiProviders:codexAuthProfiles": {
-    req: { profileId: ProfileId };
-    res: CodexAuthProfileList;
-  };
-  /** Start `codex login` for the auth profile this PwrGit profile resolves to;
-   *  the OAuth page opens in the default browser. */
-  "aiProviders:codexLogin": {
-    req: { profileId: ProfileId };
-    res: CodexLoginResult;
-  };
-
   // Desktop auto-update (Settings → Updates)
   "app:readIdentity": { req: void; res: AppIdentity };
   "app:readProcessIds": { req: void; res: AppProcessIds };
@@ -3005,8 +2907,6 @@ export interface Events {
   /** Sessions, roles, or repository boundaries changed in Settings. */
   "localAgents:changed": McpAgentPolicySnapshot;
   "agentAccess:changed": AgentAccessSnapshot;
-  /** One profile's AI provider settings changed. */
-  "aiProviders:changed": AiProviderSettingsSnapshot;
   /** Move an already-open Settings window to a page (see `settings:open`). */
   "settings:navigate": SettingsRoute;
   /** Resolved color theme changed, including a live OS change in System mode. */

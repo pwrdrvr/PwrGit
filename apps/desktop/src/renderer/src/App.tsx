@@ -26,7 +26,6 @@ import {
   rescanFoldersToast
 } from "./features/sidebar/rescan-folders";
 import { diagnosticsCopiedToast, diagnosticsRepository } from "./lib/diagnosticsCopy";
-import { useAgentOffered } from "./features/agent/agent-store";
 import { ChangeRequestRail } from "./features/change-request/ChangeRequestRail";
 import { ChangeRequestView } from "./features/change-request/ChangeRequestView";
 import {
@@ -451,7 +450,6 @@ export function App() {
     setRebaseAction(op);
     setRailCollapsed(false);
   }, []);
-  const startTidy = useCallback(() => startRebase("tidy"), [startRebase]);
   // "Edit history from here" on a commit: the run from HEAD down to it
   // replaces any selection, and the rail opens on the chosen operation.
   const editHistory = useCallback(
@@ -461,9 +459,6 @@ export function App() {
     },
     [startRebase]
   );
-  // Tidy is an agent action from the start, so with AI off for this profile
-  // the selection bar does not offer it. Squash and Reorder always stay.
-  const tidyOffered = useAgentOffered("historyEditing");
 
   // ⌘K / ⌘F (and Ctrl variants) open the repo switcher; Escape closes it.
   // ⌘F is the muscle-memory "find" — nothing else claims find yet; if an
@@ -1339,7 +1334,6 @@ export function App() {
                   selectedCommits={selectedCommits}
                   focusedCommit={commitFocus?.hash ?? null}
                   revealCommit={commitReveal}
-                  tidyOffered={tidyOffered}
                   onEditHistory={editHistory}
                   onCommitsChange={setSearchableCommits}
                   onOpenCommit={(hash, subject) => {
@@ -1372,7 +1366,6 @@ export function App() {
                     count={selectedCommits.size}
                     onSquash={() => startRebase("squash")}
                     onReorder={() => startRebase("reorder")}
-                    {...(tidyOffered ? { onTidy: startTidy } : {})}
                     onOpenRebaseTool={() =>
                       startRebase(rebaseAction ?? "squash")
                     }

@@ -80,7 +80,6 @@ runtime constraints.
 | Desktop shell | Electron + TypeScript + React + electron-vite | `apps/desktop/` |
 | Git runtime | Dugite with bundled Git and Git LFS (plus Git Credential Manager on Windows); an installed Git can be selected in Settings | `apps/desktop/src/main/git/` |
 | Forge integrations | GitHub and GitLab providers through `gh` and `glab` | `apps/desktop/src/main/forge/` |
-| AI features | Opt-in, per profile; drives the operator's own Codex CLI (ACP agents are discovered but no job runs on them yet) | `apps/desktop/src/main/ai/` |
 | Local state | SQLite through `better-sqlite3` | `apps/desktop/src/main/persistence/` |
 | Shared contracts | Typed commands, events, domain types, and result envelopes | `packages/shared/` |
 | Local agent access | MCP over OAuth-protected loopback HTTP or standalone stdio, subscribable status resources, optional loopback WebSocket | `packages/mcp-server/` |

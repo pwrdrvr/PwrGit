@@ -1,7 +1,5 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type {
-  AgentChoice,
-  AgentTidyProposal,
   HistoryEditProgram,
   RebaseCommitRef,
   RebaseOperation,
@@ -10,40 +8,20 @@ import type {
   RebaseSnagDetail
 } from "@pwrgit/shared";
 import { dispatch } from "../../lib/pwrgit";
-import { AgentGlyph } from "../../lib/AgentGlyph";
 import { RebaseGlyph } from "../../lib/RebaseGlyph";
-import { hoverTooltip, useViewportTooltip } from "../../lib/useViewportTooltip";
-import { AgentChip } from "../agent/AgentChip";
-import { AgentSaw } from "../agent/AgentSaw";
-import { DraftFooter } from "../agent/DraftFooter";
-import { openAiSettings, useAgent, type AgentView } from "../agent/agent-store";
-import { useMessageDraft } from "../agent/useMessageDraft";
 import {
-  bodyOf,
   joinedSubjects,
   ledgerRows,
-  NO_EDITS,
-  planDiff,
-  programShapeKey,
-  resultCount,
   short,
   squashProgram,
-  subjectOf,
-  tidyGroups,
-  tidyProgram,
   type LedgerCheck,
-  type LedgerRow,
-  type TidyEdits,
-  type TidyGroup
+  type LedgerRow
 } from "./history-edit";
 import { CheckGlyph } from "../../lib/CheckGlyph";
 import { CloseGlyph } from "../../lib/CloseGlyph";
 import { rebaseIdentityLine } from "../identity/identity-view";
 import { useCommitIdentity } from "../identity/useCommitIdentity";
 import { DotGlyph } from "../../lib/DotGlyph";
-
-/** Matches the main process: a failed plan is revised at most twice. */
-const MAX_REVISIONS = 2;
 
 async function orderedSelection(
   worktreeId: string,
@@ -74,20 +52,18 @@ async function orderedSelection(
 
 const STEP_CLASS: Record<string, string> = {
   pick: "rebase-op--pick",
-  squash: "rebase-op--squash",
-  fixup: "rebase-op--fixup"
+  squash: "rebase-op--squash"
 };
 
 const OP_LABEL: Record<RebaseOperation, string> = {
   squash: "Squash",
-  reorder: "Reorder",
-  tidy: "Tidy"
+  reorder: "Reorder"
 };
 
 type CheckState =
   | { kind: "idle" }
   | { kind: "checking" }
-  | { kind: "clean"; approvalToken: string; proof: RebaseProof; shape: string }
+  | { kind: "clean"; approvalToken: string; proof: RebaseProof }
   | {
       kind: "snag";
       code: string;
@@ -97,18 +73,6 @@ type CheckState =
        *  approval, for exactly one explicit unsigned apply. */
       unsignedRetry?: { approvalToken: string };
     };
-
-type TidyState =
-  | { kind: "idle" }
-  | { kind: "requesting"; revising: boolean }
-  | {
-      kind: "ready";
-      proposal: AgentTidyProposal;
-      revisions: number;
-      /** The plan this one replaced, and why the check refused it. */
-      revisedFrom: { program: HistoryEditProgram; detail: RebaseSnagDetail } | null;
-    }
-  | { kind: "failed"; code: string; message: string; detail?: string; afterMs: number };
 
 export function ProofLedger({ rows }: { rows: LedgerRow[] }) {
   return (
@@ -176,7 +140,7 @@ export function CheckResult({
               {" "}
               <button
                 type="button"
-                className="agent-link"
+                className="rebase-tree-link"
                 aria-expanded={showFiles}
                 onClick={() => setShowFiles((v) => !v)}
               >
@@ -213,128 +177,6 @@ export function CheckResult({
   );
 }
 
-function GroupMessage({
-  group,
-  disabled,
-  onEdit
-}: {
-  group: TidyGroup;
-  disabled: boolean;
-  onEdit: (message: string) => void;
-}) {
-  const [editing, setEditing] = useState<string | null>(null);
-  const subject = subjectOf(group.message, "");
-  const body = bodyOf(group.message);
-  if (editing !== null) {
-    return (
-      <div className="tidy-group__edit">
-        <textarea
-          className="tidy-group__input"
-          aria-label="Commit message"
-          value={editing}
-          autoFocus
-          onChange={(e) => setEditing(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === "Escape") setEditing(null);
-          }}
-        />
-        <div className="tidy-group__edit-actions">
-          <button
-            type="button"
-            className="agent-link"
-            disabled={editing.trim() === ""}
-            onClick={() => {
-              onEdit(editing);
-              setEditing(null);
-            }}
-          >
-            Save
-          </button>
-          <button type="button" className="agent-link agent-link--quiet" onClick={() => setEditing(null)}>
-            Cancel
-          </button>
-        </div>
-      </div>
-    );
-  }
-  return (
-    <div className="tidy-group__head">
-      <div className="tidy-group__subject">
-        <span>{subject}</span>
-        {!disabled && (
-          <button
-            type="button"
-            className="agent-link agent-link--quiet"
-            onClick={() => setEditing(group.message)}
-          >
-            Edit
-          </button>
-        )}
-      </div>
-      {body !== "" && <div className="tidy-group__body">{body}</div>}
-    </div>
-  );
-}
-
-export function TidyGroups({
-  groups,
-  locked,
-  onToggle,
-  onEditMessage
-}: {
-  groups: TidyGroup[];
-  locked: boolean;
-  onToggle: (hash: string) => void;
-  onEditMessage: (index: number, message: string) => void;
-}) {
-  const tip = useViewportTooltip();
-  return (
-    <div className="tidy-groups">
-      {groups.map((group) => (
-        <div key={group.index} className="tidy-group" data-lane={group.index % 8}>
-          <GroupMessage
-            group={group}
-            disabled={locked}
-            onEdit={(message) => onEditMessage(group.index, message)}
-          />
-          {group.rows.map((row) => (
-            <div
-              key={row.hash}
-              className={`tidy-member${row.separated ? " tidy-member--separate" : ""}`}
-            >
-              <span className={`tidy-member__role tidy-member__role--${row.role}`}>{row.role}</span>
-              <span className="tidy-member__hash">{short(row.hash)}</span>
-              <span className="tidy-member__subject">{row.subject}</span>
-              <span className="tidy-member__tools">
-                {row.moved && <span className="tidy-member__moved">moved</span>}
-                {row.canToggle && !locked && (
-                  <button
-                    type="button"
-                    className="tidy-member__toggle"
-                    {...hoverTooltip(
-                      tip,
-                      row.separated
-                        ? "Fold it back into this group's commit. Resets the check."
-                        : "Make it its own commit, with its original message. Resets the check."
-                    )}
-                    onClick={() => {
-                      tip.hide();
-                      onToggle(row.hash);
-                    }}
-                  >
-                    {row.separated ? "Fold back" : "Keep separate"}
-                  </button>
-                )}
-              </span>
-            </div>
-          ))}
-        </div>
-      ))}
-      {tip.tooltipNode}
-    </div>
-  );
-}
-
 export function RebaseTab({
   worktreeId,
   sourceHead,
@@ -350,8 +192,8 @@ export function RebaseTab({
   branch?: string | null;
   onClear: () => void;
 }) {
-  const agent = useAgent("historyEditing");
   const [plan, setPlan] = useState<RebasePlan | null>(null);
+  const [message, setMessage] = useState("");
   const [commits, setCommits] = useState<RebaseCommitRef[]>([]);
   const [check, setCheck] = useState<CheckState>({ kind: "idle" });
   const [applying, setApplying] = useState(false);
@@ -359,54 +201,11 @@ export function RebaseTab({
   // Apply rewrites every commit with the profile as committer, signed when Git
   // is set to sign: both are said beside the button before anyone presses it.
   const identity = useCommitIdentity(worktreeId, sourceHead);
-  const [tidy, setTidy] = useState<TidyState>({ kind: "idle" });
-  const [edits, setEdits] = useState<TidyEdits>(NO_EDITS);
-  /** The chip's override, for this request only; a new selection drops it. */
-  const [choice, setChoice] = useState<AgentChoice>({});
-  const choiceRef = useRef(choice);
-  choiceRef.current = choice;
   const checkGeneration = useRef(0);
   // A new selection, a later Apply, or unmount invalidates both the response
   // and its delayed Clear. An old completion must never unlock a newer Apply.
   const applyAttempt = useRef(0);
-  const tidyRequest = useRef<{ id: string; startedAt: number } | null>(null);
   const clearTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  // Read after an await: the revision that triggered a re-check has landed by
-  // the time its result does, and a closure would still hold the old state.
-  const tidyRef = useRef(tidy);
-  tidyRef.current = tidy;
-
-  const squash = useMessageDraft({
-    worktreeId,
-    source:
-      op === "squash" && commits.length > 1 ? { kind: "commits", commits } : null,
-    fallback: joinedSubjects(commits),
-    autoStart: true,
-    ready: agent.ready,
-    choice
-  });
-
-  const cancelTidyRequest = (): void => {
-    const active = tidyRequest.current;
-    if (active === null) return;
-    tidyRequest.current = null;
-    void dispatch("agent:cancel", { requestId: active.id });
-  };
-
-  const cancelTidy = (): void => {
-    const active = tidyRequest.current;
-    if (active === null) return;
-    cancelTidyRequest();
-    // Explicit cancel is terminal and retryable. Lifecycle invalidation uses
-    // cancelTidyRequest alone so it cannot resurrect an abandoned selection.
-    setTidy({
-      kind: "failed",
-      code: "cancelled",
-      message: "Cancelled. Nothing changed.",
-      afterMs: Date.now() - active.startedAt
-    });
-  };
-
   const invalidateApply = (): void => {
     applyAttempt.current += 1;
     if (clearTimer.current !== null) {
@@ -417,7 +216,6 @@ export function RebaseTab({
 
   const key = selectedHashes.join(",");
   useEffect(() => {
-    cancelTidyRequest();
     invalidateApply();
     checkGeneration.current += 1;
     setCheck({ kind: "idle" });
@@ -425,9 +223,7 @@ export function RebaseTab({
     setApplied(false);
     setPlan(null);
     setCommits([]);
-    setTidy({ kind: "idle" });
-    setEdits(NO_EDITS);
-    setChoice({});
+    setMessage("");
     if (worktreeId === null || op === null || selectedHashes.length === 0) {
       return;
     }
@@ -435,6 +231,7 @@ export function RebaseTab({
     void orderedSelection(worktreeId, selectedHashes).then((ordered) => {
       if (!active) return;
       setCommits(ordered);
+      if (op === "squash") setMessage(joinedSubjects(ordered));
       void dispatch("rebase:draft", { worktreeId, commits: ordered, op }).then(
         (r) => {
           if (active && r.ok) setPlan(r.value);
@@ -448,35 +245,20 @@ export function RebaseTab({
 
   useEffect(
     () => () => {
-      cancelTidyRequest();
       checkGeneration.current += 1;
       invalidateApply();
     },
     []
   );
 
-  const program: HistoryEditProgram | null = useMemo(() => {
-    if (op === "squash") {
-      return squash.text.trim() === "" ? null : squashProgram(commits, squash.text);
-    }
-    if (op === "tidy") {
-      return tidy.kind === "ready" ? tidyProgram(tidy.proposal.program, edits) : null;
-    }
-    return null;
-  }, [op, commits, squash.text, tidy, edits]);
-  const shape = program === null ? "" : programShapeKey(program);
+  const program: HistoryEditProgram | null =
+    op === "squash" && message.trim() !== "" ? squashProgram(commits, message) : null;
 
-  // Keep separate changes what the check proved; a message edit does not.
-  useEffect(() => {
-    if (check.kind === "clean" && check.shape !== shape) {
-      checkGeneration.current += 1;
-      setCheck({ kind: "idle" });
-    }
-  }, [shape, check]);
+  const hasRequiredMessage = op !== "squash" || program !== null;
 
-  const runCheck = async (withProgram: HistoryEditProgram | null = program): Promise<void> => {
+  const runCheck = async (): Promise<void> => {
     if (worktreeId === null || op === null || plan === null || !plan.valid) return;
-    if (op !== "reorder" && withProgram === null) return;
+    if (!hasRequiredMessage) return;
     checkGeneration.current += 1;
     const generation = checkGeneration.current;
     setCheck({ kind: "checking" });
@@ -484,7 +266,7 @@ export function RebaseTab({
       worktreeId,
       commits,
       op,
-      ...(withProgram !== null ? { program: withProgram } : {})
+      ...(program !== null ? { program } : {})
     });
     if (generation !== checkGeneration.current) return;
     if (!result.ok) {
@@ -496,8 +278,7 @@ export function RebaseTab({
       setCheck({
         kind: "clean",
         approvalToken: value.approvalToken,
-        proof: value.proof,
-        shape: withProgram === null ? "" : programShapeKey(withProgram)
+        proof: value.proof
       });
       return;
     }
@@ -507,82 +288,7 @@ export function RebaseTab({
       message: value.message,
       ...(value.detail !== undefined ? { detail: value.detail } : {})
     });
-    // A conflict is information the agent can use: ask for a revision once
-    // per failure, up to the limit, and re-check on arrival.
-    const current = tidyRef.current;
-    if (
-      op === "tidy" &&
-      value.detail?.kind === "conflict" &&
-      withProgram !== null &&
-      current.kind === "ready" &&
-      current.revisions < MAX_REVISIONS
-    ) {
-      requestTidy({ program: withProgram, detail: value.detail, revisions: current.revisions });
-    }
   };
-
-  const requestTidy = (
-    revision?: { program: HistoryEditProgram; detail: RebaseSnagDetail; revisions: number }
-  ): void => {
-    if (worktreeId === null || commits.length < 2) return;
-    cancelTidyRequest();
-    const id = crypto.randomUUID();
-    const startedAt = Date.now();
-    tidyRequest.current = { id, startedAt };
-    setTidy({ kind: "requesting", revising: revision !== undefined });
-    const override = choiceRef.current;
-    void dispatch("agent:tidyPlan", {
-      requestId: id,
-      worktreeId,
-      commits,
-      ...(revision !== undefined
-        ? {
-            revision: {
-              program: revision.program,
-              detail: revision.detail,
-              attempt: revision.revisions + 1
-            }
-          }
-        : {}),
-      ...(override.model !== undefined || override.effort !== undefined
-        ? { choice: override }
-        : {})
-    }).then((result) => {
-      if (tidyRequest.current?.id !== id) return;
-      tidyRequest.current = null;
-      if (!result.ok) {
-        setTidy({
-          kind: "failed",
-          code: result.error.code,
-          message: result.error.message,
-          ...(result.error.detail !== undefined ? { detail: result.error.detail } : {}),
-          afterMs: Date.now() - startedAt
-        });
-        return;
-      }
-      setEdits(NO_EDITS);
-      setTidy({
-        kind: "ready",
-        proposal: result.value,
-        revisions: revision === undefined ? 0 : revision.revisions + 1,
-        revisedFrom:
-          revision === undefined ? null : { program: revision.program, detail: revision.detail }
-      });
-      if (revision !== undefined) {
-        void runCheck(tidyProgram(result.value.program, NO_EDITS));
-      } else {
-        checkGeneration.current += 1;
-        setCheck({ kind: "idle" });
-      }
-    });
-  };
-
-  // Tidy is an agent action from the start: ask as soon as the selection is
-  // known good and an agent is ready.
-  useEffect(() => {
-    if (op !== "tidy" || plan?.valid !== true || !agent.ready || tidy.kind !== "idle") return;
-    requestTidy();
-  }, [op, plan?.valid, agent.ready, key]);
 
   const apply = async (unsigned = false): Promise<void> => {
     if (worktreeId === null || op === null || plan === null || !plan.valid || applying || applied) return;
@@ -593,7 +299,7 @@ export function RebaseTab({
           ? check.unsignedRetry?.approvalToken
           : undefined;
     if (approvalToken === undefined) return;
-    if (op !== "reorder" && program === null) return;
+    if (!hasRequiredMessage) return;
     const attempt = ++applyAttempt.current;
     setApplying(true);
     const result = await dispatch("rebase:apply", {
@@ -627,24 +333,11 @@ export function RebaseTab({
     }
   };
 
-  const discard = (): void => {
-    cancelTidyRequest();
-    onClear();
-  };
-
-  const resultCommits =
-    op === "squash"
-      ? 1
-      : op === "reorder"
-        ? commits.length
-        : program !== null
-          ? resultCount(program)
-          : null;
-  // "8 → 3" once there is a plan to count; "8 commits" until then.
+  const resultCommits = op === "squash" ? 1 : commits.length;
   const headSub =
     op === null || commits.length === 0
       ? "Isolated check · hooks off, nothing signed"
-      : `${resultCommits === null ? `${commits.length} commits` : `${commits.length} → ${resultCommits}`}${branch !== null && branch !== "" ? ` · ${branch}` : ""}`;
+      : `${commits.length} → ${resultCommits}${branch !== null && branch !== "" ? ` · ${branch}` : ""}`;
   const ledgerCheck: LedgerCheck =
     check.kind === "clean"
       ? { kind: "clean", proof: check.proof }
@@ -653,284 +346,155 @@ export function RebaseTab({
           ? { kind: "snag", detail: check.detail }
           : { kind: "snag" }
         : check;
-  const revised = tidy.kind === "ready" && tidy.revisedFrom !== null;
-  const lastModel =
-    op === "tidy" && tidy.kind === "ready"
-      ? tidy.proposal.model
-      : (squash.draft?.model ?? undefined);
-  const needsProgram = op === "squash" || op === "tidy";
   const canCheck =
     plan?.valid === true &&
-    (!needsProgram || program !== null) &&
+    hasRequiredMessage &&
     check.kind !== "checking" &&
     check.kind !== "clean" &&
     !applying &&
-    !applied &&
-    !(op === "tidy" && tidy.kind === "requesting");
-  const treeChanged = check.kind === "snag" && check.detail?.kind === "tree_changed";
+    !applied;
 
   return (
     <div className="rebase-tab">
       <div className="rebase-head">
         <span className="rebase-head__icon">
-          {op === "tidy" ? <AgentGlyph size={15} /> : <RebaseGlyph />}
+          <RebaseGlyph />
         </span>
         <div className="rebase-head__text">
           <div className="rebase-head__title">{op === null ? "Rebase tool" : OP_LABEL[op]}</div>
           <div className="rebase-head__sub">{headSub}</div>
         </div>
-        {op !== null && (
-          <AgentChip
-            jobId="historyEditing"
-            choice={choice}
-            onChoice={setChoice}
-            {...(lastModel !== undefined ? { lastModel } : {})}
-          />
-        )}
       </div>
 
       {op === null || plan === null ? (
         <div className="rebase-empty">
           Right-click the oldest commit you want to change in the graph and
-          choose <span className="rebase-accent">Squash</span>,{" "}
-          <span className="rebase-accent">Reorder</span> or{" "}
-          <span className="rebase-accent">
-            <AgentGlyph size={11} /> Tidy
-          </span>{" "}
-          under “Edit history from here”. Every commit from there up to HEAD
+          choose <span className="rebase-accent">Squash</span> or{" "}
+          <span className="rebase-accent">Reorder</span>
+          {" "}under “Edit history from here”. Every commit from there up to HEAD
           is included. You can inspect the exact plan and check it safely
           before changing the worktree.
         </div>
       ) : (
         <>
-          {op !== "tidy" && (
-            <>
-              <div className="rebase-section">
-                {OP_LABEL[op]} · {commits.length} commits
+          <div className="rebase-section">
+            {OP_LABEL[op]} · {commits.length} commits
+          </div>
+          <div className="rebase-commits">
+            {commits.map((c) => (
+              <div key={c.hash} className="rebase-commit">
+                <span className="rebase-commit__dot" />
+                <span className="rebase-commit__msg">{c.subject}</span>
+                <span className="rebase-commit__hash">{short(c.hash)}</span>
               </div>
-              <div className="rebase-commits">
-                {commits.map((c) => (
-                  <div key={c.hash} className="rebase-commit">
-                    <span className="rebase-commit__dot" />
-                    <span className="rebase-commit__msg">{c.subject}</span>
-                    <span className="rebase-commit__hash">{short(c.hash)}</span>
-                  </div>
-                ))}
-              </div>
-            </>
-          )}
+            ))}
+          </div>
 
           {op === "squash" && plan.valid && (
             <>
               <div className="rebase-section">Commit message</div>
-              <div className={`msg-box${squash.origin === "agent" || squash.pending ? " msg-box--agent" : ""}`}>
+              <div className="msg-box">
                 <textarea
-                  className={`msg-box__input${squash.status.kind === "drafting" ? " msg-box__input--scan" : ""}`}
+                  className="msg-box__input"
                   aria-label="Commit message"
-                  value={squash.text}
-                  onChange={(e) => squash.setText(e.target.value)}
+                  value={message}
+                  onChange={(e) => setMessage(e.target.value)}
                   spellCheck={false}
                   disabled={applying || applied}
                 />
-                <DraftFooter
-                  draft={squash}
-                  agentName={agent.name}
-                  agentReady={agent.ready}
-                  fallbackLabel={`Joined from ${commits.length} subjects`}
-                  fallbackAction="Use subjects"
-                  unitLabel={`${commits.length} diffs`}
-                  // With AI off the box is Git's joined subjects and says no
-                  // more; the chip reads "AI off" for anyone looking.
-                  {...(agent.loading || agent.off
-                    ? {}
-                    : { onNoAgent: () => openAiSettings("ai-providers") })}
-                />
               </div>
-              {squash.draft !== null && (
-                <>
-                  <div className="agent-style">
-                    Style:{" "}
-                    <b>
-                      {squash.draft.style.convention === "conventional"
-                        ? "conventional commits"
-                        : "plain subjects"}
-                    </b>
-                    , matched from {squash.draft.style.matched} of the last{" "}
-                    {squash.draft.style.sampled} subjects
-                  </div>
-                  <AgentSaw
-                    manifest={squash.draft.saw}
-                    providerName={squash.draft.providerName}
-                    model={squash.draft.model}
-                  />
-                </>
-              )}
-              {squash.text.trim() === "" && (
+              {message.trim() === "" && (
                 <div className="rebase-note">Write a commit message to check and apply.</div>
               )}
             </>
           )}
 
-          {op === "tidy" && (
-            <TidyBody
-              tidy={tidy}
-              commits={commits}
-              edits={edits}
-              agent={agent}
-              locked={applying || applied || check.kind === "checking"}
-              onRequest={() => requestTidy()}
-              onCancel={cancelTidy}
-              onToggle={(hash) =>
-                setEdits((current) => {
-                  const separated = new Set(current.separated);
-                  if (separated.has(hash)) separated.delete(hash);
-                  else separated.add(hash);
-                  return { ...current, separated };
-                })
-              }
-              onEditMessage={(index, message) =>
-                setEdits((current) => {
-                  const messages = new Map(current.messages);
-                  messages.set(index, message);
-                  return { ...current, messages };
-                })
-              }
-            />
+          <div className="rebase-section">
+            Plan <span className="rebase-section__aside">oldest first</span>
+          </div>
+          <div className="rebase-plan">
+            {plan.valid ? (
+              <>
+                {plan.steps.map((s, i) => (
+                  <div key={i} className="rebase-plan__row">
+                    <span className={`rebase-op ${STEP_CLASS[s.action] ?? ""}`}>{s.action}</span>
+                    <span className="rebase-plan__text">
+                      {s.shortHash} {s.subject}
+                    </span>
+                  </div>
+                ))}
+                <div className="rebase-plan__row rebase-plan__summary">
+                  <span className="rebase-op">#</span>
+                  <span className="rebase-plan__text">{plan.summary}</span>
+                </div>
+              </>
+            ) : (
+              <div className="rebase-plan__invalid">{plan.reason}</div>
+            )}
+          </div>
+
+          {plan.valid && (
+            <ProofLedger rows={ledgerRows(commits, ledgerCheck)} />
           )}
 
-          {op !== "tidy" && (
-            <>
-              <div className="rebase-section">
-                Plan <span className="rebase-section__aside">oldest first</span>
-              </div>
-              <div className="rebase-plan">
-                {plan.valid ? (
-                  <>
-                    {plan.steps.map((s, i) => (
-                      <div key={i} className="rebase-plan__row">
-                        <span className={`rebase-op ${STEP_CLASS[s.action] ?? ""}`}>{s.action}</span>
-                        <span className="rebase-plan__text">
-                          {s.shortHash} {s.subject}
-                        </span>
-                      </div>
-                    ))}
-                    <div className="rebase-plan__row rebase-plan__summary">
-                      <span className="rebase-op">#</span>
-                      <span className="rebase-plan__text">{plan.summary}</span>
-                    </div>
-                  </>
-                ) : (
-                  <div className="rebase-plan__invalid">{plan.reason}</div>
-                )}
-              </div>
-            </>
-          )}
-
-          {plan.valid && (op !== "tidy" || tidy.kind === "ready") && (
-            <ProofLedger rows={ledgerRows(commits, ledgerCheck, revised && check.kind === "clean")} />
-          )}
-
-          <CheckResult check={check} resultCommits={resultCommits ?? commits.length} />
+          <CheckResult check={check} resultCommits={resultCommits} />
 
           {applied && (
             <div className="rebase-applied" role="status">
-              Applied locally · {resultCommits ?? commits.length} commit
+              Applied locally · {resultCommits} commit
               {resultCommits === 1 ? "" : "s"} · nothing pushed.
             </div>
           )}
 
-          {op === "tidy" && tidy.kind !== "ready" ? (
-            // Nothing to check until there is a plan; the footer above says
-            // what is happening and what to do about it.
-            <div className="rebase-actions">
-              <div className="rebase-actions__row">
-                <button type="button" className="rebase-discard" onClick={discard}>
-                  Discard
-                </button>
-              </div>
-            </div>
-          ) : (
-            <div className="rebase-actions">
-              {treeChanged && op === "tidy" ? (
-                <button
-                  type="button"
-                  className="rebase-check"
-                  disabled={!agent.ready || tidy.kind === "requesting"}
-                  onClick={() => {
-                    if (
-                      tidy.kind === "ready" &&
-                      program !== null &&
-                      check.kind === "snag" &&
-                      check.detail !== undefined &&
-                      tidy.revisions < MAX_REVISIONS
-                    ) {
-                      requestTidy({ program, detail: check.detail, revisions: tidy.revisions });
-                    } else {
-                      requestTidy();
-                    }
-                    checkGeneration.current += 1;
-                    setCheck({ kind: "idle" });
-                  }}
-                >
-                  Ask {agent.name} for another plan
-                </button>
+          <div className="rebase-actions">
+            <button
+              type="button"
+              className={`rebase-check${check.kind === "clean" ? " rebase-check--done" : ""}`}
+              disabled={!canCheck}
+              onClick={() => void runCheck()}
+            >
+              {check.kind === "checking" ? (
+                "Checking…"
+              ) : check.kind === "clean" ? (
+                <>
+                  Checked <CheckGlyph />
+                </>
               ) : (
-                <button
-                  type="button"
-                  className={`rebase-check${check.kind === "clean" ? " rebase-check--done" : ""}`}
-                  disabled={!canCheck}
-                  onClick={() => void runCheck()}
-                >
-                  {check.kind === "checking" ? (
-                    "Checking…"
-                  ) : check.kind === "clean" ? (
-                    <>
-                      Checked <CheckGlyph />
-                    </>
-                  ) : (
-                    "Check in isolated copy"
-                  )}
-                </button>
+                "Check in isolated copy"
               )}
-              <div className="rebase-actions__row">
-                <button
-                  type="button"
-                  className="rebase-apply"
-                  disabled={!plan.valid || check.kind !== "clean" || applying || applied}
-                  onClick={() => void apply()}
-                >
-                  {applied ? (
-                    <>
-                      Applied <CheckGlyph />
-                    </>
-                  ) : applying ? (
-                    "Applying…"
-                  ) : op === "tidy" ? (
-                    revised ? (
-                      "Apply revised plan"
-                    ) : (
-                      `Apply ${resultCommits ?? commits.length} commits`
-                    )
-                  ) : (
-                    "Apply rebase"
-                  )}
-                </button>
-                <button type="button" className="rebase-discard" onClick={discard}>
-                  {op === "tidy" ? "Discard" : "Clear"}
-                </button>
-              </div>
-              {check.kind === "snag" && check.unsignedRetry !== undefined && !applied && (
-                <button
-                  type="button"
-                  className="rebase-check"
-                  disabled={applying}
-                  onClick={() => void apply(true)}
-                >
-                  {applying ? "Applying…" : "Apply without signing, this once"}
-                </button>
-              )}
+            </button>
+            <div className="rebase-actions__row">
+              <button
+                type="button"
+                className="rebase-apply"
+                disabled={!plan.valid || !hasRequiredMessage || check.kind !== "clean" || applying || applied}
+                onClick={() => void apply()}
+              >
+                {applied ? (
+                  <>
+                    Applied <CheckGlyph />
+                  </>
+                ) : applying ? (
+                  "Applying…"
+                ) : (
+                  "Apply rebase"
+                )}
+              </button>
+              <button type="button" className="rebase-discard" onClick={onClear}>
+                Clear
+              </button>
             </div>
-          )}
+            {check.kind === "snag" && check.unsignedRetry !== undefined && !applied && (
+              <button
+                type="button"
+                className="rebase-check"
+                disabled={applying || !hasRequiredMessage}
+                onClick={() => void apply(true)}
+              >
+                {applying ? "Applying…" : "Apply without signing, this once"}
+              </button>
+            )}
+          </div>
           {identity.inspection !== null && identity.inspection.worktreeId === worktreeId && (
             <div className="rebase-note rebase-note--identity">
               {rebaseIdentityLine(identity.inspection)}
@@ -945,180 +509,5 @@ export function RebaseTab({
         </>
       )}
     </div>
-  );
-}
-
-function TidyBody({
-  tidy,
-  commits,
-  edits,
-  agent,
-  locked,
-  onRequest,
-  onCancel,
-  onToggle,
-  onEditMessage
-}: {
-  tidy: TidyState;
-  commits: RebaseCommitRef[];
-  edits: TidyEdits;
-  agent: AgentView;
-  locked: boolean;
-  onRequest: () => void;
-  onCancel: () => void;
-  onToggle: (hash: string) => void;
-  onEditMessage: (index: number, message: string) => void;
-}) {
-  const agentName = agent.name;
-  const agentReady = agent.ready;
-  if (tidy.kind === "ready") {
-    const { proposal } = tidy;
-    const diff =
-      tidy.revisedFrom === null
-        ? []
-        : planDiff(commits, tidy.revisedFrom.program, proposal.program);
-    const why = tidy.revisedFrom?.detail;
-    return (
-      <>
-        {tidy.revisedFrom !== null && (
-          <div className="tidy-revision">
-            <div className="tidy-revision__head">
-              <AgentGlyph /> {proposal.providerName} revised the plan
-              <span>
-                revision {tidy.revisions} of {MAX_REVISIONS}
-              </span>
-            </div>
-            {why !== undefined && (
-              <div className="tidy-revision__why">
-                {why.kind === "conflict"
-                  ? `The check stopped: ${conflictSentence(why)}`
-                  : `The check found the code would change in ${why.files.map((f) => f.path).join(", ")}.`}
-              </div>
-            )}
-            {proposal.note ?? "The plan was changed to avoid the conflict."}
-            {diff.length > 0 && (
-              <div className="tidy-revision__diff">
-                {diff.map((line, index) => (
-                  <div key={index} className={`tidy-revision__${line.kind}`}>
-                    {line.kind === "del" ? "− " : "+ "}
-                    {line.text}
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
-        )}
-        <div className="rebase-section">
-          Proposed history <span className="rebase-section__aside">newest first</span>
-        </div>
-        {tidy.revisedFrom === null && proposal.note !== null && (
-          <div className="tidy-note">{proposal.note}</div>
-        )}
-        <TidyGroups
-          groups={tidyGroups(commits, proposal.program, edits)}
-          locked={locked}
-          onToggle={onToggle}
-          onEditMessage={onEditMessage}
-        />
-        <AgentSaw manifest={proposal.saw} providerName={proposal.providerName} model={proposal.model} />
-      </>
-    );
-  }
-
-  let footer: {
-    text: string;
-    tone: "agent" | "quiet" | "warn";
-    link?: {
-      label: string;
-      quiet?: boolean;
-      /** Leads with the agent mark: this link asks a model for something. */
-      agent?: boolean;
-      onClick: () => void;
-    };
-  };
-  if (tidy.kind === "requesting") {
-    footer = {
-      text: tidy.revising
-        ? `${agentName} is revising the plan…`
-        : `${agentName} is reading ${commits.length} diffs…`,
-      tone: "agent",
-      link: { label: "Cancel", quiet: true, onClick: onCancel }
-    };
-  } else if (tidy.kind === "failed") {
-    footer = {
-      text:
-        tidy.code === "cancelled"
-          ? "Cancelled. Nothing changed."
-          : tidy.code === "timeout"
-            ? `${agentName} stopped after ${Math.max(1, Math.round(tidy.afterMs / 1000))} s. Nothing changed.`
-            : tidy.message,
-      tone: tidy.code === "cancelled" ? "quiet" : "warn",
-      ...(agentReady
-        ? {
-            link: {
-              label: tidy.code === "cancelled" ? "Tidy" : "Retry",
-              agent: tidy.code === "cancelled",
-              onClick: onRequest
-            }
-          }
-        : {})
-    };
-  } else if (agent.loading) {
-    footer = { text: "Checking the AI provider settings…", tone: "quiet" };
-  } else if (agent.off) {
-    // Reachable only when AI was switched off with Tidy open; the selection
-    // bar stops offering Tidy once it is off.
-    footer = {
-      text: "AI features are off for this profile",
-      tone: "quiet",
-      link: { label: "Open AI Features", onClick: () => openAiSettings("ai-features", "availability") }
-    };
-  } else if (!agentReady) {
-    footer = {
-      text: agent.reason ?? "No agent is set up for this profile",
-      tone: "warn",
-      link: { label: "Open AI Providers", onClick: () => openAiSettings("ai-providers") }
-    };
-  } else {
-    footer = { text: "", tone: "quiet", link: { label: "Tidy", agent: true, onClick: onRequest } };
-  }
-
-  return (
-    <>
-      <div className="rebase-section">
-        Proposed history <span className="rebase-section__aside">newest first</span>
-      </div>
-      <div className="msg-box">
-        <div className={`msg-box__placeholder${tidy.kind === "requesting" ? " msg-box__input--scan" : ""}`}>
-          {!agentReady && tidy.kind === "idle" ? (
-            <span className="msg-box__hint">Tidy needs an agent. Squash and Reorder don't.</span>
-          ) : (
-            commits.map((commit) => (
-              <div key={commit.hash} className="msg-box__line">
-                <span>{short(commit.hash)}</span> {commit.subject}
-              </div>
-            ))
-          )}
-        </div>
-        <div className="msg-foot" role="status">
-          {footer.tone === "agent" && <AgentGlyph />}
-          <span
-            className={`msg-foot__src msg-foot__src--${footer.tone}`}
-            title={tidy.kind === "failed" ? tidy.detail : undefined}
-          >{footer.text}</span>
-          <span className="msg-foot__sp" />
-          {footer.link !== undefined && (
-            <button
-              type="button"
-              className={`agent-link${footer.link.quiet === true ? " agent-link--quiet" : ""}`}
-              onClick={footer.link.onClick}
-            >
-              {footer.link.agent === true && <AgentGlyph size={10} />}
-              {footer.link.label}
-            </button>
-          )}
-        </div>
-      </div>
-    </>
   );
 }

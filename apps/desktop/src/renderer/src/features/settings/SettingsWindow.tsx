@@ -10,19 +10,13 @@ import {
   type ForgeStatus,
   type FolderIdentityReport,
   type MachineGitIdentity,
-  type ProfileId,
   type SettingsPage,
   type SettingsRoute as SettingsDeepLink
 } from "@pwrgit/shared";
 import { subscribe } from "../../lib/pwrgit";
 import { prefersReducedMotion } from "../../lib/reducedMotion";
-import { useProfiles } from "../../state/useProfiles";
 import { AuxiliaryTitleBar } from "../chrome/AuxiliaryTitleBar";
 import { AboutSettings } from "./AboutSettings";
-import type { AiProfileSelection } from "./AiProfilePicker";
-import { AiFeaturesSettings } from "./AiFeaturesSettings";
-import { AiProvidersProvider, useAiProvidersContext } from "./AiProvidersContext";
-import { AiProvidersSettings } from "./AiProvidersSettings";
 import { DiagnosticsSettings } from "./DiagnosticsSettings";
 import { ExperimentalSettings } from "./ExperimentalSettings";
 import { GeneralSettings } from "./GeneralSettings";
@@ -38,11 +32,8 @@ import {
   forgeProductState,
   forgeStateSentence
 } from "./ForgeProductSection";
-import type { AiProviderStatus } from "./ai-provider-status";
 import {
   SETTINGS_NAV_GROUPS,
-  aiFeatureNavChildren,
-  aiProviderNavChild,
   paneScrollForRoute,
   profilesNavChildren,
   type SettingsNavChild
@@ -59,11 +50,6 @@ import {
 /**
  * Nav order and labels. The ids are `SETTINGS_PAGES` (@pwrgit/shared), the
  * same list main validates a `settings:open` deep link against.
- *
- * "Local Agents" and not "Agents": the AI pages configure agents PwrGit calls
- * OUT to, this one governs agents calling IN over MCP, and a bare "Agents"
- * beside "AI Providers" reads as either. The id stays `agents` so nothing that
- * already names the page moves.
  */
 const SECTIONS: Array<{ id: SettingsPage; label: string }> = [
   { id: "general", label: "General" },
@@ -71,8 +57,6 @@ const SECTIONS: Array<{ id: SettingsPage; label: string }> = [
   { id: "updates", label: "Updates" },
   { id: "profiles", label: "Profiles" },
   { id: "forges", label: "Forges" },
-  { id: "ai-providers", label: "AI Providers" },
-  { id: "ai-features", label: "AI Features" },
   { id: "agents", label: "Local Agents" },
   { id: "experimental", label: "Experimental" },
   { id: "diagnostics", label: "Troubleshooting" },
@@ -135,57 +119,21 @@ function forgeNavChild(
 }
 
 /**
- * The profile the AI pages edit.
- *
- * The Settings window serves every profile, and AI settings belong to one, so
- * the window holds a choice: the one a deep link named, else the one the
- * reader picked, else the active profile, else the first. A choice whose
- * profile is deleted falls through to the next rule rather than editing a
- * profile that no longer exists.
- */
-function useAiProfileSelection(): AiProfileSelection & {
-  choose: (profileId: ProfileId) => void;
-} {
-  const { profiles, activeProfileId } = useProfiles();
-  const [chosen, setChosen] = useState<ProfileId | null>(
-    () => parseSettingsRouteHash(window.location.hash)?.profileId ?? null
-  );
-  const exists = (id: ProfileId | null): id is ProfileId =>
-    id !== null && profiles.some((profile) => profile.id === id);
-  const value = exists(chosen)
-    ? chosen
-    : exists(activeProfileId)
-      ? activeProfileId
-      : (profiles[0]?.id ?? null);
-  return { profiles, value, onChange: setChosen, choose: setChosen };
-}
-
-/**
  * The Settings window (boots on the `#settings` hash route, or a deep link —
- * `#settings?page=…&sub=…&profile=…` — minted by `settings:open`). A shared
+ * `#settings?page=…&sub=…` — minted by `settings:open`). A shared
  * auxiliary title strip sits above the section nav and content pane so
  * Windows caption controls and macOS traffic lights occupy the same chrome as
  * every helper window.
  */
 export function SettingsWindow() {
-  const aiProfile = useAiProfileSelection();
-  // Above the nav AND the panes: the AI Providers children's dots and the
-  // cards they point at are one read (AiProvidersContext).
   return (
-    <AiProvidersProvider profileId={aiProfile.value}>
-      {/* Same reason for Git: the nav's "In use" and "PwrGit’s Git" dots and
-          the cards they point at are one read. */}
-      <GitSettingsProvider>
-        <SettingsWindowBody aiProfile={aiProfile} />
-      </GitSettingsProvider>
-    </AiProvidersProvider>
+    <GitSettingsProvider>
+      <SettingsWindowBody />
+    </GitSettingsProvider>
   );
 }
 
-function SettingsWindowBody(props: {
-  aiProfile: ReturnType<typeof useAiProfileSelection>;
-}) {
-  const { aiProfile } = props;
+function SettingsWindowBody() {
   const settings = useAppSettings();
   // Read here rather than inside the Forges pane, because the nav shows a dot
   // for a product whose pane the reader has not opened — which is the point of
@@ -197,7 +145,6 @@ function SettingsWindowBody(props: {
   const { machine } = useMachineIdentity();
   // The By folder card and its nav row: one read of every profile's repos.
   const folders = useFolderIdentity({ active: true });
-  const ai = useAiProvidersContext();
   const git = useGitSettingsContext() as GitSettingsState;
   const [route, setRoute] = useState<SettingsRoute>(() =>
     routeFromDeepLink(parseSettingsRouteHash(window.location.hash), 0)
@@ -237,24 +184,10 @@ function SettingsWindowBody(props: {
 
   // A `settings:open` while this window is already up: main focuses it and
   // pushes the route here instead of reloading the page.
-  const { choose } = aiProfile;
   useEffect(
-    () =>
-      subscribe("settings:navigate", (link) => {
-        if (link.profileId !== undefined) choose(link.profileId);
-        openRouteRef.current(link.page, link.sub);
-      }),
-    [choose]
+    () => subscribe("settings:navigate", (link) => openRouteRef.current(link.page, link.sub)),
+    []
   );
-
-  // The AI Providers children report discovery, so unfolding the group is a
-  // request for it — the same as opening either AI pane. Nothing is probed for
-  // a reader who never goes near AI.
-  const aiNavOpen = openGroups["ai-providers"] === true;
-  const { request } = ai;
-  useEffect(() => {
-    if (aiNavOpen) request();
-  }, [aiNavOpen, request]);
 
   // The pane's own scroll, per `paneScrollForRoute`: a new page starts at the
   // top instead of at the last one's offset, and a card request leaves the
@@ -280,15 +213,13 @@ function SettingsWindowBody(props: {
     element.scrollTo({ top: 0, behavior: prefersReducedMotion() ? "auto" : "smooth" });
   }, [route]);
 
-  // Unfolding Git asks for the runtime probe its "In use" dot reports, as
-  // unfolding AI Providers asks for discovery. Opening General starts nothing.
+  // Unfolding Git asks for the runtime probe its "In use" dot reports.
   const gitNavOpen = openGroups.git === true;
   const { requestRuntime } = git;
   useEffect(() => {
     if (gitNavOpen) requestRuntime();
   }, [gitNavOpen, requestRuntime]);
 
-  const editDefaults = (): void => openRoute("ai-features", "default-agents");
 
   return (
     <section className="settings-screen" aria-label="Settings">
@@ -301,7 +232,7 @@ function SettingsWindowBody(props: {
             const open = openGroups[item.id] === true;
             const sublistId = `settings-nav-sublist-${item.id}`;
             const holdsRoute = route.section === item.id;
-            const children = isGroup ? navChildren(item.id, forges, ai.statuses, machine, folders.report, git) : [];
+            const children = isGroup ? navChildren(item.id, forges, machine, folders.report, git) : [];
             // The child that actually carries the marker — routed to, and
             // reachable. Derived rather than inferred from "is there a focus,
             // is the group open", because those are proxies: a folded group's
@@ -416,10 +347,8 @@ function SettingsWindowBody(props: {
               section={route.section}
               {...(route.focus === undefined ? {} : { focus: route.focus })}
               settings={settings}
-              aiProfile={aiProfile}
               machine={machine}
               folders={folders}
-              onEditDefaults={editDefaults}
               onOpenUpdates={() => openRoute("updates")}
             />
             {settings.error !== null && (
@@ -439,13 +368,10 @@ function SettingsWindowBody(props: {
  *
  * Forges maps `FORGE_KINDS`, never a pair written here, so a third product
  * arrives in the nav the same way it arrives in the pane: as a registry entry.
- * AI Providers maps the statuses its cards render, so a dot and its card are
- * one answer; AI Features' children are plain jump links.
  */
 function navChildren(
   section: SettingsPage,
   forges: ForgeStatus[] | undefined,
-  aiStatuses: readonly AiProviderStatus[],
   machine: MachineGitIdentity | null,
   folders: FolderIdentityReport | null,
   git: GitSettingsState
@@ -455,8 +381,6 @@ function navChildren(
   if (section === "forges") {
     return FORGE_KINDS.map((kind) => forgeNavChild(kind, forges));
   }
-  if (section === "ai-providers") return aiStatuses.map(aiProviderNavChild);
-  if (section === "ai-features") return aiFeatureNavChildren();
   return [];
 }
 
@@ -465,10 +389,8 @@ function SettingsSectionBody(props: {
   /** The card the nav asked the pane to reveal, if any. */
   focus?: SettingsFocusRequest;
   settings: AppSettingsState;
-  aiProfile: AiProfileSelection;
   machine: MachineGitIdentity | null;
   folders: FolderIdentityState;
-  onEditDefaults: () => void;
   onOpenUpdates: () => void;
 }) {
   const { settings } = props;
@@ -478,22 +400,6 @@ function SettingsSectionBody(props: {
     return (
       <ProfilesSettings settings={settings} machine={props.machine} folders={props.folders} {...focus} />
     );
-  }
-
-  // Neither AI pane reads the app snapshot: their settings are per profile
-  // and come from `AiProvidersContext`.
-  if (props.section === "ai-providers") {
-    return (
-      <AiProvidersSettings
-        profile={props.aiProfile}
-        onEditDefaults={props.onEditDefaults}
-        {...focus}
-      />
-    );
-  }
-
-  if (props.section === "ai-features") {
-    return <AiFeaturesSettings profile={props.aiProfile} {...focus} />;
   }
 
   if (props.section === "about") {

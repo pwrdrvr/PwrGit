@@ -35,7 +35,7 @@ export type RebaseDryRunSuccess = {
 };
 
 /** A rebase failure, with the structured detail a conflict or a changed tree
- *  carries so the renderer (and a Tidy revision) can act on it. */
+ *  carries so the renderer can act on it. */
 export type RebaseFailure = Omit<PwrGitError, "detail"> & {
   detail?: string;
   snag?: RebaseSnagDetail;
@@ -51,17 +51,16 @@ export type RebaseSigningMode = "config" | "off";
 export type RebaseDryRunOptions = {
   /** Test seam; production checks use the operating system temp directory. */
   tempParent?: string;
-  /** Required for `tidy`; for `squash` it carries the edited message. */
+  /** For Squash, carries the edited commit message. */
   program?: HistoryEditProgram;
 };
 
-/** Longest commit message PwrGit will write, agent-authored or not. */
-export const MAX_COMMIT_MESSAGE_LENGTH = 8_000;
+/** Longest commit message PwrGit will write during a rebase. */
+const MAX_COMMIT_MESSAGE_LENGTH = 8_000;
 
 const OP_LABEL: Record<RebaseOperation, string> = {
   squash: "Squash",
-  reorder: "Reorder",
-  tidy: "Tidy"
+  reorder: "Reorder"
 };
 
 const short = (hash: string): string => hash.slice(0, 7);
@@ -89,7 +88,7 @@ export function joinedSubjects(commits: RebaseCommitRef[]): string {
  * newline and tab, trailing whitespace per line, and surrounding blank lines.
  * Returns null when nothing usable is left or it is too long to be a message.
  */
-export function normalizeCommitMessage(raw: string): string | null {
+function normalizeCommitMessage(raw: string): string | null {
   const cleaned = Array.from(raw.replace(/\r\n?/g, "\n"))
     .filter((ch) => {
       const code = ch.charCodeAt(0);
@@ -109,9 +108,9 @@ export function normalizeCommitMessage(raw: string): string | null {
  * (graph order). Squash folds everything into one commit; Reorder recreates
  * each commit on its own, newest first, which reverses the selected history.
  */
-export function defaultProgram(
+function defaultProgram(
   commits: RebaseCommitRef[],
-  op: Exclude<RebaseOperation, "tidy">
+  op: RebaseOperation
 ): HistoryEditProgram {
   if (op === "squash") {
     return {
@@ -131,7 +130,7 @@ export function defaultProgram(
  * commit, every selected commit used exactly once, nothing from outside the
  * selection, and a usable message wherever one is required.
  */
-export function validateProgramShape(
+function validateProgramShape(
   commits: RebaseCommitRef[],
   program: HistoryEditProgram
 ): Result<HistoryEditProgram, RebaseFailure> {
@@ -183,18 +182,16 @@ export function validateProgramShape(
 /**
  * The program a request asks for. Squash and Reorder are PwrGit's own plans;
  * a Squash request may carry a program only to supply its edited message, and
- * must otherwise have exactly Squash's shape. Tidy must carry its program.
+ * must otherwise have exactly Squash's shape.
  */
 export function resolveProgram(
   commits: RebaseCommitRef[],
   op: RebaseOperation,
   program?: HistoryEditProgram
 ): Result<HistoryEditProgram, RebaseFailure> {
-  if (op === "tidy") {
-    if (program === undefined) {
-      return err(rebaseError("program_required", "Tidy needs a proposed plan."));
-    }
-    return validateProgramShape(commits, program);
+  // IPC payloads can carry an operation outside the current contract.
+  if (op !== "squash" && op !== "reorder") {
+    return err(rebaseError("unsupported_operation", "Choose Squash or Reorder."));
   }
   const canonical = defaultProgram(commits, op);
   if (program === undefined) return ok(canonical);
@@ -227,21 +224,6 @@ export function sameProgramShape(a: HistoryEditProgram, b: HistoryEditProgram): 
   );
 }
 
-function stepsFor(
-  commits: RebaseCommitRef[],
-  program: HistoryEditProgram,
-  combine: "squash" | "fixup"
-): RebasePlan["steps"] {
-  const subjects = new Map(commits.map((c) => [c.hash, c.subject]));
-  return program.commits.flatMap((commit) =>
-    commit.members.map((hash, i) => ({
-      action: i === 0 ? ("pick" as const) : combine,
-      shortHash: short(hash),
-      subject: subjects.get(hash) ?? ""
-    }))
-  );
-}
-
 /**
  * Build the plan preview from a selection. `commits` are newest-first (graph
  * order). The steps are listed in execution order.
@@ -260,37 +242,22 @@ export function planRebase(
       reason: "Select at least two commits."
     };
   }
-  if (op === "tidy" && program === undefined) {
-    // Tidy has nothing to show until an agent proposes a history.
-    return { op, steps: [], summary: "", valid: true };
-  }
   const resolved = resolveProgram(commits, op, program);
   if (!resolved.ok) {
     return { op, steps: [], summary: "", valid: false, reason: resolved.error.message };
   }
-  if (op === "squash") {
-    return {
-      op,
-      steps: stepsFor(commits, resolved.value, "squash"),
-      summary: "→ 1 commit",
-      valid: true
-    };
-  }
-  if (op === "reorder") {
-    return {
-      op,
-      // Reorder resets to the base and cherry-picks newest-first, so the plan
-      // is shown in the exact execution order (and the history is reversed).
-      steps: stepsFor(commits, resolved.value, "fixup"),
-      summary: "→ reversed order, no content change",
-      valid: true
-    };
-  }
-  const count = resolved.value.commits.length;
+  const subjects = new Map(commits.map((c) => [c.hash, c.subject]));
+  const steps = resolved.value.commits.flatMap((commit) =>
+    commit.members.map((hash, i) => ({
+      action: i === 0 ? "pick" as const : "squash" as const,
+      shortHash: short(hash),
+      subject: subjects.get(hash) ?? ""
+    }))
+  );
   return {
     op,
-    steps: stepsFor(commits, resolved.value, "fixup"),
-    summary: `→ ${count} commit${count === 1 ? "" : "s"}`,
+    steps,
+    summary: op === "squash" ? "→ 1 commit" : "→ reversed order, no content change",
     valid: true
   };
 }
@@ -635,7 +602,7 @@ async function rewriteHistory(
   const tree = await readTree(git, cwd, "HEAD");
   if (tree === null) {
     // "Could not look" is not "the code changed": reporting it as a changed
-    // tree would send the operator — and a Tidy revision — after a difference
+    // tree would send the operator after a difference
     // that was never observed.
     await restore();
     return err(rebaseError("tree_unavailable", "Could not read the rewritten commit's files."));

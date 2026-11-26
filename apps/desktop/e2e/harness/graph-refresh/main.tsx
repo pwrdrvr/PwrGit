@@ -109,7 +109,7 @@ function App() {
   return <main style={{ height: "100vh", display: "flex", flexDirection: "column" }} data-history-count={commits.length}>
     <LineageGraph repoId={repoId} repoName="Widgets" worktreeId={worktreeId}
       worktreePath="/synthetic/widget" viewingBranch="main" activeEmail="author0@example.test"
-      selectedCommits={selection} focusedCommit={null} revealCommit={null} tidyOffered={false}
+      selectedCommits={selection} focusedCommit={null} revealCommit={null}
       onEditHistory={noop} onCommitsChange={publish} onOpenCommit={() => {}}
       onRevealWorktree={() => {}} onRevealCreatedWorktree={() => {}} />
   </main>;

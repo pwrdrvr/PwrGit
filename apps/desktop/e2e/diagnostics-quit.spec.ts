@@ -20,7 +20,7 @@ test.beforeEach(async () => {
   const previous = new Map(Object.keys(overrides).map((key) => [key, process.env[key]]));
   try {
     Object.assign(process.env, overrides);
-    handle = await launchApp({ agentUnavailable: true });
+    handle = await launchApp();
   } finally {
     for (const [key, value] of previous) {
       if (value === undefined) delete process.env[key];
