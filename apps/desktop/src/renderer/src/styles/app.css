@@ -1311,6 +1311,11 @@ textarea,
   min-height: 0;
   overflow-y: auto;
   padding: 0 8px 16px;
+  /* Size-only containment (never layout/paint, which would split the scrollport's
+     sticky .repo-row layer tree): the scroller's box is strictly determined by
+     its flex parent, so sibling toolbar count edits cannot re-query scrollbar
+     geometry and repaint every sticky row on each bulk-sync tick. */
+  contain: size;
 }
 /* Room a jump adds at the end so a repository near the bottom can reach the
    top (Sidebar's scrollRepoToTop). Zero tall until a jump needs it. */
@@ -7483,7 +7488,7 @@ button.agent-menu__item:hover {
   overflow: hidden;
   border-radius: 999px;
   background: color-mix(in srgb, var(--text-primary) 9%, transparent);
-  contain: layout paint;
+  contain: strict;
 }
 .bulk-sync__bar > i {
   display: block;
@@ -7491,11 +7496,6 @@ button.agent-menu__item:hover {
   min-width: 3px;
   box-shadow: inset -1px 0 0 var(--bg-panel);
   background: var(--bulk-sync-outcome, transparent);
-  transition: flex-grow 320ms ease;
-}
-/* Apply each completed repository immediately on the compact bars. Easing
-   flex-grow there repeats layout between results across the main window. */
-.bulk-sync__bar:is(.sidebar-toolbar__progress, .bulk-sync-toast__bar, .sync-run-card__bar) > i {
   transition: none;
 }
 .bulk-sync__bar > i.is-empty,
@@ -7539,19 +7539,35 @@ button.agent-menu__item:hover {
 .bulk-sync-toast__count.is-cancelled {
   --bulk-sync-outcome: var(--status-suspended);
 }
-/* In flight is the one accent in the bar, and the one moving part. The global
-   reduced-motion rule stops the travel; the stripes stay, so the state does. */
+/* In flight is the one accent in the bar, and the one moving part. The expanded
+   dialog bar composites its diagonal stripes on a ::before transform layer so
+   it never forces main-thread repaints. The global reduced-motion rule stops
+   the travel; the stripes stay, so the state does. */
 .bulk-sync__bar > .is-in-flight {
+  position: relative;
+  overflow: hidden;
+}
+.bulk-sync__bar:not(.sidebar-toolbar__progress):not(.bulk-sync-toast__bar):not(.sync-run-card__bar)
+  > .is-in-flight:not(.is-empty):not(.is-halted)::before {
+  content: "";
+  position: absolute;
+  inset: 0 0 0 -17px;
   background: repeating-linear-gradient(
     -45deg,
     var(--accent) 0 3px,
     color-mix(in srgb, var(--accent) 38%, transparent) 3px 6px
   );
+  will-change: transform;
   animation: bulk-sync-stripes 900ms linear infinite;
 }
 /* Keep the in-flight pattern on compact progress bars without invalidating
-   the window's paint layer on every frame. */
+   the window's paint layer or promoting an extra compositor layer. */
 .bulk-sync__bar:is(.sidebar-toolbar__progress, .bulk-sync-toast__bar, .sync-run-card__bar) > .is-in-flight {
+  background: repeating-linear-gradient(
+    -45deg,
+    var(--accent) 0 3px,
+    color-mix(in srgb, var(--accent) 38%, transparent) 3px 6px
+  );
   animation: none;
 }
 .bulk-sync__bar > .is-in-flight.is-halted {
@@ -7562,16 +7578,13 @@ button.agent-menu__item:hover {
   );
   animation: none;
 }
-/* An empty in-flight segment has nothing to show, and the receipt keeps the
-   bar on screen indefinitely: a background-position animation is not
-   compositable, so left running it would repaint every frame for nothing. */
-.bulk-sync__bar > .is-in-flight.is-empty {
-  animation: none;
-}
 /* One stripe period along x: 6px across the stripes is 6 / sin 45deg. */
 @keyframes bulk-sync-stripes {
+  from {
+    transform: translate3d(0, 0, 0);
+  }
   to {
-    background-position: 8.485px 0;
+    transform: translate3d(8.485px, 0, 0);
   }
 }
 .bulk-sync__legend {
@@ -7623,6 +7636,7 @@ button.agent-menu__item:hover {
   gap: 8px;
   padding: 12px 18px;
   overflow-y: auto;
+  contain: layout paint style;
 }
 /* Chromium makes a scroller that overflows and holds nothing focusable a Tab
    stop of its own, so the arrow keys can scroll it. This list is only text, so
@@ -7638,6 +7652,8 @@ button.agent-menu__item:hover {
   border: 1px solid var(--border-subtle);
   border-radius: 8px;
   background: var(--bg-panel);
+  content-visibility: auto;
+  contain-intrinsic-size: auto 64px;
 }
 .bulk-sync__repo.is-running {
   border-color: var(--accent-border);

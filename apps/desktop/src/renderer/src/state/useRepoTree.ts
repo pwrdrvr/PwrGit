@@ -28,12 +28,20 @@ function reuseUnchangedRepos(current: Repo[], next: Repo[]): Repo[] {
   return sameArray ? current : reused;
 }
 
+/** Trailing coalescing window for sequential targeted `repo:changed` bursts
+ *  (such as 30 repositories completing during bulk sync). The first update
+ *  after idle still runs immediately (0 ms added latency). */
+export const TARGETED_BURST_COALESCE_MS = 200;
+
 /**
  * Swap re-read repositories into the tree by id. Every other repository keeps
  * its object, so nothing keyed on it (memoized rows, each expanded repo's
- * `repo:refs`) re-runs. A named repository missing from the answer is gone or
- * hidden, so it leaves. Ownership runs over the merged list, as main runs it
- * over a full one (`repo-ownership.ts`), so a fossil duplicate stays single.
+ * `repo:refs`) re-runs. Named repositories intentionally take the fresh object
+ * even when worktree counters match, because a fetch can update refs without
+ * changing row columns and expanded `RepoRefsSections` keys on `repo`. A named
+ * repository missing from the answer is gone or hidden, so it leaves.
+ * Ownership runs over the merged list, as main runs it over a full one
+ * (`repo-ownership.ts`), so a fossil duplicate stays single.
  */
 export function mergeChangedRepos(
   current: Repo[],
@@ -271,8 +279,17 @@ export function useRepoTree(activeProfileId: string | null): UseRepoTree {
     const changed = new Set<string>();
     let reading = false;
     let live = true;
+    let lastTargetedDoneAt = -Infinity;
+    let burstTimer: ReturnType<typeof setTimeout> | null = null;
+    const clearBurstTimer = (): void => {
+      if (burstTimer !== null) {
+        clearTimeout(burstTimer);
+        burstTimer = null;
+      }
+    };
     const reloadChanged = async (): Promise<void> => {
       if (reading) return;
+      clearBurstTimer();
       reading = true;
       try {
         while (live && changed.size > 0) {
@@ -287,23 +304,41 @@ export function useRepoTree(activeProfileId: string | null): UseRepoTree {
             void reload();
             return;
           }
+          lastTargetedDoneAt = Date.now();
           commitRepos((rs) => mergeChangedRepos(rs, asked, r.value));
         }
       } finally {
         reading = false;
       }
     };
+    const scheduleTargetedReload = (): void => {
+      if (reading) return;
+      const elapsed = Date.now() - lastTargetedDoneAt;
+      if (elapsed >= TARGETED_BURST_COALESCE_MS) {
+        void reloadChanged();
+        return;
+      }
+      if (burstTimer === null) {
+        burstTimer = setTimeout(() => {
+          burstTimer = null;
+          if (live && changed.size > 0) void reloadChanged();
+        }, Math.max(1, TARGETED_BURST_COALESCE_MS - elapsed));
+      }
+    };
     const off = subscribe("repo:changed", (p) => {
       if (p.profileId !== profileId) return;
       if (p.repoIds === undefined) {
+        clearBurstTimer();
+        changed.clear();
         void reload();
         return;
       }
       for (const id of p.repoIds) changed.add(id);
-      void reloadChanged();
+      scheduleTargetedReload();
     });
     return () => {
       live = false;
+      clearBurstTimer();
       mountedRef.current = false;
       requestRef.current += 1;
       off();

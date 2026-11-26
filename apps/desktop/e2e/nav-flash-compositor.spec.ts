@@ -131,12 +131,13 @@ test("nav-flash animates on a compositor opacity layer and bulk-sync bar isolate
   });
   await session.send("Page.captureScreenshot");
 
-  // Confirm Chromium applied layout+paint containment to the modal and bar.
+  // Confirm Chromium applied layout+paint containment to the modal and strict
+  // containment to the bar.
   const containment = await page.evaluate(() => ({
     modal: getComputedStyle(document.querySelector(".bulk-sync")!).contain,
     bar: getComputedStyle(document.querySelector(".bulk-sync__bar")!).contain
   }));
-  expect(containment).toEqual({ modal: "layout paint", bar: "layout paint" });
+  expect(containment).toEqual({ modal: "layout paint", bar: "strict" });
 
   // Resolve backendNodeIds for the backdrop and progress bar so Paint events
   // are matched by Chromium's nodeId (plus nodeName when present), and verify
@@ -176,9 +177,9 @@ test("nav-flash animates on a compositor opacity layer and bulk-sync bar isolate
     success.style.flexGrow = "9";
     inFlight.style.flexGrow = "3";
   });
-  // Let the 320ms flex-grow transition advance to a non-zero delta, then force a
-  // real Blink layout+paint frame commit across all platforms (Linux Xvfb,
-  // Windows, macOS, and --disable-gpu) so hidden windows cannot skip Paint.
+  // Let the discrete flex-grow update commit, then force a real Blink
+  // layout+paint frame commit across all platforms (Linux Xvfb, Windows,
+  // macOS, and --disable-gpu) so hidden windows cannot skip Paint.
   await page.waitForTimeout(60);
   await session.send("Page.captureScreenshot");
   const done = new Promise<void>((resolve) => session.once("Tracing.tracingComplete", () => resolve()));
