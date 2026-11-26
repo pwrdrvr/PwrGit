@@ -1,5 +1,12 @@
 # Changelog
 
+## v0.64.0 - 2026-11-25
+
+- Fork sync - Added upstream sync to multiple verified writable forks. Choose which forks to keep updated in the Pull menu or the Remotes tab, and see the result for each planned fork in the sync receipt.
+- Submodules - Collapsed passive submodules below Changes and simplified the rows, keeping submodules that need attention easier to find.
+- Stacks - Collapsed the sidebar Stacks section by default and saved your expand or collapse preference.
+- Lineage and sidebar - Laid out the Lineage gutter with its rows, preserved panning across hidden panes, and reused sidebar heading measurements when the layout stayed the same.
+
 ## v0.63.2 - 2026-11-25
 
 - Tags - Fixed background tag checks reloading the repository tree or resetting the page in an open tag list.
