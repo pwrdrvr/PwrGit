@@ -129,9 +129,9 @@ runs `useStepLadder` (`section-fit.tsx`; step CSS in `app.css`). Design: `design
 - **Everything a step acts on is rigid** (`flex: 0 0 auto`): disclosure,
   chips, ⟳, Recent. A shrinkable item ellipsizes and passes the test. Only
   "on main" takes leftover space.
-- **A section with its own data calls `useRefitSections()`**, as
-  `RepoRefsSections` and `RepoChangeRequestSection` do: it re-renders after
-  `RepoRow`.
+- **Use `SectionHeading` for each measured heading.** It queues a fit when
+  its content changes, including data that lands in a child commit. It
+  observes the heading alone so list updates do not invalidate its fit.
 - **A reload keeps the last answer on screen.** A section reloads when its
   `Repo` object changes. `useRepoTree` swaps in only the repositories a
   `repo:changed` names, but one without `repoIds` replaces every object.

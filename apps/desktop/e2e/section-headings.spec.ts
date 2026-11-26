@@ -11,7 +11,7 @@ import {
 } from "@playwright/test";
 import { cleanEnv } from "./fixtures/electron-app";
 import { buildHarness } from "./harness/build";
-import type { SceneReport, ScrollbarReport } from "./harness/section-headings/main";
+import type { SceneReport, ScrollbarAnchorReport, ScrollbarReport } from "./harness/section-headings/main";
 
 /**
  * The sidebar's section headings at the widths a sidebar gives them.
@@ -153,13 +153,15 @@ test("the repository row drops marks, then its count's word, before its name", (
   }
 });
 
-test("commits that move the roving tab stop reuse the repository name fit", async () => {
+test("commits that move the roving tab stop reuse repository name and section heading fits", async () => {
   const reads = await page.evaluate(async () => {
     const { __harness } = window as unknown as {
       __harness: { benchmark: (kind: "commit", rounds: number) => Promise<void> };
     };
     const scrollWidth = Object.getOwnPropertyDescriptor(Element.prototype, "scrollWidth")!;
+    const bounds = Element.prototype.getBoundingClientRect;
     let nameReads = 0;
+    let headingReads = 0;
     Object.defineProperty(Element.prototype, "scrollWidth", {
       ...scrollWidth,
       get(this: Element) {
@@ -167,16 +169,42 @@ test("commits that move the roving tab stop reuse the repository name fit", asyn
         return scrollWidth.get!.call(this);
       }
     });
+    Element.prototype.getBoundingClientRect = function () {
+      if (this.matches(".wt-section__head, .ref-section__head-wrap")) headingReads++;
+      return bounds.call(this);
+    };
     try {
       // The tab stop changes, while the name and every in-flow control stay put.
       await __harness.benchmark("commit", 4);
-      return nameReads;
+      return { nameReads, headingReads };
     } finally {
       Object.defineProperty(Element.prototype, "scrollWidth", scrollWidth);
+      Element.prototype.getBoundingClientRect = bounds;
     }
   });
-  expect(reads).toBe(0);
+  expect(reads).toEqual({ nameReads: 0, headingReads: 0 });
   expect(await readScenes()).toEqual(scenes);
+});
+
+test("a changed heading refits in both directions at the same width", async () => {
+  const quiet = page.locator('.harness-scene[data-repo="cinder"][data-row="222"]');
+  const block = quiet.locator(".repo-sections");
+  const label = quiet.getByText("Tags", { exact: true });
+  const initial = scene("cinder", 222);
+  const read = async () => (await readScenes()).find((s) => s.repo === "cinder" && s.row === 222)!;
+  try {
+    await label.evaluate((node) => {
+      node.textContent = "Tags from every remote in this repository";
+    });
+    await expect(block).toHaveClass(/\bfit-glyphs\b/);
+    expect(await read()).toMatchObject({ measured: initial.measured, problems: [] });
+    await expect(quiet.getByRole("button", { name: /Tags from every remote in this repository/ })).toBeVisible();
+  } finally {
+    await quiet.getByText("Tags from every remote in this repository", { exact: true }).evaluate((node) => {
+      node.textContent = "Tags";
+    });
+  }
+  await expect.poll(read).toEqual(initial);
 });
 
 // Run on the base and candidate with the same harness, Electron and host.
@@ -272,4 +300,18 @@ test("full headings survive worktree badges briefly creating a scrollbar", async
   expect(result.widthWithLongBadges).toBeLessThan(result.fullWidth);
   expect(result.finalWidth).toBe(result.fullWidth);
   expect(result.headingSteps).toEqual([]);
+});
+
+test("a parent sees settled badge geometry in the commit that adds or removes a scrollbar", async () => {
+  const { wideWidth, wideDepth, narrow, restored } = await page.evaluate(() =>
+    (window as unknown as { __harness: { readAnchorWhileScrollbarChanges: () => Promise<ScrollbarAnchorReport> } })
+      .__harness.readAnchorWhileScrollbarChanges()
+  );
+  expect(wideDepth).toBe(false);
+  expect(narrow.width).toBeLessThan(wideWidth);
+  expect(narrow.settled.stepped).toBe(true);
+  expect(restored.width).toBe(wideWidth);
+  expect(restored.settled.stepped).toBe(false);
+  expect(narrow.commit).toEqual(narrow.settled);
+  expect(restored.commit).toEqual(restored.settled);
 });

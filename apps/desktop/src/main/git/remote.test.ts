@@ -584,7 +584,8 @@ describe("remote ops (bare-remote fixture)", () => {
         {
           name: "fork",
           fetchUrl: "https://example.test/f.git",
-          pushUrl: "git@example.test:f.git"
+          pushUrl: "git@example.test:f.git",
+          pushUrls: ["git@example.test:f.git", "git@example.test:g.git"]
         },
         {
           name: "origin",
@@ -2639,7 +2640,13 @@ describe("reset targets on a fork", () => {
     });
     expect(pulled).toEqual({
       ok: true,
-      value: { fastForwarded: true, stashed: true, reappliedWithConflicts: false, recoveryStash: expect.any(String) }
+      value: {
+        fastForwarded: true,
+        sourceHead: gitOut(source, ["rev-parse", "main"]),
+        stashed: true,
+        reappliedWithConflicts: false,
+        recoveryStash: expect.any(String)
+      }
     });
     expect(gitOut(local, ["rev-parse", "HEAD"])).toBe(
       gitOut(source, ["rev-parse", "main"])

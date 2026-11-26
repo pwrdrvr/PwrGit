@@ -1,4 +1,15 @@
-import { err, ok, type PrSummary, type Result } from "@pwrgit/shared";
+import {
+  err,
+  ok,
+  repoForkSyncEligibility,
+  resolveSourceForgeRepo,
+  siblingForkCandidates,
+  type ForgeHostMap,
+  type PrSummary,
+  type RepoIdentity,
+  type Result,
+  type SiblingForkCandidate
+} from "@pwrgit/shared";
 import type { CommandBus } from "../command-bus";
 import { emitEvent } from "../ipc";
 import { logMain } from "../logs";
@@ -7,6 +18,7 @@ import type { OpenPrService } from "../github/open-pr-service";
 import type { DB } from "../persistence/db";
 import type { SettingsService } from "../settings/settings-service";
 import { deleteLocalBranch, renameLocalBranch } from "./branch-lifecycle";
+import { readForkSyncPrefs, readRemoteIdentities } from "./fork-sync-remotes";
 import { tagSourcesFor } from "./tag-sources";
 import { execGit } from "./dugite";
 import { worktreeMissingError } from "./worktree-liveness";
@@ -62,7 +74,14 @@ export function registerBranchHandlers(
   operations: WorktreeOperationQueue,
   settings: SettingsService,
   /** Decorates branch rows with open change requests; omitted by tests. */
-  openPrs?: Pick<OpenPrService, "branchPrs">
+  openPrs?: Pick<OpenPrService, "branchPrs">,
+  /** Stored forge identity for remote enrichment on `repo:refs`. */
+  readIdentity?: (repoId: string) => RepoIdentity | undefined,
+  hostsForRemotes?: () => ForgeHostMap,
+  ensureRemoteIdentities?: (
+    repoId: string,
+    candidates: readonly SiblingForkCandidate[]
+  ) => Promise<boolean>
 ): void {
   /**
    * Each local branch's change request: `branch_pr` first — it is the one
@@ -152,8 +171,8 @@ export function registerBranchHandlers(
 
   bus.register("repo:refs", async (req) => {
     const repo = db
-      .prepare("SELECT path FROM repos WHERE id = ?")
-      .get(req.repoId) as { path: string } | undefined;
+      .prepare("SELECT path, profile_id FROM repos WHERE id = ?")
+      .get(req.repoId) as { path: string; profile_id: string } | undefined;
     if (repo === undefined) {
       return err({ ...notFound, message: "repo not found" });
     }
@@ -174,8 +193,67 @@ export function registerBranchHandlers(
     const remoteNames = listed.value.remotes.map((remote) => remote.name);
     const tagAttention = store.attention(req.repoId, remoteNames);
     const moves = store.moves(req.repoId, remoteNames, listed.value.previewTags);
+    const identity = readIdentity?.(req.repoId);
+    const hosts = hostsForRemotes?.() ?? {};
+    const remoteIdentities = readRemoteIdentities(db, req.repoId);
+    const forkSyncPrefs = readForkSyncPrefs(db, req.repoId);
+    const eligibility = repoForkSyncEligibility(listed.value.remotes, {
+      identity,
+      remoteIdentities,
+      prefs: forkSyncPrefs,
+      hosts
+    });
+    const remotes = listed.value.remotes.map((remote) => {
+      const info = eligibility.get(remote.name);
+      if (info === undefined) return remote;
+      return {
+        ...remote,
+        ...(info.viewerCanPush === undefined
+          ? {}
+          : { viewerCanPush: info.viewerCanPush }),
+        ...(info.parent === undefined ? {} : { forkParent: info.parent }),
+        ...(info.root === undefined ? {} : { forkRoot: info.root }),
+        ...(info.eligible
+          ? { forkSyncEligible: true, forkSyncEnabled: info.enabled }
+          : {})
+      };
+    });
+    if (ensureRemoteIdentities !== undefined) {
+      const originIsReadOnlySource =
+        identity?.parent === undefined && identity?.viewerCanPush === false;
+      const sourceRemoteName = originIsReadOnlySource
+        ? "origin"
+        : (listed.value.remotes.find((r) => r.name === "upstream")?.name ?? null);
+      const source = resolveSourceForgeRepo(
+        listed.value.remotes,
+        sourceRemoteName,
+        identity,
+        hosts
+      );
+      if (source !== null) {
+        const candidates = siblingForkCandidates(listed.value.remotes, {
+          sourceRemote: sourceRemoteName,
+          trackedRemote: originIsReadOnlySource ? null : "origin",
+          source,
+          hosts
+        });
+        if (candidates.length > 0) {
+          void ensureRemoteIdentities(req.repoId, candidates)
+            .then((changed) => {
+              if (!changed) return;
+              emitEvent("repo:changed", {
+                profileId: repo.profile_id,
+                repoIds: [req.repoId]
+              });
+              emitEvent("graph:changed", { repoId: req.repoId });
+            })
+            .catch(() => undefined);
+        }
+      }
+    }
     const refs = ok({
       ...listed.value,
+      remotes,
       ...(tagAttention === undefined ? {} : { tagAttention }),
       ...(moves.size === 0 ? {} : { tagMoves: Object.fromEntries(moves) })
     });

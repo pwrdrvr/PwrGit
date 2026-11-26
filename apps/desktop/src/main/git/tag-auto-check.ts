@@ -157,6 +157,7 @@ export class TagAutoChecks {
           if (wasStopped(refreshed.error)) {
             this.sources.store.recordFailure(repoId, state.primary, `Listing ${state.primary}'s tags timed out`, this.now());
           }
+          emitEvent("tag:changed", { profileId: repo.profileId, repoId, refreshPreview: false });
         }
         logMain("debug", "tag", `automatic tag check (${reason}) of ${state.primary} unavailable for ${repo.path}: ${sanitizeGitLogDetail(refreshed.error.message)}`);
         return false;
@@ -179,9 +180,10 @@ export class TagAutoChecks {
     );
   }
 
-  /** The sidebar re-reads its count and rows; the lineage only when a moved tag came or went. */
+  /** A listing also re-reads the open preview, including local tags that
+   *  may have changed outside PwrGit since it was opened. */
   private announce(repoId: string, repo: RepoRow, movedSetChanged: boolean): void {
-    emitEvent("repo:changed", { profileId: repo.profileId, repoIds: [repoId] });
+    emitEvent("tag:changed", { profileId: repo.profileId, repoId, refreshPreview: true });
     if (movedSetChanged) emitEvent("graph:changed", { repoId });
   }
 }

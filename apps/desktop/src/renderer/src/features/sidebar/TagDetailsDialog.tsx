@@ -1,6 +1,6 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type { Repo, TagDetails } from "@pwrgit/shared";
-import { dispatch } from "../../lib/pwrgit";
+import { dispatch, subscribe } from "../../lib/pwrgit";
 import { showErrorToast, showInfoToast } from "../../lib/toast";
 import { useModal } from "../../lib/useModal";
 import { confirmDialog } from "../shell/dialogs";
@@ -19,23 +19,23 @@ export function TagDetailsDialog({
   repo,
   name,
   now,
-  onChanged,
   onClose
 }: {
   repo: Repo;
   name: string;
   now: number;
-  /** The local tag moved (a restore) or a remote was listed. */
-  onChanged: () => void;
   onClose: () => void;
 }) {
   const [details, setDetails] = useState<TagDetails | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const modalRef = useModal<HTMLDivElement>({ onClose });
+  const request = useRef(0);
 
   const load = useCallback(async (): Promise<void> => {
+    const stamp = ++request.current;
     const result = await dispatch("tag:details", { repoId: repo.id, name });
+    if (stamp !== request.current) return;
     if (!result.ok) {
       setError(result.error.message.split("\n")[0] ?? "Load failed");
       return;
@@ -46,7 +46,16 @@ export function TagDetailsDialog({
 
   useEffect(() => {
     void load();
-  }, [load]);
+    const off = subscribe("tag:changed", (event) => {
+      if (!event.previewOnly && event.refreshPreview && event.profileId === repo.profileId && event.repoId === repo.id) {
+        void load();
+      }
+    });
+    return () => {
+      off();
+      request.current += 1;
+    };
+  }, [load, repo.id, repo.profileId]);
 
   const check = async (remote: string): Promise<void> => {
     if (busy !== null) return;
@@ -62,8 +71,6 @@ export function TagDetailsDialog({
       });
       return;
     }
-    onChanged();
-    await load();
   };
 
   const restore = async (ref: string, objectId: string): Promise<void> => {
@@ -96,8 +103,6 @@ export function TagDetailsDialog({
       return;
     }
     showInfoToast({ title: `Restored ${name}`, message: short(result.value.objectId), subject: { repoId: repo.id } });
-    onChanged();
-    await load();
   };
 
   const local = details?.local ?? null;

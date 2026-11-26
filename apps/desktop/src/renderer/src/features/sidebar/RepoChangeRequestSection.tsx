@@ -47,7 +47,7 @@ import {
   type CreateWorktreeFromRef
 } from "./RepoChangeRequests";
 import { SectionChevron } from "./SectionChevron";
-import { SectionGlyph, steppedTooltip, useRefitSections } from "./section-fit";
+import { SectionGlyph, SectionHeading, steppedTooltip } from "./section-fit";
 import { WorktreeHolderChip } from "./WorktreeHolderChip";
 
 /**
@@ -127,10 +127,6 @@ export function RepoChangeRequestSection({
   const selection = useChangeRequestSelection();
   const keyboardSelect = useRef<number | undefined>(undefined);
   useEffect(() => () => window.clearTimeout(keyboardSelect.current), []);
-  // This section's list lands on its own state; the block's heading ladder
-  // has to hear about a count that grew. Before the early return below, so
-  // a section that appears or leaves re-fits too.
-  useRefitSections();
 
   // No forge on origin: no section at all, rather than a heading that can only
   // ever say 0. Before this session's first answer, origin's identity predicts
@@ -467,7 +463,7 @@ export function RepoChangeRequestSection({
   return (
     <>
     <div className="ref-section ref-cr-section">
-      <div className="ref-section__head-wrap">
+      <SectionHeading>
         <button
           className="ref-section__head"
           aria-expanded={open}
@@ -538,7 +534,7 @@ export function RepoChangeRequestSection({
         >
           <RefreshGlyph />
         </button>
-      </div>
+      </SectionHeading>
       {open && (
         <div className="ref-section__body">
           {error !== null && <div className="ref-section__error">{error}</div>}

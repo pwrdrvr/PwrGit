@@ -2360,6 +2360,15 @@ export interface Commands {
     res: ForkSyncOutcome;
   };
   /**
+   * Enable or disable pushing synced upstream commits to a specific fork
+   * remote on a repository. Writable fork remotes are enabled by default;
+   * disabling one opts it out of future fork sync pushes until re-enabled.
+   */
+  "remote:setForkSyncRemote": {
+    req: { repoId: string; remote: string; enabled: boolean };
+    res: { remote: string; enabled: boolean };
+  };
+  /**
    * Push one exact object to one branch on one remote, leased on the tip the
    * user reviewed — the reset dialog bringing a fork's `origin/main` along.
    * Forces when the lease holds, so a diverged fork is replaced; refuses when
@@ -2874,6 +2883,10 @@ export interface Events {
    * scan, clone, removal, hide, pin or reorder).
    */
   "repo:changed": { profileId: ProfileId; repoIds?: RepoId[] };
+  /** Tag rows or listing metadata changed. Only open tag surfaces re-read.
+   *  A successful listing also refreshes the local Tags preview and summary.
+   *  A page that updated the stored comparison only needs to notify the preview. */
+  "tag:changed": { profileId: ProfileId; repoId: RepoId; refreshPreview: boolean; previewOnly?: true };
   /** Find my repositories, while it walks: folders opened, repositories so
    *  far. Throttled in main; correlated by `searchId`. */
   "repo:searchProgress": RepoSearchProgress;
