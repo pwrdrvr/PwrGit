@@ -636,6 +636,97 @@ test("a tip chip's worktree button jumps to that worktree", async () => {
   await expect(window.locator(".titlebar__branch-name")).toHaveText("feat/hop");
 });
 
+test("a narrow Lineage publish lays out the gutter and reveals lanes without reading a row width", async ({}, testInfo) => {
+  sandbox = createGitSandbox();
+  const repo = sandbox.makeRepo("gutter-workbench");
+  const focus = repo.addWorktree("feature/focus");
+  sandbox.commit(focus, "widget.txt", "Adjust the widget");
+  for (const branch of ["api", "build", "catalog", "docs", "events"]) {
+    const worktree = repo.addWorktree(`feature/${branch}`);
+    sandbox.commit(worktree, `${branch}.txt`, `Update ${branch}`);
+  }
+  for (let i = 0; i < 16; i += 1) {
+    sandbox.git(repo.path, "commit", "--allow-empty", "-m", `Main line update ${i + 1}`);
+  }
+  const headHash = sandbox.git(focus, "rev-parse", "HEAD");
+  handle = await launchApp();
+  const { app, window } = handle;
+  await window.emulateMedia({ reducedMotion: "reduce" });
+  const native = await app.browserWindow(window);
+  await native.evaluate((win) => {
+    win.setSize(940, 720);
+    win.setIgnoreMouseEvents(true);
+  });
+  await addRootAndExpand(window, handle, sandbox, repo.name);
+  await window.evaluate(() => {
+    const counter = globalThis as typeof globalThis & { laneWidthReads: number };
+    counter.laneWidthReads = 0;
+    const width = Object.getOwnPropertyDescriptor(Element.prototype, "clientWidth")!;
+    Object.defineProperty(Element.prototype, "clientWidth", {
+      ...width,
+      get(this: Element) {
+        if (this.classList.contains("graph-lanes-clip")) counter.laneWidthReads += 1;
+        return width.get!.call(this);
+      }
+    });
+  });
+
+  const head = window.locator(`.graph-row[data-hash="${headHash}"]`);
+  const bar = window.locator(".lane-scrollbar");
+  const visibleDot = () => head.evaluate((row) => {
+    const clip = row.querySelector(".graph-lanes-clip")!.getBoundingClientRect();
+    const dot = row.querySelector(".graph-lanes > circle:last-of-type")!.getBoundingClientRect();
+    const center = (dot.left + dot.right) / 2;
+    return center >= clip.left && center <= clip.right;
+  });
+  await branchRow(window, "feature/focus").click();
+  await expect(head).toHaveClass(/is-flash/);
+  await expect(head).toBeInViewport();
+  await expect(bar).toBeVisible();
+  const naturalWidth = await head.locator(".graph-lanes").getAttribute("width");
+  expect(Number(naturalWidth)).toBeLessThanOrEqual(160);
+  const clipWidth = await head.locator(".graph-lanes-clip").evaluate((clip) => clip.getBoundingClientRect().width);
+  expect(clipWidth).toBeLessThan(Number(naturalWidth));
+  expect(await bar.evaluate((el) => el.getBoundingClientRect().width)).toBeCloseTo(clipWidth);
+  // The first automatic HEAD reveal has to pan even below the lane cap.
+  await expect.soft.poll(visibleDot, { timeout: 2_000 }).toBe(true);
+  await window.screenshot({ path: testInfo.outputPath("narrow-gutter.png") });
+
+  // Opening a diff keeps this graph mounted behind it. A return to Lineage
+  // should restore both scroll axes without a second reveal.
+  await head.click();
+  const scroller = window.locator(".graph-scroll");
+  const offsets = async () => ({
+    top: await scroller.evaluate((el) => el.scrollTop),
+    left: await bar.evaluate((el) => el.scrollLeft)
+  });
+  const beforeDiff = await offsets();
+  expect(beforeDiff.top).toBeGreaterThan(0);
+  await window.locator(".file-row", { hasText: "widget.txt" }).click();
+  await expect(window.locator(".diff-pane")).toBeVisible();
+  await expect(bar).toBeHidden();
+  await window.keyboard.press("Escape");
+  await expect(bar).toBeVisible();
+  await expect.poll(offsets).toEqual(beforeDiff);
+
+  await native.evaluate((win) => win.setSize(1360, 720));
+  await expect(bar).toBeHidden();
+  await expect.poll(visibleDot).toBe(true);
+  await native.evaluate((win) => win.setSize(940, 720));
+  await expect(bar).toBeVisible();
+  await expect.poll(() => bar.evaluate((el) => el.scrollLeft)).toBe(0);
+  await window.locator(".graph-locate").press("Enter");
+  await expect.soft.poll(visibleDot, { timeout: 2_000 }).toBe(true);
+  await branchRow(window, "main").click();
+  await expect(window.locator(".graph-row--head")).toContainText("Main line update 16");
+  await expect.poll(() => bar.evaluate((el) => el.scrollLeft)).toBe(0);
+  // The DOM sizes above are independent bounds reads. An app-side read of a
+  // row's clientWidth in publish or resize reintroduces the forced layout.
+  expect(await window.evaluate(() =>
+    (globalThis as typeof globalThis & { laneWidthReads: number }).laneWidthReads
+  )).toBe(0);
+});
+
 test("lane scrollbar stays above vertical scrolling and horizontal wheel pans lanes", async () => {
   sandbox = createGitSandbox();
   const s = sandbox;
