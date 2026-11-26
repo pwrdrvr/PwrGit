@@ -360,7 +360,6 @@ textarea,
   color: var(--text-muted);
   font: 500 12px/1 var(--font-sans);
   cursor: pointer;
-  transition: border-color 140ms ease, color 140ms ease;
 }
 .titlebar-jump:hover {
   border-color: var(--accent-border);
@@ -429,7 +428,6 @@ textarea,
   background: transparent;
   color: var(--text-muted);
   cursor: pointer;
-  transition: color 80ms ease, background 80ms ease;
 }
 .history-nav__chip:hover:not(:disabled) {
   color: var(--text-primary);
@@ -677,7 +675,6 @@ textarea,
   border: 1px solid var(--border-subtle);
   border-radius: 9px;
   cursor: pointer;
-  transition: background 140ms ease, border-color 140ms ease;
 }
 .profile-chip.is-open {
   background: var(--bg-hover-strong);
@@ -845,8 +842,6 @@ textarea,
   font: 600 11px/1 var(--font-sans);
   white-space: nowrap;
   cursor: pointer;
-  transition: border-color 120ms ease, color 120ms ease,
-    background 120ms ease;
 }
 /* A glyph that declares no `flex` inherits `0 1 auto` and gives up width to
    the label beside it. */
@@ -888,7 +883,6 @@ textarea,
   border: 1px solid var(--border-default);
   border-radius: 7px;
   background: var(--bg-panel-elevated);
-  transition: border-color 120ms ease;
 }
 .sidebar-toolbar__split > .sidebar-toolbar__btn {
   height: 100%;
@@ -1130,7 +1124,6 @@ textarea,
   background: transparent;
   color: var(--text-muted);
   cursor: pointer;
-  transition: background 120ms ease, color 120ms ease, border-color 120ms ease;
 }
 /* :not(.is-active) is load-bearing, not tidiness. This rule and
    .lens-chip.is-active below both painted at (0,2,0), so .is-active won on
@@ -1218,8 +1211,6 @@ textarea,
   background: var(--bg-panel);
   color: var(--text-muted);
   cursor: pointer;
-  transition: background 120ms ease, color 120ms ease,
-    border-color 120ms ease;
 }
 .sidebar-options:hover,
 .sidebar-options[aria-expanded="true"] {
@@ -1738,7 +1729,6 @@ textarea,
   /* Opaque (matches the sidebar) so scrolling rows don't show through when the
      header is pinned to the top of the list. */
   background: var(--bg-sidebar);
-  transition: background 140ms ease;
 }
 .repo-row:hover {
   background: var(--bg-panel-hover);
@@ -1797,7 +1787,7 @@ textarea,
   color: var(--text-subtle);
   cursor: grab;
   opacity: 0;
-  transition: opacity 120ms ease;
+  isolation: isolate;
 }
 .repo-row.is-arrangeable:hover .repo-row__handle,
 .repo-row.is-arrangeable:focus-visible .repo-row__handle,
@@ -1809,7 +1799,7 @@ textarea,
 }
 .wt-row__handle {
   opacity: 0;
-  transition: opacity 120ms ease;
+  isolation: isolate;
 }
 .repo-row__handle:active,
 .wt-row__handle:active {
@@ -2084,7 +2074,6 @@ a.forge-chip:focus-visible {
   background: transparent;
   cursor: pointer;
   color: var(--text-subtle);
-  transition: background 120ms ease, color 120ms ease;
 }
 .pin:hover {
   color: var(--accent-bright);
@@ -2303,7 +2292,6 @@ a.forge-chip:focus-visible {
   border-radius: 6px;
   color: var(--text-muted);
   cursor: pointer;
-  transition: background 120ms ease, color 120ms ease;
 }
 /* Refreshing is signalled with aria-disabled, not `disabled`, so the button
    keeps its place in the focus order — see RepoRow.tsx. Match on the attribute
@@ -3217,7 +3205,6 @@ a.forge-chip:focus-visible {
   cursor: pointer;
   border: 1px solid transparent;
   background: transparent;
-  transition: background 120ms ease;
 }
 .wt-row:hover {
   background: var(--bg-panel-hover);
@@ -5710,7 +5697,7 @@ a.forge-chip:focus-visible {
     linear-gradient(to right, transparent, var(--bg-sidebar) 20px);
   opacity: 0;
   pointer-events: none;
-  transition: opacity 120ms ease;
+  isolation: isolate;
 }
 /* Two classes on purpose: `.kebab` (declared later) sets `position: relative`
    for its popover, and on equal specificity it won — the menu silently stayed
@@ -5726,7 +5713,7 @@ a.forge-chip:focus-visible {
   top: 50%;
   transform: translateY(-50%);
   opacity: 0;
-  transition: opacity 120ms ease;
+  isolation: isolate;
 }
 /* Sidebar-scoped sizes for chrome that ships larger elsewhere. Each is under
    the text ceiling so the row height comes from the type, not the chrome —
@@ -5790,10 +5777,12 @@ a.forge-chip:focus-visible {
 }
 /* Wherever the actions are showing, the floating cluster lands where the age
    text sits — ONLY the age yields. PR chips, status tags, and count badges stay
-   put and stay interactive (the PR chip has its own click + tooltip). */
+   put and stay interactive (the PR chip has its own click + tooltip).
+   `visibility` rather than `opacity` avoids creating/destroying a PaintLayer
+   and invalidating sidebar list layout on every row hover. */
 .wt-row:hover .wt-age,
 .wt-row:has(:focus-visible) .wt-age {
-  opacity: 0;
+  visibility: hidden;
 }
 /* Except over the PR chip while the chip itself holds keyboard focus. The
    strip is 77px of opaque backdrop, and with the age that normally takes its
@@ -5810,7 +5799,7 @@ a.forge-chip:focus-visible {
   pointer-events: none;
 }
 .wt-row:has(.pr-chip:focus-visible) .wt-age {
-  opacity: 1;
+  visibility: visible;
 }
 
 /* ---- Rail: Rebase tool tab ---- */
@@ -10149,7 +10138,6 @@ button.agent-menu__item:hover {
   text-overflow: ellipsis;
   white-space: nowrap;
   cursor: pointer;
-  transition: color 120ms ease, border-color 120ms ease;
 }
 .titlebar__pathchip:hover {
   color: var(--text-secondary);
@@ -10206,7 +10194,6 @@ button.agent-menu__item:hover {
   text-overflow: ellipsis;
   white-space: nowrap;
   cursor: pointer;
-  transition: box-shadow 120ms ease, background 120ms ease;
 }
 .titlebar__dot {
   width: 7px;
@@ -10980,7 +10967,6 @@ button.agent-menu__item:hover {
   min-height: 66px;
   cursor: pointer;
   border-bottom: 1px solid var(--border-faint);
-  transition: background 120ms ease;
 }
 .commit-row:hover {
   background: var(--accent-tint);
@@ -11153,7 +11139,6 @@ button.commit-byline:focus-visible {
   color: var(--text-muted);
   font: 600 9.5px/1 var(--font-mono);
   cursor: pointer;
-  transition: color 120ms ease, border-color 120ms ease, background 120ms ease;
 }
 .commit-sha-chip:hover,
 .commit-sha-chip:focus-visible,
@@ -11191,7 +11176,6 @@ button.commit-byline:focus-visible {
   padding: 0 12px 0 8px;
   cursor: pointer;
   border-bottom: 1px solid var(--border-faint);
-  transition: background 120ms ease;
 }
 .graph-row:hover,
 .graph-row.is-context-open {
@@ -11255,7 +11239,6 @@ button.commit-byline:focus-visible {
   color: var(--text-secondary);
   font: 600 10.5px/1 var(--font-sans);
   cursor: pointer;
-  transition: color 120ms ease, border-color 120ms ease, background 120ms ease;
 }
 .graph-locate:hover,
 .graph-branches:hover,
@@ -13244,7 +13227,6 @@ button.ref-chip:focus-visible {
   border-radius: 999px;
   transform: translateX(-50%);
   background: transparent;
-  transition: background 140ms ease, box-shadow 140ms ease;
 }
 .pane-resizer:hover::after,
 .pane-resizer:focus-visible::after,
@@ -13262,9 +13244,23 @@ body.is-col-resizing {
 
 /* ---- Viewport tooltip (portalled) ---- */
 
+/* Strictly above interactive popovers (.commit-context-card / .pr-status-card /
+   .person-card at 130, .remote-activity-popover / .removal-toast at 140,
+   .stack-popover at 150) so plain tooltips opened from controls inside an
+   interactive popover always paint on top regardless of DOM order, while
+   staying below the window hairline and onboarding overlay (200). */
+.viewport-tooltip-layer {
+  position: fixed;
+  inset: 0;
+  z-index: 160;
+  pointer-events: none;
+  contain: strict;
+}
+
 .viewport-tooltip {
   position: fixed;
-  z-index: 140;
+  z-index: 160;
+  contain: layout style;
   width: max-content;
   max-width: min(440px, calc(100vw - 32px));
   padding: 7px 10px;
@@ -13504,8 +13500,6 @@ body.is-col-resizing {
   background: transparent;
   color: var(--text-secondary);
   cursor: pointer;
-  transition: background 120ms ease, color 120ms ease,
-    border-color 120ms ease;
 }
 /* The worktree row's kebab is DRAWN smaller than it is TARGETED.
 
@@ -13564,7 +13558,7 @@ body.is-col-resizing {
 }
 .repo-row__menu {
   opacity: 0;
-  transition: opacity 120ms ease;
+  isolation: isolate;
 }
 /* Also at rest on the repository you are in. Hidden there, the nearest kebab
    in sight was the primary checkout's, one row down, and its menu has none of
@@ -15062,7 +15056,6 @@ body.is-col-resizing {
   color: var(--text-secondary);
   font: 600 9.5px/1 var(--font-mono);
   cursor: pointer;
-  transition: background 120ms ease, border-color 120ms ease, color 120ms ease;
 }
 .pr-chip:hover,
 .pr-chip:focus-visible {
