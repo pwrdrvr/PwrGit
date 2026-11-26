@@ -663,32 +663,63 @@ test("Lineage has its own paint root when Pull moves HEAD", async ({}, testInfo)
   await (await app.browserWindow(window)).evaluate((win) => win.setSize(1160, 740));
   await addRootAndExpand(window, handle, s, repo.name);
   await worktreeRow(window, "main").click();
-  await expect(window.locator(".graph-row--head")).toHaveAttribute("data-hash", before);
-  await expect(window.locator(".graph-row.is-flash")).toHaveCount(0);
-  await window.evaluate(async () => { await document.fonts.ready; });
+  const initialHead = window.locator(`.graph-row--head[data-hash="${before}"]`);
+  await expect(initialHead).toBeInViewport();
+  await window.locator(".graph-card").evaluate(async (card) => {
+    await Promise.all(card.getAnimations().map((animation) => animation.finished));
+    await document.fonts.ready;
+  });
+  await expect(initialHead).not.toHaveClass(/is-flash/);
 
   const pull = window.locator(".wt-btn--pull");
   const scroll = window.locator(".graph-scroll");
   const width = () => scroll.evaluate((el) => el.clientWidth);
   const beforeWidth = await width();
   await pull.focus();
+  const headCommitted = "Pull oracle HEAD committed";
+  const head = window.locator(`.graph-row--head[data-hash="${after}"]`);
+  await scroll.evaluate((el, { after, headCommitted }) => {
+    // The publish mark precedes React's synchronous commit. This mark ties it
+    // to the first DOM update that actually displays the incoming commit.
+    const observer = new MutationObserver(() => {
+      if (!el.querySelector(`.graph-row--head[data-hash="${after}"]`)) return;
+      performance.mark(headCommitted);
+      observer.disconnect();
+    });
+    observer.observe(el, { subtree: true, childList: true, attributeFilter: ["class"] });
+  }, { after, headCommitted });
+
+  const captureReceipt = async () => {
+    const card = window.locator(".remote-activity-popover");
+    await expect(card).toContainText("Fast-forwarded");
+    await expect(card.locator(".remote-activity__rail")).toBeVisible();
+    await expect(card.getByRole("button", { name: "Dismiss status" })).toBeVisible();
+    await window.screenshot({ path: testInfo.outputPath("lineage-pull-receipt.png") });
+  };
 
   const cdp = await window.context().newCDPSession(window);
-  const paintRoots = new Set<string>();
+  type TraceEvent = {
+    name: string; pid: number; tid: number; ts: number;
+    args?: { data?: { nodeName?: string } };
+  };
+  const events: TraceEvent[] = [];
   cdp.on("Tracing.dataCollected", ({ value }) => {
     for (const item of value) {
-      const event = item as unknown as { name: string; args?: { data?: { nodeName?: string } } };
-      const root = event.args?.data?.nodeName;
-      if (event.name === "Paint" && root !== undefined) paintRoots.add(root);
+      const event = item as unknown as TraceEvent;
+      if (event.name === "Paint" || event.name === "PrePaint" ||
+        event.name === headCommitted || event.name.startsWith("PwrGit Lineage publish ")) {
+        events.push(event);
+      }
     }
   });
   try {
-    await cdp.send("Tracing.start", { categories: "devtools.timeline" });
+    await cdp.send("Tracing.start", { categories: "devtools.timeline,blink.user_timing" });
     await window.keyboard.press("Enter");
-    const head = window.locator(`.graph-row--head[data-hash="${after}"]`);
-    await expect(head).toHaveClass(/is-flash/);
-    await expect(head).toBeInViewport();
-    await expect(head).not.toHaveClass(/is-flash/);
+    await Promise.all([captureReceipt(), expect(head).toBeInViewport()]);
+    // Give Chromium a paint opportunity after the incoming HEAD is visible.
+    await window.evaluate(() => new Promise<void>((resolve) => {
+      requestAnimationFrame(() => requestAnimationFrame(() => resolve()));
+    }));
     const complete = new Promise<void>((resolve) => cdp.once("Tracing.tracingComplete", () => resolve()));
     await cdp.send("Tracing.end");
     await complete;
@@ -698,9 +729,22 @@ test("Lineage has its own paint root when Pull moves HEAD", async ({}, testInfo)
   expect(s.git(repo.path, "rev-parse", "HEAD")).toBe(after);
   expect(await width()).toBe(beforeWidth);
   await expect(pull).toBeFocused();
-  await expect(window.getByRole("button", { name: "Dismiss status" })).toBeVisible();
-  await window.screenshot({ path: testInfo.outputPath("lineage-pull-receipt.png") });
-  expect([...paintRoots]).toContain("DIV class='graph-card'");
+
+  const commit = events.find((event) => event.name === headCommitted);
+  expect(commit, "the incoming HEAD reached the DOM").toBeDefined();
+  const renderer = events.filter((event) => event.pid === commit!.pid && event.tid === commit!.tid)
+    .sort((a, b) => a.ts - b.ts);
+  const publish = renderer.findLast((event) =>
+    event.ts <= commit!.ts && event.name.startsWith("PwrGit Lineage publish ")
+  );
+  expect(publish?.name).toMatch(/^PwrGit Lineage publish repo-change view=(\d+) target=\1$/);
+  const frames = renderer.filter((event) => event.name === "PrePaint" && event.ts >= commit!.ts);
+  expect(frames[0], "a frame followed the HEAD publish").toBeDefined();
+  const paintRoots = renderer
+    .filter((event) => event.name === "Paint" &&
+      event.ts >= frames[0]!.ts && event.ts < (frames[1]?.ts ?? Infinity))
+    .map((event) => event.args?.data?.nodeName);
+  expect(paintRoots, "paint roots in the first frame after the HEAD publish").toContain("DIV class='graph-card'");
 });
 
 test("a narrow Lineage publish lays out the gutter and reveals lanes without reading a row width", async ({}, testInfo) => {
