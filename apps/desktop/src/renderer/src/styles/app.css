@@ -3269,16 +3269,28 @@ a.forge-chip:focus-visible {
   background: var(--bg-row-active);
   box-shadow: none;
 }
-/* Back puts the row you left from where it was; one ring says "here". */
-.is-nav-flash {
+/* Back puts the row you left from where it was; one ring says "here". Fade a
+   static shadow on a ::before layer so the compositor animates opacity instead
+   of repainting box-shadow and neighbouring sticky rows every frame. */
+.is-nav-flash:not(.repo-row):not(.wt-row.is-selected) {
+  position: relative;
+}
+.is-nav-flash::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  pointer-events: none;
+  box-shadow: 0 0 0 3px var(--accent-border);
+  opacity: 0;
   animation: nav-flash 900ms ease-out 1;
 }
 @keyframes nav-flash {
   from {
-    box-shadow: 0 0 0 3px var(--accent-border);
+    opacity: 1;
   }
   to {
-    box-shadow: 0 0 0 0 transparent;
+    opacity: 0;
   }
 }
 /* ---- Drag source ----
@@ -7141,6 +7153,7 @@ button.agent-menu__item:hover {
   flex-direction: column;
   padding: 0;
   overflow: hidden;
+  contain: layout paint;
 }
 .bulk-sync__head {
   flex: 0 0 auto;
@@ -7470,6 +7483,7 @@ button.agent-menu__item:hover {
   overflow: hidden;
   border-radius: 999px;
   background: color-mix(in srgb, var(--text-primary) 9%, transparent);
+  contain: layout paint;
 }
 .bulk-sync__bar > i {
   display: block;
@@ -8966,7 +8980,7 @@ button.agent-menu__item:hover {
   opacity: 0;
   color: var(--accent);
   font: 600 10px/1 var(--font-mono);
-  transition: width 100ms ease, opacity 100ms ease;
+  transition: opacity 100ms ease;
 }
 .refs-copyable-name:hover::after,
 .refs-copyable-name:focus-visible::after,
