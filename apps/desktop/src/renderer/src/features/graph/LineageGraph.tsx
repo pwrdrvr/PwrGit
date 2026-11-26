@@ -1108,6 +1108,19 @@ export function LineageGraph({
     cardRef.current?.style.setProperty("--lane-scroll", `${-offset}px`);
   }, []);
 
+  useEffect(() => {
+    const bar = laneBarRef.current;
+    if (!hasRows || bar === null || typeof ResizeObserver === "undefined") return;
+    const observer = new ResizeObserver(([entry]) => {
+      // Reopening after a resize can clamp the native offset silently.
+      // Only read it after layout and when there is a pan to reconcile.
+      const pan = cardRef.current?.style.getPropertyValue("--lane-scroll");
+      if (entry && entry.contentRect.width > 0 && pan && pan !== "0px") syncLaneScroll(bar);
+    });
+    observer.observe(bar);
+    return () => observer.disconnect();
+  }, [hasRows, syncLaneScroll]);
+
   // The scrollbar is laid out with the rows, so even the first reveal can pan.
   // The browser clamps the position to the available horizontal scroll range.
   const revealLane = (lane: number): void => {

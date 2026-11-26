@@ -729,8 +729,36 @@ test("a narrow Lineage publish lays out the gutter and reveals lanes without rea
   expect.soft(interruptedPan.pan).toBeGreaterThan(0);
   expect.soft(interruptedPan.shift).toBeCloseTo(interruptedPan.pan);
 
-  await native.evaluate((win) => win.setSize(1360, 720));
+  // Chromium can clamp a hidden scrollport on reopen without sending a
+  // scroll event. The plotted lanes still have to match the native offset.
+  const laneInset = () => head.evaluate((row) => {
+    const clip = row.querySelector(".graph-lanes-clip")!.getBoundingClientRect();
+    const lanes = row.querySelector(".graph-lanes")!.getBoundingClientRect();
+    return lanes.left - clip.left;
+  });
+  expect(await laneInset()).toBeLessThan(0);
+  await window.locator(".file-row", { hasText: "widget.txt" }).click();
+  await expect(window.locator(".diff-pane")).toBeVisible();
   await expect(bar).toBeHidden();
+  // Exercise the silent clamp even on Chromium builds that deliver a scroll
+  // event for this transition. Keep the real native scrollbar and resize.
+  await bar.evaluate((el) => {
+    const controller = new AbortController();
+    el.addEventListener("scroll", (event) => event.stopImmediatePropagation(), {
+      capture: true,
+      signal: controller.signal
+    });
+    el.addEventListener("resume-scroll-events", () => controller.abort(), { once: true });
+  });
+  await native.evaluate((win) => win.setSize(1360, 720));
+  await expect.poll(() => window.evaluate(() => globalThis.innerWidth)).toBeGreaterThan(1200);
+  await window.keyboard.press("Escape");
+  await expect(head).toBeVisible();
+  await expect(bar).toBeHidden();
+  await expect.poll(() => bar.evaluate((el) => el.scrollLeft)).toBe(0);
+  await expect.soft.poll(laneInset, { timeout: 2_000 }).toBeCloseTo(0);
+  await window.screenshot({ path: testInfo.outputPath("gutter-after-hidden-resize.png") });
+  await bar.dispatchEvent("resume-scroll-events");
   await expect.poll(visibleDot).toBe(true);
   await native.evaluate((win) => win.setSize(940, 720));
   await expect(bar).toBeVisible();
