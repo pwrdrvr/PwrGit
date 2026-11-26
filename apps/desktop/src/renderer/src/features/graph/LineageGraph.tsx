@@ -3,6 +3,7 @@ import { LocateGlyph } from "../../lib/LocateGlyph";
 import {
   memo,
   type ComponentProps,
+  type CSSProperties,
   type ReactNode,
   type RefObject,
   useCallback,
@@ -1098,49 +1099,47 @@ export function LineageGraph({
   };
 
   const gutterW = gutterWidth(prLandingLayout.laneCount);
-  // The gutter also clips below its 160px cap when the pane is narrow
-  // (`.graph-lanes-clip`'s max-width keeps ~14ch of subject), and lanes cut
-  // off there need the same scrollbar as lanes past the cap, or a commit's
-  // dot can sit out of reach. Measured, because the width that clips is a
-  // container-query expression, not a lane count.
-  const [gutterClipped, setGutterClipped] = useState(false);
-  useEffect(() => {
-    const scroller = scrollerRef.current;
-    if (scroller === null) return;
-    const measure = (): void => {
-      const clip = scroller.querySelector<HTMLElement>(".graph-lanes-clip");
-      // 0 is a gutter not laid out yet (a hidden pane), not a clipped one.
-      const width = clip?.clientWidth ?? 0;
-      setGutterClipped(width > 0 && width < gutterW - 0.5);
-    };
-    measure();
-    if (typeof ResizeObserver === "undefined") return;
-    const observer = new ResizeObserver(measure);
-    observer.observe(scroller);
-    return () => observer.disconnect();
-  }, [gutterW, vms.length > 0]);
-  const laneOverflow =
-    prLandingLayout.laneCount > MAX_GUTTER_LANES || gutterClipped;
+  const hasRows = vms.length > 0;
+  const syncLaneScroll = useCallback((bar: HTMLDivElement): void => {
+    const offset = bar.scrollLeft;
+    // A queued scroll event can arrive while Lineage is behind a diff. The
+    // hidden bar reports zero but keeps its scroll position for reopening.
+    if (offset === 0 && bar.scrollWidth === 0) return;
+    cardRef.current?.style.setProperty("--lane-scroll", `${-offset}px`);
+  }, []);
 
-  // Horizontally reveal a lane inside the clipped gutter (no-op when the
-  // gutter isn't overflowing). Scrolling the bar drives a CSS var on the card.
+  useEffect(() => {
+    const bar = laneBarRef.current;
+    if (!hasRows || bar === null || typeof ResizeObserver === "undefined") return;
+    const observer = new ResizeObserver(([entry]) => {
+      // Reopening after a resize can clamp the native offset silently.
+      // Only read it after layout and when there is a pan to reconcile.
+      const pan = cardRef.current?.style.getPropertyValue("--lane-scroll");
+      if (entry && entry.contentRect.width > 0 && pan && pan !== "0px") syncLaneScroll(bar);
+    });
+    observer.observe(bar);
+    return () => observer.disconnect();
+  }, [hasRows, syncLaneScroll]);
+
+  // The scrollbar is laid out with the rows, so even the first reveal can pan.
+  // The browser clamps the position to the available horizontal scroll range.
   const revealLane = (lane: number): void => {
     const bar = laneBarRef.current;
     if (bar === null) return;
-    const x = lane * LANE_W;
-    bar.scrollLeft = Math.max(0, Math.min(x - gutterW / 2, bar.scrollWidth));
+    bar.scrollLeft = lane === 0 ? 0 : (lane + 0.5) * LANE_W - bar.clientWidth / 2;
+    syncLaneScroll(bar);
   };
 
   const locateHash = (hash: string): void => {
     if (hash === "") return;
     const vm = vmByHash.get(hash);
-    if (vm !== undefined) revealLane(vm.row.lane);
     const el = scrollerRef.current?.querySelector(`[data-hash="${hash}"]`);
     el?.scrollIntoView({
       block: "center",
       inline: "nearest",
       behavior: scrollBehavior()
     });
+    if (vm !== undefined) revealLane(vm.row.lane);
     setFlash(hash);
   };
 
@@ -1176,11 +1175,6 @@ export function LineageGraph({
     return () => cancelAnimationFrame(raf);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [head, worktreeId]);
-
-  // If the graph shrinks back under the gutter cap, undo any lane scroll.
-  useEffect(() => {
-    if (!laneOverflow) cardRef.current?.style.setProperty("--lane-scroll", "0px");
-  }, [laneOverflow]);
 
   // Commit history can be enormous, so the main process must never infer its
   // monitor set from every rendered graph row. Observe only rows intersecting
@@ -1253,7 +1247,6 @@ export function LineageGraph({
   // through to normal list scrolling. Native non-passive listener — React's
   // synthetic wheel can't preventDefault.
   useEffect(() => {
-    if (!laneOverflow) return;
     const card = cardRef.current;
     if (card === null) return;
     const onWheel = (e: WheelEvent): void => {
@@ -1261,13 +1254,14 @@ export function LineageGraph({
       if (target === null || target.closest(".graph-lanes-clip") === null) return;
       if (Math.abs(e.deltaX) <= Math.abs(e.deltaY)) return;
       const bar = laneBarRef.current;
-      if (bar === null) return;
+      if (bar === null || bar.scrollWidth <= bar.clientWidth) return;
       bar.scrollLeft += e.deltaX;
+      syncLaneScroll(bar);
       e.preventDefault();
     };
     card.addEventListener("wheel", onWheel, { passive: false });
     return () => card.removeEventListener("wheel", onWheel);
-  }, [laneOverflow]);
+  }, [hasRows, syncLaneScroll]);
 
   const shown = data?.shownBranches.length ?? 0;
   const matched = data?.matchedBranches ?? shown;
@@ -1436,24 +1430,23 @@ export function LineageGraph({
         <span ref={toolbarFitEndRef} className="graph-toolbar__fit-end" aria-hidden="true" />
       </div>
 
-      {laneOverflow && vms.length > 0 && (
+      {hasRows && (
         <div
           className="lane-scrollbar"
           ref={laneBarRef}
           {...hoverTooltip(tip, "Scroll the lane gutter — commits stay put")}
-          style={{ width: gutterW }}
-          onScroll={(e) => {
-            cardRef.current?.style.setProperty(
-              "--lane-scroll",
-              `${-e.currentTarget.scrollLeft}px`
-            );
-          }}
+          style={{
+            width: gutterW,
+            "--lane-track-width": `${prLandingLayout.laneCount * LANE_W}px`,
+            "--lane-scrollable": prLandingLayout.laneCount > MAX_GUTTER_LANES ? 1 : undefined
+          } as CSSProperties}
+          onScroll={(e) => syncLaneScroll(e.currentTarget)}
         >
-          <div style={{ width: prLandingLayout.laneCount * LANE_W, height: 1 }} />
+          <div />
         </div>
       )}
       <div className="graph-scroll" ref={scrollerRef}>
-        {vms.length > 0 ? (
+        {hasRows ? (
           <div
             ref={cardRef}
             className="graph-card"
