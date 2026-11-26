@@ -8,6 +8,7 @@ import {
   type PrSummary,
   type StackPosition
 } from "@pwrgit/shared";
+import { copyText } from "../../lib/copyText";
 import { dispatch } from "../../lib/pwrgit";
 import { prPresentation } from "./pr-status";
 import { DiffStat } from "../diff/DiffStat";
@@ -44,6 +45,9 @@ export function PrStatusCard({
   now?: number;
 }) {
   const title = pr.title.trim();
+  const repoPath = pr.repoPath?.trim() ?? "";
+  const number = numberLabel(pr);
+  const label = eyebrow(pr);
   const changes = readChanges(pr);
   const timeline = readTimeline(pr, now);
   const status = prPresentation(pr);
@@ -51,9 +55,27 @@ export function PrStatusCard({
   return (
     <>
       <div className="pr-status-card__header">
-        <span className="pr-status-card__eyebrow">{eyebrow(pr)}</span>
-        <span className="pr-status-card__identity">{identity(pr)}</span>
+        <span className="pr-status-card__eyebrow">{label}</span>
+        <button
+          type="button"
+          className={`pr-status-card__number-chip pr-status-card__number-chip--${status.dot}`}
+          aria-label={`Open ${label.toLowerCase()} ${number} in browser`}
+          onClick={(e) => {
+            e.stopPropagation();
+            if (e.altKey) void copyText(pr.url);
+            else void dispatch("shell:openExternal", { url: pr.url });
+          }}
+        >
+          <span
+            aria-hidden="true"
+            className={`pr-status-card__dot pr-status-card__dot--${status.dot}`}
+          />
+          <span className="pr-status-card__number-text">{number}</span>
+        </button>
       </div>
+      {repoPath !== "" ? (
+        <div className="pr-status-card__repo">{repoPath}</div>
+      ) : null}
       {title !== "" ? (
         <div className="pr-status-card__title">{title}</div>
       ) : null}
@@ -79,7 +101,7 @@ export function PrStatusCard({
             status.dot
           }`}
         />
-        <span>{status.label}</span>
+        <span className="pr-status-card__status-label">{status.label}</span>
       </div>
       {(status.queue?.kind === "ready_to_queue" ||
         (status.queue?.kind === "removed" && status.queue.canRequeue)) &&
@@ -205,12 +227,13 @@ function eyebrow(pr: PrSummary): string {
 }
 
 /**
- * `path#4` on GitHub, `path!4` on GitLab — each forge's native reference form,
- * which is what a reader can paste back into it.
+ * `#4` on GitHub / GitCafe, `!4` on GitLab — each forge's native reference
+ * sigil, shown in its own header chip so a long repository path can never
+ * truncate the change-request number out of view.
  */
-function identity(pr: PrSummary): string {
+function numberLabel(pr: PrSummary): string {
   const sigil = changeRequestSigil(pr.forge ?? ASSUMED_FORGE_KIND);
-  return `${pr.repoPath ?? ""}${sigil}${pr.number}`;
+  return `${sigil}${pr.number}`;
 }
 
 type Changes = {
