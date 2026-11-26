@@ -1,7 +1,7 @@
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { _electron as electron, expect, test as base, type Page } from "@playwright/test";
 import { cleanEnv } from "./fixtures/electron-app";
 
@@ -19,7 +19,7 @@ const test = base.extend<{ harnessPage: Page }>({
 <html>
   <head>
     <meta charset="utf-8" />
-    <link rel="stylesheet" href="file://${APP_CSS}" />
+    <link rel="stylesheet" href="${pathToFileURL(APP_CSS).href}" />
     <style>
       body { margin: 0; background: var(--bg-sidebar); }
       .stage { width: 320px; padding: 12px; }
@@ -115,8 +115,10 @@ test("nav-flash animates on a compositor opacity layer and bulk-sync bar isolate
     element.classList.remove("is-nav-flash");
   });
 
-  // Now show the expanded bulk-sync dialog and settle its 120ms pg-fade entrance
-  // animation before tracing Paint roots while the bar updates.
+  // Now show the expanded bulk-sync dialog, settle its 120ms pg-fade entrance
+  // animation, and force one initial frame commit so the backdrop is already
+  // painted before Tracing.start on every platform (including hidden Linux/Windows
+  // windows that do not pump BeginMainFrame while occluded).
   await page.evaluate(async () => {
     const backdrop = document.querySelector<HTMLElement>(".bulk-sync-backdrop")!;
     backdrop.style.display = "flex";
@@ -127,6 +129,14 @@ test("nav-flash animates on a compositor opacity layer and bulk-sync bar isolate
     }
     await new Promise<void>((r) => requestAnimationFrame(() => requestAnimationFrame(() => r())));
   });
+  await session.send("Page.captureScreenshot");
+
+  // Confirm Chromium applied layout+paint containment to the modal and bar.
+  const containment = await page.evaluate(() => ({
+    modal: getComputedStyle(document.querySelector(".bulk-sync")!).contain,
+    bar: getComputedStyle(document.querySelector(".bulk-sync__bar")!).contain
+  }));
+  expect(containment).toEqual({ modal: "layout paint", bar: "layout paint" });
 
   // Resolve backendNodeIds for the backdrop and progress bar so Paint events
   // are matched by Chromium's nodeId (plus nodeName when present), and verify
@@ -166,7 +176,11 @@ test("nav-flash animates on a compositor opacity layer and bulk-sync bar isolate
     success.style.flexGrow = "9";
     inFlight.style.flexGrow = "3";
   });
-  await page.waitForTimeout(350);
+  // Let the 320ms flex-grow transition advance to a non-zero delta, then force a
+  // real Blink layout+paint frame commit across all platforms (Linux Xvfb,
+  // Windows, macOS, and --disable-gpu) so hidden windows cannot skip Paint.
+  await page.waitForTimeout(60);
+  await session.send("Page.captureScreenshot");
   const done = new Promise<void>((resolve) => session.once("Tracing.tracingComplete", () => resolve()));
   await session.send("Tracing.end");
   await done;
