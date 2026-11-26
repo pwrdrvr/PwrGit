@@ -13242,17 +13242,22 @@ body.is-col-resizing {
 
 /* ---- Viewport tooltip (portalled) ---- */
 
+/* Strictly above interactive popovers (.commit-context-card / .pr-status-card /
+   .person-card at 130, .remote-activity-popover / .removal-toast at 140,
+   .stack-popover at 150) so plain tooltips opened from controls inside an
+   interactive popover always paint on top regardless of DOM order, while
+   staying below the window hairline and onboarding overlay (200). */
 .viewport-tooltip-layer {
   position: fixed;
   inset: 0;
-  z-index: 140;
+  z-index: 160;
   pointer-events: none;
   contain: strict;
 }
 
 .viewport-tooltip {
   position: fixed;
-  z-index: 140;
+  z-index: 160;
   contain: layout style;
   width: max-content;
   max-width: min(440px, calc(100vw - 32px));

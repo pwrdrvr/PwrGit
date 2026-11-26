@@ -12,7 +12,10 @@ const contributionsCss = strip(
     "utf8"
   )
 );
-const allCss = `${appCss}\n${contributionsCss}`;
+const stacksCss = strip(
+  readFileSync(resolve(here, "../features/stacks/stacks.css"), "utf8")
+);
+const allCss = `${appCss}\n${contributionsCss}\n${stacksCss}`;
 
 type Rule = { selectors: string[]; body: string };
 
@@ -127,7 +130,15 @@ describe("pointer-travel rendering contract", () => {
     expect(focusRestore).not.toMatch(/(?:^|;)\s*opacity\s*:\s*1\b/);
   });
 
-  it("contains plain tooltips inside a strict viewport overlay layer", () => {
+  it("contains plain tooltips inside a strict viewport overlay layer above interactive popovers", () => {
+    const parseZIndex = (selector: string): number => {
+      const match = declarationsFor(selector).match(
+        /(?:^|;)\s*z-index\s*:\s*(\d+)\b/
+      );
+      expect(match, `expected numeric z-index on ${selector}`).not.toBeNull();
+      return Number(match![1]);
+    };
+
     const layer = declarationsFor(".viewport-tooltip-layer");
     expect(layer).toMatch(/(?:^|;)\s*position\s*:\s*fixed\b/);
     expect(layer).toMatch(/(?:^|;)\s*inset\s*:\s*0\b/);
@@ -136,5 +147,26 @@ describe("pointer-travel rendering contract", () => {
 
     const tooltip = declarationsFor(".viewport-tooltip");
     expect(tooltip).toMatch(/(?:^|;)\s*contain\s*:\s*layout\s+style\b/);
+
+    const layerZ = parseZIndex(".viewport-tooltip-layer");
+    const tooltipZ = parseZIndex(".viewport-tooltip");
+    for (const overlay of [
+      ".commit-context-card",
+      ".pr-status-card",
+      ".person-card",
+      ".remote-activity-popover",
+      ".removal-toast",
+      ".stack-popover"
+    ]) {
+      const overlayZ = parseZIndex(overlay);
+      expect(
+        layerZ,
+        `.viewport-tooltip-layer z-index (${layerZ}) must exceed ${overlay} (${overlayZ})`
+      ).toBeGreaterThan(overlayZ);
+      expect(
+        tooltipZ,
+        `.viewport-tooltip z-index (${tooltipZ}) must exceed ${overlay} (${overlayZ})`
+      ).toBeGreaterThan(overlayZ);
+    }
   });
 });
