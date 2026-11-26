@@ -24,6 +24,7 @@ import { stackItemRows, stackListItems, stackPositionLabel, type StackListItem }
 import { useStackNavigation, useStackSnapshot } from "../stacks/stack-navigation";
 import { PlusGlyph } from "../../lib/PlusGlyph";
 import { RefreshGlyph } from "../../lib/RefreshGlyph";
+import { usePersistedOpen, usePersistedValue } from "../../lib/usePersistedState";
 import { hoverTooltip, useViewportTooltip } from "../../lib/useViewportTooltip";
 import { shortWhen } from "../graph/graph-view";
 import { CopyTarget } from "../shell/CopyTarget";
@@ -48,37 +49,6 @@ import {
 import { SectionChevron } from "./SectionChevron";
 import { SectionGlyph, SectionHeading, steppedTooltip } from "./section-fit";
 import { WorktreeHolderChip } from "./WorktreeHolderChip";
-
-/**
- * A value that outlives the window, per repository — the same localStorage
- * shape as the Worktrees toggle in RepoRow.
- */
-function usePersistedValue(
-  key: string,
-  fallback: string
-): [string, (value: string) => void] {
-  const [value, setValue] = useState(() => {
-    try {
-      return window.localStorage.getItem(key) ?? fallback;
-    } catch {
-      return fallback;
-    }
-  });
-  useEffect(() => {
-    try {
-      window.localStorage.setItem(key, value);
-    } catch {
-      // Ignore private-mode and quota failures.
-    }
-  }, [key, value]);
-  return [value, setValue];
-}
-
-/** A disclosure, stored as "1" / "0". */
-function usePersistedOpen(key: string): [boolean, (open: boolean) => void] {
-  const [value, setValue] = usePersistedValue(key, "0");
-  return [value === "1", (open) => setValue(open ? "1" : "0")];
-}
 
 /**
  * Arrowing through the rows selects each one after this pause, so holding
@@ -204,9 +174,6 @@ export function RepoChangeRequestSection({
   const localSet = new Set(localItems);
   const remoteItems = items.filter(item => !localSet.has(item));
   const rows = items.flatMap(stackItemRows);
-  const shownStacks = new Set(open ? [...localItems, ...remoteItems].flatMap(item => item.kind === "stack"
-    ? [item.stack.id]
-    : item.position ? [item.position.stack.id] : []) : []);
   const rowIndices = new Map(rows.map((item, index) => [changeRequestKey(item.entry), index]));
   const defaultBranch = repo.worktrees.find((w) => w.isPrimary)?.defaultBranch;
   const worktreesById = new Map(repo.worktrees.map((w) => [w.id, w]));
@@ -704,7 +671,7 @@ export function RepoChangeRequestSection({
       )}
       {tip.tooltipNode}
     </div>
-    <StacksSidebar repo={repo} stacks={stacks} shownStacks={shownStacks} writable={writable}
+    <StacksSidebar repo={repo} stacks={stacks} writable={writable}
       {...(snapshot?.recoveryAvailable ? { recoverEmpty: refreshStacks } : {})} />
     </>
   );

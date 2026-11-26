@@ -32,6 +32,14 @@ test("shows stack positions and navigates between the stack and lineage", async 
       const graphPosition = page.locator(".graph-row").getByRole("button", { name: "windows/scheduler, position 2 of 3. Show stack" });
       await expect(graphPosition).toBeVisible();
       if (shots) await page.screenshot({ path: join(shots, "stack-after-lineage.png") });
+      const prHead = page.locator(".ref-cr-section .ref-section__head");
+      const stacksHead = page.locator(".stack-sidebar .ref-section__head");
+      await prHead.click();
+      await expect(prHead).toHaveAttribute("aria-expanded", "false");
+      if (shots) await page.locator(".pane--sidebar").screenshot({ path: join(shots, "stack-prs-collapsed.png") });
+      await expect(stacksHead).toHaveAttribute("aria-expanded", "false");
+      await prHead.click();
+      await expect(prHead).toHaveAttribute("aria-expanded", "true");
       await graphPosition.hover();
       const branchTooltip = page.getByRole("tooltip").filter({ hasText: "windows/api" });
       await expect(branchTooltip).toBeVisible();
