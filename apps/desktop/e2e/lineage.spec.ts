@@ -3,7 +3,7 @@ import { join } from "node:path";
 import { expect, test } from "@playwright/test";
 import { launchApp, type AppHandle } from "./fixtures/electron-app";
 import { createGitSandbox, type GitSandbox } from "./fixtures/git-sandbox";
-import { addRootAndExpand, branchRow } from "./fixtures/steps";
+import { addRootAndExpand, branchRow, worktreeRow } from "./fixtures/steps";
 
 let sandbox: GitSandbox | null = null;
 let handle: AppHandle | null = null;
@@ -634,6 +634,73 @@ test("a tip chip's worktree button jumps to that worktree", async () => {
   const selected = window.locator(".wt-row.is-selected");
   await expect(selected).toContainText("feat/hop", { timeout: 20_000 });
   await expect(window.locator(".titlebar__branch-name")).toHaveText("feat/hop");
+});
+
+test("Lineage has its own paint root when Pull moves HEAD", async ({}, testInfo) => {
+  test.skip(process.env.PWRGIT_LINEAGE_PAINT_ORACLE !== "1",
+    "Requires Chromium paint tracing with the lab GPU");
+
+  sandbox = createGitSandbox();
+  const s = sandbox;
+  const repo = s.makeRepoWithRemote("ledger");
+  const epoch = Math.floor(Date.now() / 1000) - 3600;
+  for (let i = 0; i < 60; i++) {
+    s.commitEmptyAt(repo.path, `Ledger change ${i}`, epoch + i * 20);
+  }
+  for (let i = 0; i < 24; i++) {
+    const branch = repo.addWorktree(`feature/ledger-${i}`);
+    s.git(branch, "reset", "--hard", `main~${4 + i % 5}`);
+    s.commitEmptyAt(branch, `Ledger side change ${i}`, epoch + 1190 + i);
+  }
+  const before = s.git(repo.path, "rev-parse", "HEAD");
+  s.commitEmptyAt(repo.path, "Ledger incoming change", epoch + 1220);
+  const after = s.git(repo.path, "rev-parse", "HEAD");
+  s.git(repo.path, "push", "origin", "main");
+  s.git(repo.path, "reset", "--hard", before);
+
+  handle = await launchApp();
+  const { app, window } = handle;
+  await (await app.browserWindow(window)).evaluate((win) => win.setSize(1160, 740));
+  await addRootAndExpand(window, handle, s, repo.name);
+  await worktreeRow(window, "main").click();
+  await expect(window.locator(".graph-row--head")).toHaveAttribute("data-hash", before);
+  await expect(window.locator(".graph-row.is-flash")).toHaveCount(0);
+  await window.evaluate(async () => { await document.fonts.ready; });
+
+  const pull = window.locator(".wt-btn--pull");
+  const scroll = window.locator(".graph-scroll");
+  const width = () => scroll.evaluate((el) => el.clientWidth);
+  const beforeWidth = await width();
+  await pull.focus();
+
+  const cdp = await window.context().newCDPSession(window);
+  const paintRoots = new Set<string>();
+  cdp.on("Tracing.dataCollected", ({ value }) => {
+    for (const item of value) {
+      const event = item as unknown as { name: string; args?: { data?: { nodeName?: string } } };
+      const root = event.args?.data?.nodeName;
+      if (event.name === "Paint" && root !== undefined) paintRoots.add(root);
+    }
+  });
+  try {
+    await cdp.send("Tracing.start", { categories: "devtools.timeline" });
+    await window.keyboard.press("Enter");
+    const head = window.locator(`.graph-row--head[data-hash="${after}"]`);
+    await expect(head).toHaveClass(/is-flash/);
+    await expect(head).toBeInViewport();
+    await expect(head).not.toHaveClass(/is-flash/);
+    const complete = new Promise<void>((resolve) => cdp.once("Tracing.tracingComplete", () => resolve()));
+    await cdp.send("Tracing.end");
+    await complete;
+  } finally {
+    await cdp.detach();
+  }
+  expect(s.git(repo.path, "rev-parse", "HEAD")).toBe(after);
+  expect(await width()).toBe(beforeWidth);
+  await expect(pull).toBeFocused();
+  await expect(window.getByRole("button", { name: "Dismiss status" })).toBeVisible();
+  await window.screenshot({ path: testInfo.outputPath("lineage-pull-receipt.png") });
+  expect([...paintRoots]).toContain("DIV class='graph-card'");
 });
 
 test("a narrow Lineage publish lays out the gutter and reveals lanes without reading a row width", async ({}, testInfo) => {

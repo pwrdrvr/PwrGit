@@ -10942,6 +10942,8 @@ button.agent-menu__item:hover {
   padding: 0 20px 20px;
 }
 .graph-card {
+  /* Keep Lineage row updates from repainting with the surrounding app. */
+  contain: layout;
   border: 1px solid var(--border-subtle);
   border-radius: var(--radius-lg);
   background: var(--bg-panel);
