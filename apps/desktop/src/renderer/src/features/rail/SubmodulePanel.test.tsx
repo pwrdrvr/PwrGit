@@ -136,6 +136,289 @@ describe("SubmodulePanel", () => {
     expect(container.textContent).toContain("Reinitialize it from the parent");
   });
 
+  it("starts collapsed for passive unconfigured/uninitialized gitlinks and deduplicates shared remedies when expanded", async () => {
+    const sharedRemedy =
+      "Restore a matching .gitmodules entry with a reviewed URL before initializing, or remove the gitlink if it was added accidentally.";
+    const passiveSnapshot: SubmoduleSnapshot = {
+      truncated: false,
+      issues: [],
+      submodules: [
+        {
+          name: ".repos/alchemy-effect/submodules/distilled",
+          path: ".repos/alchemy-effect/submodules/distilled",
+          depth: 0,
+          pinnedCommit: "e02e9d405b8848909f4f746b61b12a663f631c7c",
+          indexCommit: "e02e9d405b8848909f4f746b61b12a663f631c7c",
+          checkoutState: "uninitialized",
+          relation: "unknown",
+          dirty: null,
+          detached: null,
+          pinnedTags: [],
+          issues: [
+            {
+              code: "gitmodules_entry_missing",
+              severity: "error",
+              message:
+                "The parent records a gitlink here, but .gitmodules has no matching path.",
+              remedy: sharedRemedy
+            },
+            {
+              code: "checkout_uninitialized",
+              severity: "warning",
+              message: "This submodule has not been initialized.",
+              remedy: sharedRemedy
+            }
+          ]
+        },
+        {
+          name: ".repos/alchemy-effect/submodules/floci",
+          path: ".repos/alchemy-effect/submodules/floci",
+          depth: 0,
+          pinnedCommit: "493909133db04153348eabc503f4e30cf0033d96",
+          indexCommit: "493909133db04153348eabc503f4e30cf0033d96",
+          checkoutState: "uninitialized",
+          relation: "unknown",
+          dirty: null,
+          detached: null,
+          pinnedTags: [],
+          issues: [
+            {
+              code: "gitmodules_entry_missing",
+              severity: "error",
+              message:
+                "The parent records a gitlink here, but .gitmodules has no matching path.",
+              remedy: sharedRemedy
+            },
+            {
+              code: "checkout_uninitialized",
+              severity: "warning",
+              message: "This submodule has not been initialized.",
+              remedy: sharedRemedy
+            }
+          ]
+        }
+      ]
+    };
+    dispatchMock.mockResolvedValueOnce(ok(passiveSnapshot));
+    const onConcernChange = vi.fn();
+
+    await act(async () => {
+      root.render(
+        <SubmodulePanel
+          worktreeId="worktree-1"
+          onConcernChange={onConcernChange}
+        />
+      );
+    });
+
+    const toggle = container.querySelector<HTMLButtonElement>(
+      ".submodule-panel__toggle"
+    );
+    expect(toggle?.getAttribute("aria-expanded")).toBe("false");
+    expect(onConcernChange).toHaveBeenLastCalledWith(false);
+    expect(container.querySelector(".submodule-panel__count")?.textContent).toBe(
+      "0"
+    );
+    expect(container.textContent).toContain("2 unconfigured");
+    expect(container.querySelectorAll(".submodule-row")).toHaveLength(0);
+
+    await act(async () => toggle?.click());
+
+    expect(toggle?.getAttribute("aria-expanded")).toBe("true");
+    const rows = [
+      ...container.querySelectorAll<HTMLDetailsElement>(".submodule-row")
+    ];
+    expect(rows).toHaveLength(2);
+    expect(rows.every((row) => !row.open)).toBe(true);
+    expect(
+      rows.map((row) => row.querySelector(".submodule-row__leaf")?.textContent)
+    ).toEqual(["distilled", "floci"]);
+    expect(container.textContent).not.toContain("Unknown relation");
+    for (const row of rows) {
+      expect(row.querySelectorAll(".submodule-issue small")).toHaveLength(1);
+    }
+  });
+
+  it("shows working and failing counts separately when both are present", async () => {
+    const sha = "1111111111111111111111111111111111111111";
+    const mixedSnapshot: SubmoduleSnapshot = {
+      truncated: false,
+      issues: [],
+      submodules: [
+        ...["alpha", "beta", "gamma"].map((name) => ({
+          name,
+          path: `modules/${name}`,
+          depth: 0,
+          pinnedCommit: sha,
+          indexCommit: sha,
+          checkedOutCommit: sha,
+          checkoutState: "checked_out" as const,
+          relation: "at_pin" as const,
+          dirty: false,
+          detached: true,
+          pinnedTags: [],
+          configuredUrl: `../${name}.git`,
+          issues: []
+        })),
+        ...["broken-a", "broken-b"].map((name) => ({
+          name,
+          path: `modules/${name}`,
+          depth: 0,
+          pinnedCommit: sha,
+          indexCommit: sha,
+          checkoutState: "missing" as const,
+          relation: "unknown" as const,
+          dirty: null,
+          detached: null,
+          pinnedTags: [],
+          configuredUrl: `../${name}.git`,
+          issues: [
+            {
+              code: "checkout_missing" as const,
+              severity: "error" as const,
+              message: "The submodule checkout path is missing."
+            }
+          ]
+        }))
+      ]
+    };
+    dispatchMock.mockResolvedValueOnce(ok(mixedSnapshot));
+
+    await act(async () => {
+      root.render(<SubmodulePanel worktreeId="worktree-1" />);
+    });
+
+    expect(container.querySelector(".submodule-panel__count")?.textContent).toBe(
+      "3"
+    );
+    expect(
+      container.querySelector(".submodule-panel__toggle .submodule-chip")
+        ?.textContent
+    ).toBe("2 failing");
+  });
+
+  it("auto-expands and surfaces a danger badge for parent .gitmodules parse errors even when gitlinks exist", async () => {
+    const sha = "1111111111111111111111111111111111111111";
+    const parseErrorSnapshot: SubmoduleSnapshot = {
+      truncated: false,
+      issues: [
+        {
+          code: "inspect_failed",
+          severity: "error",
+          message: "fatal: bad config line 3 in file .gitmodules",
+          remedy: "Repair .gitmodules, then refresh the submodule scan."
+        }
+      ],
+      submodules: [
+        {
+          name: "modules/vendor",
+          path: "modules/vendor",
+          depth: 0,
+          pinnedCommit: sha,
+          indexCommit: sha,
+          checkoutState: "uninitialized",
+          relation: "unknown",
+          dirty: null,
+          detached: null,
+          pinnedTags: [],
+          issues: [
+            {
+              code: "gitmodules_entry_missing",
+              severity: "error",
+              message:
+                "The parent records a gitlink here, but .gitmodules has no matching path."
+            },
+            {
+              code: "checkout_uninitialized",
+              severity: "warning",
+              message: "This submodule has not been initialized."
+            }
+          ]
+        }
+      ]
+    };
+    dispatchMock.mockResolvedValueOnce(ok(parseErrorSnapshot));
+    const onConcernChange = vi.fn();
+
+    await act(async () => {
+      root.render(
+        <SubmodulePanel
+          worktreeId="worktree-1"
+          onConcernChange={onConcernChange}
+        />
+      );
+    });
+
+    const toggle = container.querySelector<HTMLButtonElement>(
+      ".submodule-panel__toggle"
+    );
+    expect(toggle?.getAttribute("aria-expanded")).toBe("true");
+    expect(onConcernChange).toHaveBeenLastCalledWith(true);
+    expect(
+      container.querySelector(".submodule-panel__toggle .submodule-chip--danger")
+        ?.textContent
+    ).toBe("1 error");
+    expect(container.textContent).toContain("bad config line 3 in file .gitmodules");
+  });
+
+  it("re-enables auto-expand after inspecting and re-collapsing a passive panel", async () => {
+    const sha = "1111111111111111111111111111111111111111";
+    const passive: SubmoduleSnapshot = {
+      truncated: false,
+      issues: [],
+      submodules: [
+        {
+          name: "api",
+          path: "modules/api",
+          depth: 0,
+          pinnedCommit: sha,
+          indexCommit: sha,
+          checkedOutCommit: sha,
+          checkoutState: "checked_out",
+          relation: "at_pin",
+          dirty: false,
+          detached: true,
+          pinnedTags: [],
+          configuredUrl: "../api.git",
+          issues: []
+        }
+      ]
+    };
+    const dirty: SubmoduleSnapshot = {
+      ...passive,
+      submodules: [{ ...passive.submodules[0]!, dirty: true }]
+    };
+    dispatchMock
+      .mockResolvedValueOnce(ok(passive))
+      .mockResolvedValueOnce(ok(dirty));
+
+    await act(async () => {
+      root.render(<SubmodulePanel worktreeId="worktree-1" />);
+    });
+
+    const toggle = container.querySelector<HTMLButtonElement>(
+      ".submodule-panel__toggle"
+    );
+    expect(toggle?.getAttribute("aria-expanded")).toBe("false");
+
+    // Inspect and then collapse back to the passive default state.
+    await act(async () => toggle?.click());
+    expect(toggle?.getAttribute("aria-expanded")).toBe("true");
+    await act(async () => toggle?.click());
+    expect(toggle?.getAttribute("aria-expanded")).toBe("false");
+
+    // A later active change on the same worktree must still auto-expand.
+    const changesHandler = subscribeMock.mock.calls.find(
+      ([channel]) => channel === "changes:changed"
+    )?.[1] as ((event: { worktreeId: string }) => void) | undefined;
+    await act(async () => {
+      changesHandler?.({ worktreeId: "worktree-1" });
+    });
+
+    expect(toggle?.getAttribute("aria-expanded")).toBe("true");
+    expect(container.textContent).toContain("1 changed");
+  });
+
   it("disappears after a successful scan finds no submodules or parent issues", async () => {
     dispatchMock.mockResolvedValue(
       ok({ submodules: [], truncated: false, issues: [] })
