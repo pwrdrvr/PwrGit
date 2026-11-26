@@ -1,5 +1,11 @@
 # Changelog
 
+## v0.65.0 - 2026-11-26
+
+- Bulk sync - Reduced repaints in the expanded progress view and grouped bursts of repository tree updates during sync.
+- Lineage - Limited repaints when Pull moves the checked-out commit and skipped redraws when refreshed data is unchanged.
+- Sidebar - Reduced layout work when moving the pointer across rows and opening tooltips. Pull request status cards show the PR number as a chip and handle narrow layouts more reliably.
+
 ## v0.64.0 - 2026-11-25
 
 - Fork sync - Added upstream sync to multiple verified writable forks. Choose which forks to keep updated in the Pull menu or the Remotes tab, and see the result for each planned fork in the sync receipt.
