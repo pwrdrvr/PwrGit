@@ -69,8 +69,15 @@ match the face. Verb, scope, interval and view live in
   focus ring rings the pair. Don't give either half its own border or
   outline: as butted buttons, hover drew a three-sided orange box.
   Design: `design/Sync Split Button - UX Review.dc.html`.
+- **"Sync forks with upstream" is main's setting, not a `localStorage` pref**
+  (`general.syncForksOnBulkPull`, `useSyncMenuSettings`): during bulk pull
+  (manual and timed), clean fork branches fast-forward from their upstream
+  source and leased-push to enabled writable fork remotes, honouring each
+  repository's Pull menu choice (`forkModes`) and per-remote overrides
+  (`fork_sync_remote_prefs`). Sits beside "Check tags after sync", hidden until
+  read.
 - **"Check tags after sync" is main's setting, not a `localStorage` pref**
-  (`general.tagCheckAfterSync`, `useTagCheckAfterSync`): main checks after
+  (`general.tagCheckAfterSync`, `useSyncMenuSettings`): main checks after
   every Fetch and Pull, including a repository's own and timed ones. It
   sits between the interval and Show last run, and hides until the setting
   is read rather than showing a guessed check.

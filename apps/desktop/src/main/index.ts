@@ -1450,7 +1450,16 @@ if (!gotSingleInstanceLock) {
       worktreeOperations,
       indexer,
       refreshIdentity,
-      (profileId) => void rootDiscovery.check(profileId)
+      (profileId) => void rootDiscovery.check(profileId),
+      {
+        enabled: () =>
+          settings.get().general?.syncForksOnBulkPull ??
+          GENERAL_DEFAULTS.syncForksOnBulkPull,
+        readIdentity: (repoId) => identityService.read([repoId]).get(repoId),
+        hostsForRemotes: () => forgeHosts.overrides(),
+        ensureRemoteIdentities: (repoId, candidates) =>
+          identityService.ensureRemoteIdentities(repoId, candidates)
+      }
     );
     const pruneHandlers = registerPruneHandlers(
       bus,

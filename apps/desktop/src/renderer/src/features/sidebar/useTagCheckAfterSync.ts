@@ -2,31 +2,65 @@ import { useCallback, useEffect, useState } from "react";
 import { dispatch, subscribe } from "../../lib/pwrgit";
 
 /**
- * The sync menu's "Check tags after sync" (`general.tagCheckAfterSync`). It
- * is main's setting, because main runs the check after every Fetch and Pull,
- * including timed ones. Null until the first read answers, so the menu never
- * shows a guessed state.
+ * Main-owned toggles shown in the sidebar's Sync options menu:
+ * - "Check tags after sync" (`general.tagCheckAfterSync`)
+ * - "Sync forks with upstream" (`general.syncForksOnBulkPull`)
+ *
+ * Both stay `null` until the first `settings:read` answers, so the menu never
+ * draws a guessed checkmark.
  */
-export function useTagCheckAfterSync(): [boolean | null, (on: boolean) => void] {
-  const [on, setOn] = useState<boolean | null>(null);
+export function useSyncMenuSettings(): {
+  tagCheckAfterSync: boolean | null;
+  setTagCheckAfterSync: (on: boolean) => void;
+  syncForksOnBulkPull: boolean | null;
+  setSyncForksOnBulkPull: (on: boolean) => void;
+} {
+  const [tagCheckAfterSync, setTagCheckState] = useState<boolean | null>(null);
+  const [syncForksOnBulkPull, setSyncForksState] = useState<boolean | null>(null);
+
   useEffect(() => {
     let active = true;
     void dispatch("settings:read", undefined).then((result) => {
-      if (active && result.ok) setOn(result.value.general.tagCheckAfterSync);
+      if (!active || !result.ok) return;
+      if (typeof result.value.general.tagCheckAfterSync === "boolean") {
+        setTagCheckState(result.value.general.tagCheckAfterSync);
+      }
+      if (typeof result.value.general.syncForksOnBulkPull === "boolean") {
+        setSyncForksState(result.value.general.syncForksOnBulkPull);
+      }
     });
     const off = subscribe("settings:changed", (snapshot) => {
-      setOn(snapshot.general.tagCheckAfterSync);
+      if (typeof snapshot.general.tagCheckAfterSync === "boolean") {
+        setTagCheckState(snapshot.general.tagCheckAfterSync);
+      }
+      if (typeof snapshot.general.syncForksOnBulkPull === "boolean") {
+        setSyncForksState(snapshot.general.syncForksOnBulkPull);
+      }
     });
     return () => {
       active = false;
       off();
     };
   }, []);
-  const choose = useCallback((next: boolean) => {
-    setOn(next);
+
+  const setTagCheckAfterSync = useCallback((next: boolean) => {
+    setTagCheckState(next);
     void dispatch("settings:update", { patch: { general: { tagCheckAfterSync: next } } }).then((result) => {
-      if (!result.ok) setOn(!next);
+      if (!result.ok) setTagCheckState(!next);
     });
   }, []);
-  return [on, choose];
+
+  const setSyncForksOnBulkPull = useCallback((next: boolean) => {
+    setSyncForksState(next);
+    void dispatch("settings:update", { patch: { general: { syncForksOnBulkPull: next } } }).then((result) => {
+      if (!result.ok) setSyncForksState(!next);
+    });
+  }, []);
+
+  return {
+    tagCheckAfterSync,
+    setTagCheckAfterSync,
+    syncForksOnBulkPull,
+    setSyncForksOnBulkPull
+  };
 }

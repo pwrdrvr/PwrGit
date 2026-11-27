@@ -88,7 +88,7 @@ import {
 import { BulkSyncDialog } from "./BulkSyncDialog";
 import { FIRST_RUN_MINIMIZE_MS } from "./bulk-sync-prefs";
 import { useBulkSyncRun } from "./useBulkSyncRun";
-import { useTagCheckAfterSync } from "./useTagCheckAfterSync";
+import { useSyncMenuSettings } from "./useTagCheckAfterSync";
 import { MaintenanceDialog } from "./MaintenanceDialog";
 import { useReopenMaintenanceAfterReload } from "./maintenance-attach";
 import { useClonesOffer } from "./clones-offer";
@@ -638,7 +638,12 @@ export function Sidebar({
     [focusVisits, now, repos, selectedWorktreeId]
   );
   const counts = lensCounts(repos, now, focusContext, recentRepos, finishedAfterDays);
-  const [tagCheckAfterSync, setTagCheckAfterSync] = useTagCheckAfterSync();
+  const {
+    tagCheckAfterSync,
+    setTagCheckAfterSync,
+    syncForksOnBulkPull,
+    setSyncForksOnBulkPull
+  } = useSyncMenuSettings();
   const bulk = useBulkSyncRun({
     profileId: activeProfile?.id ?? null,
     repos,
@@ -1456,6 +1461,8 @@ export function Sidebar({
         onPickFetchInterval={bulk.pickInterval}
         tagCheckAfterSync={tagCheckAfterSync}
         onToggleTagCheck={setTagCheckAfterSync}
+        syncForksOnBulkPull={syncForksOnBulkPull}
+        onToggleSyncForks={setSyncForksOnBulkPull}
         onMaintenance={() => setMaintenance({})}
       />
 

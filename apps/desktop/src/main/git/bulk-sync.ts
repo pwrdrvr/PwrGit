@@ -29,6 +29,14 @@ import {
   BULK_OPERATION_STATE_PATHS, readBulkSyncSnapshot, readBulkSyncRefs,
   bulkSyncRefsChanged, remoteTipsUnchanged, inspectReadOnlyWorktree, type BulkSyncSnapshot
 } from "./bulk-sync-preflight";
+import {
+  repoMaySyncFork,
+  tryBulkForkSync,
+  worktreeMayHaveForkSource,
+  type BulkSyncForkConfig
+} from "./bulk-sync-fork";
+
+export type { BulkSyncForkConfig } from "./bulk-sync-fork";
 
 export const BULK_SYNC_CONCURRENCY = 3;
 /** Each repository worker runs at most four independent checkout operations. */
@@ -48,6 +56,9 @@ export type BulkSyncRepoInput = {
   /** Stored worktree state already shows a clean checkout behind its upstream
    * and not ahead of it: a fast-forward this pull can very likely make. */
   pullPending?: boolean;
+  /** Optional fork-sync configuration for soft-pull. Absent when disabled or
+   *  when callers want tracked-upstream pulls only. */
+  forkSync?: BulkSyncForkConfig;
 };
 
 type LockRunner = <T>(id: string, operation: () => Promise<T>) => Promise<T>;
@@ -111,7 +122,13 @@ export function watchedGit(git: GitExec, signal: AbortSignal | undefined): GitEx
         logMain("error", "remote", `bulk sync timeout: ${commandLabel()}; ${error.code}; ${error.message}; ${stallContext()}; direct Git termination requested`);
       }
     });
-    watchdog.setPhase(args[0] === "fetch" ? "fetch" : args[0] === "merge" ? "fast_forward" : "prepare");
+    watchdog.setPhase(
+      args[0] === "fetch" || args[0] === "push"
+        ? "fetch"
+        : args[0] === "merge"
+          ? "fast_forward"
+          : "prepare"
+    );
     const signals = [watchdog.signal];
     if (signal !== undefined) signals.push(signal);
     if (options?.signal !== undefined) signals.push(options.signal);
@@ -858,6 +875,23 @@ async function syncRepo(
     );
     const runWorktree: LockRunner =
       options.runWorktree ?? ((_id, operation) => operation());
+    // Serialize fork-sync pushes per repository so concurrent worktrees never
+    // race on remote-tracking ref updates inside `.git/packed-refs`.
+    let pushTail: Promise<void> = Promise.resolve();
+    const runRepoPush = async <T>(operation: () => Promise<T>): Promise<T> => {
+      const wait = pushTail;
+      let release!: () => void;
+      pushTail = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      await wait;
+      try {
+        return await operation();
+      } finally {
+        release();
+      }
+    };
+    const maySyncFork = repoMaySyncFork(snapshot, repo.forkSync);
     worktrees = await mapLimit(repo.worktrees, BULK_WORKTREE_CONCURRENCY, async (worktree) => {
       if (isAborted(options.signal)) {
         return worktreeResult(worktree, {
@@ -875,13 +909,40 @@ async function syncRepo(
         if (isAborted(options.signal)) return worktreeResult(worktree, {
           outcome: "cancelled", reason: "cancelled", message: "Cancelled before this worktree was checked."
         });
-        const readOnly = await inspectReadOnlyWorktree(git, snapshot, worktree.path, fetchedByName);
-        if (readOnly !== null && !isAborted(options.signal)) return worktreeResult(worktree, readOnly);
+        const checkFork =
+          maySyncFork &&
+          repo.forkSync !== undefined &&
+          worktreeMayHaveForkSource(snapshot, worktree.path, repo.forkSync);
+        if (!checkFork) {
+          const readOnly = await inspectReadOnlyWorktree(git, snapshot, worktree.path, fetchedByName);
+          if (readOnly !== null && !isAborted(options.signal)) return worktreeResult(worktree, readOnly);
+        }
+        if (maySyncFork && repo.forkSync !== undefined) {
+          const forked = await tryBulkForkSync(
+            git,
+            exec,
+            worktree,
+            repo.forkSync,
+            fetchedByName,
+            options.signal,
+            reportWorktree,
+            runRepoPush
+          );
+          if (forked !== null) return forked;
+        }
         return softPullWorktree(git, exec, worktree, fetchedByName, options.signal, reportWorktree);
       });
       report({ worktreeResult: result });
       return result;
     });
+    if (
+      worktrees.some(
+        (worktree) =>
+          worktree.forkPushes?.some((push) => push.outcome === "pushed") === true
+      )
+    ) {
+      refsChanged = true;
+    }
   }
   return {
     repoId: repo.id,

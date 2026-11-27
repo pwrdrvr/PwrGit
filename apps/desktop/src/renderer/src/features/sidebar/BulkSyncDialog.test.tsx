@@ -659,4 +659,61 @@ describe("BulkSyncDialog", () => {
       container.querySelector(".bulk-sync__repo-status.is-running")?.textContent
     ).toBe("Fetching…");
   });
+
+  it("forwards per-repo fork pull choices and renders fork sync results", async () => {
+    window.localStorage.setItem("pwrgit.pullChoice.repo-safe", "source");
+    window.localStorage.setItem("pwrgit.forkMovedOn.repo-partial", "tracked");
+    const forkResult: BulkSyncRepoResult = {
+      repoId: "repo-safe",
+      name: "safe",
+      path: "/repos/safe",
+      outcome: "success",
+      remotes: [
+        { remote: "origin", outcome: "fetched" },
+        { remote: "upstream", outcome: "fetched" }
+      ],
+      worktrees: [
+        {
+          worktreeId: "wt-1",
+          branch: "main",
+          path: "/repos/safe",
+          outcome: "updated",
+          beforeHead: "1".repeat(40),
+          afterHead: "2".repeat(40),
+          forkSource: "upstream/main",
+          message: "pushed to origin/main, huntharo/main"
+        }
+      ]
+    };
+    dispatch.mockResolvedValue({ ok: true, value: summary([forkResult]) });
+    try {
+      await act(async () => {
+        root.render(
+          <BulkSyncDialog
+            profileId="profile-1"
+            repos={repos}
+            mode="soft-pull"
+            platform="darwin"
+            onClose={vi.fn()}
+          />
+        );
+      });
+      expect(dispatch).toHaveBeenCalledWith(
+        "remote:bulkSync",
+        expect.objectContaining({
+          mode: "soft-pull",
+          forkModes: {
+            "repo-safe": "source",
+            "repo-partial": "tracked"
+          }
+        })
+      );
+      expect(container.textContent).toContain(
+        "main: fast-forwarded from upstream/main — pushed to origin/main, huntharo/main"
+      );
+    } finally {
+      window.localStorage.removeItem("pwrgit.pullChoice.repo-safe");
+      window.localStorage.removeItem("pwrgit.forkMovedOn.repo-partial");
+    }
+  });
 });

@@ -1,4 +1,13 @@
-import { err, ok } from "@pwrgit/shared";
+import {
+  err,
+  ok,
+  resolveSourceForgeRepo,
+  siblingForkCandidates,
+  type BulkSyncForkMode,
+  type ForgeHostMap,
+  type RepoIdentity,
+  type SiblingForkCandidate
+} from "@pwrgit/shared";
 import type { CommandBus } from "../command-bus";
 import { emitEvent } from "../ipc";
 import { logMain } from "../logs";
@@ -6,6 +15,8 @@ import { withResourceSource } from "../diagnostics/resource-usage";
 import type { DB } from "../persistence/db";
 import { bulkSyncRepositories, type BulkSyncRepoInput } from "./bulk-sync";
 import { execGit, sanitizeGitLogDetail } from "./dugite";
+import { readForkSyncPrefs, readRemoteIdentities } from "./fork-sync-remotes";
+import { listRemoteEndpoints } from "./git-service";
 import type { RepoIndexer } from "./repo-indexer";
 import type { WorktreeRefresher } from "./worktree-handlers";
 import { WorktreeOperationQueue } from "./worktree-operation-queue";
@@ -15,6 +26,17 @@ import { tagAutoChecksFor } from "./tag-auto-check";
 export type BulkSyncHandlers = {
   /** Cancel work owned by a renderer window that has gone away. */
   releaseWebContents: (webContentsId: number) => void;
+};
+
+export type BulkSyncForkSupport = {
+  /** Whether bulk soft-pull should sync clean fork branches with upstream. */
+  enabled: () => boolean;
+  readIdentity?: (repoId: string) => RepoIdentity | undefined;
+  hostsForRemotes?: () => ForgeHostMap;
+  ensureRemoteIdentities?: (
+    repoId: string,
+    candidates: readonly SiblingForkCandidate[]
+  ) => Promise<boolean>;
 };
 
 type RepoRow = {
@@ -36,12 +58,14 @@ type WorktreeRow = {
 export function profileRepos(
   db: DB,
   profileId: string,
-  repoIds?: readonly string[]
+  repoIds?: readonly string[],
+  options?: { syncForks?: boolean }
 ): BulkSyncRepoInput[] | null {
   const profile = db
     .prepare("SELECT id FROM profiles WHERE id = ?")
     .get(profileId) as { id: string } | undefined;
   if (profile === undefined) return null;
+  const syncForks = options?.syncForks === true ? 1 : 0;
   const repos = db
     .prepare(
       // A hidden repository sits out Fetch all and Try pull all.
@@ -52,14 +76,17 @@ export function profileRepos(
            SELECT 1 FROM worktrees w
            JOIN worktree_state s ON s.worktree_id = w.id
            WHERE w.repo_id = r.id AND w.missing = 0 AND s.branch = w.branch
-             AND s.has_upstream = 1 AND s.behind > 0 AND s.ahead = 0
-             AND s.dirty = 0
+             AND s.dirty = 0 AND s.has_upstream = 1
+             AND (
+               (s.behind > 0 AND s.ahead = 0)
+               OR (? = 1 AND s.source_behind > 0 AND s.source_ahead = 0)
+             )
          ) AS pullPending
        FROM repos r
        WHERE profile_id = ? AND ${visibleRepoSql("r")}
        ORDER BY name COLLATE NOCASE, name, id`
     )
-    .all(profileId) as RepoRow[];
+    .all(syncForks, profileId) as RepoRow[];
   const worktrees = db
     .prepare(
       `SELECT w.id, w.repo_id AS repoId, w.branch, w.path
@@ -98,12 +125,64 @@ export function registerBulkSyncHandlers(
   indexer?: Pick<RepoIndexer, "refreshRepoRemoteBranches">,
   refreshIdentity?: (repoId: string) => void,
   /** A run is starting: look at the roots for new repositories too. */
-  onRunStart?: (profileId: string) => void
+  onRunStart?: (profileId: string) => void,
+  forkSync?: BulkSyncForkSupport
 ): BulkSyncHandlers {
   const active = new Map<
     string,
     { controller: AbortController; webContentsId?: number }
   >();
+
+  const discoverSiblings = (
+    profileId: string,
+    repoId: string,
+    cwd: string,
+    trackedRemote: string | null,
+    sourceRemote: string
+  ): void => {
+    const ensure = forkSync?.ensureRemoteIdentities;
+    if (ensure === undefined) return;
+    void listRemoteEndpoints(execGit, cwd).then((endpoints) => {
+      if (!endpoints.ok) return;
+      const identity = forkSync?.readIdentity?.(repoId);
+      const hosts = forkSync?.hostsForRemotes?.() ?? {};
+      const source = resolveSourceForgeRepo(
+        endpoints.value,
+        sourceRemote,
+        identity,
+        hosts
+      );
+      if (source === null) return;
+      const candidates = siblingForkCandidates(endpoints.value, {
+        sourceRemote,
+        trackedRemote,
+        source,
+        hosts
+      });
+      if (candidates.length === 0) return;
+      return ensure(repoId, candidates).then((changed) => {
+        if (!changed) return;
+        const latestIdentity = forkSync?.readIdentity?.(repoId);
+        if (latestIdentity !== undefined) {
+          emitEvent("repo:identityChanged", {
+            profileId,
+            identities: [{ repoId, identity: latestIdentity }]
+          });
+        }
+        emitEvent("repo:changed", {
+          profileId,
+          repoIds: [repoId]
+        });
+        emitEvent("graph:changed", { repoId });
+      });
+    }).catch((cause: unknown) => {
+      logMain(
+        "debug",
+        "forge",
+        `bulk sync sibling fork discovery failed for ${cwd}: ${sanitizeGitLogDetail(cause)}`
+      );
+    });
+  };
 
   bus.register("remote:cancelBulkSync", (req, ctx) => {
     const operation = active.get(req.operationId);
@@ -138,13 +217,49 @@ export function registerBulkSyncHandlers(
         message: "This bulk synchronization is already running."
       });
     }
-    const repos = profileRepos(db, req.profileId, req.repoIds);
+    const syncForks = req.mode === "soft-pull" && forkSync?.enabled() === true;
+    const repos = profileRepos(db, req.profileId, req.repoIds, { syncForks });
     if (repos === null) {
       return err({
         kind: "profile",
         code: "not_found",
         message: `No profile "${req.profileId}"`
       });
+    }
+    if (syncForks) {
+      const hosts = forkSync?.hostsForRemotes?.() ?? {};
+      for (const repo of repos) {
+        const mode: BulkSyncForkMode = req.forkModes?.[repo.id] ?? "sync";
+        if (mode === "tracked") continue;
+        const identity = forkSync?.readIdentity?.(repo.id);
+        const parent =
+          identity?.parent === undefined
+            ? null
+            : {
+                hostname: identity.hostname,
+                nameWithOwner: identity.parent.nameWithOwner
+              };
+        repo.forkSync = {
+          mode,
+          parent,
+          ...(identity === undefined ? {} : { identity }),
+          remoteIdentities: readRemoteIdentities(db, repo.id),
+          forkSyncPrefs: readForkSyncPrefs(db, repo.id),
+          hosts,
+          ...(forkSync?.ensureRemoteIdentities === undefined
+            ? {}
+            : {
+                onDiscoverSiblings: (trackedRemote, sourceRemote) =>
+                  discoverSiblings(
+                    req.profileId,
+                    repo.id,
+                    repo.path,
+                    trackedRemote,
+                    sourceRemote
+                  )
+              })
+        };
+      }
     }
 
     onRunStart?.(req.profileId);
@@ -180,11 +295,19 @@ export function registerBulkSyncHandlers(
             (remote) => remote.outcome === "fetched"
           );
           const fetchedChanges = fetched && result.refsChanged !== false;
-          const updated = result.worktrees.some(
-            (worktree) => worktree.outcome === "updated"
+          const headMoved = result.worktrees.some(
+            (worktree) =>
+              worktree.outcome === "updated" ||
+              (worktree.afterHead !== undefined &&
+                worktree.afterHead !== worktree.beforeHead)
+          );
+          const pushedFork = result.worktrees.some(
+            (worktree) =>
+              worktree.forkPushes?.some((push) => push.outcome === "pushed") ===
+              true
           );
           if (fetchedChanges) refreshIdentity?.(repo.id);
-          if (fetchedChanges && indexer !== undefined) {
+          if ((fetchedChanges || pushedFork) && indexer !== undefined) {
             try {
               const indexed = await operations.runRepository(repo.id, () =>
                 indexer.refreshRepoRemoteBranches(repo.id)
@@ -204,7 +327,7 @@ export function registerBulkSyncHandlers(
               );
             }
           }
-          if (fetchedChanges || updated) {
+          if (fetchedChanges || headMoved || pushedFork) {
             try {
               await refresher.refreshRepoWorktrees(repo.id);
             } catch (cause) {
@@ -214,6 +337,9 @@ export function registerBulkSyncHandlers(
                 `bulk ${req.mode} state refresh failed for ${repo.path}: ${sanitizeGitLogDetail(cause)}`
               );
             }
+          }
+          if (headMoved || pushedFork) {
+            emitEvent("graph:changed", { repoId: repo.id });
           }
           // Timed and bulk syncs check tags as a toolbar Fetch does: behind
           // the sync menu's switch, hourly at most, a few at a time.

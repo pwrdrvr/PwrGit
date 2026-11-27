@@ -115,6 +115,9 @@ function sanitizePatch(patch: AppSettingsPatch): {
     if (typeof gen.tagCheckAfterSync === "boolean") {
       general.tagCheckAfterSync = gen.tagCheckAfterSync;
     }
+    if (typeof gen.syncForksOnBulkPull === "boolean") {
+      general.syncForksOnBulkPull = gen.syncForksOnBulkPull;
+    }
     if (typeof gen.gitReflinkCheckout === "boolean") {
       general.gitReflinkCheckout = gen.gitReflinkCheckout;
     }
