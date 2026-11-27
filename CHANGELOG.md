@@ -1,5 +1,9 @@
 # Changelog
 
+## v0.66.0 - 2026-11-26
+
+- AI and Agent Access - Removed the built-in AI features and provider settings. External agents can still connect through the MCP server when local-agent access is enabled.
+
 ## v0.65.0 - 2026-11-26
 
 - Bulk sync - Reduced repaints in the expanded progress view and grouped bursts of repository tree updates during sync.
