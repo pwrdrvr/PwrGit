@@ -167,3 +167,6 @@ Beta Prerelease. CI, preview builds and signing:
   chain under 28 KiB, and every link resolving. Move detail into
   `docs/guides/<area>/` and leave a rule plus when-to-read line here.
 - Symlink `CLAUDE.md → AGENTS.md` beside every `AGENTS.md`.
+- Use the [PwrGit scaling audit skill](.agents/skills/pwrgit-scaling-audit/SKILL.md)
+  when changing work that scales with repositories, worktrees, remotes, refs,
+  history, or renderer refreshes and event bursts.

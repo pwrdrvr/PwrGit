@@ -1,0 +1,4 @@
+interface:
+  display_name: "PwrGit Scaling Audit"
+  short_description: "Find quadratic work and fanout in PwrGit"
+  default_prompt: "Use $pwrgit-scaling-audit to check the changed paths for quadratic work and fanout, fix reproduced issues, and keep small regression tests."
