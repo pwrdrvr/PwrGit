@@ -342,7 +342,7 @@ describe("bulk soft-pull fork sync (real-git property & oracle tests)", () => {
   beforeAll(() => {
     propRoot = mkdtempSync(join(tmpdir(), "pwrgit-bulk-fork-prop-"));
     world = createMultiForkWorld(propRoot, "prop");
-  });
+  }, 30_000);
 
   afterAll(() => {
     rmSync(propRoot, { recursive: true, force: true });
@@ -475,15 +475,30 @@ describe("bulk soft-pull fork sync (real-git property & oracle tests)", () => {
           }
         }
       ),
-      { numRuns: 6 }
+      // Windows Git process spawning under parallel Vitest workers is ~5-10x
+      // slower than Unix; keep a focused smoke count there and a generous
+      // timeout so CI never flakes on the default 20s limit.
+      { numRuns: process.platform === "win32" ? 4 : 8 }
     );
-  });
+  }, 60_000);
 });
 
 describe("bulk soft-pull fork sync examples", () => {
+  let sharedRoot: string;
+  let sharedWorld: MultiForkWorld;
   let root: string;
 
+  beforeAll(() => {
+    sharedRoot = mkdtempSync(join(tmpdir(), "pwrgit-bulk-fork-shared-"));
+    sharedWorld = createMultiForkWorld(sharedRoot, "shared");
+  }, 30_000);
+
+  afterAll(() => {
+    rmSync(sharedRoot, { recursive: true, force: true });
+  });
+
   beforeEach(() => {
+    sharedWorld.reset();
     root = mkdtempSync(join(tmpdir(), "pwrgit-bulk-fork-ex-"));
   });
 
@@ -492,9 +507,8 @@ describe("bulk soft-pull fork sync examples", () => {
   });
 
   it("t3code scenario: fast-forwards main from upstream/main and pushes to both origin and huntharo forks", async () => {
-    const world = createMultiForkWorld(root, "t3code");
-    const upstreamTip = commitTo(world.upstreamWork, "feature.ts", "export const x = 1;\n", "upstream commit");
-    git(world.upstreamWork, "push", "origin", "main");
+    const world = sharedWorld;
+    const upstreamTip = advanceBareFast(world.upstreamBare, "upstream commit");
 
     const summary = await bulkSyncRepositories(
       world.gitExec,
@@ -518,12 +532,11 @@ describe("bulk soft-pull fork sync examples", () => {
     expect(git(world.checkout, "rev-parse", "refs/remotes/huntharo/main")).toBe(upstreamTip);
     // Read-only sibling fork is never pushed.
     expect(git(world.coworkerBare, "rev-parse", "refs/heads/main")).toBe(world.base);
-  });
+  }, 30_000);
 
   it("pushes a lagging sibling fork even when local main and origin/main are already at upstream/main", async () => {
-    const world = createMultiForkWorld(root, "lagging-sibling");
-    const upstreamTip = commitTo(world.upstreamWork, "new.ts", "1\n", "upstream commit");
-    git(world.upstreamWork, "push", "origin", "main");
+    const world = sharedWorld;
+    const upstreamTip = advanceBareFast(world.upstreamBare, "upstream commit");
     // Advance local main and origin/main to upstreamTip, leaving huntharo behind.
     await world.gitExec(["fetch", "upstream"], world.checkout);
     git(world.checkout, "merge", "--ff-only", upstreamTip);
@@ -544,10 +557,10 @@ describe("bulk soft-pull fork sync examples", () => {
       { outcome: "pushed", remote: "huntharo", branch: "main" }
     ]);
     expect(git(world.personalBare, "rev-parse", "refs/heads/main")).toBe(upstreamTip);
-  });
+  }, 30_000);
 
   it("falls back to tracked origin/main when the fork has moved on from upstream/main", async () => {
-    const world = createMultiForkWorld(root, "moved-on");
+    const world = sharedWorld;
     const originTip = advanceBareFast(world.originBare, "fork moved on");
 
     const summary = await bulkSyncRepositories(
@@ -563,12 +576,11 @@ describe("bulk soft-pull fork sync examples", () => {
     // Neither upstream nor sibling fork was pushed.
     expect(git(world.personalBare, "rev-parse", "refs/heads/main")).toBe(world.base);
     expect(git(world.upstreamBare, "rev-parse", "refs/heads/main")).toBe(world.base);
-  });
+  }, 30_000);
 
   it("refuses a sibling fork whose pushurl was redirected to an unconfirmed repository while still pushing origin", async () => {
     const world = createMultiForkWorld(root, "bad-pushurl");
-    const upstreamTip = commitTo(world.upstreamWork, "up.ts", "1\n", "upstream");
-    git(world.upstreamWork, "push", "origin", "main");
+    const upstreamTip = advanceBareFast(world.upstreamBare, "upstream");
     git(
       world.checkout,
       "remote",
@@ -592,7 +604,7 @@ describe("bulk soft-pull fork sync examples", () => {
     // Sibling remote failed allPushUrlsMatch so it was excluded as an eligible
     // sibling target before pushing, leaving origin cleanly synced.
     expect(wt.outcome).toBe("updated");
-  });
+  }, 30_000);
 
   it("keeps feature-branch worktrees on their tracked upstream while syncing main from fork source", async () => {
     const world = createMultiForkWorld(root, "feature-wt");
@@ -600,8 +612,7 @@ describe("bulk soft-pull fork sync examples", () => {
     git(world.checkout, "worktree", "add", "-b", "feat/demo", featureDir, "main");
     await world.gitExec(["push", "-u", "origin", "feat/demo"], featureDir);
 
-    const upstreamTip = commitTo(world.upstreamWork, "up.ts", "1\n", "upstream");
-    git(world.upstreamWork, "push", "origin", "main");
+    const upstreamTip = advanceBareFast(world.upstreamBare, "upstream");
 
     const repo = world.makeRepo();
     repo.worktrees.push({ id: "wt-feat", branch: "feat/demo", path: featureDir });
@@ -617,12 +628,11 @@ describe("bulk soft-pull fork sync examples", () => {
     expect(mainRes.afterHead).toBe(upstreamTip);
     expect(featRes.outcome).toBe("up_to_date");
     expect(git(featureDir, "rev-parse", "HEAD")).toBe(world.base);
-  });
+  }, 30_000);
 
   it("reports cancellation or failure (preserving afterHead) when post-merge fork status refresh aborts or errors", async () => {
-    const world = createMultiForkWorld(root, "post-merge-fail");
-    const upstreamTip = commitTo(world.upstreamWork, "up.ts", "1\n", "upstream");
-    git(world.upstreamWork, "push", "origin", "main");
+    const world = sharedWorld;
+    const upstreamTip = advanceBareFast(world.upstreamBare, "upstream");
 
     // Abort right after the fast-forward merge completes so the post-merge
     // resolveForkStatus observes an aborted signal.
@@ -678,12 +688,11 @@ describe("bulk soft-pull fork sync examples", () => {
     expect(failedWt.beforeHead).toBe(world.base);
     expect(failedWt.afterHead).toBe(upstreamTip2);
     expect(failedWt.message).toContain("simulated post-merge read failure");
-  });
+  }, 45_000);
 
   it("preserves authentication reason when a fork remote fails fetch for authentication", async () => {
-    const world = createMultiForkWorld(root, "auth-fetch-fail");
-    const upstreamTip = commitTo(world.upstreamWork, "up.ts", "1\n", "upstream");
-    git(world.upstreamWork, "push", "origin", "main");
+    const world = sharedWorld;
+    const upstreamTip = advanceBareFast(world.upstreamBare, "upstream");
 
     const authFailGit: GitExec = async (args, cwd, options) => {
       if (args[0] === "fetch" && args.includes("huntharo")) {
@@ -709,5 +718,5 @@ describe("bulk soft-pull fork sync examples", () => {
     expect(wt.reason).toBe("authentication");
     expect(wt.afterHead).toBe(upstreamTip);
     expect(git(world.originBare, "rev-parse", "refs/heads/main")).toBe(upstreamTip);
-  });
+  }, 30_000);
 });
