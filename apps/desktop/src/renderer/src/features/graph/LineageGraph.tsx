@@ -17,6 +17,7 @@ import { flushSync } from "react-dom";
 import {
   commitAuthorInterest,
   commitAuthorPersonKey,
+  err,
   mergeCommitAuthorPeople,
   type Commit,
   type CommitAuthorPerson,
@@ -70,6 +71,7 @@ import { layoutLanes } from "./lane-layout";
 import { findPrLandingLinks, layoutPrLandingLinks } from "./pr-landings";
 
 type Scope = "active" | "all";
+type LaneInvalidation = { source: Exclude<LineageRefreshSource, "view"> };
 const VISIBLE_COMMIT_PR_IDLE_MS = 500;
 
 /**
@@ -85,18 +87,6 @@ const TOOLBAR_FIT_STEPS = [
   "fit-count-short",
   "fit-no-label"
 ] as const;
-
-export function consumeBranchPrInvalidation(
-  scope: Scope,
-  generation: number,
-  consumedGeneration: number
-): { force: boolean; consumedGeneration: number } {
-  const force = scope === "active" && generation !== consumedGeneration;
-  return {
-    force,
-    consumedGeneration: force ? generation : consumedGeneration
-  };
-}
 
 /**
  * The authors a loaded graph shows, for `people:replaceInterest`: most recent
@@ -348,7 +338,6 @@ export function LineageGraph({
   const [loadError, setLoadError] = useState<string | null>(null);
   const loadErrorRef = useRef(loadError);
   loadErrorRef.current = loadError;
-  const [branchPrGeneration, setBranchPrGeneration] = useState(0);
   const [flash, setFlash] = useState<string | null>(null);
   const [branchesOpen, setBranchesOpen] = useState(false);
   const branchesBtnRef = useRef<HTMLButtonElement>(null);
@@ -416,7 +405,11 @@ export function LineageGraph({
   const commitPrMonitorIdRef = useRef(crypto.randomUUID());
   const peopleMonitorIdRef = useRef(crypto.randomUUID());
   const publishedCommitsRef = useRef<Commit[] | null>(null);
-  const consumedBranchPrGenerationRef = useRef(0);
+  const publishedRepoRef = useRef<string | null>(null);
+  // Main caches by repo and scope. Keep changes observed by an old view
+  // pending until a successful read covers them, including tag-only changes
+  // that a plain view request's branch/remote stamp would miss.
+  const laneInvalidationsRef = useRef(new Map<string, Partial<Record<Scope, LaneInvalidation>>>());
 
   const acceptCommitPullRequests = useCallback(
     (prs: Record<string, PrSummary | null>): void => {
@@ -477,17 +470,55 @@ export function LineageGraph({
   useEffect(() => {
     let active = true;
     let loadSequence = 0;
-    const load = (source: LineageRefreshSource): void => {
+    let reading = false;
+    let publishing = false;
+    const invalidations = laneInvalidationsRef.current;
+    const dirty = invalidations.get(repoId) ?? {};
+    const invalidate = (source: LaneInvalidation["source"]): void => {
+      const change = { source };
+      dirty.active = change;
+      dirty.all = change;
+    };
+    invalidations.set(repoId, dirty);
+    const load = (): void => {
+      if (reading) return;
+      reading = true;
+      publishing = true;
+      const change = dirty[scope];
+      const source = change?.source ?? "view";
       const sequence = ++loadSequence;
+      if (dataRef.current === null && !loadingRef.current) {
+        loadingRef.current = true;
+        setLoading(true);
+      }
       if (loadErrorRef.current !== null) {
         loadErrorRef.current = null;
         setLoadError(null);
       }
-      const force = source !== "view";
       markLineageRefresh(repoId, source, "request");
-      void dispatch("graph:lanes", { worktreeId, scope, force, ...(revealHash === undefined ? {} : { revealHash }) }).then((r) => {
-        if (!active || sequence !== loadSequence) return;
+      const reply = dispatch("graph:lanes", {
+        worktreeId,
+        scope,
+        force: change !== undefined,
+        ...(revealHash === undefined ? {} : { revealHash })
+      }).catch((error: unknown) => err({
+        kind: "repo",
+        code: "graph_failed",
+        message: error instanceof Error ? error.message : String(error)
+      }));
+      void reply.then((r) => {
+        if (!active) return;
+        // Avatar decoding does not hold the lane read slot. A subsequent
+        // request can start at once and supersede these rows while they warm.
+        reading = false;
+        // A read that was already underway may have missed the change. Reconcile
+        // immediately, even during steady input, and skip obsolete results.
+        if (change !== dirty[scope]) {
+          load();
+          return;
+        }
         if (!r.ok) {
+          publishing = false;
           const message = r.error.message.split("\n")[0];
           loadErrorRef.current = message;
           setLoadError(message);
@@ -495,8 +526,7 @@ export function LineageGraph({
             loadingRef.current = false;
             setLoading(false);
           }
-          // Keyed: every `graph:changed` for the repo reloads, and a
-          // worktree whose folder is gone fails each time the same way.
+          // Keyed so repeated reads of a missing worktree share one toast.
           showErrorToast({
             key: `history:${worktreeId}`,
             title: "History unavailable",
@@ -507,6 +537,7 @@ export function LineageGraph({
           return;
         }
 
+        delete dirty[scope];
         const publishedCommits = publishedCommitsRef.current;
         const sameCommits = samePayload(publishedCommits, r.value.commits);
         const graph = sameCommits && publishedCommits !== null
@@ -518,6 +549,8 @@ export function LineageGraph({
           onCommitsChange(graph.commits);
         }
         const publish = (): void => {
+          publishing = false;
+          publishedRepoRef.current = repoId;
           markLineageRefresh(repoId, source, "publish");
           if (!samePayload(dataRef.current, graph)) {
             dataRef.current = graph;
@@ -555,48 +588,17 @@ export function LineageGraph({
         });
       });
     };
-    if (dataRef.current === null && !loadingRef.current) {
-      loadingRef.current = true;
-      setLoading(true);
-    }
-    // A plain worktree/scope switch reuses the repo's cached lanes (fast); a
-    // repo-scoped graph invalidation forces a recompute. Lane data is shared
-    // across sibling worktrees, so filtering this event to one worktree would
-    // leave the focused graph stale when a sibling HEAD moves.
-    // A PR delta observed in All remains unconsumed until Active is requested.
-    // Once that forced Active load starts, ordinary scope/worktree switches
-    // return to the repo-level lane cache.
-    const prInvalidation = consumeBranchPrInvalidation(
-      scope,
-      branchPrGeneration,
-      consumedBranchPrGenerationRef.current
-    );
-    consumedBranchPrGenerationRef.current = prInvalidation.consumedGeneration;
-    load(prInvalidation.force ? "branch-pr" : "view");
-    const off = subscribe("graph:changed", (p) => {
-      if (p.repoId === repoId) load("repo-change");
+    const offGraph = subscribe("graph:changed", (event) => {
+      if (event.repoId !== repoId) return;
+      // The lanes include other worktrees' branches. Any repo event can
+      // change this view, even if the selected worktree did not move.
+      invalidate("repo-change");
+      load();
     });
-    return () => {
-      active = false;
-      off();
-    };
-  }, [acceptPeople, branchPrGeneration, onCommitsChange, repoId, worktreeId, scope, revealHash]);
 
-  // Interest follows the window: a graph that goes away withdraws it, so main
-  // stops looking after authors nobody is shown.
-  useEffect(() => {
-    const monitorId = peopleMonitorIdRef.current;
-    return () => {
-      publishedCommitsRef.current = null;
-      void dispatch("people:replaceInterest", { worktreeId, monitorId, authors: [] });
-    };
-  }, [worktreeId]);
-
-  // The sidebar and graph keep separate view models. Apply the same targeted
-  // PR delta to the graph cache so a hover/focused refresh updates both
-  // surfaces without re-running this repository's expensive lane query.
-  useEffect(() => {
-    return subscribe("pr:changed", (event) => {
+    // The sidebar and graph keep separate view models. Apply a targeted PR
+    // delta immediately while Active reconciles its branch membership.
+    const offPr = subscribe("pr:changed", (event) => {
       if (event.repoId !== repoId) return;
       const entries = Object.entries(event.prs);
       if (entries.length === 0) return;
@@ -604,7 +606,7 @@ export function LineageGraph({
       // Re-run the branch query after a fresh association lands — or for a
       // branch not yet in `data.branches` — while skipping equivalent deltas
       // that match what the loaded graph already holds.
-      const snapshot = dataRef.current;
+      const snapshot = publishedRepoRef.current === repoId ? dataRef.current : null;
       const affectsMembership =
         snapshot === null ||
         entries.some(([branch, pr]) => {
@@ -612,11 +614,13 @@ export function LineageGraph({
           return info === undefined || !samePayload(info.pr ?? null, pr);
         });
       if (!affectsMembership) return;
-      setBranchPrGeneration((generation) => generation + 1);
-      const current = dataRef.current;
-      if (current !== null) {
+      invalidate("branch-pr");
+      // All's membership is independent of PRs. Update its chips in place
+      // and reconcile if a pending reply could overwrite the delta.
+      if (scope === "active" || publishing) load();
+      if (snapshot !== null) {
         let changed = false;
-        const branches = { ...current.branches };
+        const branches = { ...snapshot.branches };
         for (const [branch, pr] of entries) {
           const info = branches[branch];
           if (info === undefined || samePayload(info.pr ?? null, pr)) continue;
@@ -627,13 +631,29 @@ export function LineageGraph({
           changed = true;
         }
         if (changed) {
-          const updated = { ...current, branches };
+          const updated = { ...snapshot, branches };
           dataRef.current = updated;
           setData(updated);
         }
       }
     });
-  }, [repoId]);
+    load();
+    return () => {
+      active = false;
+      offGraph();
+      offPr();
+    };
+  }, [acceptPeople, onCommitsChange, repoId, worktreeId, scope, revealHash]);
+
+  // Interest follows the window: a graph that goes away withdraws it, so main
+  // stops looking after authors nobody is shown.
+  useEffect(() => {
+    const monitorId = peopleMonitorIdRef.current;
+    return () => {
+      publishedCommitsRef.current = null;
+      void dispatch("people:replaceInterest", { worktreeId, monitorId, authors: [] });
+    };
+  }, [worktreeId]);
 
   useEffect(() => {
     return subscribe("pr:commitChanged", (event) => {
