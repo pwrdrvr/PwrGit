@@ -38,6 +38,7 @@ let originalScrollIntoView: typeof Element.prototype.scrollIntoView | undefined;
 
 beforeEach(() => {
   vi.clearAllMocks();
+  vi.useFakeTimers();
   channels.clear();
   originalScrollIntoView = Element.prototype.scrollIntoView;
   Element.prototype.scrollIntoView = vi.fn();
@@ -80,6 +81,7 @@ afterEach(() => {
     Element.prototype.scrollIntoView = originalScrollIntoView;
   }
   vi.unstubAllGlobals();
+  vi.useRealTimers();
 });
 
 const makePr = (number: number, state: "open" | "merged"): PrSummary => ({
@@ -141,6 +143,8 @@ describe("LineageGraph pr:changed invalidation invariants", () => {
         fc.integer({ min: 1, max: 5 }),
         fc.boolean(),
         async (equivalentCount, changeKnownBranch) => {
+          const scrollIntoView = vi.mocked(Element.prototype.scrollIntoView);
+          scrollIntoView.mockClear();
           const initialPr = makePr(42, "open");
           let currentGraph = makeGraph(initialPr);
           let laneDispatches = 0;
@@ -183,6 +187,13 @@ describe("LineageGraph pr:changed invalidation invariants", () => {
             );
           });
 
+          // Loading lanes schedules a frame that centers and flashes HEAD.
+          // Count that mount update before measuring PR deltas. Keep the
+          // flash expiry and relative clock on fake time during the deltas.
+          await act(async () => {
+            vi.advanceTimersToNextFrame();
+          });
+          expect(scrollIntoView).toHaveBeenCalledTimes(1);
           const settledLanes = laneDispatches;
           const settledCommits = commits;
 
@@ -218,7 +229,8 @@ describe("LineageGraph pr:changed invalidation invariants", () => {
           root = createRoot(container);
         }
       ),
-      { numRuns: 10, seed: 2026112607 }
+      // Replay the CI case and always exercise both kinds of real PR change.
+      { numRuns: 12, examples: [[5, false], [1, true]] }
     );
   });
 
