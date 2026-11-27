@@ -13016,6 +13016,9 @@ body.is-col-resizing {
   z-index: 120;
   min-width: 184px;
   padding: 5px;
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
   background: var(--bg-menu);
   border: 1px solid var(--border-default);
   border-radius: 10px;

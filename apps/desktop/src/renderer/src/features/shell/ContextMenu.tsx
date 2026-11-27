@@ -54,6 +54,83 @@ export type MenuItem =
       hint?: string;
     };
 
+export interface ContextMenuPlacementInput {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  viewportWidth: number;
+  viewportHeight: number;
+  align?: "start" | "end";
+  placement?: "below" | "above";
+  /** True when the menu is attached to a trigger control rather than a free
+   *  pointer coordinate, so overflowing prefers scrolling on the anchor's roomier
+   *  side over sliding back across the trigger or its split-button face. */
+  anchored?: boolean;
+  gutter?: number;
+}
+
+export interface ContextMenuPlacement {
+  left: number;
+  top: number;
+  maxHeight?: number;
+}
+
+export function placeContextMenu({
+  x,
+  y,
+  width,
+  height,
+  viewportWidth,
+  viewportHeight,
+  align = "start",
+  placement = "below",
+  anchored = false,
+  gutter = 8
+}: ContextMenuPlacementInput): ContextMenuPlacement {
+  let left = align === "end" ? x - width : x;
+  if (left + width > viewportWidth - gutter) left = viewportWidth - width - gutter;
+  left = Math.max(gutter, left);
+
+  const maxViewportHeight = Math.max(0, viewportHeight - 2 * gutter);
+  const spaceBelow = Math.max(0, viewportHeight - gutter - y);
+  const spaceAbove = Math.max(0, y - gutter);
+
+  if (placement === "above") {
+    if (y - height >= gutter && y <= viewportHeight - gutter) {
+      return { left, top: y - height };
+    }
+    if (anchored && spaceAbove >= spaceBelow) {
+      const clampedY = Math.min(y, viewportHeight - gutter);
+      const avail = Math.max(0, clampedY - gutter);
+      return height > avail
+        ? { left, top: gutter, maxHeight: avail }
+        : { left, top: clampedY - height };
+    }
+    if (height > maxViewportHeight) {
+      return { left, top: gutter, maxHeight: maxViewportHeight };
+    }
+    let top = y - height;
+    if (top + height > viewportHeight - gutter) top = viewportHeight - height - gutter;
+    return { left, top: Math.max(gutter, top) };
+  }
+
+  if (y >= gutter && y + height <= viewportHeight - gutter) {
+    return { left, top: y };
+  }
+  if (anchored && spaceBelow >= spaceAbove) {
+    const top = Math.max(gutter, y);
+    const avail = Math.max(0, viewportHeight - gutter - top);
+    return height > avail ? { left, top, maxHeight: avail } : { left, top };
+  }
+  if (height > maxViewportHeight) {
+    return { left, top: gutter, maxHeight: maxViewportHeight };
+  }
+  let top = y;
+  if (top + height > viewportHeight - gutter) top = viewportHeight - height - gutter;
+  return { left, top: Math.max(gutter, top) };
+}
+
 /**
  * A context menu anchored at a screen point (right-click). Portalled to <body>,
  * clamped into the viewport, and dismissed on outside click / Escape / scroll /
@@ -93,7 +170,7 @@ export function ContextMenu({
   // A right-click menu has no trigger element to return focus to; the empty
   // ref makes that the no-op case rather than a special one.
   const noTrigger = useRef<HTMLElement | null>(null);
-  const [pos, setPos] = useState<{ left: number; top: number }>({
+  const [pos, setPos] = useState<ContextMenuPlacement>({
     left: x,
     top: y
   });
@@ -125,14 +202,24 @@ export function ContextMenu({
     const el = ref.current;
     if (!el) return;
     const r = el.getBoundingClientRect();
-    let left = align === "end" ? x - r.width : x;
-    let top = placement === "above" ? y - r.height : y;
-    if (left + r.width > window.innerWidth - 8) left = window.innerWidth - r.width - 8;
-    if (top + r.height > window.innerHeight - 8) top = window.innerHeight - r.height - 8;
-    setPos({ left: Math.max(8, left), top: Math.max(8, top) });
+    const borderHeight = Math.max(0, el.offsetHeight - el.clientHeight);
+    const naturalHeight = Math.max(r.height, el.scrollHeight + borderHeight);
+    setPos(
+      placeContextMenu({
+        x,
+        y,
+        width: r.width,
+        height: naturalHeight,
+        viewportWidth: window.innerWidth,
+        viewportHeight: window.innerHeight,
+        align,
+        placement,
+        anchored: triggerRef !== undefined
+      })
+    );
     // Initial focus belongs to useMenuNavigation, which also seeds the roving
     // tabindex; focusing here too would fight it on every reposition.
-  }, [x, y, items.length, align, placement]);
+  }, [x, y, items.length, align, placement, triggerRef]);
 
   useEffect(() => {
     const onDown = (e: MouseEvent): void => {
@@ -145,17 +232,22 @@ export function ContextMenu({
         onClose();
       }
     };
+    const onScroll = (e: Event): void => {
+      const target = e.target;
+      if (target instanceof Node && ref.current?.contains(target)) return;
+      onClose();
+    };
     window.addEventListener("mousedown", onDown, true);
     window.addEventListener("contextmenu", onDown, true);
     // The focus-return control can also be activated by Enter or Space.
     if (focusReturnRef !== undefined) window.addEventListener("click", onDown, true);
-    window.addEventListener("scroll", onClose, true);
+    window.addEventListener("scroll", onScroll, true);
     window.addEventListener("resize", onClose);
     return () => {
       window.removeEventListener("mousedown", onDown, true);
       window.removeEventListener("contextmenu", onDown, true);
       window.removeEventListener("click", onDown, true);
-      window.removeEventListener("scroll", onClose, true);
+      window.removeEventListener("scroll", onScroll, true);
       window.removeEventListener("resize", onClose);
     };
   }, [onClose, triggerRef, focusReturnRef]);
@@ -166,7 +258,12 @@ export function ContextMenu({
       className="pop-menu"
       role="menu"
       aria-label={label}
-      style={{ position: "fixed", left: pos.left, top: pos.top }}
+      style={{
+        position: "fixed",
+        left: pos.left,
+        top: pos.top,
+        ...(pos.maxHeight === undefined ? {} : { maxHeight: pos.maxHeight })
+      }}
       // A portal's React events still bubble to the component that rendered
       // it: a click on a separator or a right-click here reached the
       // worktree row under a kebab, selecting it or opening its own menu.

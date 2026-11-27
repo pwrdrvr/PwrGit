@@ -96,6 +96,22 @@ test("Sync options toggles in the sync menu", async () => {
       expect(await calls(page)).toEqual(["syncForksOnBulkPull:false", "tagCheckAfterSync:false"]);
       await shoot(`after-off-${theme}`);
     }
+
+    // In a shorter window (e.g. 1024x768 CI runners), the Sync options menu
+    // must scroll within the viewport below the toolbar instead of sliding
+    // upward over the split-button face.
+    await app.evaluate(({ BrowserWindow }) => {
+      BrowserWindow.getAllWindows()[0]?.setContentSize(420, 560);
+    });
+    await open("on", "dark");
+    const face = page.getByRole("button", { name: "Try pull recent", exact: true });
+    const faceBox = (await face.boundingBox())!;
+    const menuBox = (await page.getByRole("menu").boundingBox())!;
+    expect(menuBox.y).toBeGreaterThanOrEqual(faceBox.y + faceBox.height);
+    expect(menuBox.y + menuBox.height).toBeLessThanOrEqual(560);
+    await face.click();
+    await expect(page.getByRole("menu")).toHaveCount(0);
+    expect(await calls(page)).toContain("sync");
   } finally {
     await app.close();
     rmSync(out, { recursive: true, force: true });

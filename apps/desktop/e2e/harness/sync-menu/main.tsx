@@ -51,7 +51,9 @@ function Toolbar({
         onAddFolder={() => undefined}
         onClone={() => undefined}
         onFork={() => undefined}
-        onSync={() => undefined}
+        onSync={() => {
+          calls.push("sync");
+        }}
         onMaintenance={() => undefined}
       />
     </div>
