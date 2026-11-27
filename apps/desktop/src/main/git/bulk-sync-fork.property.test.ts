@@ -292,6 +292,47 @@ describe("summarizeBulkForkSyncResult properties", () => {
       { numRuns: 200 }
     );
   });
+  it("preserves authentication reason for sanitized auth-required messages and explicit authFailed flag", () => {
+    const worktree = { id: "wt-1", branch: "main", path: "/repos/t3code" };
+    const fromMessage = summarizeBulkForkSyncResult({
+      worktree,
+      branch: "main",
+      beforeHead: "a".repeat(40),
+      afterHead: "b".repeat(40),
+      headMoved: true,
+      sourceLabel: "upstream/main",
+      pushes: [
+        {
+          outcome: "fetch_failed",
+          remote: "huntharo",
+          branch: "main",
+          message: "Authentication is required; PwrGit did not open an interactive prompt."
+        }
+      ]
+    });
+    expect(fromMessage.outcome).toBe("failed");
+    expect(fromMessage.reason).toBe("authentication");
+
+    const fromFlag = summarizeBulkForkSyncResult({
+      worktree,
+      branch: "main",
+      beforeHead: "a".repeat(40),
+      afterHead: "a".repeat(40),
+      headMoved: false,
+      sourceLabel: "upstream/main",
+      pushes: [
+        {
+          outcome: "fetch_failed",
+          remote: "huntharo",
+          branch: "main",
+          message: "Custom proxy message"
+        }
+      ],
+      authFailed: true
+    });
+    expect(fromFlag.outcome).toBe("failed");
+    expect(fromFlag.reason).toBe("authentication");
+  });
 });
 
 describe("bulk soft-pull fork sync (real-git property & oracle tests)", () => {
@@ -576,5 +617,97 @@ describe("bulk soft-pull fork sync examples", () => {
     expect(mainRes.afterHead).toBe(upstreamTip);
     expect(featRes.outcome).toBe("up_to_date");
     expect(git(featureDir, "rev-parse", "HEAD")).toBe(world.base);
+  });
+
+  it("reports cancellation or failure (preserving afterHead) when post-merge fork status refresh aborts or errors", async () => {
+    const world = createMultiForkWorld(root, "post-merge-fail");
+    const upstreamTip = commitTo(world.upstreamWork, "up.ts", "1\n", "upstream");
+    git(world.upstreamWork, "push", "origin", "main");
+
+    // Abort right after the fast-forward merge completes so the post-merge
+    // resolveForkStatus observes an aborted signal.
+    const controller = new AbortController();
+    let mergeFinished = false;
+    const abortAfterMergeGit: GitExec = async (args, cwd, options) => {
+      const res = await world.gitExec(args, cwd, options);
+      if (args[0] === "merge" && args.includes("--ff-only")) {
+        mergeFinished = true;
+      } else if (mergeFinished && args[0] === "rev-parse" && args.includes("--verify") && args.includes("HEAD")) {
+        controller.abort();
+      }
+      return res;
+    };
+
+    const cancelledSummary = await bulkSyncRepositories(
+      abortAfterMergeGit,
+      [world.makeRepo()],
+      { operationId: "post-merge-cancel", mode: "soft-pull", signal: controller.signal }
+    );
+    const cancelledWt = cancelledSummary.results[0]!.worktrees[0]!;
+    expect(cancelledWt.outcome).toBe("cancelled");
+    expect(cancelledWt.reason).toBe("cancelled");
+    expect(cancelledWt.beforeHead).toBe(world.base);
+    expect(cancelledWt.afterHead).toBe(upstreamTip);
+
+    // Reset and simulate a Git error during the post-merge resolveForkStatus read.
+    world.reset();
+    const upstreamTip2 = advanceBareFast(world.upstreamBare, "upstream 2");
+    let verifiedAfterMerge = false;
+    const failPostMergeStatusGit: GitExec = async (args, cwd, options) => {
+      if (verifiedAfterMerge && args[0] === "rev-parse" && args.includes("@{u}")) {
+        return {
+          ok: false,
+          error: { kind: "git", code: "spawn_failed", message: "simulated post-merge read failure" }
+        };
+      }
+      const res = await world.gitExec(args, cwd, options);
+      if (args[0] === "rev-parse" && args.includes("--verify") && args.includes("HEAD") && res.ok && res.value.stdout.trim() === upstreamTip2) {
+        verifiedAfterMerge = true;
+      }
+      return res;
+    };
+
+    const failedSummary = await bulkSyncRepositories(
+      failPostMergeStatusGit,
+      [world.makeRepo()],
+      { operationId: "post-merge-err", mode: "soft-pull" }
+    );
+    const failedWt = failedSummary.results[0]!.worktrees[0]!;
+    expect(failedWt.outcome).toBe("failed");
+    expect(failedWt.reason).toBe("fork_push_failed");
+    expect(failedWt.beforeHead).toBe(world.base);
+    expect(failedWt.afterHead).toBe(upstreamTip2);
+    expect(failedWt.message).toContain("simulated post-merge read failure");
+  });
+
+  it("preserves authentication reason when a fork remote fails fetch for authentication", async () => {
+    const world = createMultiForkWorld(root, "auth-fetch-fail");
+    const upstreamTip = commitTo(world.upstreamWork, "up.ts", "1\n", "upstream");
+    git(world.upstreamWork, "push", "origin", "main");
+
+    const authFailGit: GitExec = async (args, cwd, options) => {
+      if (args[0] === "fetch" && args.includes("huntharo")) {
+        return {
+          ok: true,
+          value: {
+            exitCode: 128,
+            stdout: "",
+            stderr: "Permission denied (publickey)."
+          }
+        };
+      }
+      return world.gitExec(args, cwd, options);
+    };
+
+    const summary = await bulkSyncRepositories(
+      authFailGit,
+      [world.makeRepo()],
+      { operationId: "auth-fetch-1", mode: "soft-pull" }
+    );
+    const wt = summary.results[0]!.worktrees[0]!;
+    expect(wt.outcome).toBe("failed");
+    expect(wt.reason).toBe("authentication");
+    expect(wt.afterHead).toBe(upstreamTip);
+    expect(git(world.originBare, "rev-parse", "refs/heads/main")).toBe(upstreamTip);
   });
 });

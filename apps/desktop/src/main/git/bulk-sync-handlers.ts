@@ -175,6 +175,12 @@ export function registerBulkSyncHandlers(
         });
         emitEvent("graph:changed", { repoId });
       });
+    }).catch((cause: unknown) => {
+      logMain(
+        "debug",
+        "forge",
+        `bulk sync sibling fork discovery failed for ${cwd}: ${sanitizeGitLogDetail(cause)}`
+      );
     });
   };
 
@@ -289,8 +295,11 @@ export function registerBulkSyncHandlers(
             (remote) => remote.outcome === "fetched"
           );
           const fetchedChanges = fetched && result.refsChanged !== false;
-          const updated = result.worktrees.some(
-            (worktree) => worktree.outcome === "updated"
+          const headMoved = result.worktrees.some(
+            (worktree) =>
+              worktree.outcome === "updated" ||
+              (worktree.afterHead !== undefined &&
+                worktree.afterHead !== worktree.beforeHead)
           );
           const pushedFork = result.worktrees.some(
             (worktree) =>
@@ -318,7 +327,7 @@ export function registerBulkSyncHandlers(
               );
             }
           }
-          if (fetchedChanges || updated || pushedFork) {
+          if (fetchedChanges || headMoved || pushedFork) {
             try {
               await refresher.refreshRepoWorktrees(repo.id);
             } catch (cause) {
@@ -329,7 +338,7 @@ export function registerBulkSyncHandlers(
               );
             }
           }
-          if (updated || pushedFork) {
+          if (headMoved || pushedFork) {
             emitEvent("graph:changed", { repoId: repo.id });
           }
           // Timed and bulk syncs check tags as a toolbar Fetch does: behind

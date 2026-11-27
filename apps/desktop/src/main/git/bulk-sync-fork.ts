@@ -49,7 +49,7 @@ type WorktreeInput = {
 const HEAD_REVISIONS = ["--revs-only", "HEAD", "--symbolic-full-name", "HEAD", "--"];
 
 const authFailure = (message: string): boolean =>
-  /authentication failed|terminal prompts disabled|could not read (?:username|password)|username for ['"]|password for ['"]|permission denied \(publickey|credential[^\r\n]*(?:failed|unavailable)|http basic: access denied/i.test(
+  /authentication (?:failed|is required)|terminal prompts disabled|could not read (?:username|password)|username for ['"]|password for ['"]|permission denied \(publickey|credential[^\r\n]*(?:failed|unavailable)|http basic: access denied/i.test(
     message
   );
 
@@ -178,8 +178,19 @@ export function summarizeBulkForkSyncResult(input: {
   headMoved: boolean;
   sourceLabel: string;
   pushes: ForkSyncPush[];
+  /** Explicit signal that a fork remote fetch or push failed for authentication. */
+  authFailed?: boolean;
 }): BulkSyncWorktreeResult {
-  const { worktree, branch, beforeHead, afterHead, headMoved, sourceLabel, pushes } = input;
+  const {
+    worktree,
+    branch,
+    beforeHead,
+    afterHead,
+    headMoved,
+    sourceLabel,
+    pushes,
+    authFailed = false
+  } = input;
   const stopped = pushes.some((entry) => entry.outcome === "stopped");
   if (stopped) {
     return worktreeResult(worktree, {
@@ -199,7 +210,7 @@ export function summarizeBulkForkSyncResult(input: {
       entry.outcome === "failed" || entry.outcome === "fetch_failed"
   );
   if (failures.length > 0) {
-    const auth = failures.some((entry) => authFailure(entry.message));
+    const auth = authFailed || failures.some((entry) => authFailure(entry.message));
     const detail = failures
       .map((entry) => `${entry.remote}/${entry.branch}: ${entry.message}`)
       .join("; ");
@@ -664,6 +675,7 @@ export async function tryBulkForkSync(
 
   // `mode === "sync"`: push `sourceHead` (fast-forward only, leased on the
   // fetched tip) to every enabled writable fork remote that carries this branch.
+  let fetchAuthFailed = false;
   const pushes = await runRepoPush(async (): Promise<ForkSyncPush[]> => {
     const results: ForkSyncPush[] = [];
     if (isAborted(signal)) {
@@ -676,16 +688,38 @@ export async function tryBulkForkSync(
       forkSync.identity,
       statusOptions
     );
-    if (!fresh.ok || fresh.value === null) return results;
+    if (isAborted(signal)) {
+      return [{ outcome: "stopped", remote: tracked.remote, branch }];
+    }
+    if (!fresh.ok) {
+      return [
+        {
+          outcome: "failed",
+          remote: tracked.remote,
+          branch,
+          message:
+            sanitizeGitLogDetail(fresh.error.message) ||
+            "Git could not inspect fork status before pushing."
+        }
+      ];
+    }
     const now = fresh.value;
     if (
+      now === null ||
       now.branch !== branch ||
       now.source === null ||
       now.source.ref !== source.ref ||
       now.source.head !== sourceHead ||
       now.tracked?.ref !== tracked.ref
     ) {
-      return results;
+      return [
+        {
+          outcome: "failed",
+          remote: tracked.remote,
+          branch,
+          message: "The branch or fork sync route changed before pushing."
+        }
+      ];
     }
 
     const planned = (now.source.syncTargets ?? []).filter(
@@ -704,6 +738,7 @@ export async function tryBulkForkSync(
         if (remoteResult?.reason === "skip_fetch_all") {
           results.push({ outcome: "skipped", remote: target.remote, branch: target.branch });
         } else {
+          if (remoteResult?.reason === "authentication") fetchAuthFailed = true;
           results.push({
             outcome: "fetch_failed",
             remote: target.remote,
@@ -831,6 +866,7 @@ export async function tryBulkForkSync(
     afterHead: sourceHead,
     headMoved,
     sourceLabel: source.label,
-    pushes
+    pushes,
+    authFailed: fetchAuthFailed
   });
 }
