@@ -2275,6 +2275,9 @@ export type WorktreeState = {
 /** Profile-wide repository synchronization without destructive recovery. */
 export type BulkSyncMode = "fetch" | "soft-pull";
 
+/** Per-repository fork handling during bulk soft-pull, matching the Pull menu. */
+export type BulkSyncForkMode = "sync" | "source" | "tracked";
+
 export type BulkSyncRemoteResult = {
   remote: string;
   outcome: "fetched" | "skipped" | "failed" | "cancelled";
@@ -2306,11 +2309,16 @@ export type BulkSyncWorktreeResult = {
     | "upstream_not_fetched"
     | "unsafe_state"
     | "merge_failed"
+    | "fork_push_failed"
     | "cancelled";
   message?: string;
   /** Exact commit ids before and after a successful fast-forward. */
   beforeHead?: string;
   afterHead?: string;
+  /** Fork source ref label (e.g. `upstream/main`) when synced against the fork's source. */
+  forkSource?: string;
+  /** Per-fork push outcomes when bulk pull synced a fork branch and pushed to enabled forks. */
+  forkPushes?: ForkSyncPush[];
 };
 
 export type BulkSyncRepoResult = {

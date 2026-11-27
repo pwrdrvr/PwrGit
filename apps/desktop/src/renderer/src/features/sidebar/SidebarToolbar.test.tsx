@@ -294,6 +294,26 @@ describe("SidebarToolbar", () => {
     expect(caret()).toBe("m6 9 6 6 6-6");
   });
 
+  it("offers Sync forks with upstream as a toggle that leaves the menu open", () => {
+    const onToggleSyncForks = vi.fn();
+    render({
+      hasProfile: true,
+      rootCount: 1,
+      repoCount: 3,
+      syncForksOnBulkPull: true,
+      onToggleSyncForks
+    });
+    act(() => button("Sync options").click());
+    const toggle = [...document.querySelectorAll<HTMLButtonElement>('[role="menuitemcheckbox"]')].find((el) =>
+      el.textContent?.startsWith("Sync forks with upstream")
+    )!;
+    expect(toggle.getAttribute("aria-checked")).toBe("true");
+    expect(toggle.textContent).toContain("fast-forward clean fork branches");
+    act(() => toggle.click());
+    expect(onToggleSyncForks).toHaveBeenCalledWith(false);
+    expect(document.querySelector('[role="menu"]')).not.toBeNull();
+  });
+
   it("offers Check tags after sync as a toggle that leaves the menu open", () => {
     const onToggleTagCheck = vi.fn();
     render({ hasProfile: true, rootCount: 1, repoCount: 3, tagCheckAfterSync: true, onToggleTagCheck });

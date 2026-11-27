@@ -130,4 +130,23 @@ describe("profileRepos and pending pulls", () => {
     ]);
     expect(profileRepos(db, theirs)?.map((repo) => repo.pullPending)).toEqual([true]);
   });
+
+  it("prioritizes clean fork-behind repositories only when syncForks is enabled", () => {
+    const db = openDatabase(":memory:");
+    const profiles = new ProfileService(db);
+    const profileId = profiles.create({ name: "mine", email: "mine@example.com", roots: [] }).id;
+    db.prepare("INSERT INTO repos (id, profile_id, name, path) VALUES (?, ?, ?, ?)")
+      .run("fork-behind", profileId, "t3code", "/checkouts/t3code");
+    db.prepare(
+      "INSERT INTO worktrees (id, repo_id, branch, path, is_primary, missing) VALUES (?, ?, ?, ?, 1, 0)"
+    ).run("wt-main", "fork-behind", "main", "/checkouts/t3code");
+    db.prepare(
+      `INSERT INTO worktree_state
+         (worktree_id, branch, has_upstream, ahead, behind, dirty, source_ahead, source_behind)
+       VALUES (?, ?, 1, 0, 0, 0, 0, 89)`
+    ).run("wt-main", "main");
+
+    expect(profileRepos(db, profileId, undefined, { syncForks: false })?.[0]?.pullPending).toBeUndefined();
+    expect(profileRepos(db, profileId, undefined, { syncForks: true })?.[0]?.pullPending).toBe(true);
+  });
 });

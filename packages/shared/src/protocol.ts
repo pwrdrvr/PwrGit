@@ -28,6 +28,7 @@ import type {
   RetrackMove,
   RetrackReview,
   TrackingChoices,
+  BulkSyncForkMode,
   BulkSyncMode,
   BulkSyncProgress,
   BulkSyncSummary,
@@ -734,6 +735,14 @@ export type GeneralSettings = {
    */
   tagCheckAfterSync: boolean;
   /**
+   * The sync menu's "Sync forks with upstream": during Pull all / Pull recent
+   * (manual and scheduled), fast-forward clean fork branches from their
+   * upstream source and leased-push to enabled fork remotes, honouring each
+   * repository's Pull menu choice and per-remote fork sync preferences. On by
+   * default.
+   */
+  syncForksOnBulkPull: boolean;
+  /**
    * Settings › Git: Git runs with `checkout.reflink` on,
    * so checkouts clone files the main checkout holds unchanged. Applies only
    * while the Git in use supports it; with any other Git the switch is shown
@@ -894,6 +903,7 @@ export const GENERAL_DEFAULTS: GeneralSettings = {
   worktreeFinishedAfterDays: STALE_AGE_DAYS,
   gitIdentityReminder: true,
   tagCheckAfterSync: true,
+  syncForksOnBulkPull: true,
   gitIdentityByFolder: false,
   gitReflinkCheckout: true
 };
@@ -2027,6 +2037,10 @@ export interface Commands {
       /** Only these repositories of the profile (Fetch recent). Absent means
        *  every visible repository. An id outside the profile is ignored. */
       repoIds?: string[];
+      /** Per-repository fork handling from the Pull menu (`sync` / `source` /
+       *  `tracked`). Repositories absent from this map default to `sync` when
+       *  `general.syncForksOnBulkPull` is enabled. */
+      forkModes?: Record<RepoId, BulkSyncForkMode>;
     };
     res: BulkSyncSummary;
   };

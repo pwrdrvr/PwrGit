@@ -10,6 +10,7 @@ import {
   type ReactNode
 } from "react";
 import type {
+  BulkSyncForkMode,
   BulkSyncMode,
   BulkSyncProgress,
   BulkSyncRepoResult,
@@ -19,6 +20,7 @@ import type {
   Repo
 } from "@pwrgit/shared";
 import { dispatch, subscribe } from "../../lib/pwrgit";
+import { readMovedOnAnswer, readPullChoice } from "../graph/pull-choice";
 import { displayPath } from "../../lib/platform";
 import { useModal } from "../../lib/useModal";
 import {
@@ -164,6 +166,7 @@ const WORKTREE_REASON: Record<
   upstream_not_fetched: "upstream not fetched",
   unsafe_state: "state changed or could not be verified",
   merge_failed: "fast-forward failed",
+  fork_push_failed: "fork push failed",
   cancelled: "cancelled"
 };
 
@@ -286,18 +289,27 @@ function RepoResultDetails({ result, includeAll = false }: {
           <strong>{remote.remote}</strong>: {remote.message ?? remote.outcome}
         </li>
       ))}
-      {worktreeDetails.map((worktree) => (
-        <li key={worktree.worktreeId}>
-          <strong>{worktree.branch}</strong>: {worktree.outcome === "updated"
+      {worktreeDetails.map((worktree) => {
+        const updatedLabel =
+          worktree.forkSource === undefined
             ? "fast-forwarded"
-            : worktree.outcome === "up_to_date"
-              ? "already current"
-              : worktree.reason === undefined
-                ? worktree.outcome
-                : WORKTREE_REASON[worktree.reason]}
-          {worktree.message === undefined ? "" : ` — ${worktree.message}`}
-        </li>
-      ))}
+            : worktree.beforeHead !== undefined &&
+                worktree.beforeHead === worktree.afterHead
+              ? `synced with ${worktree.forkSource}`
+              : `fast-forwarded from ${worktree.forkSource}`;
+        return (
+          <li key={worktree.worktreeId}>
+            <strong>{worktree.branch}</strong>: {worktree.outcome === "updated"
+              ? updatedLabel
+              : worktree.outcome === "up_to_date"
+                ? "already current"
+                : worktree.reason === undefined
+                  ? worktree.outcome
+                  : WORKTREE_REASON[worktree.reason]}
+            {worktree.message === undefined ? "" : ` — ${worktree.message}`}
+          </li>
+        );
+      })}
     </ul>
   );
 }
@@ -491,13 +503,24 @@ export function BulkSyncDialog({
     queueMicrotask(() => {
       if (!live) return;
       started = true;
+      const forkModes: Record<string, BulkSyncForkMode> = {};
+      if (mode === "soft-pull") {
+        for (const repo of repoSnapshot) {
+          const choice: BulkSyncForkMode =
+            readMovedOnAnswer(repo.id) === "tracked"
+              ? "tracked"
+              : readPullChoice(repo.id);
+          if (choice !== "sync") forkModes[repo.id] = choice;
+        }
+      }
       void dispatch("remote:bulkSync", {
         operationId,
         profileId,
         mode,
         ...(repoIdsRef.current === undefined
           ? {}
-          : { repoIds: repoIdsRef.current })
+          : { repoIds: repoIdsRef.current }),
+        ...(Object.keys(forkModes).length === 0 ? {} : { forkModes })
       }).then(
         (result) => {
           settled = true;

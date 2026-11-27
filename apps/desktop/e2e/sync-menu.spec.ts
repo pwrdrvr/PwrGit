@@ -13,13 +13,14 @@ const calls = (page: Page): Promise<string[]> =>
   page.evaluate(() => [...(window as unknown as { __harness: Harness }).__harness.calls]);
 
 /**
- * The sync menu's "Check tags after sync" in a Vite build of the real
- * `SidebarToolbar` (`harness/sync-menu`): a toggle that stays open, between
- * the interval and Show last run, whose hint wraps inside the menu.
+ * The sync menu's "Sync forks with upstream" and "Check tags after sync" in a
+ * Vite build of the real `SidebarToolbar` (`harness/sync-menu`): toggles that
+ * stay open, between the interval and Show last run, whose hints wrap inside
+ * the menu.
  *
  * `PWRGIT_HARNESS_SHOTS=<dir>` also writes each state as a PNG there.
  */
-test("Check tags after sync in the sync menu", async () => {
+test("Sync options toggles in the sync menu", async () => {
   test.setTimeout(120_000);
   const out = mkdtempSync(join(tmpdir(), "pwrgit-sync-menu-"));
   const html = await buildHarness("sync-menu", join(out, "dist"));
@@ -30,7 +31,7 @@ test("Check tags after sync in the sync menu", async () => {
       ...(process.env["PWRGIT_E2E_DISABLE_GPU"] === "1" ? ["--disable-gpu"] : []),
       join(dirname(fileURLToPath(import.meta.url)), "harness/electron-main.cjs")
     ],
-    env: cleanEnv({ PWRGIT_HARNESS_HTML: html, PWRGIT_HARNESS_WIDTH: "420", PWRGIT_HARNESS_HEIGHT: "720" })
+    env: cleanEnv({ PWRGIT_HARNESS_HTML: html, PWRGIT_HARNESS_WIDTH: "420", PWRGIT_HARNESS_HEIGHT: "760" })
   });
   const shots = process.env["PWRGIT_HARNESS_SHOTS"];
   if (shots) mkdirSync(shots, { recursive: true });
@@ -56,33 +57,43 @@ test("Check tags after sync in the sync menu", async () => {
     };
 
     for (const theme of ["dark", "light"]) {
-      await open("before", theme);
+      await open("none", theme);
       await expect(page.getByRole("menuitemcheckbox")).toHaveCount(0);
+
+      await open("before", theme);
+      await expect(page.getByRole("menuitemcheckbox")).toHaveCount(1);
       await shoot(`before-${theme}`);
 
       await open("on", theme);
-      const toggle = page.getByRole("menuitemcheckbox", { name: /Check tags after sync/ });
-      await expect(toggle).toHaveAttribute("aria-checked", "true");
-      // The hint wraps inside the menu; nothing is cut off or pushes it wide.
-      const fits = await toggle.evaluate((el) => {
-        const menu = el.closest('[role="menu"]')!.getBoundingClientRect();
-        const hint = el.querySelector(".pop-menu__hint")!;
-        const box = hint.getBoundingClientRect();
-        return box.right <= menu.right && hint.scrollWidth <= hint.clientWidth + 1 && menu.right <= window.innerWidth;
-      });
-      expect(fits).toBe(true);
-      // Its place: after the interval group, before Show last run.
+      const forkToggle = page.getByRole("menuitemcheckbox", { name: /Sync forks with upstream/ });
+      const tagToggle = page.getByRole("menuitemcheckbox", { name: /Check tags after sync/ });
+      await expect(forkToggle).toHaveAttribute("aria-checked", "true");
+      await expect(tagToggle).toHaveAttribute("aria-checked", "true");
+      // Each hint wraps inside the menu; nothing is cut off or pushes it wide.
+      for (const toggle of [forkToggle, tagToggle]) {
+        const fits = await toggle.evaluate((el) => {
+          const menu = el.closest('[role="menu"]')!.getBoundingClientRect();
+          const hint = el.querySelector(".pop-menu__hint")!;
+          const box = hint.getBoundingClientRect();
+          return box.right <= menu.right && hint.scrollWidth <= hint.clientWidth + 1 && menu.right <= window.innerWidth;
+        });
+        expect(fits).toBe(true);
+      }
+      // Their place: after the interval group, before Show last run.
       const order = await page.getByRole("menu").evaluate((menu) =>
         [...menu.querySelectorAll('[role^="menuitem"]')].map((el) => (el.querySelector(".pop-menu__stack > span:first-child") ?? el).textContent)
       );
-      expect(order.slice(-3)).toEqual(["Every hour", "Check tags after sync", "Show last run"]);
+      expect(order.slice(-4)).toEqual(["Every hour", "Sync forks with upstream", "Check tags after sync", "Show last run"]);
       await shoot(`after-${theme}`);
 
-      // A setting: the menu stays open and the check follows.
-      await toggle.click();
+      // Settings: the menu stays open and each check follows.
+      await forkToggle.click();
       await expect(page.getByRole("menu")).toBeVisible();
-      await expect(toggle).toHaveAttribute("aria-checked", "false");
-      expect(await calls(page)).toEqual(["tagCheckAfterSync:false"]);
+      await expect(forkToggle).toHaveAttribute("aria-checked", "false");
+      await tagToggle.click();
+      await expect(page.getByRole("menu")).toBeVisible();
+      await expect(tagToggle).toHaveAttribute("aria-checked", "false");
+      expect(await calls(page)).toEqual(["syncForksOnBulkPull:false", "tagCheckAfterSync:false"]);
       await shoot(`after-off-${theme}`);
     }
   } finally {

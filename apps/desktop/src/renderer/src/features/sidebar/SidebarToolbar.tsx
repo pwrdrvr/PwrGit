@@ -193,6 +193,8 @@ export function SidebarToolbar({
   lastRun = null,
   tagCheckAfterSync = null,
   onToggleTagCheck,
+  syncForksOnBulkPull = null,
+  onToggleSyncForks,
   onAddFolder,
   onFindRepositories,
   onRescanFolders,
@@ -226,6 +228,9 @@ export function SidebarToolbar({
   /** `general.tagCheckAfterSync`; null until the setting has been read. */
   tagCheckAfterSync?: boolean | null;
   onToggleTagCheck?: (on: boolean) => void;
+  /** `general.syncForksOnBulkPull`; null until the setting has been read. */
+  syncForksOnBulkPull?: boolean | null;
+  onToggleSyncForks?: (on: boolean) => void;
   onAddFolder: () => void;
   /** Find my repositories: search the home folder for folders to add. */
   onFindRepositories?: (() => void) | undefined;
@@ -332,21 +337,31 @@ export function SidebarToolbar({
       })
     ),
     { type: "sep" },
-    // What a sync does besides fetching. Every Fetch and Pull obeys it:
-    // this face, the timer, and a repository's own Fetch or Pull.
-    ...(tagCheckAfterSync === null
-      ? []
-      : [
-          {
-            type: "item",
-            label: "Check tags after sync",
-            hint: "Compares with the published remote, at most hourly. Never changes a tag.",
-            checked: tagCheckAfterSync,
-            keepOpen: true,
-            onSelect: () => onToggleTagCheck?.(!tagCheckAfterSync)
-          } satisfies MenuItem,
-          { type: "sep" } satisfies MenuItem
-        ]),
+    // What a sync does besides fetching. Main-owned settings read from disk.
+    ...(() => {
+      const toggles: MenuItem[] = [];
+      if (syncForksOnBulkPull !== null) {
+        toggles.push({
+          type: "item",
+          label: "Sync forks with upstream",
+          hint: "During Pull, fast-forward clean fork branches from upstream and push to enabled forks.",
+          checked: syncForksOnBulkPull,
+          keepOpen: true,
+          onSelect: () => onToggleSyncForks?.(!syncForksOnBulkPull)
+        });
+      }
+      if (tagCheckAfterSync !== null) {
+        toggles.push({
+          type: "item",
+          label: "Check tags after sync",
+          hint: "Compares with the published remote, at most hourly. Never changes a tag.",
+          checked: tagCheckAfterSync,
+          keepOpen: true,
+          onSelect: () => onToggleTagCheck?.(!tagCheckAfterSync)
+        });
+      }
+      return toggles.length === 0 ? [] : [...toggles, { type: "sep" } satisfies MenuItem];
+    })(),
     // A timed run raises no toast, and a finished toast leaves: this is how
     // either is read afterwards. It opens the dialog, so the menu closes.
     syncBusy
