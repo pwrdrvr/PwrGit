@@ -1,14 +1,10 @@
 # Sidebar tree rows and selection
 
-This guide covers the sidebar footer, pins, the worktree list cap, refs-browser rows, selection, anchoring, and section-heading fit.
+This guide covers overlays, pins, the worktree list cap, refs-browser rows, selection, anchoring, and section-heading fit.
 
 Code paths in backticks are relative to [apps/desktop/src/renderer/src/features/sidebar](../../../apps/desktop/src/renderer/src/features/sidebar/).
 
-## The sidebar footer holds the profile's AI switch
-
-`.sidebar__footer` sits under `.sidebar__list` and carries `AiFeaturesSwitch`.
-It is a footer, not a row: the switch belongs to the profile
-(`settings/AGENTS.md`).
+## Sidebar overlays render in place
 
 **Do not portal a sidebar overlay to `<body>`.** Dialogs render in place, like
 `NewWorktreeModal`. `.overlay-backdrop` (`position: fixed`) covers the window.

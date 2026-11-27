@@ -5,11 +5,11 @@ import { Fragment } from "react";
  *  at its hyphens in a narrow window. */
 export function MetaParts(props: { parts: string[] }) {
   return (
-    <span className="settings-ai-install__meta">
+    <span className="settings-git-install__meta">
       {props.parts.map((part, index) => (
         <Fragment key={index}>
           {index > 0 ? " " : null}
-          <span className="settings-ai-install__meta-part">
+          <span className="settings-git-install__meta-part">
             {index < props.parts.length - 1 ? `${part} ·` : part}
           </span>
         </Fragment>

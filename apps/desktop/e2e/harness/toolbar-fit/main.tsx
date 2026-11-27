@@ -132,7 +132,7 @@ function ToolbarScene({ toolbar, width, expanded, overflow, tick, forkSource, pr
             worktreePath={worktree.path} viewingBranch={worktree.branch} activeEmail=""
             selectedCommits={selected}
             focusedCommit={tick % 2 === 0 ? null : compactGraph.commits[1]!.hash}
-            revealCommit={null} tidyOffered={false}
+            revealCommit={null}
             onEditHistory={noop} onCommitsChange={noop} onOpenCommit={noop}
             onRevealWorktree={noop} onRevealCreatedWorktree={noop}
           />

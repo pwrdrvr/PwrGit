@@ -60,7 +60,7 @@ export function HiddenReposButton({
       type: "item",
       label: "Manage in Settings → Profiles…",
       onSelect: () =>
-        void dispatch("settings:open", { page: "profiles", profileId: profile.id })
+        void dispatch("settings:open", { page: "profiles" })
     }
   ];
 

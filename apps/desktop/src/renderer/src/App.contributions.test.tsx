@@ -27,9 +27,6 @@ const mocks = vi.hoisted(() => ({
 vi.mock("./state/useProfiles", () => ({ useProfiles: () => mocks.profiles }));
 vi.mock("./state/useRepoTree", () => ({ useRepoTree: () => mocks.tree }));
 vi.mock("./state/useWorktreeState", () => ({ useWorktreeState: () => null }));
-vi.mock("./features/agent/agent-store", () => ({
-  useAgentOffered: () => false
-}));
 vi.mock("./features/change-request/useChangeRequestView", () => ({
   useChangeRequestView: () => ({ view: null, fetching: null, error: null, scope: { kind: "all" }, scopeError: null, patch: null, files: [], totals: null })
 }));

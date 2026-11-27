@@ -88,7 +88,7 @@ describe("against the repository's own files", () => {
     );
 
     expect(policy.minimumReleaseAgeMinutes).toBe(10_080);
-    expect(policy.exclusions).toContain("@pwrdrvr/agent-core");
+    expect(policy.exclusions).toContain("@shutterstock/p-map-iterable@1.2.0");
     expect(policy.exclusions.every((entry) => entry.length > 0)).toBe(true);
     expect(parseExclusions(policy.exclusions).unsupported).toEqual([]);
   });

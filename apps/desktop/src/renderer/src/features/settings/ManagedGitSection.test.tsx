@@ -196,7 +196,7 @@ describe("PwrGit’s Git", () => {
     };
     await render();
 
-    const rows = Array.from(card().querySelectorAll(".settings-ai-install"), (row) => row.textContent);
+    const rows = Array.from(card().querySelectorAll(".settings-git-install"), (row) => row.textContent);
     expect(rows[0]).toContain("Using");
     expect(rows[1]).toContain("Previous, kept for rollback");
     await act(async () => button(`Use ${V5}`).click());

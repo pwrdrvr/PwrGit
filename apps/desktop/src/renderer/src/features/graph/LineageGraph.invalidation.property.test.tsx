@@ -173,7 +173,6 @@ describe("LineageGraph pr:changed invalidation invariants", () => {
                   selectedCommits={new Set()}
                   focusedCommit={null}
                   revealCommit={null}
-                  tidyOffered={false}
                   onEditHistory={() => undefined}
                   onCommitsChange={() => undefined}
                   onOpenCommit={() => undefined}
@@ -255,7 +254,6 @@ describe("LineageGraph pr:changed invalidation invariants", () => {
             selectedCommits={new Set()}
             focusedCommit={null}
             revealCommit={null}
-            tidyOffered={false}
             onEditHistory={() => undefined}
             onCommitsChange={() => undefined}
             onOpenCommit={() => undefined}

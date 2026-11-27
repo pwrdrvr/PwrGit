@@ -2681,15 +2681,12 @@ export type LaneGraph = {
 };
 
 export type RebaseStep = {
-  /** `squash` keeps the step's message in the combined one; `fixup` folds the
-   *  change in under a message written for the whole resulting commit. */
-  action: "pick" | "squash" | "fixup";
+  action: "pick" | "squash";
   shortHash: string;
   subject: string;
 };
 
-/** Squash and Reorder are planned by PwrGit; Tidy is planned by an agent. */
-export type RebaseOperation = "squash" | "reorder" | "tidy";
+export type RebaseOperation = "squash" | "reorder";
 
 export type RebasePlan = {
   op: RebaseOperation;
@@ -2714,7 +2711,7 @@ export type HistoryEditCommit = {
 };
 
 /**
- * The executable form of every history edit. Squash, Reorder and Tidy all
+ * The executable form of every history edit. Squash and Reorder both
  * compile to one of these, and the isolated check proves it before Apply:
  * every selected commit used exactly once, a clean replay, and a final tree
  * identical to the current tip.
@@ -2765,85 +2762,6 @@ export type RebaseCheckResult =
       message: string;
       detail?: RebaseSnagDetail;
     };
-
-/**
- * One request's override of the job's Settings default (Settings → AI
- * Features → Default agents). Omitted fields keep that default. `model` is a
- * `CodexModelOption.id` and `effort` one of that model's
- * `supportedReasoningEfforts` — the same values Settings stores, and checked
- * by the same `isAiModelId` / `isAiReasoningEffort` in main.
- */
-export type AgentChoice = {
-  model?: string;
-  effort?: string;
-};
-
-/** How one changed file was treated when a request was built. */
-export type AgentInputFile = {
-  path: string;
-  added: number;
-  removed: number;
-  /**
-   * `sent` in full, `cut` to fit the line budget, or left out entirely as a
-   * lockfile, a snapshot, a binary, or a path that must never leave the machine.
-   */
-  treatment: "sent" | "cut" | "lockfile" | "snapshot" | "binary" | "never_send";
-  sentLines: number;
-  totalLines: number;
-};
-
-/** Everything an agent request carried, so the operator can inspect it. */
-export type AgentInputManifest = {
-  source: "commits" | "staged";
-  commitCount: number;
-  files: AgentInputFile[];
-  /** Diff lines sent, against the per-request budget. */
-  budget: { used: number; limit: number };
-  /** Recent subjects sent as style examples only. */
-  styleSubjects: number;
-};
-
-export type AgentMessageStyle = {
-  convention: "conventional" | "plain";
-  /** Subjects that matched, of the recent ones read. */
-  matched: number;
-  sampled: number;
-};
-
-type AgentResultBase = {
-  requestId: string;
-  providerId: string;
-  providerName: string;
-  /** The model that actually answered. */
-  model: string;
-  saw: AgentInputManifest;
-  style: AgentMessageStyle;
-  generatedAt: string;
-};
-
-/** A drafted commit message. Text only: it is shown, edited, and written with
- *  `commit -m`, never executed. */
-export type AgentMessageDraft = AgentResultBase & {
-  subject: string;
-  body: string;
-};
-
-/** An agent-proposed history, already checked for shape (every selected
- *  commit exactly once) but not yet replayed. */
-export type AgentTidyProposal = AgentResultBase & {
-  /** Oldest first; every commit carries its message. */
-  program: HistoryEditProgram;
-  /** Why a revision differs from the plan it replaces. */
-  note: string | null;
-};
-
-/** The failed check a Tidy revision is asked to fix. */
-export type AgentTidyRevision = {
-  program: HistoryEditProgram;
-  detail: RebaseSnagDetail;
-  /** 1-based; PwrGit asks for at most two. */
-  attempt: number;
-};
 
 export type Lens = "Focused" | "Pinned" | "Behind" | "Stale" | "All";
 export type WorktreeSort = "recent" | "pinned" | "az" | "active" | "custom";

@@ -30,8 +30,8 @@ test("Settings › Git runs bundled Git and LFS by default and lists the Gits it
     ).toHaveCount(1);
     await expect(section).toContainText(/git-lfs\/\d/);
     // The bundle is always the first install, and the one in use.
-    const bundled = installs.locator(".settings-ai-install").first();
-    await expect(bundled.locator(".settings-ai-install__meta")).toHaveText(/^Bundled · \d+\.\d+.* · LFS \d/);
+    const bundled = installs.locator(".settings-git-install").first();
+    await expect(bundled.locator(".settings-git-install__meta")).toHaveText(/^Bundled · \d+\.\d+.* · LFS \d/);
     await expect(bundled.locator(".settings-card__chip")).toHaveText("Using");
     await expect(installs.getByRole("textbox", { name: "Custom Git path" })).toHaveValue("");
     await expect(section.locator(".settings-field__error")).toHaveCount(0);
@@ -72,11 +72,11 @@ test("Settings › Git runs bundled Git and LFS by default and lists the Gits it
         ["/opt/homebrew/bin/git", "Homebrew · 2.50.1 · LFS 3.7.0"],
         ["/Library/Developer/CommandLineTools/usr/bin/git", "Apple · 2.39.5"]
       ];
-      element.querySelectorAll(".settings-ai-install").forEach((row, index) => {
+      element.querySelectorAll(".settings-git-install").forEach((row, index) => {
         const [path, meta] = rows[index] ?? [];
         if (path === undefined) { row.remove(); return; }
-        const pathNode = row.querySelector(".settings-ai-install__path");
-        const metaNode = row.querySelector(".settings-ai-install__meta");
+        const pathNode = row.querySelector(".settings-git-install__path");
+        const metaNode = row.querySelector(".settings-git-install__meta");
         if (pathNode !== null) pathNode.textContent = path;
         if (metaNode !== null) metaNode.textContent = meta ?? "";
       });

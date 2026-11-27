@@ -38,7 +38,6 @@ const rules = [...css.matchAll(/([^@{};\s][^{};]*)\{([^{}]*)\}/g)].map((m) => ({
 const IN_FLIGHT_ONLY: Record<string, string> = {
   ".clone-destination-progress__dot": "CloneRepoDialog, while destinationsLoading",
   ".clone-progress__track.is-indeterminate > span": "clone/fork progress with no percent yet",
-  ".msg-box__input--scan": "commit/squash message while drafting",
   ".bulk-sync__spinner": "bulk sync / clones panel while running",
   ".bulk-sync__bar:not(.sidebar-toolbar__progress):not(.bulk-sync-toast__bar):not(.sync-run-card__bar) > .is-in-flight:not(.is-empty):not(.is-halted)::before": "expanded bulk sync dialog bar, repositories in flight",
   ".prune__spinner": "prune / reclaim panels while working",

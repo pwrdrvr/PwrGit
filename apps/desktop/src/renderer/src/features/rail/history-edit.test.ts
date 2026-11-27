@@ -1,14 +1,8 @@
 import { describe, expect, it } from "vitest";
-import type { HistoryEditProgram, RebaseCommitRef } from "@pwrgit/shared";
+import type { RebaseCommitRef } from "@pwrgit/shared";
 import {
   ledgerRows,
-  movedHashes,
-  NO_EDITS,
-  planDiff,
-  programShapeKey,
-  squashProgram,
-  tidyGroups,
-  tidyProgram
+  squashProgram
 } from "./history-edit";
 
 // Newest first, as the graph hands them over: e is the tip.
@@ -18,96 +12,11 @@ const commits: RebaseCommitRef[] = ["e", "d", "c", "b", "a"].map((id) => ({
 }));
 const h = (id: string): string => id.repeat(40);
 
-const proposal: HistoryEditProgram = {
-  commits: [
-    { members: [h("a"), h("c")], message: "feat: exporter\n\nWhy." },
-    { members: [h("b"), h("d"), h("e")], message: "test: exporter" }
-  ]
-};
-
 describe("squashProgram", () => {
   it("folds the selection oldest first under the given message", () => {
     expect(squashProgram(commits.slice(0, 2), "msg")).toEqual({
       commits: [{ members: [h("d"), h("e")], message: "msg" }]
     });
-  });
-});
-
-describe("tidyProgram", () => {
-  it("is the proposal when nothing was edited", () => {
-    expect(tidyProgram(proposal, NO_EDITS)).toEqual(proposal);
-  });
-
-  it("puts a separated member right after its group with its own message", () => {
-    const program = tidyProgram(proposal, {
-      separated: new Set([h("d")]),
-      messages: new Map([[0, "feat: rewritten"]])
-    });
-    expect(program.commits).toEqual([
-      { members: [h("a"), h("c")], message: "feat: rewritten" },
-      { members: [h("b"), h("e")], message: "test: exporter" },
-      { members: [h("d")], message: null }
-    ]);
-  });
-
-  it("changes the shape key on Keep separate but not on a message edit", () => {
-    const base = programShapeKey(tidyProgram(proposal, NO_EDITS));
-    expect(
-      programShapeKey(tidyProgram(proposal, { separated: new Set(), messages: new Map([[1, "x"]]) }))
-    ).toBe(base);
-    expect(
-      programShapeKey(tidyProgram(proposal, { separated: new Set([h("e")]), messages: new Map() }))
-    ).not.toBe(base);
-  });
-});
-
-describe("movedHashes", () => {
-  it("tags only the commits that left their original order", () => {
-    // a c | b d e: only c jumped ahead of b.
-    expect([...movedHashes(commits, proposal)]).toEqual([h("c")]);
-  });
-
-  it("tags nothing for an in-order fold", () => {
-    const inOrder: HistoryEditProgram = {
-      commits: [{ members: [h("a"), h("b"), h("c"), h("d"), h("e")], message: "all" }]
-    };
-    expect(movedHashes(commits, inOrder).size).toBe(0);
-  });
-});
-
-describe("tidyGroups", () => {
-  it("draws groups newest first with each base commit on top", () => {
-    const groups = tidyGroups(commits, proposal, NO_EDITS);
-    expect(groups.map((g) => g.message)).toEqual(["test: exporter", "feat: exporter\n\nWhy."]);
-    expect(groups[1]!.rows.map((r) => [r.subject, r.role, r.moved, r.canToggle])).toEqual([
-      ["commit a", "pick", false, false],
-      ["commit c", "fixup", true, true]
-    ]);
-  });
-
-  it("shows a separated member as its own pick", () => {
-    const groups = tidyGroups(commits, proposal, {
-      separated: new Set([h("d")]),
-      messages: new Map()
-    });
-    expect(groups[0]!.rows.find((r) => r.hash === h("d"))).toEqual(
-      expect.objectContaining({ role: "pick", separated: true })
-    );
-  });
-});
-
-describe("planDiff", () => {
-  it("shows each commit that changed group, where it was and where it went", () => {
-    const revised: HistoryEditProgram = {
-      commits: [
-        { members: [h("a")], message: "feat: exporter" },
-        { members: [h("b"), h("c"), h("d"), h("e")], message: "test: exporter" }
-      ]
-    };
-    expect(planDiff(commits, proposal, revised)).toEqual([
-      { kind: "del", text: "fixup ccccccc → feat: exporter" },
-      { kind: "add", text: "fixup ccccccc → test: exporter" }
-    ]);
   });
 });
 

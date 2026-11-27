@@ -1,4 +1,4 @@
-// The "manual executable path" contract behind Settings → AI Providers' path
+// The "manual executable path" contract behind Settings → Git's path
 // fields, shared so the renderer's inline validation and main's sanitizer
 // agree on what a path is. Ported from PwrSnap's `desktop-platform.ts`.
 //

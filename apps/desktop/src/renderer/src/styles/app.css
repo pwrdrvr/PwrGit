@@ -197,7 +197,6 @@ textarea,
 .refs-tag-resolved__subject,
 .remote-activity__output,
 .remote-activity__command,
-.tidy-group__head,
 .msg-compare__body,
 .rebase-check-result,
 .selectable {
@@ -1625,33 +1624,6 @@ textarea,
 }
 .sidebar__list > .read-error {
   margin: 8px 4px;
-}
-
-/* The window profile's AI switch (AiFeaturesSwitch) — PwrGit's version of the
-   switch in PwrSnap's Library status bar. A footer rather than a row in the
-   list: it belongs to the profile, not to any repo, and holds still while the
-   list scrolls. `.pane` is a flex column and `.sidebar__list` takes the rest,
-   so this sits on the bottom edge with no positioning of its own. */
-.sidebar__footer {
-  flex: 0 0 auto;
-  padding: 5px 12px 6px;
-  border-top: 1px solid var(--border-subtle);
-}
-.ai-switch {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-  min-height: 26px;
-}
-.ai-switch__label {
-  color: var(--text-muted);
-  font: 600 11px/1.2 var(--font-sans);
-}
-.ai-switch__error {
-  margin: 2px 0 2px;
-  color: var(--danger-text);
-  font: 500 11px/1.4 var(--font-sans);
 }
 
 .read-error {
@@ -5957,196 +5929,18 @@ a.forge-chip:focus-visible {
 .rebase-op--squash {
   color: var(--accent);
 }
-.rebase-op--fixup {
-  color: var(--accent);
-}
 .rebase-plan__text {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-/* ---- Agent chip: split pill, after PwrAgnt's .composer__run-split ---- */
-
-.agent-chip-wrap {
-  position: relative;
-  flex: 0 0 auto;
-}
-.agent-chip {
-  display: inline-flex;
-  align-items: stretch;
-  height: 24px;
-  padding: 0;
-  border: 1px solid var(--border-default);
-  border-radius: 999px;
-  overflow: hidden;
-  background: var(--bg-panel-elevated);
-  color: var(--text-secondary);
-  font: 600 10px/1 var(--font-sans);
-  white-space: nowrap;
-  cursor: pointer;
-}
-.agent-chip.is-open {
-  border-color: var(--accent-border);
-}
-.agent-chip--none {
-  border-style: dashed;
-  color: var(--text-subtle);
-}
-.agent-chip__main {
-  display: flex;
-  align-items: center;
-  gap: 5px;
-  padding: 0 8px;
-}
-.agent-chip__model {
-  max-width: 96px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  font: 500 10px/1 var(--font-mono);
-  font-style: normal;
-  color: var(--text-subtle);
-}
-.agent-chip__caret {
-  display: flex;
-  align-items: center;
-  padding: 0 7px;
-  border-left: 1px solid var(--border-default);
-  color: var(--text-muted);
-}
-.agent-dot {
-  flex: 0 0 auto;
-  display: inline-block;
-  width: 6px;
-  height: 6px;
-  border-radius: 999px;
-  background: var(--status-ok);
-}
-.agent-dot--wait {
-  background: var(--status-warning);
-}
-.agent-dot--off {
-  background: var(--text-muted);
-  opacity: 0.5;
-}
-.agent-menu__backdrop {
-  position: fixed;
-  inset: 0;
-  z-index: 39;
-}
-.agent-menu {
-  position: absolute;
-  top: calc(100% + var(--popover-gap));
-  right: 0;
-  z-index: 40;
-  width: 290px;
-  padding: 5px;
-  border: 1px solid var(--border-strong);
-  border-radius: var(--radius-md);
-  background: var(--bg-menu);
-  box-shadow: var(--shadow-popover);
-}
-.agent-menu__head {
-  padding: 7px 9px 5px;
-  font: 600 9.5px/1 var(--font-sans);
-  letter-spacing: 0.05em;
-  text-transform: uppercase;
-  color: var(--text-muted);
-}
-.agent-menu__item {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  width: 100%;
-  padding: 6px 9px;
-  border: none;
-  border-radius: 5px;
-  background: transparent;
-  text-align: left;
-  font: 500 11.5px/1.35 var(--font-sans);
-  color: var(--text-secondary);
-  cursor: pointer;
-}
-button.agent-menu__item:hover {
-  background: var(--bg-panel-hover);
-}
-.agent-menu__item.is-on {
-  background: var(--accent-soft);
-  color: var(--text-primary);
-}
-.agent-menu__item--static {
-  cursor: default;
-}
-.agent-menu__item.is-disabled {
-  opacity: 0.6;
-}
-.agent-menu__check {
-  width: 10px;
-  flex: 0 0 auto;
-  display: inline-flex;
-  color: var(--accent);
-}
-.agent-menu__item.is-on .agent-menu__check {
-  color: var(--accent-bright);
-}
-.agent-menu__name {
-  min-width: 0;
-}
-.agent-menu__name small {
-  display: block;
-  margin-top: 2px;
-  font: 400 10px/1.35 var(--font-sans);
-  color: var(--text-subtle);
-}
-.agent-menu__model {
-  margin-left: auto;
-  font: 500 10px/1 var(--font-mono);
-  color: var(--text-subtle);
-  white-space: nowrap;
-}
-.agent-menu__sep {
-  height: 1px;
-  margin: 4px 5px;
-  background: var(--border-subtle);
-}
-.agent-menu__seg {
-  display: flex;
-  gap: 2px;
-  margin: 2px 9px 6px;
-  padding: 2px;
-  border: 1px solid var(--border-subtle);
-  border-radius: 7px;
-  background: var(--bg-input);
-}
-/* Sized to their labels, then the slack shared: a model's efforts vary in
-   number and length ("Extra high"), and none of them may wrap. */
-.agent-menu__seg button {
-  flex: 1 1 auto;
-  padding: 5px 6px;
-  white-space: nowrap;
-  border: none;
-  border-radius: 5px;
-  background: transparent;
-  font: 600 10.5px/1 var(--font-sans);
-  color: var(--text-muted);
-  cursor: pointer;
-}
-.agent-menu__seg button.is-on {
-  background: var(--bg-panel-elevated);
-  color: var(--text-primary);
-  box-shadow: inset 0 0 0 1px var(--border-default);
-}
-.agent-menu__foot {
-  padding: 6px 9px 4px;
-  font: 500 10px/1.45 var(--font-sans);
-  color: var(--text-subtle);
-}
-.agent-menu__foot .agent-link {
+.rebase-tree-link {
   display: block;
   margin-top: 4px;
   padding: 0;
 }
-.agent-link {
+.rebase-tree-link {
   display: inline-flex;
   align-items: center;
   gap: 3px;
@@ -6157,41 +5951,19 @@ button.agent-menu__item:hover {
   color: var(--accent);
   cursor: pointer;
 }
-/* An SVG in a flex button inherits `0 1 auto` and gives up width to the
-   label. See styles/AGENTS.md. */
-.agent-link svg {
-  flex: 0 0 auto;
-}
-.agent-link--quiet {
-  color: var(--text-muted);
-}
-.agent-link:hover {
+.rebase-tree-link:hover {
   text-decoration: underline;
 }
-/* It had no focus rule and fell back to Chromium's ring. Borderless, so a
-   radius; 1px off keeps the ring inside the commit box, whose overflow clips. */
-.agent-link:focus-visible {
+.rebase-tree-link:focus-visible {
   outline: 2px solid var(--focus-ring);
   outline-offset: 1px;
   border-radius: var(--radius-sm);
 }
-.agent-link:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
-  text-decoration: none;
-}
-
-/* ---- Message box: Squash's message, and the placeholder Tidy draws while
-   it waits. The footer says who wrote what the box holds. ---- */
-
 .msg-box {
   border: 1px solid var(--border-default);
   border-radius: 9px;
   background: var(--bg-input);
   overflow: hidden;
-}
-.msg-box--agent {
-  border-color: var(--accent-border);
 }
 .msg-box:focus-within {
   border-color: var(--accent-border);
@@ -6210,154 +5982,7 @@ button.agent-menu__item:hover {
   font: 500 10.5px/1.55 var(--font-mono);
   color: var(--text-secondary);
 }
-.msg-box__input--scan {
-  background-image: linear-gradient(
-    90deg,
-    transparent,
-    color-mix(in srgb, var(--accent) 10%, transparent),
-    transparent
-  );
-  background-size: 200% 100%;
-  animation: msg-scan 1.6s linear infinite;
-}
-@keyframes msg-scan {
-  from {
-    background-position: 100% 0;
-  }
-  to {
-    background-position: -100% 0;
-  }
-}
-@media (prefers-reduced-motion: reduce) {
-  .msg-box__input--scan {
-    animation: none;
-  }
-}
-.msg-box__placeholder {
-  padding: 8px 12px;
-  font: 500 10.5px/1.6 var(--font-mono);
-  color: var(--text-muted);
-}
-.msg-box__line {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.msg-box__line span {
-  color: var(--text-subtle);
-}
-.msg-box__hint {
-  font-family: var(--font-sans);
-  color: var(--text-subtle);
-}
-.msg-foot {
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 4px 6px;
-  padding: 6px 8px 6px 10px;
-  border-top: 1px solid var(--border-subtle);
-  background: var(--bg-panel);
-  font: 500 10px/1.35 var(--font-sans);
-  color: var(--text-muted);
-}
-.msg-foot__src--agent {
-  color: var(--accent);
-}
-.msg-foot__src--warn {
-  color: var(--status-warning);
-}
-.msg-foot__sp {
-  flex: 1;
-}
-/* The agent mark leads the line, and must not be squeezed by the sentence
-   beside it when the footer wraps. */
-.msg-foot > svg {
-  flex: 0 0 auto;
-  color: var(--accent);
-}
-.msg-compare {
-  border-top: 1px solid var(--border-subtle);
-  padding: 8px 12px;
-  background: var(--bg-panel);
-}
-.msg-compare__head {
-  margin-bottom: 4px;
-  font: 600 9.5px/1 var(--font-sans);
-  letter-spacing: 0.05em;
-  text-transform: uppercase;
-  color: var(--accent);
-}
-.msg-compare__body {
-  font: 500 10.5px/1.55 var(--font-mono);
-  color: var(--text-secondary);
-  white-space: pre-wrap;
-}
-.agent-style,
-.agent-saw {
-  margin-top: 6px;
-  font: 500 10px/1.45 var(--font-sans);
-  color: var(--text-subtle);
-}
-.agent-style b,
-.agent-saw b {
-  color: var(--text-secondary);
-  font-weight: 600;
-}
-.agent-saw .agent-link {
-  padding: 0 2px;
-}
-.agent-saw__details {
-  margin-top: 6px;
-  padding: 10px 12px;
-  border: 1px solid var(--border-subtle);
-  border-radius: 9px;
-  background: var(--bg-panel);
-}
-.agent-saw__head {
-  margin-bottom: 8px;
-  font: 600 10px/1 var(--font-sans);
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-  color: var(--text-muted);
-}
-.agent-saw__row {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  gap: 8px;
-  font: 500 10.5px/1.65 var(--font-mono);
-  color: var(--text-secondary);
-}
-.agent-saw__path {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.agent-saw__n {
-  color: var(--text-subtle);
-}
-.agent-saw__row--cut .agent-saw__n {
-  color: var(--status-warning);
-}
-.agent-saw__row--lockfile .agent-saw__path,
-.agent-saw__row--snapshot .agent-saw__path,
-.agent-saw__row--binary .agent-saw__path,
-.agent-saw__row--never_send .agent-saw__path {
-  color: var(--text-subtle);
-  text-decoration: line-through;
-}
-.agent-saw__div {
-  height: 1px;
-  margin: 7px 0;
-  background: var(--border-faint);
-}
-.agent-saw__details p {
-  margin: 0;
-  font: 400 10.5px/1.5 var(--font-sans);
-  color: var(--text-muted);
-}
-
-/* ---- Proof ledger: the same three rows for every plan, whoever wrote it ---- */
+/* ---- Proof ledger: the three checks every plan must pass ---- */
 
 .proof-ledger {
   margin-top: 10px;
@@ -6406,198 +6031,6 @@ button.agent-menu__item:hover {
   color: var(--danger-text);
 }
 
-/* ---- Tidy: the agent's proposed history ---- */
-
-.tidy-note {
-  margin: -2px 0 8px;
-  font: 500 10.5px/1.45 var(--font-sans);
-  color: var(--text-muted);
-}
-.tidy-group {
-  border: 1px solid var(--border-subtle);
-  border-left-width: 3px;
-  border-radius: 9px;
-  background: var(--bg-panel);
-  overflow: hidden;
-}
-.tidy-group + .tidy-group {
-  margin-top: 8px;
-}
-.tidy-group[data-lane="0"] { border-left-color: var(--lane-1); }
-.tidy-group[data-lane="1"] { border-left-color: var(--lane-2); }
-.tidy-group[data-lane="2"] { border-left-color: var(--lane-3); }
-.tidy-group[data-lane="3"] { border-left-color: var(--lane-4); }
-.tidy-group[data-lane="4"] { border-left-color: var(--lane-5); }
-.tidy-group[data-lane="5"] { border-left-color: var(--lane-6); }
-.tidy-group[data-lane="6"] { border-left-color: var(--lane-7); }
-.tidy-group[data-lane="7"] { border-left-color: var(--lane-8); }
-.tidy-group__head,
-.tidy-group__edit {
-  padding: 9px 11px 8px;
-}
-.tidy-group__subject {
-  display: flex;
-  align-items: baseline;
-  gap: 6px;
-  font: 650 11px/1.35 var(--font-mono);
-  color: var(--text-primary);
-}
-.tidy-group__subject span {
-  flex: 1;
-  min-width: 0;
-}
-.tidy-group__subject .agent-link {
-  flex: 0 0 auto;
-}
-.tidy-group__body {
-  margin-top: 4px;
-  font: 400 10.5px/1.45 var(--font-sans);
-  color: var(--text-muted);
-  white-space: pre-wrap;
-}
-.tidy-group__input {
-  display: block;
-  width: 100%;
-  min-height: 64px;
-  field-sizing: content;
-  padding: 7px 9px;
-  border: 1px solid var(--accent-border);
-  border-radius: 7px;
-  outline: none;
-  resize: none;
-  background: var(--bg-input);
-  font: 500 10.5px/1.55 var(--font-mono);
-  color: var(--text-primary);
-}
-.tidy-group__edit-actions {
-  display: flex;
-  justify-content: flex-end;
-  gap: 4px;
-  margin-top: 4px;
-}
-.tidy-member {
-  position: relative;
-  display: grid;
-  grid-template-columns: 38px 54px minmax(0, 1fr) auto;
-  gap: 6px;
-  align-items: center;
-  padding: 4px 11px;
-  border-top: 1px solid var(--border-faint);
-  font: 500 10.5px/1.5 var(--font-mono);
-  color: var(--text-secondary);
-}
-.tidy-member--separate {
-  background: var(--bg-panel-hover);
-}
-.tidy-member--separate .tidy-member__subject {
-  color: var(--text-primary);
-}
-.tidy-member__role--pick {
-  color: var(--success-text);
-}
-.tidy-member__role--fixup {
-  color: var(--accent);
-}
-.tidy-member__hash {
-  color: var(--text-subtle);
-}
-.tidy-member__subject {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.tidy-member__tools {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-}
-.tidy-member__moved {
-  padding: 1px 5px;
-  border: 1px solid var(--accent-border);
-  border-radius: 999px;
-  background: var(--accent-soft);
-  color: var(--accent-bright);
-  font: 700 8px/1.3 var(--font-sans);
-  letter-spacing: 0.05em;
-  text-transform: uppercase;
-}
-.tidy-member__toggle {
-  padding: 0;
-  border: none;
-  background: none;
-  font: 600 9.5px/1 var(--font-sans);
-  color: var(--text-muted);
-  white-space: nowrap;
-  cursor: pointer;
-}
-/* "Keep separate" lies over the end of its row rather than in it: hidden, it
-   takes no room from the subject, and shown, it moves nothing under the
-   pointer. It shows on the row's hover and whenever it holds focus, and its
-   tooltip says what it does. A separated row keeps "Fold back" in the row, in
-   plain sight: that state needs its way back. */
-.tidy-member:hover,
-.tidy-member:focus-within {
-  background: var(--bg-panel-hover);
-}
-.tidy-member:not(.tidy-member--separate) .tidy-member__toggle {
-  position: absolute;
-  top: 0;
-  right: 0;
-  bottom: 0;
-  padding: 0 11px 0 22px;
-  background: linear-gradient(to right, transparent, var(--bg-panel-hover) 16px);
-  opacity: 0;
-}
-.tidy-member:hover .tidy-member__toggle,
-.tidy-member:focus-within .tidy-member__toggle {
-  opacity: 1;
-}
-.tidy-member__toggle:hover {
-  color: var(--accent);
-}
-.tidy-revision {
-  margin: 12px 0 2px;
-  padding: 10px 11px;
-  border: 1px solid var(--accent-border);
-  border-radius: 8px;
-  background: var(--accent-tint);
-  font: 500 11px/1.5 var(--font-sans);
-  color: var(--text-secondary);
-}
-.tidy-revision .tidy-revision__head {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  margin-bottom: 5px;
-  font: 600 9.5px/1 var(--font-mono);
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
-  color: var(--accent-bright);
-}
-.tidy-revision .tidy-revision__head svg {
-  flex: 0 0 auto;
-}
-.tidy-revision .tidy-revision__head span {
-  margin-left: auto;
-  color: var(--text-subtle);
-}
-.tidy-revision__why {
-  margin-bottom: 5px;
-  color: var(--text-muted);
-}
-.tidy-revision__diff {
-  margin-top: 7px;
-  padding: 6px 9px;
-  border-radius: 6px;
-  background: var(--bg-input);
-  font: 500 10.5px/1.6 var(--font-mono);
-}
-.tidy-revision__del {
-  color: var(--danger-text);
-}
-.tidy-revision__add {
-  color: var(--success-text);
-}
 .rebase-check-result {
   display: grid;
   grid-template-columns: auto 1fr;
@@ -11777,17 +11210,6 @@ button.ref-chip:focus-visible {
   font: 600 11.5px/1 var(--font-sans);
   cursor: pointer;
 }
-.selection-bar__btn--agent {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  white-space: nowrap;
-  border-color: var(--accent-border);
-  color: var(--accent);
-}
-.selection-bar__btn--agent svg {
-  flex: 0 0 auto;
-}
 .selection-bar__rebase {
   height: 28px;
   padding: 0 12px;
@@ -12314,21 +11736,14 @@ button.ref-chip:focus-visible {
   border-radius: 7px;
   overflow: hidden;
 }
-.commit-message:focus-within,
-.commit-message--agent {
+.commit-message:focus-within {
   border-color: var(--accent-border);
 }
-/* That tint was the only focus signal: the same too-faint `--accent-border`
-   `.modal__input` had, and the same paint as an agent-drafted message, so
-   focus and "the agent wrote this" looked alike. The field is borderless, so
-   the box rings, as `.clone-input-wrap` does. Keyed to the field rather than
-   :focus-within, because the draft footer's links sit in the same box. */
 .commit-message:has(.commit-input:focus-visible) {
   outline: 2px solid var(--focus-ring);
   outline-offset: 1px;
 }
-/* A textarea that grows with its message, so a drafted body is readable in
-   place; one line tall while it holds a subject or nothing. */
+/* One line for a subject, growing to fit a longer commit message. */
 .commit-input {
   display: block;
   width: 100%;
@@ -12342,12 +11757,6 @@ button.ref-chip:focus-visible {
   font: 500 12px/1.35 var(--font-sans);
   outline: none;
   resize: none;
-}
-.commit-message .msg-foot {
-  padding: 4px 6px 4px 10px;
-}
-.commit-box .agent-saw {
-  margin: -2px 0 8px;
 }
 .commit-actions {
   display: flex;
@@ -13943,28 +13352,7 @@ body.is-col-resizing {
   color: var(--danger-text);
 }
 /* A way out of the profile modal to where this profile's AI choices live. */
-.profile-modal__link {
-  align-self: flex-start;
-  appearance: none;
-  border: 0;
-  padding: 0;
-  background: transparent;
-  color: var(--accent);
-  font: 550 11.5px/1.3 var(--font-sans);
-  cursor: pointer;
-}
-.profile-modal__link:hover {
-  text-decoration: underline;
-}
-/* Borderless text, so it rings the way `.settings-notes-link` does: off the
-   text, with a radius of its own to follow. The ring reaches 4px here, so the
-   scroll margin (see `.modal__cancel:focus-visible`) is a pixel more. */
-.profile-modal__link:focus-visible {
-  outline: 2px solid var(--focus-ring);
-  outline-offset: 2px;
-  border-radius: var(--radius-sm);
-  scroll-margin: 5px;
-}
+
 
 .rootlist__add {
   display: inline-flex;
@@ -14101,19 +13489,7 @@ body.is-col-resizing {
 
 /* The AI disclosure (AiConsentDialog): two paragraphs, so the pair is spaced
    as prose rather than as the one-message confirm the base rule assumes. */
-.ai-consent {
-  width: min(440px, 92vw);
-}
-.ai-consent__eyebrow {
-  margin: 0 0 6px;
-  font: 650 10px/1 var(--font-sans);
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-  color: var(--accent);
-}
-.ai-consent .dialog__message {
-  margin: 0 0 10px;
-}
+
 
 /* ---- A question with more than two answers ----
 
@@ -18118,16 +17494,9 @@ body.is-col-resizing {
   outline-offset: 1px;
 }
 
-/* ---- Settings → AI Providers / AI Features ---- */
-
-.settings-ai-jobs {
-  color: var(--text-secondary);
-  font: 500 12px/1.35 var(--font-sans);
-}
-
 /* One row per install found. The path gets the full width and ellipsizes
    from its own box, so a long Homebrew path never pushes the action off. */
-.settings-ai-installs {
+.settings-git-installs {
   display: flex;
   flex-direction: column;
   gap: 6px;
@@ -18136,7 +17505,7 @@ body.is-col-resizing {
   padding: 0;
   list-style: none;
 }
-.settings-ai-install {
+.settings-git-install {
   display: flex;
   align-items: center;
   gap: 10px;
@@ -18145,99 +17514,48 @@ body.is-col-resizing {
   border: 1px solid var(--border-subtle);
   border-radius: var(--radius-md);
 }
-.settings-ai-install.is-using {
+.settings-git-install.is-using {
   border-color: var(--accent-border);
 }
-.settings-ai-install__body {
+.settings-git-install__body {
   display: flex;
   flex-direction: column;
   gap: 2px;
   flex: 1;
   min-width: 0;
 }
-.settings-ai-install__path {
+.settings-git-install__path {
   overflow: hidden;
   color: var(--text-primary);
   font: 500 11.5px/1.3 var(--font-mono);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.settings-ai-install__meta {
+.settings-git-install__meta {
   color: var(--text-muted);
   font: 400 11px/1.3 var(--font-sans);
 }
 /* One version per box: the line wraps between parts, and only a part wider
    than the whole row breaks inside itself. */
-.settings-ai-install__meta-part {
+.settings-git-install__meta-part {
   display: inline-block;
   max-width: 100%;
   overflow-wrap: anywhere;
 }
 
-.settings-ai-path {
+.settings-executable-path {
   display: flex;
   flex-direction: column;
   gap: 6px;
   width: 100%;
 }
-.settings-ai-path .settings-field__actions {
+.settings-executable-path .settings-field__actions {
   flex-wrap: nowrap;
   width: 100%;
 }
-.settings-ai-path__input {
+.settings-executable-path__input {
   flex: 1;
   min-width: 0;
-}
-
-.settings-ai-account {
-  display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  gap: 8px;
-  width: 100%;
-}
-.settings-ai-account__state {
-  color: var(--text-secondary);
-  font: 500 11.5px/1.35 var(--font-sans);
-}
-
-/* Provider / model / reasoning, each labelled above its select. */
-.settings-ai-job {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 10px;
-  width: 100%;
-}
-.settings-ai-job__field {
-  display: flex;
-  flex-direction: column;
-  gap: 5px;
-  min-width: 0;
-}
-.settings-ai-job__field .settings-select {
-  width: 100%;
-}
-
-.settings-ai-guidance {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  padding: 11px 0;
-}
-.settings-ai-guidance__input {
-  width: 100%;
-  height: auto;
-  min-height: 96px;
-  padding: 8px;
-  font: 450 12.5px/1.5 var(--font-sans);
-  resize: vertical;
-}
-.settings-ai-guidance__meta {
-  display: flex;
-  justify-content: space-between;
-  gap: 12px;
-  color: var(--text-subtle);
-  font: 400 11px/1.3 var(--font-sans);
 }
 
 /* Switch */
@@ -19762,14 +19080,11 @@ button.agent-auth-node:focus-visible,
   user-select: text;
 }
 
-/* Installer guidance needs the full card width, with one action row below
-   the text, shaped like the "Update ready" card. */
-.codex-version-notice,
+/* The identity notice puts its actions below the message. */
 .git-identity-notice {
   grid-template-columns: minmax(0, 1fr);
   width: 420px;
 }
-.codex-version-notice .app-toast__actions,
 .git-identity-notice .app-toast__actions {
   flex-wrap: wrap;
 }
@@ -19779,70 +19094,6 @@ button.agent-auth-node:focus-visible,
   font: 400 11.5px/1.4 var(--font-sans);
   color: var(--text-muted);
 }
-.codex-version-help {
-  display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  gap: 6px;
-  user-select: text;
-}
-.codex-version-help > p {
-  margin: 0;
-}
-.codex-version-help__gap {
-  font: 500 12px/1.3 var(--font-mono);
-  color: var(--text-primary);
-}
-.codex-version-help__want {
-  color: var(--status-warning);
-}
-/* The command to copy, set apart from the prose around it. */
-.codex-version-well {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  max-width: 100%;
-  padding: 5px 6px 5px 9px;
-  border: 1px solid var(--border-subtle);
-  border-radius: var(--radius-sm);
-  background: var(--bg-input);
-}
-.codex-version-well code {
-  min-width: 0;
-  font: 500 11.5px/1.3 var(--font-mono);
-  color: var(--text-primary);
-  overflow-wrap: anywhere;
-  user-select: all;
-}
-.app-toast .codex-version-well {
-  margin-top: 8px;
-  padding: 7px 9px;
-}
-/* AI Features: one line above the pickers, not a peer of the feature rows. */
-.ai-features-codex-notice {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  margin: 4px 0 8px;
-  padding: 7px 10px;
-  border: 1px solid var(--border-subtle);
-  border-radius: var(--radius-md);
-  background: var(--warn-soft);
-  font: 500 11.5px/1.4 var(--font-sans);
-  color: var(--text-primary);
-}
-.ai-features-codex-notice__dot {
-  flex: none;
-  width: 6px;
-  height: 6px;
-  border-radius: 999px;
-  background: var(--status-warning);
-}
-.ai-features-codex-notice__text {
-  flex: 1;
-  min-width: 0;
-}
-
 .app-toast__eyebrow {
   margin: 0 0 4px;
   font: 700 10.5px/1.2 var(--font-sans);

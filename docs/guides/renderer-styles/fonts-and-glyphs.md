@@ -83,7 +83,6 @@ codepoints) and `geist-mono-latin-400-normal.woff` (225):
 
 | char | in either bundled face? |
 |---|---|
-| `✦` U+2726 (the agent mark) | **no** — now `lib/AgentGlyph.tsx` |
 | `▴` U+25B4, `▾` U+25BE (a caret) | **no** — now `lib/ChevronGlyph.tsx` |
 | `‥` U+2025 (two-dot leader) | **no** — the ledger's hash range uses `…` |
 | `✓` U+2713, `✕` U+2715 | **no** — now `CheckGlyph`, `CloseGlyph` |

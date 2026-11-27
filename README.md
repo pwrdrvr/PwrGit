@@ -141,24 +141,11 @@ to run when it is not.
 
 Full walkthrough, first launch, and uninstall: [docs.pwrgit.com/install](https://docs.pwrgit.com/install/).
 
-## AI features are opt-in
-
-Off by default, and switched on per profile. When on, PwrGit can draft commit
-and squash messages and propose a **Tidy** plan for selected commits. The work
-runs through the Codex CLI you already have and are signed in to, with no
-tools and no repository access — only the staged changes or selected commits
-it is asked about. PwrGit holds no provider key.
-
-A history plan is checked in an isolated copy and blocked if it would change
-the final file tree; applying it stays your decision. Plain **Squash** and
-**Reorder** need no model at all: they dry-run in a throwaway copy before you
-approve them.
-
 ## Privacy
 
 No account, no telemetry, no PwrGit server. Repository state stays in a local
-SQLite database. Forge access goes through your own `gh` and `glab` sign-ins,
-and AI features, when you turn them on, through your own agent CLI.
+SQLite database. Forge access goes through your own `gh` and `glab` sign-ins. To connect an external
+agent, see [Local Agents and MCP](docs/desktop-owned-mcp.md).
 
 ## Ways to help
 

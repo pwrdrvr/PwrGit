@@ -12,7 +12,6 @@ overrides:
   "glob@13.0.6": "14.0.2"
   "minimatch@9.0.9": "11.0.1"
   "minimatch@10.2.6": "11.0.1"
-  "@pwrdrvr/codex-app-server-protocol": "0.164.0"
 
 # Ignore machine-local hooks so every install hashes only .pnpmfile.cjs.
 globalPnpmfile: null
@@ -63,17 +62,6 @@ minimumReleaseAgeExclude:
 
   # GHSA-jr5w-w6x2-84p9 eMudhra fix; published 2026-10-21T03:31:39.419Z.
   - "electron@44.9.3"
-
-  # The @pwrdrvr/agent-kit packages are PwrDrvr's own, freshly published, and
-  # pinned — exempt them outright so PwrGit can consume new versions
-  # immediately.
-  - "@pwrdrvr/codex-app-server-protocol"
-  - "@pwrdrvr/agent-core"
-  - "@pwrdrvr/agent-transport"
-  - "@pwrdrvr/codex-discovery"
-  - "@pwrdrvr/agent-client"
-  - "@pwrdrvr/agent-acp"
-  - "@pwrdrvr/agent-chat-react"
 
   # Owner-approved trial of huntharo's freshly published library release.
   # Exempt only this version; remove once it matures or leaves the lockfile.

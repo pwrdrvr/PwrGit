@@ -14,7 +14,7 @@ the Electron pass being deferred, and the pass then cancels the retry:
 Electron emits `window-all-closed` where `will-quit` belongs, and only the
 exit fail-safe ends the process. `quitDrain` (`bounded-shutdown.ts`) is the
 one listener that defers today, and only while it has something to flush (a
-profiler recording, an agent request or backend open).
+profiler recording).
 
 An OS shutdown exits after `SYSTEM_SHUTDOWN_EXIT_MS` (3 s), so it calls
 `quitDrain.hurry()` first: a flush still running at the exit would skip

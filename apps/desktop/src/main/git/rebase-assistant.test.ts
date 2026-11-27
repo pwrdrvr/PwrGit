@@ -227,50 +227,6 @@ describe("applyRebase (system git)", () => {
     );
   });
 
-  it("tidy regroups, keeps a replayed commit's author, and leaves the tree alone", async () => {
-    const repo = makeRepo();
-    const tree = gitOut(repo, ["rev-parse", "HEAD^{tree}"]);
-    const [c3, c2, c1] = topCommits(repo, 3);
-    const r = await applyRebase(
-      systemGit,
-      repo,
-      [c3!, c2!, c1!],
-      "tidy",
-      { email: "me@acme.io", name: "Me" },
-      undefined,
-      {
-        commits: [
-          { members: [c1!.hash, c3!.hash], message: "feat: c1 and c3" },
-          { members: [c2!.hash], message: null }
-        ]
-      }
-    );
-    expect(r.ok).toBe(true);
-    expect(gitOut(repo, ["log", "-3", "--format=%s|%ae"]).split("\n")).toEqual([
-      "c2|orig@x.com",
-      "feat: c1 and c3|me@acme.io",
-      "c0|orig@x.com"
-    ]);
-    expect(gitOut(repo, ["rev-parse", "HEAD^{tree}"])).toBe(tree);
-  });
-
-  it("tidy refuses a program that drops a selected commit, before touching Git", async () => {
-    const repo = makeRepo();
-    const before = sourceSnapshot(repo);
-    const [c3, c2, c1] = topCommits(repo, 3);
-    const r = await applyRebase(
-      systemGit,
-      repo,
-      [c3!, c2!, c1!],
-      "tidy",
-      { email: "me@acme.io" },
-      undefined,
-      { commits: [{ members: [c1!.hash, c2!.hash], message: "lost c3" }] }
-    );
-    expect(!r.ok && r.error.code).toBe("missing_commit");
-    expect(sourceSnapshot(repo)).toEqual(before);
-  });
-
   it("reorder reverses the top run without losing commits", async () => {
     const repo = makeRepo();
     expect(gitOut(repo, ["log", "-1", "--format=%s"])).toBe("c3");
@@ -481,7 +437,7 @@ describe("dryRunRebase (disposable clone)", () => {
     if (!result.ok) {
       expect(result.error.code).toBe("conflict");
       expect(result.error.message).toContain("worktree was not changed");
-      // What a Tidy revision is told: which step, which commit, which files.
+      // Structured conflict detail: which step, which commit, which files.
       expect(result.error.snag).toEqual({
         kind: "conflict",
         step: 1,
@@ -520,29 +476,6 @@ describe("dryRunRebase (disposable clone)", () => {
     }
     expect(sourceSnapshot(repo)).toEqual(before);
     expect(readdirSync(tempParent)).toEqual([]);
-  });
-
-  it("proves a Tidy program in the isolated copy", async () => {
-    const repo = makeRepo();
-    const [c3, c2, c1] = topCommits(repo, 3);
-    const result = await dryRunRebase(
-      systemGit,
-      repo,
-      [c3!, c2!, c1!],
-      "tidy",
-      { email: "me@acme.io", name: "Me" },
-      {
-        program: {
-          commits: [
-            { members: [c1!.hash, c3!.hash], message: "feat: c1 and c3" },
-            { members: [c2!.hash], message: null }
-          ]
-        }
-      }
-    );
-    expect(result.ok && result.value.proof).toEqual(
-      expect.objectContaining({ commitCount: 3, resultCount: 2, steps: 3 })
-    );
   });
 
   it("fetches only the checked ref through the selected commits and base", async () => {

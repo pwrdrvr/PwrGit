@@ -5,17 +5,13 @@ import fc from "fast-check";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
-  DEFAULT_AI_PROVIDER_SETTINGS,
   FORGE_KINDS,
   GENERAL_DEFAULTS,
   DIAGNOSTICS_DEFAULTS,
   forgeProduct,
   ok,
-  type AcpAgentDiscovery,
-  type AiProviderSettings,
   type AppSettingsSnapshot,
   type Req,
-  type CodexProviderDiscovery,
   type ForgeStatus,
   type MachineGitIdentity,
   type Profile,
@@ -125,8 +121,6 @@ const ACME: Profile = {
   showInMenu: true
 };
 
-/** What the AI reads answer, per test. */
-let aiSettings: AiProviderSettings;
 const CONFIGURED_GIT: MachineGitIdentity = {
   outside: {
     kind: "configured",
@@ -138,27 +132,6 @@ const CONFIGURED_GIT: MachineGitIdentity = {
   notice: false
 };
 let machineIdentity: MachineGitIdentity;
-let codexDiscovery: CodexProviderDiscovery;
-let acpDiscovery: AcpAgentDiscovery;
-
-function codex(overrides: Partial<CodexProviderDiscovery> = {}): CodexProviderDiscovery {
-  return {
-    candidates: [
-      { path: "/opt/homebrew/bin/codex", source: "path", version: "0.200.0", available: true }
-    ],
-    resolvedPath: "/opt/homebrew/bin/codex",
-    auth: {
-      status: "authenticated",
-      profile: "",
-      profileLabel: "System default",
-      codexHome: "/Users/you/.codex",
-      email: "dev@example.com"
-    },
-    refreshedAt: "2026-09-19T00:00:00.000Z",
-    ...overrides
-  };
-}
-
 /** A status shaped the way main's probe shapes one, as `ForgesSettings.test`
  *  shapes it — `hosts` derived from the same values the summary reads. */
 function forge(overrides: Partial<ForgeStatus> = {}): ForgeStatus {
@@ -210,7 +183,7 @@ function installBridge(): void {
 }
 
 /** Every read the window makes on open, answered from the fixtures above. */
-async function answer(name: string, req?: unknown): Promise<unknown> {
+async function answer(name: string): Promise<unknown> {
   // General is the window's opening pane, so it renders in every test and
   // reads its half of the snapshot. No other pane here looks inside one.
   if (name === "settings:read") return ok(SNAPSHOT);
@@ -220,6 +193,8 @@ async function answer(name: string, req?: unknown): Promise<unknown> {
   if (name === "git:runtimeStatus") return ok(GIT_RUNTIME);
   if (name === "gitManaged:status" || name === "gitManaged:check") return ok(managedGit);
   if (name === "identity:machine") return ok(machineIdentity);
+  if (name === "localAgents:read") return ok({ sessions: [], roles: [], policyFile: "/demo/mcp-policy.json" });
+  if (name === "agentAccess:read") return ok({ enabled: false, listening: false });
   if (name === "repo:hiddenList") return ok([]);
   if (name === "identity:folders") {
     return ok({ enabled: false, globalFile: "/home/rowan/.gitconfig", machine: machineIdentity.outside, profiles: [] });
@@ -227,25 +202,6 @@ async function answer(name: string, req?: unknown): Promise<unknown> {
   if (name === "profile:list") {
     return ok({ activeProfileId: PERSONAL.id, profiles: [PERSONAL, ACME] });
   }
-  const profileId = (req as { profileId?: string } | undefined)?.profileId;
-  if (name === "aiProviders:read") return ok({ profileId, settings: aiSettings });
-  if (name === "aiProviders:discoverCodex") return ok(codexDiscovery);
-  if (name === "aiProviders:discoverAcp") return ok(acpDiscovery);
-  if (name === "aiProviders:codexAuthProfiles") {
-    return ok({
-      profiles: [
-        {
-          name: "",
-          displayName: "System default",
-          codexHome: "/Users/you/.codex",
-          hasAuthFile: true,
-          email: "dev@example.com"
-        }
-      ],
-      followed: ""
-    });
-  }
-  if (name === "aiProviders:codexModels") return ok({ models: [] });
   return ok(undefined);
 }
 
@@ -258,34 +214,6 @@ beforeEach(() => {
   forges = [];
   managedGit = NO_NEWER_GIT;
   machineIdentity = CONFIGURED_GIT;
-  aiSettings = DEFAULT_AI_PROVIDER_SETTINGS;
-  codexDiscovery = codex();
-  acpDiscovery = {
-    agents: [
-      {
-        id: "grok",
-        displayName: "Grok",
-        installed: true,
-        version: "1.2.0",
-        instances: [{ command: "/usr/local/bin/grok", version: "1.2.0", source: "path" }],
-        activeCommand: "/usr/local/bin/grok"
-      },
-      {
-        id: "kimi",
-        displayName: "Kimi Code CLI",
-        installed: false,
-        detail: "Install Kimi Code CLI",
-        instances: []
-      },
-      {
-        id: "qwen",
-        displayName: "Qwen Code",
-        installed: false,
-        detail: "Install Qwen Code",
-        instances: []
-      }
-    ]
-  };
   window.location.hash = "#settings";
   mocks.subscribe.mockReturnValue(() => {});
   mocks.dispatch.mockImplementation(answer);
@@ -324,7 +252,7 @@ it("keeps resource recording off until explicitly toggled in Troubleshooting", a
     if (name === "settings:update") {
       return ok({ ...SNAPSHOT, diagnostics: { ...DIAGNOSTICS_DEFAULTS, ...req.patch.diagnostics } });
     }
-    return answer(name, req);
+    return answer(name);
   });
   await render();
   await act(async () => navButton("Troubleshooting").click());
@@ -345,7 +273,7 @@ async function editRulesWhileThresholdSaves(
   let stored = SNAPSHOT;
   const writes: Array<() => void> = [];
   mocks.dispatch.mockImplementation(async (name, req: Req<"settings:update">) => {
-    if (name !== "settings:update") return answer(name, req);
+    if (name !== "settings:update") return answer(name);
     return new Promise((resolve) => writes.push(() => {
       stored = { ...stored, diagnostics: { ...stored.diagnostics, ...req.patch.diagnostics } };
       resolve(ok(stored));
@@ -418,10 +346,10 @@ it("preserves both rule edits whether the threshold write settles before or afte
 
 it("shows when a resource recording stops, and turns the switch off when main ends it", async () => {
   const expiresAt = "2026-11-21T18:43:00.000Z";
-  mocks.dispatch.mockImplementation(async (name, req) =>
+  mocks.dispatch.mockImplementation(async (name) =>
     name === "settings:read"
       ? ok({ ...SNAPSHOT, diagnostics: { ...DIAGNOSTICS_DEFAULTS, resourceUsageEnabled: true, resourceUsageExpiresAt: expiresAt } })
-      : answer(name, req));
+      : answer(name));
   await render();
   await act(async () => navButton("Troubleshooting").click());
   const section = () => container.querySelector<HTMLElement>('section[aria-label="Resource Usage Recording"]')!;
@@ -442,10 +370,10 @@ it("shows when a resource recording stops, and turns the switch off when main en
 });
 
 it("labels startup profiling as one launch, with no reminder to turn it back off", async () => {
-  mocks.dispatch.mockImplementation(async (name, req) =>
+  mocks.dispatch.mockImplementation(async (name) =>
     name === "settings:read"
       ? ok({ ...SNAPSHOT, diagnostics: { ...DIAGNOSTICS_DEFAULTS, startupCpuProfilingEnabled: true } })
-      : answer(name, req));
+      : answer(name));
   await render();
   await act(async () => navButton("Troubleshooting").click());
   const toggle = container.querySelector<HTMLButtonElement>('[role="switch"][aria-label="Profile next launch"]');
@@ -671,8 +599,8 @@ describe("Settings nav — forge status", () => {
   it("shows nothing at all until a probe has answered", async () => {
     // "We do not know" is honest; a neutral dot would be a guess and a green
     // one a wrong guess. The row's name stays the bare product label.
-    mocks.dispatch.mockImplementation(async (name: string, req: unknown) =>
-      name === "forge:status" ? new Promise(() => {}) : answer(name, req)
+    mocks.dispatch.mockImplementation(async (name: string) =>
+      name === "forge:status" ? new Promise(() => {}) : answer(name)
     );
     await render();
 
@@ -739,77 +667,13 @@ describe("Settings nav — reveal", () => {
   });
 });
 
-describe("Settings nav — AI", () => {
-  /** Every name `dispatch` was called with, in order. */
-  function dispatched(): string[] {
-    return mocks.dispatch.mock.calls.map(([name]) => String(name));
-  }
-
-  it("names Local Agents apart from the two AI pages", async () => {
-    // Agents calling IN (MCP) and agents PwrGit calls OUT to share a word and
-    // nothing else; a bare "Agents" beside "AI Providers" reads as either.
+describe("Settings nav — Profiles and MCP", () => {
+  it("opens Local Agents for MCP from the Settings nav", async () => {
     await render();
-
-    const rows = [
-      ...container.querySelectorAll(".settings-nav__button")
-    ].map((node) => node.textContent?.trim());
-    expect(rows).toContain("AI Providers");
-    expect(rows).toContain("AI Features");
-    expect(rows).toContain("Local Agents");
-    expect(rows).not.toContain("Agents");
-  });
-
-  it("probes nothing until the reader goes near AI", async () => {
-    await render();
-    expect(dispatched()).not.toContain("aiProviders:discoverCodex");
-    expect(dispatched()).not.toContain("aiProviders:discoverAcp");
-
-    await act(async () => navButton("AI Providers").click());
-
-    expect(dispatched()).toContain("aiProviders:discoverCodex");
-    expect(dispatched()).toContain("aiProviders:discoverAcp");
-  });
-
-  it("gives AI Providers a child per provider, with no Gemini", async () => {
-    await render();
-    await act(async () => navButton("AI Providers").click());
-
-    const labels = [
-      ...sublist("ai-providers").querySelectorAll(".settings-nav__sublabel")
-    ].map((node) => node.textContent?.trim());
-    expect(labels).toEqual(["Codex", "Grok", "Kimi Code CLI", "Qwen Code"]);
-    expect(container.textContent).not.toMatch(/gemini/i);
-  });
-
-  it("reports each provider's state from the same read as its card", async () => {
-    codexDiscovery = codex({
-      auth: {
-        status: "unauthenticated",
-        profile: "",
-        profileLabel: "System default",
-        codexHome: "/Users/you/.codex"
-      }
-    });
-    aiSettings = {
-      ...DEFAULT_AI_PROVIDER_SETTINGS,
-      acp: { enabledAgentIds: ["grok"], agents: {} }
-    };
-    await render();
-    await act(async () => navButton("AI Providers").click());
-
-    const codexRow = navChild("Codex");
-    expect(dotTone(codexRow)).toBe("warn");
-    expect(chip(codexRow)).toBe("sign in");
-    expect(codexRow.getAttribute("aria-label")).toBe("Codex: Sign in");
-    // The card says the same thing in its chip.
-    expect(card("Codex").textContent).toContain("Sign in");
-
-    // Enabled and installed: fine, so a dot and no word.
-    expect(dotTone(navChild("Grok"))).toBe("ok");
-    expect(chip(navChild("Grok"))).toBeUndefined();
-    // Not enabled, not installed: grey, and says which.
-    expect(dotTone(navChild("Kimi Code CLI"))).toBe("off");
-    expect(chip(navChild("Kimi Code CLI"))).toBe("missing");
+    await act(async () => navButton("Local Agents").click());
+    expect(card("MCP server")).toBeDefined();
+    expect(mocks.dispatch).toHaveBeenCalledWith("localAgents:read", undefined);
+    expect(mocks.dispatch).toHaveBeenCalledWith("agentAccess:read", undefined);
   });
 
   it("warns on Profiles' Git row while Git outside PwrGit has no identity", async () => {
@@ -834,33 +698,6 @@ describe("Settings nav — AI", () => {
     expect(navChild("Hidden repos")).toBeDefined();
   });
 
-  it("gives AI Features a jump link per section", async () => {
-    await render();
-    await act(async () => navButton("AI Features").click());
-
-    const labels = [
-      ...sublist("ai-features").querySelectorAll(".settings-nav__sublabel")
-    ].map((node) => node.textContent?.trim());
-    expect(labels).toEqual(["Availability", "Default agents", "Guidance"]);
-    await act(async () => navChild("Guidance").click());
-    expect(navChild("Guidance").getAttribute("aria-current")).toBe("page");
-  });
-
-  it("boots on a deep link: page, card and profile", async () => {
-    window.location.hash = "#settings?page=ai-features&sub=guidance&profile=acme";
-    await render();
-
-    expect(sublist("ai-features").hasAttribute("inert")).toBe(false);
-    expect(navChild("Guidance").getAttribute("aria-current")).toBe("page");
-    expect(card("Guidance")).toBeDefined();
-    // The AI pages edit the profile the link named, not the active one.
-    const picker = container.querySelector<HTMLSelectElement>(
-      "select[aria-label='Profile these AI settings belong to']"
-    );
-    expect(picker?.value).toBe("acme");
-    expect(mocks.dispatch).toHaveBeenCalledWith("aiProviders:read", { profileId: "acme" });
-  });
-
   it("follows settings:navigate when the window is already open", async () => {
     let navigate: ((route: unknown) => void) | undefined;
     mocks.subscribe.mockImplementation((channel: string, handler: (route: unknown) => void) => {
@@ -870,10 +707,10 @@ describe("Settings nav — AI", () => {
     await render();
     expect(navigate).toBeDefined();
 
-    await act(async () => navigate?.({ page: "ai-providers", sub: "codex", profileId: "acme" }));
+    await act(async () => navigate?.({ page: "forges", sub: "github" }));
 
-    expect(navChild("Codex").getAttribute("aria-current")).toBe("page");
-    expect(mocks.dispatch).toHaveBeenCalledWith("aiProviders:read", { profileId: "acme" });
+    expect(navChild("GitHub").getAttribute("aria-current")).toBe("page");
+    expect(card("GitHub")).toBeDefined();
   });
 });
 

@@ -1,5 +1,4 @@
 import {
-  DEFAULT_AI_PROVIDER_SETTINGS,
   EXPERIMENTAL_DEFAULTS,
   type BulkSyncProgress,
   type BulkSyncRepoResult,
@@ -120,8 +119,6 @@ Object.assign(window, {
             general: { tagCheckAfterSync: false },
             experimental: EXPERIMENTAL_DEFAULTS
           } };
-        case "aiProviders:read":
-          return { ok: true, value: { profileId: profile.id, settings: DEFAULT_AI_PROVIDER_SETTINGS } };
         case "repo:list": {
           const ids = request?.repoIds;
           if (ids !== undefined) {
@@ -219,7 +216,7 @@ function App() {
               repoId={selected.repoId} repoName={repos[0]!.name} worktreeId={selected.id}
               worktreePath={selected.path} viewingBranch="main" activeEmail={profile.email}
               selectedCommits={selectedCommits} focusedCommit={null} revealCommit={null}
-              tidyOffered={false} onEditHistory={noop} onCommitsChange={noop} onOpenCommit={noop}
+              onEditHistory={noop} onCommitsChange={noop} onOpenCommit={noop}
               onRevealWorktree={noop} onRevealCreatedWorktree={noop}
             />
           </div>

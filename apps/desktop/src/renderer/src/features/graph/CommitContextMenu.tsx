@@ -27,7 +27,6 @@ export function CommitContextMenu({
   onSwitchBranch,
   onRevealWorktree,
   historyRange,
-  tidyOffered,
   onEditHistory,
   onClose
 }: {
@@ -48,8 +47,6 @@ export function CommitContextMenu({
   onRevealWorktree: (worktreeId: string) => void;
   /** The run from HEAD down to this commit, for "Edit history from here". */
   historyRange: HistoryRange | null;
-  /** AI history editing is on for this profile, so Tidy is offered. */
-  tidyOffered: boolean;
   /** Select the run and open the rebase tool on one operation. */
   onEditHistory: (hashes: string[], op: RebaseOperation) => void;
   onClose: () => void;
@@ -97,7 +94,7 @@ export function CommitContextMenu({
       label: "Tag this commit…",
       onSelect: onTagFrom
     },
-    ...historyItems(historyRange, tidyOffered, onEditHistory),
+    ...historyItems(historyRange, onEditHistory),
     { type: "sep" },
     {
       type: "item",
@@ -179,7 +176,6 @@ export function CommitContextMenu({
  *  2a). */
 function historyItems(
   range: HistoryRange | null,
-  tidyOffered: boolean,
   onEditHistory: (hashes: string[], op: RebaseOperation) => void
 ): MenuItem[] {
   if (range === null) return [];
@@ -198,9 +194,7 @@ function historyItems(
       ...heading,
       {
         type: "item",
-        label: tidyOffered
-          ? `Squash, reorder or tidy ${range.count} commits`
-          : `Squash or reorder ${range.count} commits`,
+        label: `Squash or reorder ${range.count} commits`,
         disabled: true,
         hint:
           range.reason === "merge"
@@ -223,16 +217,7 @@ function historyItems(
       type: "item",
       label: `Reorder ${n} commits…`,
       onSelect: () => onEditHistory(hashes, "reorder")
-    },
-    ...(tidyOffered
-      ? [
-          {
-            type: "item",
-            label: `Tidy ${n} commits with an agent…`,
-            onSelect: () => onEditHistory(hashes, "tidy")
-          } satisfies MenuItem
-        ]
-      : [])
+    }
   ];
 }
 

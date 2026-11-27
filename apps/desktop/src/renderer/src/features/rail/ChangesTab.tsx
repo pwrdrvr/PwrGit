@@ -18,12 +18,8 @@ import { confirmDialog, notifyDialog } from "../shell/dialogs";
 import { SubmodulePanel } from "./SubmodulePanel";
 import { DiscoveryExplainPopover } from "./DiscoveryExplainPopover";
 import { IgnoreDialog } from "./IgnoreDialog";
-import { AgentSaw } from "../agent/AgentSaw";
 import { CommitIdentityFooter } from "../identity/CommitIdentityFooter";
 import { useCommitIdentity } from "../identity/useCommitIdentity";
-import { DraftFooter } from "../agent/DraftFooter";
-import { openAiSettings, useAgent } from "../agent/agent-store";
-import { useMessageDraft, type DraftSource } from "../agent/useMessageDraft";
 import {
   hoverTooltip,
   pinnableTooltip,
@@ -40,8 +36,6 @@ import {
 import { fileLabel } from "../file-tree/file-tree";
 import { TreeFileDir, TreeFolderRow, treeDepthStyle } from "../file-tree/TreeFolderRow";
 import { useFileTree, type FileTreeView } from "../file-tree/useFileTree";
-
-const STAGED_SOURCE: DraftSource = { kind: "staged" };
 
 function PlusIcon() {
   return (
@@ -330,8 +324,8 @@ export function ChangesTab({
   ignoredRef.current = ignored;
   const [ignoreTarget, setIgnoreTarget] = useState<{ path: string; directory: boolean } | null>(null);
   const [commitOutcome, setCommitOutcome] = useState<{ hooks: HookRun[] } | { error: PwrGitError; amend: boolean } | null>(null);
+  const [message, setMessage] = useState("");
   const [committing, setCommitting] = useState(false);
-  const agent = useAgent("commitMessage");
   const messageRef = useRef<HTMLTextAreaElement>(null);
   const [menu, setMenu] = useState<{
     x: number;
@@ -354,15 +348,6 @@ export function ChangesTab({
   // Git would refuse: the one identity state that disables Commit and Amend.
   const identityBlocked = identity.inspection !== null && !identity.inspection.pwrgit.ok;
   const [amendHover, setAmendHover] = useState(false);
-  // Staged changes only: an agent draft never sees unstaged edits.
-  const draft = useMessageDraft({
-    worktreeId: wtId,
-    source: STAGED_SOURCE,
-    fallback: "",
-    autoStart: false,
-    ready: agent.ready
-  });
-  const message = draft.text;
 
   const receiveSubmoduleConcern = useCallback(
     (hasConcern: boolean) => setHasSubmoduleConcern(hasConcern),
@@ -370,6 +355,7 @@ export function ChangesTab({
   );
 
   useEffect(() => {
+    setMessage("");
     setMenu(null);
     setIgnoreTarget(null);
     setCommitOutcome(null);
@@ -517,7 +503,7 @@ export function ChangesTab({
       // the identity changed under the footer since it last resolved.
       identity.refresh();
       if (r.ok) {
-        draft.reset("");
+        setMessage("");
         setCommitOutcome({ hooks: r.value.hooks });
         return;
       }
@@ -825,14 +811,12 @@ export function ChangesTab({
       )}
 
       <div className="commit-box">
-        <div
-          className={`commit-message${draft.origin === "agent" || draft.pending ? " commit-message--agent" : ""}`}
-        >
+        <div className="commit-message">
           <textarea
             ref={messageRef}
-            className={`commit-input${draft.status.kind === "drafting" ? " msg-box__input--scan" : ""}`}
+            className="commit-input"
             value={message}
-            onChange={(e) => { setCommitOutcome(null); draft.setText(e.target.value); }}
+            onChange={(e) => { setCommitOutcome(null); setMessage(e.target.value); }}
             onKeyDown={(e) => {
               if (e.key === "Enter" && (e.metaKey || e.ctrlKey) && canCommit) {
                 e.preventDefault();
@@ -843,32 +827,7 @@ export function ChangesTab({
             aria-label="Commit message"
             rows={1}
           />
-          {/* With AI off the commit box is a commit box: no footer at all. */}
-          {((!agent.loading && !agent.off) ||
-            draft.status.kind !== "idle" ||
-            draft.draft !== null) && (
-            <DraftFooter
-              draft={draft}
-              agentName={agent.name}
-              // Whether the agent can run, not whether there is anything to
-              // draft from: gating on the staged count here would send
-              // someone whose agent works to AI Providers. With nothing
-              // staged, main answers with what to do about it.
-              agentReady={agent.ready}
-              fallbackLabel={null}
-              fallbackAction={null}
-              unitLabel={`${stagedTotal} staged file${stagedTotal === 1 ? "" : "s"}`}
-              onNoAgent={() => openAiSettings("ai-providers")}
-            />
-          )}
         </div>
-        {draft.draft !== null && draft.origin === "agent" && (
-          <AgentSaw
-            manifest={draft.draft.saw}
-            providerName={draft.draft.providerName}
-            model={draft.draft.model}
-          />
-        )}
         <div className="commit-actions">
           <button
             className="commit-btn"

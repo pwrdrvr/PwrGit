@@ -1,13 +1,7 @@
 // Child rows under an expandable Settings nav group, and how the pane scrolls
 // when the route moves. Ported from PwrSnap's `settings-nav.ts`, adapted to
 // PwrGit's rule that a child is a route to a card in its parent's pane, never
-// a pane of its own (settings/AGENTS.md):
-//
-//   - Forges and AI Providers: one card per product / provider, each child
-//     carrying that card's live status (dot + word), so the reader can tell
-//     what is installed and working without opening anything.
-//   - AI Features: one card per section. A plain jump-to link — sections have
-//     no status of their own.
+// a pane of its own (settings/AGENTS.md).
 //
 // Which pages expand is not decided here: it is exactly the pages that own
 // subs in `SETTINGS_PAGE_SUBS` (@pwrgit/shared), the same allowlist main checks
@@ -15,15 +9,13 @@
 
 import {
   SETTINGS_PAGE_SUBS,
-  type AiFeaturesSettingsSub,
   type FolderIdentityReport,
   type MachineGitIdentity,
   type SettingsPage
 } from "@pwrgit/shared";
-import type { AiProviderStatus, AiProviderTone } from "./ai-provider-status";
 import { folderCardChip } from "../identity/folder-view";
 
-export type SettingsNavDot = AiProviderTone | "accent";
+export type SettingsNavDot = "ok" | "warn" | "bad" | "off" | "accent";
 
 export type SettingsNavChild = {
   label: string;
@@ -43,33 +35,6 @@ export type SettingsNavChild = {
 export const SETTINGS_NAV_GROUPS: ReadonlySet<SettingsPage> = new Set(
   Object.keys(SETTINGS_PAGE_SUBS) as SettingsPage[]
 );
-
-/** Card title for each AI Features section. The pane titles its cards from
- *  this too, so a jump link always names the card it lands on. */
-export const AI_FEATURE_SECTION_LABELS: Readonly<Record<AiFeaturesSettingsSub, string>> = {
-  availability: "Availability",
-  "default-agents": "Default agents",
-  guidance: "Guidance"
-};
-
-/** One provider's nav row, from the same status its card renders. */
-export function aiProviderNavChild(status: AiProviderStatus): SettingsNavChild {
-  return {
-    label: status.label,
-    sectionId: status.sub,
-    ...(status.tone === undefined ? {} : { dot: status.tone }),
-    ...(status.chip === undefined ? {} : { chip: status.chip }),
-    ...(status.sentence === undefined ? {} : { stateLabel: status.sentence })
-  };
-}
-
-/** AI Features' jump links, in the order the pane reads. */
-export function aiFeatureNavChildren(): SettingsNavChild[] {
-  return SETTINGS_PAGE_SUBS["ai-features"].map((sub) => ({
-    label: AI_FEATURE_SECTION_LABELS[sub],
-    sectionId: sub
-  }));
-}
 
 /**
  * Profiles' children. "Git identity" carries a warning while Git has no

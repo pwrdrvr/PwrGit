@@ -1,8 +1,10 @@
+import fc from "fast-check";
 import { describe, expect, it, vi } from "vitest";
 import {
   err,
   ok,
   type RebaseCommitRef,
+  type RebaseOperation,
   type Result
 } from "@pwrgit/shared";
 import { CommandBus } from "../command-bus";
@@ -250,33 +252,25 @@ describe("rebase handler approval gate", () => {
     expect(apply.mock.calls[0]?.[6]).toEqual(program("edited after the check"));
   });
 
-  it("refuses Apply when a Tidy program's shape changed after the check", async () => {
-    const { bus, apply } = setup();
-    const folded = {
-      commits: [{ members: ["aaaaaaaa", "bbbbbbbb"], message: "one" }]
-    };
-    const split = {
-      commits: [
-        { members: ["aaaaaaaa"], message: "one" },
-        { members: ["bbbbbbbb"], message: null }
-      ]
-    };
-    await bus.dispatch("rebase:check", { worktreeId: "wt-1", commits, op: "tidy", program: folded });
-    const applied = await bus.dispatch("rebase:apply", {
-      worktreeId: "wt-1",
-      commits,
-      op: "tidy",
-      approvalToken: "approval-1",
-      program: split
-    });
-    expect(!applied.ok && applied.error.code).toBe("dry_run_mismatch");
-    expect(apply).not.toHaveBeenCalled();
-  });
-
-  it("snags a Tidy check that brings no program, before any Git runs", async () => {
-    const { bus, dryRun } = setup();
-    const checked = await bus.dispatch("rebase:check", { worktreeId: "wt-1", commits, op: "tidy" });
-    expect(checked.ok && checked.value.status).toBe("snag");
-    expect(dryRun).not.toHaveBeenCalled();
+  it("rejects unsupported history operations at IPC before running Git", async () => {
+    const unsupported = fc.oneof(fc.constant("tidy"), fc.string()).filter(
+      (op) => op !== "squash" && op !== "reorder"
+    );
+    await fc.assert(fc.asyncProperty(unsupported, async (op) => {
+      const { bus, dryRun } = setup();
+      const request = {
+        worktreeId: "wt-1",
+        commits,
+        op: op as RebaseOperation,
+        ...(op === "tidy"
+          ? { program: { commits: [{ members: ["aaaaaaaa", "bbbbbbbb"], message: "folded" }] } }
+          : {})
+      };
+      const draft = await bus.dispatch("rebase:draft", request);
+      const checked = await bus.dispatch("rebase:check", request);
+      expect(draft.ok && draft.value.valid).toBe(false);
+      expect(checked.ok && checked.value.status).toBe("snag");
+      expect(dryRun).not.toHaveBeenCalled();
+    }), { examples: [["tidy"]] });
   });
 });
