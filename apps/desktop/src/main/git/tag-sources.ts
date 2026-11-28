@@ -18,7 +18,7 @@ import {
   type TagSyncStatus
 } from "@pwrgit/shared";
 import type { DB } from "../persistence/db";
-import { requireExit0, type GitExec } from "./dugite";
+import { installedGitSelection, requireExit0, type GitExec } from "./dugite";
 import { readAllTagSummaries, readTagSummaries, validTagName } from "./git-service";
 
 /**
@@ -74,7 +74,7 @@ export async function readRemoteConfig(
     const name = key.slice(7, dot);
     const variable = key.slice(dot + 1).toLowerCase();
     const remote = remotes.get(name) ?? { name, url: null, tagOpt: null };
-    if (variable === "url") remote.url ??= value;
+    if (variable === "url") remote.url = value === "" ? null : remote.url ?? value;
     else if (variable === "tagopt") remote.tagOpt = value;
     remotes.set(name, remote);
   }
@@ -117,12 +117,25 @@ function refuseOptionLike(remote: string): Result<void> {
 export async function listRemoteTags(
   git: GitExec,
   cwd: string,
-  remote: string
+  remote: string,
+  fetchUrl?: string
 ): Promise<Result<ListedTag[]>> {
   const usable = refuseOptionLike(remote);
   if (!usable.ok) return usable;
   const args = ["ls-remote", "--tags", remote];
-  const raw = await git(args, cwd);
+  // Keep Git's named-remote transport settings. Clear the URL list, then
+  // pin the observed fetch URL for this child only, outside its arguments.
+  const key = `remote.${remote}.url`;
+  const count = Number(process.env.GIT_CONFIG_COUNT ?? 0);
+  const raw = await git(args, cwd, fetchUrl === undefined ? undefined : {
+    env: {
+      GIT_CONFIG_COUNT: String(count + 2),
+      [`GIT_CONFIG_KEY_${count}`]: key,
+      [`GIT_CONFIG_VALUE_${count}`]: "",
+      [`GIT_CONFIG_KEY_${count + 1}`]: key,
+      [`GIT_CONFIG_VALUE_${count + 1}`]: fetchUrl
+    }
+  });
   if (!raw.ok) return raw;
   const checked = requireExit0(raw.value, args);
   if (!checked.ok) return checked;
@@ -721,9 +734,12 @@ export class TagSources {
       const shared = await running;
       if (shared.ok || !wasStopped(shared.error)) return shared;
     }
-    // A caller starting immediately can use the config it just resolved.
-    // A retry after a stopped listing needs a fresh read.
-    const run = this.list(git, repoId, cwd, remote, running === undefined ? remotes : undefined);
+    // Reuse config only when we can pin the URL. Our bundle supports clearing
+    // a remote's URL list, which older user-selected installations may not.
+    // Reread after a stopped shared listing as well.
+    const pinUrl = remotes !== undefined && installedGitSelection() === null;
+    const captured = running === undefined && pinUrl ? remotes : undefined;
+    const run = this.list(git, repoId, cwd, remote, captured, pinUrl);
     this.inFlight.set(key, run);
     try {
       return await run;
@@ -734,15 +750,15 @@ export class TagSources {
 
   /** True when the publisher's differing set moved (its rows need redrawing). */
   private async list(
-    git: GitExec, repoId: string, cwd: string, remote: string, remotes?: readonly RemoteConfig[]
+    git: GitExec, repoId: string, cwd: string, remote: string, remotes: readonly RemoteConfig[] | undefined, pinUrl: boolean
   ): Promise<Result<boolean>> {
     const config = remotes === undefined ? await readRemoteConfig(git, cwd) : ok(remotes);
     if (!config.ok) return config;
     const target = config.value.find((candidate) => candidate.name === remote);
-    if (target === undefined) {
+    if (target === undefined || target.url === null) {
       return err({ kind: "repo", code: "invalid_remote", message: `Not a configured remote: ${remote}` });
     }
-    const listed = await listRemoteTags(git, cwd, remote);
+    const listed = await listRemoteTags(git, cwd, remote, pinUrl ? target.url : undefined);
     if (!listed.ok) {
       // A stopped listing says nothing about the remote. The caller that set
       // a timeout records that itself (`recordFailure`).

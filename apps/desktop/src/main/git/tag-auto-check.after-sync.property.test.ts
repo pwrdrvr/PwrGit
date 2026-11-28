@@ -7,6 +7,7 @@ import { err, ok, TAG_SOURCE_SYNC_TTL_MS } from "@pwrgit/shared";
 import { expect, it, vi } from "vitest";
 import { emitEvent } from "../ipc";
 import { openDatabase, type DB } from "../persistence/db";
+import * as dugite from "./dugite";
 import type { GitExec } from "./dugite";
 import { TagAutoChecks } from "./tag-auto-check";
 import { TagSources } from "./tag-sources";
@@ -19,6 +20,15 @@ const NOW = TAG_SOURCE_SYNC_TTL_MS * 3;
 const ORIGINAL = "a".repeat(40);
 const MOVED = "b".repeat(40);
 const URL = "/fixtures/origin.git";
+const fileGit = createSystemGit({
+  env: { ...process.env, GIT_ALLOW_PROTOCOL: "file", GIT_CONFIG_GLOBAL: "/dev/null", GIT_CONFIG_NOSYSTEM: "1" }
+});
+
+async function fixtureGit(cwd: string, ...args: string[]): Promise<string> {
+  const result = await fileGit(args, cwd);
+  if (!result.ok || result.value.exitCode !== 0) throw new Error(JSON.stringify(result));
+  return result.value.stdout.trim();
+}
 
 function profiles(db: DB): void {
   db.exec(`
@@ -83,14 +93,7 @@ it("resolves configuration once per after-sync check in a burst", async () => {
 it("sees a tag moved outside PwrGit with one config read and one local ref scan", async () => {
   const root = mkdtempSync(join(tmpdir(), "pwrgit-after-sync-"));
   const db = openDatabase(":memory:");
-  const git = createSystemGit({
-    env: { ...process.env, GIT_ALLOW_PROTOCOL: "file", GIT_CONFIG_GLOBAL: "/dev/null", GIT_CONFIG_NOSYSTEM: "1" }
-  });
-  const setup = async (...args: string[]): Promise<string> => {
-    const result = await git(args, root);
-    if (!result.ok || result.value.exitCode !== 0) throw new Error(JSON.stringify(result));
-    return result.value.stdout.trim();
-  };
+  const setup = (...args: string[]) => fixtureGit(root, ...args);
   try {
     profiles(db);
     db.prepare("INSERT INTO repos (id, profile_id, name, path) VALUES ('r0', 'p', 'Fixture', ?)").run(root);
@@ -116,7 +119,7 @@ it("sees a tag moved outside PwrGit with one config read and one local ref scan"
     const calls: string[] = [];
     const counted: GitExec = (args, cwd, options) => {
       calls.push(args[0]!);
-      return git(args, cwd, options);
+      return fileGit(args, cwd, options);
     };
     vi.mocked(emitEvent).mockClear();
     const checks = new TagAutoChecks(db, { git: counted, sources, now: () => NOW });
@@ -144,6 +147,58 @@ it("sees a tag moved outside PwrGit with one config read and one local ref scan"
       ["tag:changed", { profileId: "p", repoId: "r0", refreshPreview: true }]
     ]);
   } finally {
+    db.close();
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+it.each(["bundled", "user-selected"])("stores the listed publisher's tags when origin is repointed (%s Git)", async (runtime) => {
+  const root = mkdtempSync(join(tmpdir(), "pwrgit-after-sync-repointed-"));
+  const db = openDatabase(":memory:");
+  const setup = (...args: string[]) => fixtureGit(root, ...args);
+  const pin = runtime === "bundled";
+  const selection = vi.spyOn(dugite, "installedGitSelection").mockReturnValue(pin ? null : "/fixture/git");
+  try {
+    profiles(db);
+    db.prepare("INSERT INTO repos (id, profile_id, name, path) VALUES ('r0', 'p', 'Fixture', ?)").run(root);
+    await setup("init", "-q", "-b", "main");
+    await setup("init", "--bare", "-q", "a.git");
+    await setup("init", "--bare", "-q", "b.git");
+    await setup("remote", "add", "origin", "./a.git");
+    const publish = async (repo: string): Promise<string> => {
+      await setup("-c", "user.name=Fixture", "-c", "user.email=fixture@example.test",
+        "commit", "--allow-empty", "-qm", repo);
+      const oid = await setup("rev-parse", "HEAD");
+      await setup("tag", "-f", "release", oid);
+      await setup("push", repo, "refs/tags/release");
+      return oid;
+    };
+    const a = await publish("./a.git");
+    const b = await publish("./b.git");
+    expect(a).not.toBe(b);
+    const sources = new TagSources(db, () => NOW);
+    const calls: string[] = [];
+    const repointingGit: GitExec = async (args, cwd, options) => {
+      calls.push(args[0]!);
+      const result = await fileGit(args, cwd, options);
+      if (args[0] === "config") await setup("remote", "set-url", "origin", "./b.git");
+      return result;
+    };
+    const checks = new TagAutoChecks(db, { git: repointingGit, sources, now: () => NOW });
+    vi.mocked(emitEvent).mockClear();
+    checks.afterSync("r0");
+    await vi.waitFor(() => expect(emitEvent).toHaveBeenCalled(), { interval: 10 });
+    expect(sources.store.snapshot("r0", "origin")).toMatchObject({
+      fetch_url: pin ? "./a.git" : "./b.git", checked_at_ms: NOW
+    });
+    expect(sources.store.tags("r0", "origin")?.get("release")?.objectId).toBe(pin ? a : b);
+    expect(await setup("remote", "get-url", "origin")).toBe("./b.git");
+    expect(await sources.source(fileGit, "r0", root)).toMatchObject({ value: { state: { stale: pin } } });
+    await setup("remote", "set-url", "origin", "./a.git");
+    expect(await sources.source(fileGit, "r0", root)).toMatchObject({ value: { state: { stale: !pin } } });
+    expect(calls).toEqual(pin ? ["config", "ls-remote", "for-each-ref"] : ["config", "config", "ls-remote", "for-each-ref"]);
+  } finally {
+    selection.mockRestore();
     db.close();
     rmSync(root, { recursive: true, force: true });
   }
