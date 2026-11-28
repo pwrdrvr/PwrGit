@@ -29,6 +29,7 @@ import {
 } from "./git-service";
 import { readGraphTagIndex, type GraphLocalTag } from "./graph-tags";
 import { readRemoteConfig, tagSourcesFor } from "./tag-sources";
+import { readShallowState } from "./shallow-history";
 import type { WorktreeStateService } from "./worktree-state";
 
 /** The repo-level part of the lane graph (same for every worktree of a repo);
@@ -454,6 +455,10 @@ export function registerGraphHandlers(
     // Which of HEAD's commits are already on a remote, so "Edit history from
     // here" can say a rewrite will need a force push.
     let headUnpushedCommits: string[] | undefined;
+    // Per request, like the moved tags: deepening moves no ref, so a cached
+    // build cannot know the boundary moved. A complete repository pays one
+    // `rev-parse`; a failed read draws no boundary, never a wrong one.
+    const shallowRead = readShallowState(git, wt.path, cached.defaultRef);
     if (head !== "") {
       const [headOnly, unpushed] = await Promise.all([
         readUniqueCommits(git, wt.path, cached.defaultRef, [head], UNIQUE_CAP),
@@ -559,6 +564,17 @@ export function registerGraphHandlers(
       if (tag !== undefined) tags[commit.hash] = tag;
     }
     const movedTags = drawnMovedTags(db, wt.repo_id, out, commits);
+    const shallowState = await shallowRead;
+    const shallow =
+      shallowState.ok && shallowState.value !== null
+        ? {
+            boundaries: commits
+              .filter((commit) => shallowState.value!.boundaries.has(commit.hash))
+              .map((commit) => commit.hash),
+            remote: shallowState.value.remote,
+            fetchesOnly: shallowState.value.fetchesOnly
+          }
+        : undefined;
     return ok({
       commits,
       tags,
@@ -576,7 +592,8 @@ export function registerGraphHandlers(
       shownBranches: out.shownBranches,
       upstreamRefs: out.upstreamRefs,
       matchedBranches: out.matchedBranches,
-      hiddenBranches: out.hiddenBranches
+      hiddenBranches: out.hiddenBranches,
+      ...(shallow === undefined ? {} : { shallow })
     });
   });
 }

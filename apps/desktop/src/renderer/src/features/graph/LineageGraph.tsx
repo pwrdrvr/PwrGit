@@ -68,6 +68,7 @@ import { shortWhen } from "./graph-view";
 import { markLineageRefresh, type LineageRefreshSource } from "./lineage-refresh-trace";
 import { layoutLanes } from "./lane-layout";
 import { findPrLandingLinks, layoutPrLandingLinks } from "./pr-landings";
+import { ShallowHistoryNote } from "./ShallowHistoryNote";
 
 type Scope = "active" | "all";
 const VISIBLE_COMMIT_PR_IDLE_MS = 500;
@@ -721,6 +722,9 @@ export function LineageGraph({
       movedAt.set(moved.local.targetId, [...(movedAt.get(moved.local.targetId) ?? []), moved]);
       publishedAt.set(moved.published.targetId, [...(publishedAt.get(moved.published.targetId) ?? []), moved]);
     }
+    // Main's answer, from `.git/shallow`: never inferred from a parentless
+    // commit, which is also what a real root looks like.
+    const shallowBoundaries = new Set(data?.shallow?.boundaries ?? []);
     return commits.map((commit, i) => {
       const pullRequest = commitPullRequests[commit.hash];
       const names = tips[commit.hash] ?? [];
@@ -760,6 +764,7 @@ export function LineageGraph({
         remoteRefs,
         isHead: commit.hash === head,
         isHeadOnly: headOnlyCommits.has(commit.hash),
+        ...(shallowBoundaries.has(commit.hash) ? { shallowBoundary: true } : {}),
         isMine: commit.authorEmail.toLowerCase() === email,
         defaultBranch,
         ...(pullRequest == null ? {} : { pullRequest })
@@ -1506,6 +1511,15 @@ export function LineageGraph({
                 ? "No active branches — you're all caught up."
                 : "No commits."}
           </div>
+        )}
+
+        {hasRows && data?.shallow !== undefined && (
+          <ShallowHistoryNote
+            repoId={repoId}
+            repoName={repoName}
+            worktreeId={worktreeId}
+            shallow={data.shallow}
+          />
         )}
 
         {scope === "active" && hidden > 0 && (

@@ -3,6 +3,7 @@ import { SUGGESTED_ROOTS, type NewRootChoice } from "@pwrgit/shared";
 import { tildeFor, useSuggestedRoots } from "../onboarding/NewRootPicker";
 import { NoFolderDestination, useNoFolderDestination } from "./NoFolderDestination";
 import {
+  DEFAULT_CLONE_DEPTH,
   forgeLabel,
   isForgeKind,
   type CloneCatalog,
@@ -75,6 +76,12 @@ import { FORGE_UNASKED_CODES, useCloneSearch } from "./useCloneSearch";
 import { SshHostTrustPanel, sshTrustTone } from "./SshHostTrustPanel";
 import { RepoIdentityChips } from "./RepoIdentityMarks";
 import { CloseGlyph } from "../../lib/CloseGlyph";
+import {
+  CLONE_HISTORY_DETAIL,
+  CLONE_HISTORY_LOCAL_NOTE,
+  CLONE_HISTORY_ON_DETAIL,
+  cloneHistoryChoice
+} from "./clone-history";
 
 const PROTOCOL_IDS = ["ssh", "https", "cli"] as const;
 
@@ -203,6 +210,9 @@ export function CloneRepoDialog({
   const [checking, setChecking] = useState(false);
   const [checkError, setCheckError] = useState<string | null>(null);
   const [protocol, setProtocol] = useState<CloneProtocol>("ssh");
+  /** "Recent history only": off is a full clone, the default. */
+  const [limitHistory, setLimitHistory] = useState(false);
+  const [historyDepthText, setHistoryDepthText] = useState(String(DEFAULT_CLONE_DEPTH));
   const [host, setHost] = useState<ForgeKind>("github");
   const [destinationQuery, setDestinationQuery] = useState("");
   const [selectedDestination, setSelectedDestination] =
@@ -558,6 +568,14 @@ export function CloneRepoDialog({
         ? "original"
         : cloneFromDefault(originalCanPush, forkCard)));
   const forking = cloneFrom === "fork";
+  const history = cloneHistoryChoice({
+    on: limitHistory,
+    text: historyDepthText,
+    forking,
+    local: localSelected,
+    protocol,
+    host: activeHost
+  });
   const forkStep = forkAction(forkPreflight);
   const forkUpstream = defaultUpstream(forkPreflight);
 
@@ -821,6 +839,7 @@ export function CloneRepoDialog({
       return;
     }
     if (destination === null || originRepository === null) return;
+    if (history.blocksSubmit) return;
     if (
       forking &&
       (forkPreflight === null || forkTarget === null || forkStep.kind === "blocked")
@@ -865,7 +884,8 @@ export function CloneRepoDialog({
             host: selectedRepository.host,
             hostname: selectedRepository.hostname,
             ...(cloneUpstreamSlug === null ? {} : { upstream: cloneUpstreamSlug }),
-            ...(noFolder ? { newRoot } : {})
+            ...(noFolder ? { newRoot } : {}),
+            ...(history.depth === undefined ? {} : { depth: history.depth })
           });
     activeCloneIdRef.current = null;
     setBusy(false);
@@ -911,7 +931,8 @@ export function CloneRepoDialog({
       selectedRepository === null ||
       (revealing
         ? false
-        : activeDestination === null ||
+        : history.blocksSubmit ||
+          activeDestination === null ||
           originRepository === null ||
           (!forking && !lineageKnown) ||
           (forking && (forkTarget === null || forkStep.kind === "blocked"))));
@@ -1339,6 +1360,65 @@ export function CloneRepoDialog({
                     </button>
                   );
                 })}
+              </div>
+            </section>
+          )}
+
+          {!revealing && (
+            <section className="clone-section">
+              {/* Drawn at open and never forge-dependent, so it cannot move
+                  anything after the pick; the count sits inline so turning
+                  it on does not change the row's height. */}
+              <div className="fork-options">
+                <label
+                  className={`clone-history${limitHistory ? " is-on" : ""}${
+                    history.toggleDisabled ? " is-disabled" : ""
+                  }`}
+                >
+                  <input
+                    type="checkbox"
+                    checked={limitHistory}
+                    disabled={busy || history.toggleDisabled}
+                    aria-describedby="clone-history-detail"
+                    onChange={(event) => {
+                      setLimitHistory(event.target.checked);
+                      clearSubmitError();
+                    }}
+                  />
+                  <span>
+                    <strong>
+                      Recent history only
+                      {limitHistory && (
+                        <>
+                          {" \u2014 last "}
+                          <input
+                            className="clone-history__depth"
+                            type="text"
+                            inputMode="numeric"
+                            aria-label="Commits per branch"
+                            aria-invalid={history.error !== null && history.unavailable === null}
+                            value={historyDepthText}
+                            disabled={busy}
+                            maxLength={6}
+                            onChange={(event) => {
+                              setHistoryDepthText(event.target.value);
+                              clearSubmitError();
+                            }}
+                          />
+                          {" commits per branch"}
+                        </>
+                      )}
+                    </strong>
+                    <small id="clone-history-detail" className={history.error === null ? undefined : "clone-history__error"}>
+                      {history.error ??
+                        (history.toggleDisabled && history.unavailable !== null
+                          ? history.unavailable
+                          : `${limitHistory ? CLONE_HISTORY_ON_DETAIL : CLONE_HISTORY_DETAIL}${
+                              localSelected ? ` ${CLONE_HISTORY_LOCAL_NOTE}` : ""
+                            }`)}
+                    </small>
+                  </span>
+                </label>
               </div>
             </section>
           )}

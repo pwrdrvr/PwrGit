@@ -349,10 +349,11 @@ export class GitHubRepoProvider implements ForgeRepoProvider {
       onStderr: (chunk: string) => void;
       env: Record<string, string>;
       signal?: AbortSignal;
+      gitOptions?: readonly string[];
     }
   ): Promise<void> {
     await this.gh(
-      ["repo", "clone", nameWithOwner, destination, "--", "--progress"],
+      ["repo", "clone", nameWithOwner, destination, "--", "--progress", ...(options.gitOptions ?? [])],
       {
         timeoutMs: 10 * 60_000,
         onStderr: options.onStderr,

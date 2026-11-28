@@ -147,6 +147,16 @@ export type ForgeProduct = {
    */
   readonly accountChoice: boolean;
   /**
+   * The CLI's `repo clone` hands options after `--` to `git clone`, so a
+   * limited-history clone (`--depth N --no-single-branch`) can go through it.
+   *
+   * `gh repo clone` and `glab repo clone` document `-- <gitflags>`; `cafe
+   * repo clone` takes none. Where this is false the Clone dialog disables
+   * "Recent history only" for the CLI card, and main refuses the pair rather
+   * than cloning full history the user did not ask for.
+   */
+  readonly cliCloneTakesGitOptions: boolean;
+  /**
    * What the integration can answer at all.
    *
    * Not a login: these say what is possible, which is why a false one means
@@ -237,6 +247,7 @@ export const FORGE_PRODUCTS: Readonly<Record<ForgeKind, ForgeProduct>> = freeze(
     addHost: { button: "Add GitCafe host…", sub: "For a GitCafe host you have not signed in to yet.", title: "Add a GitCafe host", placeholder: "git.cafe" },
     forkCompletesAsynchronously: true,
     accountChoice: false,
+    cliCloneTakesGitOptions: false,
     capabilities: {
       batchedBranchLookup: false,
       batchedCommitAssociation: false,
@@ -288,6 +299,7 @@ export const FORGE_PRODUCTS: Readonly<Record<ForgeKind, ForgeProduct>> = freeze(
     },
     forkCompletesAsynchronously: false,
     accountChoice: true,
+    cliCloneTakesGitOptions: true,
     capabilities: {
       batchedBranchLookup: true,
       // `associatedPullRequests` takes many commit OIDs in one aliased query.
@@ -342,6 +354,7 @@ export const FORGE_PRODUCTS: Readonly<Record<ForgeKind, ForgeProduct>> = freeze(
     // The fork API returns before the project is ready to clone.
     forkCompletesAsynchronously: true,
     accountChoice: false,
+    cliCloneTakesGitOptions: true,
     capabilities: {
       // `mergeRequests(sourceBranches: [...])` batches natively.
       batchedBranchLookup: true,

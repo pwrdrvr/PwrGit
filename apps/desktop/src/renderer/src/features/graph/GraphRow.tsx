@@ -44,6 +44,9 @@ const LANE_COLORS = [
   "var(--lane-7)",
   "var(--lane-8)"
 ];
+export const SHALLOW_BOUNDARY_TIP =
+  "History cut \u2014 this repository has no commits older than this one on this line. Its parents weren\u2019t downloaded (limited-history clone). Fetch older commits from the note under History.";
+
 export const laneColor = (i: number): string =>
   LANE_COLORS[i % LANE_COLORS.length] ?? "var(--lane-1)";
 
@@ -85,6 +88,9 @@ export type GraphRowVM = {
   isHead: boolean;
   /** Reachable from the viewed HEAD but not the default comparison ref. */
   isHeadOnly: boolean;
+  /** A shallow boundary: its parents were never downloaded, so history drawn
+   *  here ends at this commit even though the project's does not. */
+  shallowBoundary?: boolean;
   isMine: boolean;
   defaultBranch: string;
   /** Best pull request associated with this exact commit, when known. */
@@ -424,6 +430,15 @@ export function GraphRow({
           </RefBrowser>
         )}
         {commit.isMerge && <span className="commit-tag commit-tag--merge">merge</span>}
+        {vm.shallowBoundary === true && (
+          <span
+            className="commit-tag commit-tag--shallow"
+            {...hoverTooltip(tip, SHALLOW_BOUNDARY_TIP)}
+          >
+            history cut
+            <span className="a11y-sr-only">: {SHALLOW_BOUNDARY_TIP}</span>
+          </span>
+        )}
         {onShowPerson === undefined ? (
           <span className="commit-byline">{byline}</span>
         ) : (

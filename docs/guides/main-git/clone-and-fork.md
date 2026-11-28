@@ -78,3 +78,35 @@ constraint must also offer the way past it.
 - `pushWasDenied` (git-service.ts) classifies the one push failure with a
   remedy in PwrGit. It excludes a protected branch, which reads almost the
   same on GitLab but means the opposite about access.
+
+## Recent history only is `--depth N --no-single-branch`, never `--depth` alone
+
+The Clone dialog's "Recent history only" sends `repo:clone`'s `depth`.
+`cloneHistoryArgs` turns it into `--depth N --no-single-branch`; full history
+(no `depth`) runs exactly the command it always did.
+
+- **`--depth` alone implies `--single-branch`.** Git then fetches only the
+  default branch *and* rewrites `remote.origin.fetch` to name it, so every
+  other branch is missing from PwrGit on every later fetch too. With
+  `--no-single-branch` each branch and each tag arrives with its own newest N
+  commits (many old tags therefore still cost history near each).
+- **A plain local path ignores `--depth`** ("use file:// instead"): Git
+  hard-links objects instead of running a transfer. A local source with a
+  depth clones from `pathToFileURL(path)`.
+- **Never fall back to a full clone.** A bad count (main re-checks it: a
+  `number`, whole, 1–`MAX_HISTORY_DEPTH`), a CLI whose product has
+  `cliCloneTakesGitOptions: false` (GitCafe), or a server that refuses shallow
+  requests (`isShallowUnsupportedError`: dumb HTTP, old servers) each fail
+  with a reason. `gh` and `glab` get the options after `--`.
+- Fork… and "Clone from: your fork" clone full history; `ForkService` passes
+  no depth to `runClone`.
+
+A shallow repository, cloned here or elsewhere, is read by
+`shallow-history.ts`: `rev-parse --is-shallow-repository` plus the common
+directory's `shallow` file (linked worktrees share it). `graph:lanes` attaches
+`shallow` per request, never cached with the lanes, because deepening moves no
+ref. `remote:deepenHistory` is the only thing that fetches older history: a
+tracked fetch (`--deepen=N` or `--unshallow`, remote after `--`, configured
+remotes only) that keeps the fetch refspec as it is. Design:
+`design/Shallow Clones - UX Review.dc.html`.
+

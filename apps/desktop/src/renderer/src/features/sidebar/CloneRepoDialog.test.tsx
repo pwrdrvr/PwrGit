@@ -610,3 +610,58 @@ it("offers no upstream for a repository that is not a fork", async () => {
   expect(upstreamOption()).toBeNull();
   expect(willCreate()).not.toContain("upstream");
 });
+
+const historyRow = (): HTMLLabelElement => container.querySelector<HTMLLabelElement>(".clone-history")!;
+const historyBox = (): HTMLInputElement => historyRow().querySelector<HTMLInputElement>("input[type=checkbox]")!;
+const depthInput = (): HTMLInputElement | null => historyRow().querySelector<HTMLInputElement>(".clone-history__depth");
+async function typeDepth(value: string): Promise<void> {
+  const input = depthInput()!;
+  await act(async () => {
+    Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!.call(input, value);
+    input.dispatchEvent(new Event("input", { bubbles: true }));
+  });
+}
+
+it("clones full history by default: the history row is off and no depth is sent", async () => {
+  mockForge(preflight());
+  await openAndPick();
+  expect(historyBox().checked).toBe(false);
+  expect(depthInput()).toBeNull();
+  await act(async () => submit().click());
+  const request = dispatchMock.mock.calls.find(([channel]) => channel === "repo:clone")?.[1];
+  expect(request).not.toHaveProperty("depth");
+});
+
+it("sends the commit count when recent history only is on, and blocks a malformed one", async () => {
+  mockForge(preflight());
+  await openAndPick();
+  await act(async () => historyBox().click());
+  expect(historyBox().checked).toBe(true);
+  expect(depthInput()!.value).toBe("50");
+
+  await typeDepth("0");
+  expect(historyRow().textContent).toContain("whole number of commits from 1 to 100,000");
+  expect(depthInput()!.getAttribute("aria-invalid")).toBe("true");
+  expect(submit().disabled).toBe(true);
+  await typeDepth("1e3");
+  expect(submit().disabled).toBe(true);
+
+  await typeDepth("25");
+  expect(submit().disabled).toBe(false);
+  await act(async () => submit().click());
+  expect(dispatchMock).toHaveBeenCalledWith("repo:clone", expect.objectContaining({
+    nameWithOwner: "octo-labs/sparkline",
+    depth: 25
+  }));
+});
+
+it("does not offer recent history only while cloning your fork, and never sends it to repo:fork", async () => {
+  mockForge(preflight(fork));
+  await openAndPick();
+  expect(card("Your fork").getAttribute("aria-pressed")).toBe("true");
+  expect(historyBox().disabled).toBe(true);
+  expect(historyRow().textContent).toContain("Not available when cloning your fork");
+  await act(async () => submit().click());
+  const request = dispatchMock.mock.calls.find(([channel]) => channel === "repo:fork")?.[1];
+  expect(request).not.toHaveProperty("depth");
+});

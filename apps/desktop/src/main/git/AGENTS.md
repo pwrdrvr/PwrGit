@@ -56,6 +56,9 @@ before you change clone, fork or remote rewiring.
   Read the remotes first; never overwrite one.
 - **Forking a checkout in place: add `upstream` first, then re-point
   `origin`.** Never rename `origin`.
+- **Recent history only is `--depth N --no-single-branch`, never `--depth`
+  alone.** A local path clones through `file://`; nothing falls back to a full
+  clone, and only `remote:deepenHistory` fetches older history.
 
 ## Worktrees, queue locks and removal
 
