@@ -31,7 +31,7 @@ type BranchRefresh = Promise<Map<string, PrSummary | null>>;
 type BranchRefreshQueue = {
   waiting: Map<string, BranchRefresh>;
   tail?: BranchRefresh;
-  running?: BranchRefresh;
+  pendingWrite?: BranchRefresh;
 };
 
 /**
@@ -132,8 +132,8 @@ export class PrService {
   private readonly resolveForge: typeof resolveForge;
   private readonly now: () => number;
   private writeGeneration = 0;
-  // Branch batches run in order. Only the running batch blocks PR-number
-  // refreshes, so a queued batch can safely wait for an active number refresh.
+  // Branch batches run in order. PR-number refreshes can run during ref
+  // discovery and wait for an active branch fetch and write.
   private readonly branchRefreshQueues = new Map<string, BranchRefreshQueue>();
   private readonly pendingCommitRefreshes = new Map<
     string,
@@ -414,7 +414,7 @@ export class PrService {
     }
 
     const pending: Promise<unknown>[] = [];
-    const pendingRepo = this.branchRefreshQueues.get(repoId)?.running;
+    const pendingRepo = this.branchRefreshQueues.get(repoId)?.pendingWrite;
     const pendingCommits = this.pendingCommitRefreshes.get(repoId);
     const pendingNumbers = this.pendingPrNumberRefreshes.get(repoId);
     if (pendingRepo !== undefined) pending.push(pendingRepo);
@@ -629,16 +629,9 @@ export class PrService {
     key: string
   ): Promise<Map<string, PrSummary | null>> {
     const previous = queue.tail;
-    let waited = previous !== undefined;
     // Yield even on an idle repo, so equivalent requests can join before the
     // ref snapshot. A failed batch must still release the next branch scope.
     await previous?.catch(() => undefined);
-    while (this.isCurrent(generation)) {
-      const pendingStatus = this.pendingPrNumberRefreshes.get(repoId);
-      if (pendingStatus === undefined) break;
-      waited = true;
-      await pendingStatus;
-    }
     // A request arriving after discovery starts may know about new local
     // refs or request a new forced observation. Let it join the next batch.
     queue.waiting.delete(key);
@@ -649,20 +642,31 @@ export class PrService {
     // absent refs cannot make the remaining branches stale.
     const { branches } = opts;
     if (
-      waited &&
+      previous !== undefined &&
       opts.force !== true &&
       branches !== undefined &&
-      this.isFresh(repoId, branches, this.refreshTtlMs(repoId, branches, opts))
+      this.branchesAreFresh(repoId, branches, opts)
     ) {
       return new Map();
     }
 
-    const refresh = this.discoverAndRefreshBranches(repoId, opts, generation);
-    queue.running = refresh;
+    const toCheck = await this.branchesToCheck(repoId, branches);
+    if (toCheck.branches.length === 0) return new Map();
+    // Ref discovery is read-only. Acquire the write turn after discovery so
+    // a slow Git listing cannot hold up PR status polling.
+    while (this.isCurrent(generation)) {
+      const pendingStatus = this.pendingPrNumberRefreshes.get(repoId);
+      if (pendingStatus === undefined) break;
+      await pendingStatus;
+    }
+    if (!this.isCurrent(generation)) return new Map();
+
+    const refresh = this.refreshBranches(repoId, toCheck, opts, generation);
+    queue.pendingWrite = refresh;
     try {
       return await refresh;
     } finally {
-      delete queue.running;
+      delete queue.pendingWrite;
     }
   }
 
@@ -670,16 +674,6 @@ export class PrService {
     const scope = branchFailureScope(opts);
     return opts.force !== true &&
       this.failedWithin(repoId, scope, this.failureTtlMs(scope, opts.trigger));
-  }
-
-  private async discoverAndRefreshBranches(
-    repoId: string,
-    opts: BranchRefreshOptions,
-    generation: number
-  ): Promise<Map<string, PrSummary | null>> {
-    const toCheck = await this.branchesToCheck(repoId, opts.branches);
-    if (toCheck.branches.length === 0 || !this.isCurrent(generation)) return new Map();
-    return await this.refreshBranches(repoId, toCheck, opts, generation);
   }
 
   private async refreshBranches(
@@ -694,10 +688,7 @@ export class PrService {
       .get(repoId) as { path: string } | undefined;
     if (repo === undefined) return empty;
     // The failure throttle is checked by the caller, above `branchesToCheck`.
-    if (
-      opts.force !== true &&
-      this.isFresh(repoId, branches, this.refreshTtlMs(repoId, branches, opts))
-    ) {
+    if (opts.force !== true && this.branchesAreFresh(repoId, branches, opts)) {
       return empty;
     }
     const scope = branchFailureScope(opts);
@@ -729,7 +720,7 @@ export class PrService {
       // A change request is filed under the name the branch was PUBLISHED
       // as: its upstream's, when it tracks a branch on an accepted source
       // remote (`local-name` -> `origin/remote-name`). The answer is keyed
-      // back to the local name, so `branch_pr`, `isFresh`, the failure marks
+      // back to the local name, so `branch_pr`, freshness checks, the failure marks
       // and `Worktree.pr` never see the published one.
       const publishedName = (branch: string): string => {
         const upstream = refs.get(branch)?.upstream ?? null;
@@ -755,7 +746,7 @@ export class PrService {
       return empty;
     }
     // A batched client answers what it could and omits the chunks it never
-    // reached, so a partial answer counts as a failed attempt too: `isFresh`
+    // reached, so a partial answer counts as a failed attempt too: freshness
     // is all-or-nothing, so one omitted branch leaves the whole repo stale and
     // the next trigger would re-send every batch. The batches that *did*
     // resolve are still written below — that is the forward progress.
@@ -835,7 +826,6 @@ export class PrService {
     // timezone, a wake from sleep), not a fresh failure. Without the upper
     // bound it suppresses every refresh until the clock catches up, which
     // `force` is the only escape from — and nothing in the renderer sends it.
-    // `isFresh` guards its stored timestamps the same way.
     return failedAt <= now && failedAt > now - ttlMs;
   }
 
@@ -880,7 +870,7 @@ export class PrService {
    * How long an attempt of this shape is not worth repeating once it failed:
    * the TTL a successful one would have earned.
    *
-   * `refreshTtlMs`'s terminal-state refinement is deliberately absent. That
+   * The terminal-state refinement for freshness is deliberately absent. That
    * refinement asks whether the *cached* rows are all merged/closed, and a
    * refusal cached nothing — so there is no terminal state to be slow about,
    * and the unrefined value is the shorter, retry-sooner half anyway. Both the
@@ -900,55 +890,36 @@ export class PrService {
       : SCHEDULED_BRANCH_REFRESH_TTL_MS;
   }
 
-  private refreshTtlMs(
+  private branchesAreFresh(
     repoId: string,
     branches: string[],
-    opts: { branches?: string[]; trigger?: PrRefreshTrigger }
-  ): number {
+    opts: BranchRefreshOptions
+  ): boolean {
+    const select = "SELECT branch, state, fetched_at FROM branch_pr WHERE repo_id = ?";
+    // Keep the composite-key lookup for targeted batches with one bound list,
+    // including batches larger than SQLite's parameter limit.
+    const rows = (opts.branches === undefined
+      ? this.db.prepare(select).all(repoId)
+      : this.db.prepare(`${select} AND branch IN (SELECT value FROM json_each(?))`)
+        .all(repoId, JSON.stringify(branches))) as {
+      branch: string;
+      state: string | null;
+      fetched_at: string;
+    }[];
+    const cached = new Map(rows.map((row) => [row.branch, row] as const));
+    let ttlMs = opts.branches === undefined ? REPO_REFRESH_TTL_MS : SCHEDULED_BRANCH_REFRESH_TTL_MS;
     if (opts.trigger === "user") {
-      return this.hasOnlyTerminalPrs(repoId, branches)
-        ? TERMINAL_USER_BRANCH_REFRESH_TTL_MS
-        : USER_BRANCH_REFRESH_TTL_MS;
+      const terminal = branches.every((branch) => {
+        const state = cached.get(branch)?.state;
+        return state === "merged" || state === "closed";
+      });
+      ttlMs = terminal ? TERMINAL_USER_BRANCH_REFRESH_TTL_MS : USER_BRANCH_REFRESH_TTL_MS;
     }
-    return opts.branches === undefined
-      ? REPO_REFRESH_TTL_MS
-      : SCHEDULED_BRANCH_REFRESH_TTL_MS;
-  }
-
-  private isFresh(repoId: string, branches: string[], ttlMs: number): boolean {
-    const fetchedAtByBranch = new Map(
-      (
-        this.db
-          .prepare("SELECT branch, fetched_at FROM branch_pr WHERE repo_id = ?")
-          .all(repoId) as { branch: string; fetched_at: string }[]
-      ).map((row) => [row.branch, Date.parse(row.fetched_at)] as const)
-    );
     const oldestAllowed = this.now() - ttlMs;
     return branches.every((branch) => {
-      const fetchedAt = fetchedAtByBranch.get(branch);
-      return (
-        fetchedAt !== undefined &&
-        Number.isFinite(fetchedAt) &&
-        fetchedAt > oldestAllowed
-      );
+      const row = cached.get(branch);
+      return row !== undefined && Date.parse(row.fetched_at) > oldestAllowed;
     });
-  }
-
-  private hasOnlyTerminalPrs(repoId: string, branches: string[]): boolean {
-    const cached = new Map(
-      (
-        this.db
-          .prepare("SELECT branch, state FROM branch_pr WHERE repo_id = ?")
-          .all(repoId) as { branch: string; state: string | null }[]
-      ).map((row) => [row.branch, row.state] as const)
-    );
-    return (
-      branches.length > 0 &&
-      branches.every((branch) => {
-        const state = cached.get(branch);
-        return state === "merged" || state === "closed";
-      })
-    );
   }
 
   private async originForge(repoPath: string): Promise<ResolvedForge | null> {

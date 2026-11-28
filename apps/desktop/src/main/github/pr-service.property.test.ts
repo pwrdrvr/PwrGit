@@ -1,3 +1,4 @@
+import { setImmediate } from "node:timers/promises";
 import fc from "fast-check";
 import { expect, it, vi } from "vitest";
 import { ok, type PrSummary } from "@pwrgit/shared";
@@ -228,6 +229,60 @@ it("lets distinct targeted scopes run after the same blocked refresh", async () 
   }
 });
 
+it.each([4, 8, 16])("reads only requested cache rows for %i queued deleted branches", async (callers) => {
+  const git = vi.fn<GitExec>(async (args) => stdoutOk(args[0] === "for-each-ref" ? branch : origin));
+  const started = deferred<void>();
+  const reply = deferred<Map<string, PrSummary | null>>();
+  const fetch = vi.fn<TokenForgeProvider["fetchPrsForBranches"]>(() => {
+    started.resolve();
+    return reply.promise;
+  });
+  const { bus, db, close } = fixture(git, fetch);
+  const deleted = Array.from({ length: callers }, (_, index) => `deleted/${index}`);
+  const prepare = db.prepare.bind(db);
+  const insert = prepare("INSERT INTO branch_pr (repo_id, branch, state, fetched_at) VALUES (?, ?, 'open', ?)");
+  db.transaction(() => {
+    const stale = new Date(0).toISOString();
+    for (let index = 0; index < 4_000 - callers; index++) {
+      insert.run("repo", `cached/${index}`, stale);
+    }
+    for (const name of deleted) {
+      insert.run("repo", name, stale);
+      insert.run("other", name, new Date(1_000_000).toISOString());
+    }
+  })();
+  let rowsRead = 0;
+  const countRows = vi.spyOn(db, "prepare").mockImplementation((sql) => {
+    const statement = prepare(sql);
+    if (/^SELECT branch, (?:state|fetched_at)(?:, (?:state|fetched_at))?\s+FROM branch_pr/i.test(sql.trim())) {
+      const all = statement.all.bind(statement);
+      statement.all = (...args) => {
+        const rows = all(...args);
+        rowsRead += rows.length;
+        return rows;
+      };
+    }
+    return statement;
+  });
+  try {
+    const submit = (name: string, force = false) => bus.dispatch("pr:refresh", {
+      repoId: "repo", branches: [name], trigger: "user", force
+    });
+    const first = submit(branch, true);
+    await started.promise;
+    const queued = deleted.map((name) => submit(name));
+    reply.resolve(new Map([[branch, pr]]));
+    expect(await Promise.all([first, ...queued])).toEqual(Array.from({ length: callers + 1 }, () => ok(null)));
+    expect(fetch).toHaveBeenCalledTimes(1);
+    expect(git.mock.calls.filter(([args]) => args[0] === "for-each-ref")).toHaveLength(callers + 1);
+    expect(rowsRead).toBe(callers);
+  } finally {
+    reply.resolve(new Map());
+    countRows.mockRestore();
+    close();
+  }
+});
+
 it("drops branch changes when a repository disappears during an attempt", async () => {
   const git: GitExec = async (args) => stdoutOk(args[0] === "for-each-ref" ? branch : origin);
   const started = deferred<void>();
@@ -255,9 +310,10 @@ it("drops branch changes when a repository disappears during an attempt", async 
   }
 });
 
-it("hands off between PR-number refreshes and branch tip associations in write order", async () => {
+it("polls PR numbers during ref discovery and serializes branch and commit writes", async () => {
   const tip = "a".repeat(40);
-  const firstStatus = deferred<void>();
+  const refsStarted = deferred<void>();
+  const releaseRefs = deferred<void>();
   const releaseStatus = deferred<void>();
   const tipStarted = deferred<void>();
   const releaseTip = deferred<void>();
@@ -267,10 +323,15 @@ it("hands off between PR-number refreshes and branch tip associations in write o
   const git: GitExec = async (args) => {
     if (args[0] !== "for-each-ref") return stdoutOk(origin);
     calls.push("refs");
+    refsStarted.resolve();
+    await releaseRefs.promise;
     return stdoutOk(`${branch}\0${tip}\0\0\n`);
   };
   let numberCalls = 0;
-  const { prs, close } = fixture(git, async () => new Map([[branch, null]]), {
+  const { prs, close } = fixture(git, async () => {
+    calls.push("branches");
+    return new Map([[branch, null]]);
+  }, {
     fetchPrsForCommits: async () => {
       calls.push("tip");
       tipStarted.resolve();
@@ -280,35 +341,44 @@ it("hands off between PR-number refreshes and branch tip associations in write o
     fetchPrsByNumbers: async () => {
       calls.push("number");
       if (++numberCalls === 1) {
-        firstStatus.resolve();
         await releaseStatus.promise;
       }
       return new Map([[pr.number, merged]]);
     }
   });
 
+  const inFlight: Promise<unknown>[] = [];
   try {
-    const first = prs.refreshPrNumbers("repo", [pr.number]);
-    await firstStatus.promise;
     const refresh = prs.refreshRepo("repo");
-    await Promise.resolve();
-    expect(calls).toEqual(["number"]);
+    inFlight.push(refresh);
+    await refsStarted.promise;
+    const first = prs.refreshPrNumbers("repo", [pr.number]);
+    inFlight.push(first);
+    await setImmediate();
+    expect(calls).toEqual(["refs", "number"]);
+
+    releaseRefs.resolve();
+    await setImmediate();
+    expect(calls).toEqual(["refs", "number"]);
     releaseStatus.resolve();
     await first;
     await tipStarted.promise;
     const last = prs.refreshPrNumbers("repo", [pr.number]);
-    await Promise.resolve();
-    expect(calls).toEqual(["number", "refs", "tip"]);
+    inFlight.push(last);
+    await setImmediate();
+    expect(calls).toEqual(["refs", "number", "branches", "tip"]);
     releaseTip.resolve();
 
     expect((await refresh).get(branch)).toEqual(open);
     const final = await last;
     expect(final.branches.get(branch)).toMatchObject(merged);
     expect(final.commits.get(tip)).toMatchObject(merged);
-    expect(calls).toEqual(["number", "refs", "tip", "number"]);
+    expect(calls).toEqual(["refs", "number", "branches", "tip", "number"]);
   } finally {
+    releaseRefs.resolve();
     releaseStatus.resolve();
     releaseTip.resolve();
+    await Promise.allSettled(inFlight);
     close();
   }
 });
