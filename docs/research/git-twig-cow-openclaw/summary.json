@@ -1,0 +1,857 @@
+{
+  "/private/tmp/pwrgit-openclaw-20261116/results1/results.json": {
+    "timing": [
+      {
+        "fixture": "openclaw",
+        "rev": "head",
+        "arm": "stock",
+        "samples": {
+          "wall": [
+            16.12,
+            12.39,
+            13.17,
+            13.22,
+            12.62
+          ],
+          "user": [
+            1.64,
+            1.46,
+            1.46,
+            1.45,
+            1.46
+          ],
+          "system": [
+            6.35,
+            5.18,
+            5.24,
+            5.12,
+            5.14
+          ],
+          "rss_bytes": [
+            320274432,
+            319553536,
+            320929792,
+            322748416,
+            321814528
+          ]
+        },
+        "median": {
+          "wall": 13.17,
+          "user": 1.46,
+          "system": 5.18,
+          "rss_bytes": 320929792
+        },
+        "backends": {
+          "stock": 5
+        },
+        "sharing": {
+          "files": 65498,
+          "same_first_extent": 0,
+          "zero_private": 5,
+          "private_bytes": 921948160,
+          "sample": {
+            ".agents/resume": {
+              "source": {
+                "first_block": 246882304,
+                "private_bytes": 4096
+              },
+              "target": {
+                "first_block": 1436631040,
+                "private_bytes": 4096
+              }
+            },
+            ".agents/setup": {
+              "source": {
+                "first_block": 246886400,
+                "private_bytes": 4096
+              },
+              "target": {
+                "first_block": 1436635136,
+                "private_bytes": 4096
+              }
+            },
+            ".agents/skills/agent-transcript/SKILL.md": {
+              "source": {
+                "first_block": 246890496,
+                "private_bytes": 4096
+              },
+              "target": {
+                "first_block": 1436639232,
+                "private_bytes": 4096
+              }
+            }
+          }
+        }
+      },
+      {
+        "fixture": "openclaw",
+        "rev": "head",
+        "arm": "twig",
+        "samples": {
+          "wall": [
+            19.45,
+            13.65,
+            12.87,
+            13.26,
+            12.04
+          ],
+          "user": [
+            1.98,
+            1.7,
+            1.69,
+            1.71,
+            1.67
+          ],
+          "system": [
+            6.98,
+            5.45,
+            5.33,
+            5.38,
+            5.25
+          ],
+          "rss_bytes": [
+            324354048,
+            320700416,
+            320307200,
+            320126976,
+            320798720
+          ]
+        },
+        "median": {
+          "wall": 13.26,
+          "user": 1.7,
+          "system": 5.38,
+          "rss_bytes": 320700416
+        },
+        "backends": {
+          "fallback": 5
+        },
+        "sharing": {
+          "files": 65498,
+          "same_first_extent": 0,
+          "zero_private": 5,
+          "private_bytes": 921948160,
+          "sample": {
+            ".agents/resume": {
+              "source": {
+                "first_block": 246882304,
+                "private_bytes": 4096
+              },
+              "target": {
+                "first_block": 1503551488,
+                "private_bytes": 4096
+              }
+            },
+            ".agents/setup": {
+              "source": {
+                "first_block": 246886400,
+                "private_bytes": 4096
+              },
+              "target": {
+                "first_block": 1503555584,
+                "private_bytes": 4096
+              }
+            },
+            ".agents/skills/agent-transcript/SKILL.md": {
+              "source": {
+                "first_block": 246890496,
+                "private_bytes": 4096
+              },
+              "target": {
+                "first_block": 1503559680,
+                "private_bytes": 4096
+              }
+            }
+          }
+        }
+      },
+      {
+        "fixture": "openclaw",
+        "rev": "head",
+        "arm": "on",
+        "samples": {
+          "wall": [
+            21.33,
+            11.67,
+            11.93,
+            11.35,
+            11.46
+          ],
+          "user": [
+            0.58,
+            0.41,
+            0.4,
+            0.41,
+            0.4
+          ],
+          "system": [
+            13.19,
+            10.36,
+            10.49,
+            10.12,
+            10.13
+          ],
+          "rss_bytes": [
+            216891392,
+            215891968,
+            215760896,
+            214122496,
+            217300992
+          ]
+        },
+        "median": {
+          "wall": 11.67,
+          "user": 0.41,
+          "system": 10.36,
+          "rss_bytes": 215891968
+        },
+        "backends": {
+          "on": 5
+        },
+        "sharing": {
+          "files": 65498,
+          "same_first_extent": 65493,
+          "zero_private": 65498,
+          "private_bytes": 0,
+          "sample": {
+            ".agents/resume": {
+              "source": {
+                "first_block": 246882304,
+                "private_bytes": 0
+              },
+              "target": {
+                "first_block": 246882304,
+                "private_bytes": 0
+              }
+            },
+            ".agents/setup": {
+              "source": {
+                "first_block": 246886400,
+                "private_bytes": 0
+              },
+              "target": {
+                "first_block": 246886400,
+                "private_bytes": 0
+              }
+            },
+            ".agents/skills/agent-transcript/SKILL.md": {
+              "source": {
+                "first_block": 246890496,
+                "private_bytes": 0
+              },
+              "target": {
+                "first_block": 246890496,
+                "private_bytes": 0
+              }
+            }
+          }
+        }
+      },
+      {
+        "fixture": "openclaw",
+        "rev": "head",
+        "arm": "off",
+        "samples": {
+          "wall": [
+            24.08,
+            23.7,
+            13.27,
+            12.58,
+            12.66
+          ],
+          "user": [
+            1.74,
+            1.71,
+            1.47,
+            1.43,
+            1.44
+          ],
+          "system": [
+            7.04,
+            7.01,
+            5.32,
+            5.16,
+            5.13
+          ],
+          "rss_bytes": [
+            285589504,
+            307396608,
+            319733760,
+            320978944,
+            319406080
+          ]
+        },
+        "median": {
+          "wall": 13.27,
+          "user": 1.47,
+          "system": 5.32,
+          "rss_bytes": 319406080
+        },
+        "backends": {
+          "off": 5
+        },
+        "sharing": {
+          "files": 65498,
+          "same_first_extent": 0,
+          "zero_private": 5,
+          "private_bytes": 921948160,
+          "sample": {
+            ".agents/resume": {
+              "source": {
+                "first_block": 246882304,
+                "private_bytes": 4096
+              },
+              "target": {
+                "first_block": 1306677248,
+                "private_bytes": 4096
+              }
+            },
+            ".agents/setup": {
+              "source": {
+                "first_block": 246886400,
+                "private_bytes": 4096
+              },
+              "target": {
+                "first_block": 1306681344,
+                "private_bytes": 4096
+              }
+            },
+            ".agents/skills/agent-transcript/SKILL.md": {
+              "source": {
+                "first_block": 246890496,
+                "private_bytes": 4096
+              },
+              "target": {
+                "first_block": 1306685440,
+                "private_bytes": 4096
+              }
+            }
+          }
+        }
+      },
+      {
+        "fixture": "openclaw",
+        "rev": "older",
+        "arm": "stock",
+        "samples": {
+          "wall": [
+            13.56,
+            13.48,
+            13.32,
+            14.11,
+            13.42
+          ],
+          "user": [
+            1.47,
+            1.47,
+            1.46,
+            1.47,
+            1.47
+          ],
+          "system": [
+            5.22,
+            5.2,
+            5.23,
+            5.2,
+            5.19
+          ],
+          "rss_bytes": [
+            322994176,
+            323780608,
+            321634304,
+            321634304,
+            323239936
+          ]
+        },
+        "median": {
+          "wall": 13.48,
+          "user": 1.47,
+          "system": 5.2,
+          "rss_bytes": 322994176
+        },
+        "backends": {
+          "stock": 5
+        },
+        "sharing": {
+          "files": 65498,
+          "same_first_extent": 0,
+          "zero_private": 5,
+          "private_bytes": 921948160,
+          "sample": {
+            ".agents/resume": {
+              "source": {
+                "first_block": 246882304,
+                "private_bytes": 4096
+              },
+              "target": {
+                "first_block": 1305481216,
+                "private_bytes": 4096
+              }
+            },
+            ".agents/setup": {
+              "source": {
+                "first_block": 246886400,
+                "private_bytes": 4096
+              },
+              "target": {
+                "first_block": 1305485312,
+                "private_bytes": 4096
+              }
+            },
+            ".agents/skills/agent-transcript/SKILL.md": {
+              "source": {
+                "first_block": 246890496,
+                "private_bytes": 4096
+              },
+              "target": {
+                "first_block": 1305489408,
+                "private_bytes": 4096
+              }
+            }
+          }
+        }
+      },
+      {
+        "fixture": "openclaw",
+        "rev": "older",
+        "arm": "twig",
+        "samples": {
+          "wall": [
+            14.22,
+            13.58,
+            13.85,
+            13.3,
+            13.81
+          ],
+          "user": [
+            1.52,
+            1.48,
+            1.5,
+            1.48,
+            1.46
+          ],
+          "system": [
+            5.54,
+            5.22,
+            5.41,
+            5.24,
+            5.19
+          ],
+          "rss_bytes": [
+            324468736,
+            323076096,
+            323141632,
+            321126400,
+            320831488
+          ]
+        },
+        "median": {
+          "wall": 13.81,
+          "user": 1.48,
+          "system": 5.24,
+          "rss_bytes": 323076096
+        },
+        "backends": {
+          "fallback": 5
+        },
+        "sharing": {
+          "files": 65498,
+          "same_first_extent": 0,
+          "zero_private": 5,
+          "private_bytes": 921948160,
+          "sample": {
+            ".agents/resume": {
+              "source": {
+                "first_block": 246882304,
+                "private_bytes": 4096
+              },
+              "target": {
+                "first_block": 1367396352,
+                "private_bytes": 4096
+              }
+            },
+            ".agents/setup": {
+              "source": {
+                "first_block": 246886400,
+                "private_bytes": 4096
+              },
+              "target": {
+                "first_block": 1367400448,
+                "private_bytes": 4096
+              }
+            },
+            ".agents/skills/agent-transcript/SKILL.md": {
+              "source": {
+                "first_block": 246890496,
+                "private_bytes": 4096
+              },
+              "target": {
+                "first_block": 1367404544,
+                "private_bytes": 4096
+              }
+            }
+          }
+        }
+      },
+      {
+        "fixture": "openclaw",
+        "rev": "older",
+        "arm": "on",
+        "samples": {
+          "wall": [
+            11.84,
+            13.06,
+            11.95,
+            11.57,
+            11.15
+          ],
+          "user": [
+            0.42,
+            0.45,
+            0.41,
+            0.4,
+            0.39
+          ],
+          "system": [
+            10.39,
+            10.97,
+            10.47,
+            10.17,
+            9.94
+          ],
+          "rss_bytes": [
+            218677248,
+            217923584,
+            215465984,
+            216694784,
+            216514560
+          ]
+        },
+        "median": {
+          "wall": 11.84,
+          "user": 0.41,
+          "system": 10.39,
+          "rss_bytes": 216694784
+        },
+        "backends": {
+          "on": 5
+        },
+        "sharing": {
+          "files": 65498,
+          "same_first_extent": 65440,
+          "zero_private": 65445,
+          "private_bytes": 937984,
+          "sample": {
+            ".agents/resume": {
+              "source": {
+                "first_block": 246882304,
+                "private_bytes": 0
+              },
+              "target": {
+                "first_block": 246882304,
+                "private_bytes": 0
+              }
+            },
+            ".agents/setup": {
+              "source": {
+                "first_block": 246886400,
+                "private_bytes": 0
+              },
+              "target": {
+                "first_block": 246886400,
+                "private_bytes": 0
+              }
+            },
+            ".agents/skills/agent-transcript/SKILL.md": {
+              "source": {
+                "first_block": 246890496,
+                "private_bytes": 0
+              },
+              "target": {
+                "first_block": 246890496,
+                "private_bytes": 0
+              }
+            }
+          }
+        }
+      },
+      {
+        "fixture": "openclaw",
+        "rev": "older",
+        "arm": "off",
+        "samples": {
+          "wall": [
+            13.12,
+            13.75,
+            17.7,
+            13.26,
+            13.42
+          ],
+          "user": [
+            1.45,
+            1.46,
+            1.58,
+            1.45,
+            1.44
+          ],
+          "system": [
+            5.17,
+            5.24,
+            6.67,
+            5.25,
+            5.18
+          ],
+          "rss_bytes": [
+            321929216,
+            321011712,
+            324173824,
+            321470464,
+            323371008
+          ]
+        },
+        "median": {
+          "wall": 13.42,
+          "user": 1.45,
+          "system": 5.24,
+          "rss_bytes": 321929216
+        },
+        "backends": {
+          "off": 5
+        },
+        "sharing": {
+          "files": 65498,
+          "same_first_extent": 0,
+          "zero_private": 5,
+          "private_bytes": 921948160,
+          "sample": {
+            ".agents/resume": {
+              "source": {
+                "first_block": 246882304,
+                "private_bytes": 4096
+              },
+              "target": {
+                "first_block": 6406688768,
+                "private_bytes": 4096
+              }
+            },
+            ".agents/setup": {
+              "source": {
+                "first_block": 246886400,
+                "private_bytes": 4096
+              },
+              "target": {
+                "first_block": 6406692864,
+                "private_bytes": 4096
+              }
+            },
+            ".agents/skills/agent-transcript/SKILL.md": {
+              "source": {
+                "first_block": 246890496,
+                "private_bytes": 4096
+              },
+              "target": {
+                "first_block": 6406696960,
+                "private_bytes": 4096
+              }
+            }
+          }
+        }
+      }
+    ],
+    "allocation": [
+      {
+        "fixture": "openclaw",
+        "arm": "stock",
+        "children": 3,
+        "before": 1205882880,
+        "after": 4093906944,
+        "delta": 2888024064
+      },
+      {
+        "fixture": "openclaw",
+        "arm": "twig",
+        "children": 3,
+        "before": 1205882880,
+        "after": 4097130496,
+        "delta": 2891247616
+      },
+      {
+        "fixture": "openclaw",
+        "arm": "on",
+        "children": 3,
+        "before": 1206087680,
+        "after": 1309290496,
+        "delta": 103202816
+      },
+      {
+        "fixture": "openclaw",
+        "arm": "off",
+        "children": 3,
+        "before": 1206087680,
+        "after": 4096069632,
+        "delta": 2889981952
+      }
+    ],
+    "incorrect_trees": [],
+    "nonzero_creates": [],
+    "checks": 50,
+    "resets": 1,
+    "reshare": [
+      {
+        "label": "public-private-reshare",
+        "before": "b34f8bf22ca17167c4999c8141708de49cdc0ace6a0e639fe677e247c8be82bc",
+        "after": "b34f8bf22ca17167c4999c8141708de49cdc0ace6a0e639fe677e247c8be82bc",
+        "changed": [],
+        "inode_changed": 65493,
+        "mtime_changed": 0,
+        "dry_exit": 0,
+        "apply_exit": 0,
+        "dry_metrics": {
+          "wall": 9.41,
+          "user": 0.31,
+          "system": 4.04,
+          "rss_bytes": 37404672
+        },
+        "apply_metrics": {
+          "wall": 43.56,
+          "user": 0.91,
+          "system": 34.71,
+          "rss_bytes": 37634048
+        },
+        "dry": {
+          "scanned": 65500,
+          "eligible": 65493,
+          "already-shared": 0,
+          "reshared": 0,
+          "skipped": 7,
+          "failed": 0,
+          "allocated-before": 921948160,
+          "allocated-after": 921948160,
+          "private-before": 921948160,
+          "private-after": 921948160,
+          "observed-private-reduction": 0,
+          "potential-private-reduction": 921948160,
+          "deduplicated-range-bytes": 0,
+          "allocation-unknown": 0,
+          "stat-clean": 64124,
+          "content-checked": 1369,
+          "content-check-bytes": 11640259,
+          "userspace-compared": 65493,
+          "native-attempts": 0,
+          "native-range-bytes": 0,
+          "clone-attempts": 0,
+          "comparison-bytes": 1552399496
+        },
+        "apply": {
+          "scanned": 65500,
+          "eligible": 65493,
+          "already-shared": 0,
+          "reshared": 65493,
+          "skipped": 7,
+          "failed": 0,
+          "allocated-before": 921948160,
+          "allocated-after": 921948160,
+          "private-before": 921948160,
+          "private-after": 0,
+          "observed-private-reduction": 921948160,
+          "potential-private-reduction": 0,
+          "deduplicated-range-bytes": 776199748,
+          "allocation-unknown": 0,
+          "stat-clean": 64124,
+          "content-checked": 1369,
+          "content-check-bytes": 11640259,
+          "userspace-compared": 65493,
+          "native-attempts": 0,
+          "native-range-bytes": 0,
+          "clone-attempts": 65493,
+          "comparison-bytes": 1552399496
+        }
+      }
+    ],
+    "sharing": [
+      {
+        "label": "public-before-reshare",
+        "sharing": {
+          "files": 65498,
+          "same_first_extent": 0,
+          "zero_private": 5,
+          "private_bytes": 921948160,
+          "sample": {
+            ".agents/resume": {
+              "source": {
+                "first_block": 246882304,
+                "private_bytes": 4096
+              },
+              "target": {
+                "first_block": 1765711872,
+                "private_bytes": 4096
+              }
+            },
+            ".agents/setup": {
+              "source": {
+                "first_block": 246886400,
+                "private_bytes": 4096
+              },
+              "target": {
+                "first_block": 1765715968,
+                "private_bytes": 4096
+              }
+            },
+            ".agents/skills/agent-transcript/SKILL.md": {
+              "source": {
+                "first_block": 246890496,
+                "private_bytes": 4096
+              },
+              "target": {
+                "first_block": 1765720064,
+                "private_bytes": 4096
+              }
+            }
+          }
+        }
+      },
+      {
+        "label": "public-after-reshare",
+        "sharing": {
+          "files": 65498,
+          "same_first_extent": 65493,
+          "zero_private": 65498,
+          "private_bytes": 0,
+          "sample": {
+            ".agents/resume": {
+              "source": {
+                "first_block": 246882304,
+                "private_bytes": 0
+              },
+              "target": {
+                "first_block": 246882304,
+                "private_bytes": 0
+              }
+            },
+            ".agents/setup": {
+              "source": {
+                "first_block": 246886400,
+                "private_bytes": 0
+              },
+              "target": {
+                "first_block": 246886400,
+                "private_bytes": 0
+              }
+            },
+            ".agents/skills/agent-transcript/SKILL.md": {
+              "source": {
+                "first_block": 246890496,
+                "private_bytes": 0
+              },
+              "target": {
+                "first_block": 246890496,
+                "private_bytes": 0
+              }
+            }
+          }
+        }
+      }
+    ],
+    "concurrent": []
+  }
+}

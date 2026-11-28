@@ -1,0 +1,10 @@
+2026-11-16 final evidence validation
+Python: py_compile run.py supplement.py summarize.py: exit 0
+C: clang -Wall -Wextra -Werror -O2 apfs-probe.c: exit 0
+All 12 gzip artifacts: full decode and JSON/JSONL parse succeeded
+Research: byte-for-byte match to commit 8eeb9f2a9e87e67e54edf75630dd57074a0627ff
+pnpm lint: exit 0; Node 24.22.1; full output in lint-output.txt
+Image cleanup: hdiutil detach /private/tmp/pwrgit-twig-20261116/volume: exit 0, disk4 ejected
+Host available space after runs: 85 GiB
+Final staged-file pnpm lint: exit 0
+Offline evidence assertions: 312 successful recorded creates, 304 oracle checks without mismatch; lifecycle 24 reset snapshots; no re-share tree changes; donor-byte failure reproduced in all 3 supplemental datasets
