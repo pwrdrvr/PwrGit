@@ -611,6 +611,7 @@ export class TagSourceStore {
 export type ResolvedSource = {
   state: TagSourceState;
   remote: RemoteConfig | null;
+  remotes: readonly RemoteConfig[];
 };
 
 const iso = (ms: number | null): string | null => (ms === null ? null : new Date(ms).toISOString());
@@ -644,7 +645,7 @@ export class TagSources {
     return ok(this.resolve(repoId, config.value, ttlMs));
   }
 
-  resolve(repoId: string, remotes: RemoteConfig[], ttlMs = TAG_SOURCE_VIEW_TTL_MS): ResolvedSource {
+  resolve(repoId: string, remotes: readonly RemoteConfig[], ttlMs = TAG_SOURCE_VIEW_TTL_MS): ResolvedSource {
     const chosen = this.store.chosenPrimary(repoId);
     const chosenRemote = chosen === null ? undefined : remotes.find((remote) => remote.name === chosen);
     const remote = chosenRemote ?? remotes.find((candidate) => candidate.name === "origin") ?? null;
@@ -655,6 +656,7 @@ export class TagSources {
     const tagOpt = remote?.tagOpt === "--no-tags" ? "no-tags" : remote?.tagOpt === "--tags" ? "all" : null;
     return {
       remote,
+      remotes,
       state: {
         remotes: remotes.map((candidate) => candidate.name),
         primary: remote?.name ?? null,
@@ -710,14 +712,18 @@ export class TagSources {
    * was stopped: a background check yields to a tracked one by aborting, and
    * the tracked caller must not inherit that abort.
    */
-  async refresh(git: GitExec, repoId: string, cwd: string, remote: string): Promise<Result<boolean>> {
+  async refresh(
+    git: GitExec, repoId: string, cwd: string, remote: string, remotes?: readonly RemoteConfig[]
+  ): Promise<Result<boolean>> {
     const key = `${repoId}\0${remote}`;
     const running = this.inFlight.get(key);
     if (running !== undefined) {
       const shared = await running;
       if (shared.ok || !wasStopped(shared.error)) return shared;
     }
-    const run = this.list(git, repoId, cwd, remote);
+    // A caller starting immediately can use the config it just resolved.
+    // A retry after a stopped listing needs a fresh read.
+    const run = this.list(git, repoId, cwd, remote, running === undefined ? remotes : undefined);
     this.inFlight.set(key, run);
     try {
       return await run;
@@ -727,8 +733,10 @@ export class TagSources {
   }
 
   /** True when the publisher's differing set moved (its rows need redrawing). */
-  private async list(git: GitExec, repoId: string, cwd: string, remote: string): Promise<Result<boolean>> {
-    const config = await readRemoteConfig(git, cwd);
+  private async list(
+    git: GitExec, repoId: string, cwd: string, remote: string, remotes?: readonly RemoteConfig[]
+  ): Promise<Result<boolean>> {
+    const config = remotes === undefined ? await readRemoteConfig(git, cwd) : ok(remotes);
     if (!config.ok) return config;
     const target = config.value.find((candidate) => candidate.name === remote);
     if (target === undefined) {
@@ -1041,11 +1049,14 @@ export class TagSources {
     return ok(undefined);
   }
 
-  async recountPublisher(git: GitExec, repoId: string, cwd: string): Promise<Result<boolean>> {
-    const source = await this.source(git, repoId, cwd);
-    if (!source.ok) return source;
-    if (source.value.remote === null) return ok(false);
-    return this.recount(git, repoId, cwd, source.value.remote.name);
+  async recountPublisher(
+    git: GitExec, repoId: string, cwd: string, remotes?: readonly RemoteConfig[]
+  ): Promise<Result<boolean>> {
+    const config = remotes === undefined ? await readRemoteConfig(git, cwd) : ok(remotes);
+    if (!config.ok) return config;
+    const publisher = this.store.publisherOf(repoId, config.value.map((remote) => remote.name));
+    if (publisher === null) return ok(false);
+    return this.recount(git, repoId, cwd, publisher);
   }
 
   /** Every source's own value for one name. Runs no network command. */
