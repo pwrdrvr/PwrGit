@@ -23,6 +23,7 @@ import {
   type CommitAuthorPerson,
   type CommitStats,
   type LaneGraph,
+  type LaneBranchInfo,
   type MovedTag,
   type PrSummary,
   type RepositoryStack,
@@ -619,19 +620,20 @@ export function LineageGraph({
       // and reconcile if a pending reply could overwrite the delta.
       if (scope === "active" || publishing) load();
       if (snapshot !== null) {
-        let changed = false;
-        const branches = { ...snapshot.branches };
+        const changed = new Map<string, LaneBranchInfo>();
         for (const [branch, pr] of entries) {
-          const info = branches[branch];
-          if (info === undefined || samePayload(info.pr ?? null, pr)) continue;
+          const info = snapshot.branches[branch];
+          if (samePayload(info?.pr ?? null, pr)) continue;
           const next = { ...info };
           if (pr === null) delete next.pr;
           else next.pr = pr;
-          branches[branch] = next;
-          changed = true;
+          changed.set(branch, next);
         }
-        if (changed) {
-          const updated = { ...snapshot, branches };
+        if (changed.size > 0) {
+          const updated = {
+            ...snapshot,
+            branches: { ...snapshot.branches, ...Object.fromEntries(changed) }
+          };
           dataRef.current = updated;
           setData(updated);
         }

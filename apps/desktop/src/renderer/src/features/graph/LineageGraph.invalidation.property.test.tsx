@@ -96,7 +96,7 @@ const makePr = (number: number, state: "open" | "merged"): PrSummary => ({
   checkState: "passing"
 });
 
-const makeGraph = (pr: PrSummary): LaneGraph => ({
+const makeGraph = (pr: PrSummary | null): LaneGraph => ({
   head: "c2",
   defaultBranch: "main",
   defaultRef: "origin/main",
@@ -133,7 +133,7 @@ const makeGraph = (pr: PrSummary): LaneGraph => ({
   remoteTips: { c2: ["origin/feat-1"], c1: ["origin/main"] },
   branches: {
     main: {},
-    "feat-1": { pr }
+    ...(pr === null ? {} : { "feat-1": { pr } })
   }
 });
 
@@ -320,10 +320,10 @@ function controlledGraph() {
       )),
     invalidate: (repoId = "repo-1") =>
       act(async () => emit("graph:changed", { repoId })),
-    changePr: (pr: PrSummary) =>
+    changePr: (pr: PrSummary | null) =>
       act(async () => emit("pr:changed", { repoId: "repo-1", prs: { "feat-1": pr } })),
-    finish: (index: number, label: string, fail = false) => act(async () => {
-      const graph = makeGraph(makePr(42, "open"));
+    finish: (index: number, label: string, fail = false, pr: PrSummary | null = makePr(42, "open")) => act(async () => {
+      const graph = makeGraph(pr);
       graph.commits[0]!.subject = label;
       requests[index]!.finish(fail ? { ok: false, error: { message: label } } : ok(graph));
     }),
@@ -405,6 +405,38 @@ describe("Lineage repo invalidation reads", () => {
       await view.render();
       expect(view.requests[3]!.input).toEqual({ worktreeId: "wt-1", scope: "active", force: true });
     }
+  });
+
+  it("shows the first PR and later deltas for a visible branch missing from All adornments", async () => {
+    const prNumber = fc.integer({ min: 1, max: 999 });
+    await fc.assert(fc.asyncProperty(
+      prNumber,
+      fc.array(fc.option(prNumber, { nil: null }), { maxLength: 6 }),
+      async (firstPr, changes) => {
+        const view = controlledGraph();
+        try {
+          await view.render();
+          await view.finish(0, "Active history", false, null);
+          await view.switchScope();
+          await view.finish(1, "All history", false, null);
+          const branchTip = container.querySelector('.graph-row[data-hash="c2"]')!;
+          expect(branchTip.textContent).toContain("feat-1");
+          expect(branchTip.querySelector(".pr-chip")).toBeNull();
+          for (const number of [firstPr, ...changes]) {
+            await view.changePr(number === null ? null : makePr(number, "open"));
+            // All already draws the branch. The chip follows the latest delta
+            // immediately, including the first PR on a branch with no worktree.
+            const chip = branchTip.querySelector(".pr-chip");
+            if (number === null) expect(chip).toBeNull();
+            else expect(chip?.textContent).toBe(`#${number}`);
+            expect(view.requests).toHaveLength(2);
+          }
+        } finally {
+          act(() => root.unmount());
+          root = createRoot(container);
+        }
+      }
+    ), { numRuns: 20, examples: [[42, [null, 43]]] });
   });
 
   it("forces Active membership after a deferred PR delta and preserves it across a superseding repo invalidation", async () => {

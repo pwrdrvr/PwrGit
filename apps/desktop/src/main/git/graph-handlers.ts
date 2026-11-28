@@ -60,9 +60,12 @@ type CachedLanes = {
   refsStamp: string;
   at: number;
 };
-const laneCache = new Map<string, CachedLanes>();
-/** Builds started per cache key. Only the newest build may write the cache. */
-const laneBuilds = new Map<string, number>();
+type LaneCacheEntry = {
+  lanes: CachedLanes;
+  // Supplements belong to this exact base. An old request can finish building
+  // one after invalidation without exposing it to the replacement entry.
+  supplements: Map<string, CachedLanes>;
+};
 const LANE_TTL_MS = 30_000;
 /** Trunk window — recent default-branch history drawn as the spine. */
 const TRUNK_CAP = 150;
@@ -134,7 +137,9 @@ export function registerGraphHandlers(
   bus: CommandBus,
   db: DB,
   state: WorktreeStateService
-): void {
+): (repoId: string) => void {
+  const laneCache = new Map<string, LaneCacheEntry>();
+  const laneBuilds = new Map<string, symbol>();
   // Shared across requests: overlapping graph rebuilds share this ceiling.
   const git = limitConcurrency(execGit, 6);
   bus.register("graph:log", async (req) => {
@@ -239,16 +244,16 @@ export function registerGraphHandlers(
     // The stamp is read BEFORE the build reads anything, so a ref that moves
     // mid-build leaves the entry older than its refs, never newer.
     const key = `${wt.repo_id}:${req.scope}`;
-    let cached = laneCache.get(key);
+    let entry = laneCache.get(key);
     const fresh =
-      cached !== undefined &&
+      entry !== undefined &&
       req.force !== true &&
       refsStamp !== null &&
-      cached.refsStamp === refsStamp &&
-      Date.now() - cached.at < LANE_TTL_MS;
+      entry.lanes.refsStamp === refsStamp &&
+      Date.now() - entry.lanes.at < LANE_TTL_MS;
 
     if (!fresh) {
-      const build = (laneBuilds.get(key) ?? 0) + 1;
+      const build = Symbol();
       laneBuilds.set(key, build);
       const def = await state.resolveDefaultBranch(wt.repo_id, wt.path);
 
@@ -403,7 +408,7 @@ export function registerGraphHandlers(
       // Tags are decoration on a commit row. A refs/tags directory this
       // process cannot read is a reason to draw no chips, not a reason to
       // refuse the graph — which is what returning the error here would do.
-      cached = {
+      const lanes: CachedLanes = {
         tags: tags.ok ? tags.value.prominent : {},
         localTags: new Map((tags.ok ? tags.value.all : []).map((tag) => [tag.name, tag])),
         remotes: remoteConfig.ok ? remoteConfig.value.map((remote) => remote.name) : [],
@@ -422,21 +427,18 @@ export function registerGraphHandlers(
         refsStamp: refsStamp ?? "",
         at: Date.now()
       };
-      // Builds overlap: a graph:changed during a slow build starts another.
-      // The older one finishing last must not replace the newer answer — it
-      // still answers its own request, but it never becomes the shared cache.
+      entry = { lanes, supplements: new Map() };
+      // A newer build or a repo invalidation can supersede this snapshot.
+      // The request still gets its result, but later windows must read afresh.
       if (laneBuilds.get(key) === build) {
-        laneCache.set(key, cached);
-        // Per-HEAD supplements were merged into the replaced base; drop them
-        // rather than leave one per HEAD ever seen.
-        for (const k of laneCache.keys()) {
-          if (k.startsWith(`${key}:`)) laneCache.delete(k);
-        }
+        laneCache.set(key, entry);
+        laneBuilds.delete(key);
       }
     }
-    if (cached === undefined) {
+    if (entry === undefined) {
       return err({ kind: "repo", code: "graph_failed", message: "graph unavailable" });
     }
+    const cached = entry.lanes;
 
     // HEAD is per-worktree — always resolve it (one cheap call).
     const headSha = await git(["rev-parse", "HEAD"], wt.path);
@@ -496,8 +498,8 @@ export function registerGraphHandlers(
 
     let out = cached;
     if (missingHead || missingUpstream !== undefined) {
-      const supKey = `${key}:${head}:${missingUpstream ?? ""}`;
-      const supCached = laneCache.get(supKey);
+      const supKey = `${head}:${missingUpstream ?? ""}`;
+      const supCached = entry.supplements.get(supKey);
       if (
         supCached !== undefined &&
         req.force !== true &&
@@ -537,7 +539,7 @@ export function registerGraphHandlers(
               : cached.upstreamRefs,
           at: Date.now()
         };
-        laneCache.set(supKey, out);
+        entry.supplements.set(supKey, out);
       }
     }
 
@@ -579,4 +581,14 @@ export function registerGraphHandlers(
       hiddenBranches: out.hiddenBranches
     });
   });
+
+  // Observe repo changes for the lifetime of the cache. A window can close
+  // with a refresh queued while an older read is still running in main.
+  return (repoId) => {
+    for (const scope of ["active", "all"]) {
+      const key = `${repoId}:${scope}`;
+      laneCache.delete(key);
+      laneBuilds.delete(key);
+    }
+  };
 }
