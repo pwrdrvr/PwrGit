@@ -146,8 +146,7 @@ describe("PrService", () => {
       provider, repo: { ...GITHUB_ORIGIN, path: url.includes("alice") ? "alice/PwrGit" :
         url.includes("bob") ? "bob/PwrGit" : GITHUB_ORIGIN.path }
     }) });
-    await scoped.refreshRepo("repo");
-    await scoped.refreshRepo("other");
+    await Promise.all([scoped.refreshRepo("repo"), scoped.refreshRepo("other")]);
     expect(sources.map((repos) => repos?.map((repo) => repo.path))).toEqual([
       ["pwrdrvr/PwrGit", "pwrdrvr/PwrGit", "alice/PwrGit"],
       ["pwrdrvr/PwrGit", "pwrdrvr/PwrGit", "bob/PwrGit"]
@@ -312,9 +311,12 @@ describe("PrService", () => {
     const fetchResult = new Promise<Map<string, PrSummary | null>>((resolve) => {
       releaseFetch = resolve;
     });
+    let attempts = 0;
+    const replacement = new Map([["feature/pr-state", pr({ number: 43 })]]);
     service = new PrService(db, git, {
       resolveForge: fakeForge({
         fetchPrsForBranches: async () => {
+          if (++attempts > 1) return replacement;
           announceFetch();
           return await fetchResult;
         }
@@ -322,11 +324,10 @@ describe("PrService", () => {
       now: () => now
     });
 
-    const refresh = service.refreshRepo("repo", {
-      branches: ["feature/pr-state"],
-      force: true
-    });
+    const opts = { branches: ["feature/pr-state"], force: true };
+    const refresh = service.refreshRepo("repo", opts);
     await fetchStarted;
+    const queued = service.refreshRepo("repo", opts);
 
     // Profile deletion cascades the old repo, then invalidates async writes.
     // A new profile and index pass may immediately reuse both stable ids.
@@ -338,13 +339,15 @@ describe("PrService", () => {
     db.prepare(
       "INSERT INTO repos (id, profile_id, name, path) VALUES ('repo', 'profile', 'Replacement', '/replacement')"
     ).run();
+    const recreated = service.refreshRepo("repo", opts);
 
     releaseFetch(new Map([["feature/pr-state", pr()]]));
 
     await expect(refresh).resolves.toEqual(new Map());
-    expect(
-      db.prepare("SELECT 1 FROM branch_pr WHERE repo_id = 'repo'").get()
-    ).toBeUndefined();
+    await expect(queued).resolves.toEqual(new Map());
+    await expect(recreated).resolves.toEqual(replacement);
+    expect(service.cachedBranchPr("repo", "feature/pr-state")).toMatchObject({ number: 43 });
+    expect(attempts).toBe(2);
   });
 
   it("discovers PRs for local branches that are not checked out in worktrees", async () => {
