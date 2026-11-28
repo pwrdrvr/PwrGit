@@ -65,55 +65,74 @@ export function profileRepos(
     .prepare("SELECT id FROM profiles WHERE id = ?")
     .get(profileId) as { id: string } | undefined;
   if (profile === undefined) return null;
+  if (repoIds?.length === 0) return [];
+  // Drive scoped plans from the requested IDs, with one parameter even for
+  // large scopes. CROSS JOIN keeps SQLite from scanning the profile first.
+  const repoBindings = repoIds === undefined ? [] : [JSON.stringify([...new Set(repoIds)])];
+  const repoSource = repoIds === undefined
+    ? "repos r"
+    : "json_each(?) wanted CROSS JOIN repos r ON r.id = wanted.value";
+  const eligibleCheckout = "w.repo_id = r.id AND w.missing = 0";
+  const pending = `s.branch = w.branch AND s.dirty = 0 AND s.has_upstream = 1
+    AND (
+      (s.behind > 0 AND s.ahead = 0)
+      OR (? = 1 AND s.source_behind > 0 AND s.source_ahead = 0)
+    )`;
+  // The correlated lookup keeps SQLite from scanning unrelated state or
+  // building a bloom filter over it for a scoped request.
+  const pendingCheck = repoIds === undefined
+    ? `JOIN worktree_state s ON s.worktree_id = w.id
+       WHERE ${eligibleCheckout} AND ${pending}`
+    : `WHERE ${eligibleCheckout} AND (
+         SELECT ${pending} FROM worktree_state s INDEXED BY sqlite_autoindex_worktree_state_1
+         WHERE s.worktree_id = w.id
+       )`;
   const syncForks = options?.syncForks === true ? 1 : 0;
   const repos = db
     .prepare(
       // A hidden repository sits out Fetch all and Try pull all.
-      `SELECT id, name, path,
+      `SELECT r.id, r.name, r.path,
          EXISTS (
            -- Stored state only orders the run's starts; Try pull re-inspects
            -- every checkout itself.
            SELECT 1 FROM worktrees w
-           JOIN worktree_state s ON s.worktree_id = w.id
-           WHERE w.repo_id = r.id AND w.missing = 0 AND s.branch = w.branch
-             AND s.dirty = 0 AND s.has_upstream = 1
-             AND (
-               (s.behind > 0 AND s.ahead = 0)
-               OR (? = 1 AND s.source_behind > 0 AND s.source_ahead = 0)
-             )
+           ${pendingCheck}
          ) AS pullPending
-       FROM repos r
-       WHERE profile_id = ? AND ${visibleRepoSql("r")}
-       ORDER BY name COLLATE NOCASE, name, id`
+       FROM ${repoSource}
+       WHERE r.profile_id = ? AND ${visibleRepoSql("r")}
+       ORDER BY r.name COLLATE NOCASE, r.name, r.id`
     )
-    .all(syncForks, profileId) as RepoRow[];
+    .all(syncForks, ...repoBindings, profileId) as RepoRow[];
+  if (repos.length === 0) return [];
+
+  // Start from the matched IDs and check profile and visibility again before
+  // looking up each repository's checkouts.
+  const worktreeJoin = repoIds === undefined ? "JOIN" : "CROSS JOIN";
+  const worktreeBindings = repoIds === undefined ? [] : [JSON.stringify(repos.map((r) => r.id))];
   const worktrees = db
     .prepare(
       `SELECT w.id, w.repo_id AS repoId, w.branch, w.path
-       FROM worktrees w
-       JOIN repos r ON r.id = w.repo_id
+       FROM ${repoSource}
+       ${worktreeJoin} worktrees w ON w.repo_id = r.id
        -- A checkout that is gone has nothing to pull; the repo-level fetch
        -- still runs from the primary.
-       WHERE r.profile_id = ? AND w.missing = 0 AND ${visibleRepoSql("r")}
+       WHERE r.profile_id = ? AND ${visibleRepoSql("r")} AND w.missing = 0
        ORDER BY w.repo_id, w.is_primary DESC, w.branch COLLATE NOCASE, w.id`
     )
-    .all(profileId) as WorktreeRow[];
+    .all(...worktreeBindings, profileId) as WorktreeRow[];
   const byRepo = new Map<string, WorktreeRow[]>();
   for (const worktree of worktrees) {
     const rows = byRepo.get(worktree.repoId) ?? [];
     rows.push(worktree);
     byRepo.set(worktree.repoId, rows);
   }
-  const wanted = repoIds === undefined ? null : new Set(repoIds);
-  return repos
-    .filter((repo) => wanted === null || wanted.has(repo.id))
-    .map(({ pullPending, ...repo }) => ({
-      ...repo,
-      ...(pullPending === 1 ? { pullPending: true } : {}),
-      worktrees: (byRepo.get(repo.id) ?? []).map(
-        ({ repoId: _repoId, ...row }) => row
-      )
-    }));
+  return repos.map(({ pullPending, ...repo }) => ({
+    ...repo,
+    ...(pullPending === 1 ? { pullPending: true } : {}),
+    worktrees: (byRepo.get(repo.id) ?? []).map(
+      ({ repoId: _repoId, ...row }) => row
+    )
+  }));
 }
 
 /** Profile-wide fetch and conservative pull handlers with cooperative cancel. */

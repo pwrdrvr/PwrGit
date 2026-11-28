@@ -5,7 +5,7 @@ import type { DB } from "../persistence/db";
 import { limitConcurrency } from "../util/map-limit";
 import { execGit, sanitizeGitLogDetail, type GitExec } from "./dugite";
 import { controlledGit } from "./git-service";
-import { tagSourcesFor, wasStopped, type TagSources } from "./tag-sources";
+import { tagSourcesFor, wasStopped, type RemoteConfig, type TagSources } from "./tag-sources";
 
 /** Automatic listings at once across all repositories: a bulk sync of 100
  *  repositories queues its checks rather than opening 100 connections. */
@@ -16,6 +16,9 @@ export const TAG_CHECK_TIMEOUT_MS = 20_000;
 export const TAG_CHECK_RETRY_MS = 2 * 60_000;
 
 type RepoRow = { path: string; profileId: string };
+type ListingResult =
+  | { listed: true }
+  | { listed: false; config?: { path: string; remotes: readonly RemoteConfig[] } };
 
 export type TagAutoCheckOptions = {
   /** The sync menu's "Check tags after sync" (`general.tagCheckAfterSync`). */
@@ -50,7 +53,7 @@ export class TagAutoChecks {
   /** One check per repository and TTL at a time; a second asker shares it,
    *  so a Fetch and a bulk sync of one repository list once, and no check
    *  can pass the back-off while another's failure is landing. */
-  private readonly running = new Map<string, Promise<boolean>>();
+  private readonly running = new Map<string, Promise<ListingResult>>();
   /** After-sync checks only: the Tags tab's check never queues behind a bulk sync's. */
   private readonly queuedAfterSync: (repoId: string) => Promise<void>;
 
@@ -91,8 +94,8 @@ export class TagAutoChecks {
   }
 
   /** The Tags tab opened. True when it listed. Not behind the sync switch. */
-  view(repoId: string): Promise<boolean> {
-    return this.list(repoId, TAG_SOURCE_VIEW_TTL_MS, "view");
+  async view(repoId: string): Promise<boolean> {
+    return (await this.list(repoId, TAG_SOURCE_VIEW_TTL_MS, "view")).listed;
   }
 
   /**
@@ -111,14 +114,16 @@ export class TagAutoChecks {
   private async runAfterSync(repoId: string): Promise<void> {
     // Read again: the switch may have gone off while this waited for a slot.
     if (!this.enabledAfterSync()) return;
-    if (await this.list(repoId, TAG_SOURCE_SYNC_TTL_MS, "after sync")) return;
+    const result = await this.list(repoId, TAG_SOURCE_SYNC_TTL_MS, "after sync");
+    if (result.listed) return;
     const repo = this.repoOf(repoId);
     if (repo === null) return;
-    const moved = await this.sources.recountPublisher(this.git, repoId, repo.path);
+    const remotes = result.config?.path === repo.path ? result.config.remotes : undefined;
+    const moved = await this.sources.recountPublisher(this.git, repoId, repo.path, remotes);
     if (moved.ok && moved.value) this.announce(repoId, repo, true);
   }
 
-  private list(repoId: string, ttlMs: number, reason: string): Promise<boolean> {
+  private list(repoId: string, ttlMs: number, reason: "view" | "after sync"): Promise<ListingResult> {
     const key = `${repoId}\0${ttlMs}`;
     const running = this.running.get(key);
     if (running !== undefined) return running;
@@ -129,18 +134,19 @@ export class TagAutoChecks {
     return run;
   }
 
-  private async listOnce(repoId: string, ttlMs: number, reason: string): Promise<boolean> {
+  private async listOnce(repoId: string, ttlMs: number, reason: "view" | "after sync"): Promise<ListingResult> {
     const repo = this.repoOf(repoId);
-    if (repo === null) return false;
+    if (repo === null) return { listed: false };
     const source = await this.sources.source(this.git, repoId, repo.path, ttlMs);
-    if (!source.ok) return false;
-    const { state } = source.value;
-    if (state.primary === null || state.tagOpt === "no-tags" || !state.stale) return false;
+    if (!source.ok) return { listed: false };
+    const { state, remotes } = source.value;
+    const skipped = { listed: false, config: { path: repo.path, remotes } } as const;
+    if (state.primary === null || state.tagOpt === "no-tags" || !state.stale) return skipped;
     // Read just before listing: the user may have started an operation on
     // this repository while the check waited for a slot or read its config.
-    if (this.paused(repoId)) return false;
+    if (this.paused(repoId)) return skipped;
     const failedKey = `${repoId}\0${state.primary}`;
-    if ((this.failedAt.get(failedKey) ?? 0) > this.now() - TAG_CHECK_RETRY_MS) return false;
+    if ((this.failedAt.get(failedKey) ?? 0) > this.now() - TAG_CHECK_RETRY_MS) return skipped;
     const controller = new AbortController();
     const aborts = this.aborts.get(repoId) ?? new Set();
     aborts.add(controller);
@@ -148,7 +154,10 @@ export class TagAutoChecks {
     const signal = AbortSignal.any([controller.signal, AbortSignal.timeout(this.timeoutMs)]);
     const startedAt = this.now();
     try {
-      const refreshed = await this.sources.refresh(controlledGit(this.git, { signal }), repoId, repo.path, state.primary);
+      const refreshed = await this.sources.refresh(
+        controlledGit(this.git, { signal }), repoId, repo.path, state.primary,
+        reason === "after sync" ? remotes : undefined
+      );
       if (!refreshed.ok) {
         // Yielding to the user's own operation is not a failure. Our own
         // timeout is: `refresh` leaves stopped listings unrecorded, so say it.
@@ -160,12 +169,14 @@ export class TagAutoChecks {
           emitEvent("tag:changed", { profileId: repo.profileId, repoId, refreshPreview: false });
         }
         logMain("debug", "tag", `automatic tag check (${reason}) of ${state.primary} unavailable for ${repo.path}: ${sanitizeGitLogDetail(refreshed.error.message)}`);
-        return false;
+        // A failed listing may have waited on the network. Re-read the
+        // publisher before comparing against a stored snapshot.
+        return { listed: false };
       }
       this.failedAt.delete(failedKey);
       logMain("info", "tag", `listed ${state.primary}'s tags for ${repo.path} (${reason}, ${((this.now() - startedAt) / 1000).toFixed(1)}s)`);
       this.announce(repoId, repo, refreshed.value);
-      return true;
+      return { listed: true };
     } finally {
       aborts.delete(controller);
       if (aborts.size === 0) this.aborts.delete(repoId);

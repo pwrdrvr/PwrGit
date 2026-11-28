@@ -18,7 +18,7 @@ import {
   type TagSyncStatus
 } from "@pwrgit/shared";
 import type { DB } from "../persistence/db";
-import { requireExit0, type GitExec } from "./dugite";
+import { installedGitSelection, requireExit0, type GitExec } from "./dugite";
 import { readAllTagSummaries, readTagSummaries, validTagName } from "./git-service";
 
 /**
@@ -74,7 +74,7 @@ export async function readRemoteConfig(
     const name = key.slice(7, dot);
     const variable = key.slice(dot + 1).toLowerCase();
     const remote = remotes.get(name) ?? { name, url: null, tagOpt: null };
-    if (variable === "url") remote.url ??= value;
+    if (variable === "url") remote.url = value === "" ? null : remote.url ?? value;
     else if (variable === "tagopt") remote.tagOpt = value;
     remotes.set(name, remote);
   }
@@ -117,12 +117,25 @@ function refuseOptionLike(remote: string): Result<void> {
 export async function listRemoteTags(
   git: GitExec,
   cwd: string,
-  remote: string
+  remote: string,
+  fetchUrl?: string
 ): Promise<Result<ListedTag[]>> {
   const usable = refuseOptionLike(remote);
   if (!usable.ok) return usable;
   const args = ["ls-remote", "--tags", remote];
-  const raw = await git(args, cwd);
+  // Keep Git's named-remote transport settings. Clear the URL list, then
+  // pin the observed fetch URL for this child only, outside its arguments.
+  const key = `remote.${remote}.url`;
+  const count = Number(process.env.GIT_CONFIG_COUNT ?? 0);
+  const raw = await git(args, cwd, fetchUrl === undefined ? undefined : {
+    env: {
+      GIT_CONFIG_COUNT: String(count + 2),
+      [`GIT_CONFIG_KEY_${count}`]: key,
+      [`GIT_CONFIG_VALUE_${count}`]: "",
+      [`GIT_CONFIG_KEY_${count + 1}`]: key,
+      [`GIT_CONFIG_VALUE_${count + 1}`]: fetchUrl
+    }
+  });
   if (!raw.ok) return raw;
   const checked = requireExit0(raw.value, args);
   if (!checked.ok) return checked;
@@ -611,6 +624,7 @@ export class TagSourceStore {
 export type ResolvedSource = {
   state: TagSourceState;
   remote: RemoteConfig | null;
+  remotes: readonly RemoteConfig[];
 };
 
 const iso = (ms: number | null): string | null => (ms === null ? null : new Date(ms).toISOString());
@@ -644,7 +658,7 @@ export class TagSources {
     return ok(this.resolve(repoId, config.value, ttlMs));
   }
 
-  resolve(repoId: string, remotes: RemoteConfig[], ttlMs = TAG_SOURCE_VIEW_TTL_MS): ResolvedSource {
+  resolve(repoId: string, remotes: readonly RemoteConfig[], ttlMs = TAG_SOURCE_VIEW_TTL_MS): ResolvedSource {
     const chosen = this.store.chosenPrimary(repoId);
     const chosenRemote = chosen === null ? undefined : remotes.find((remote) => remote.name === chosen);
     const remote = chosenRemote ?? remotes.find((candidate) => candidate.name === "origin") ?? null;
@@ -655,6 +669,7 @@ export class TagSources {
     const tagOpt = remote?.tagOpt === "--no-tags" ? "no-tags" : remote?.tagOpt === "--tags" ? "all" : null;
     return {
       remote,
+      remotes,
       state: {
         remotes: remotes.map((candidate) => candidate.name),
         primary: remote?.name ?? null,
@@ -710,14 +725,21 @@ export class TagSources {
    * was stopped: a background check yields to a tracked one by aborting, and
    * the tracked caller must not inherit that abort.
    */
-  async refresh(git: GitExec, repoId: string, cwd: string, remote: string): Promise<Result<boolean>> {
+  async refresh(
+    git: GitExec, repoId: string, cwd: string, remote: string, remotes?: readonly RemoteConfig[]
+  ): Promise<Result<boolean>> {
     const key = `${repoId}\0${remote}`;
     const running = this.inFlight.get(key);
     if (running !== undefined) {
       const shared = await running;
       if (shared.ok || !wasStopped(shared.error)) return shared;
     }
-    const run = this.list(git, repoId, cwd, remote);
+    // Reuse config only when we can pin the URL. Our bundle supports clearing
+    // a remote's URL list, which older user-selected installations may not.
+    // Reread after a stopped shared listing as well.
+    const pinUrl = remotes !== undefined && installedGitSelection() === null;
+    const captured = running === undefined && pinUrl ? remotes : undefined;
+    const run = this.list(git, repoId, cwd, remote, captured, pinUrl);
     this.inFlight.set(key, run);
     try {
       return await run;
@@ -727,14 +749,16 @@ export class TagSources {
   }
 
   /** True when the publisher's differing set moved (its rows need redrawing). */
-  private async list(git: GitExec, repoId: string, cwd: string, remote: string): Promise<Result<boolean>> {
-    const config = await readRemoteConfig(git, cwd);
+  private async list(
+    git: GitExec, repoId: string, cwd: string, remote: string, remotes: readonly RemoteConfig[] | undefined, pinUrl: boolean
+  ): Promise<Result<boolean>> {
+    const config = remotes === undefined ? await readRemoteConfig(git, cwd) : ok(remotes);
     if (!config.ok) return config;
     const target = config.value.find((candidate) => candidate.name === remote);
-    if (target === undefined) {
+    if (target === undefined || target.url === null) {
       return err({ kind: "repo", code: "invalid_remote", message: `Not a configured remote: ${remote}` });
     }
-    const listed = await listRemoteTags(git, cwd, remote);
+    const listed = await listRemoteTags(git, cwd, remote, pinUrl ? target.url : undefined);
     if (!listed.ok) {
       // A stopped listing says nothing about the remote. The caller that set
       // a timeout records that itself (`recordFailure`).
@@ -1041,11 +1065,14 @@ export class TagSources {
     return ok(undefined);
   }
 
-  async recountPublisher(git: GitExec, repoId: string, cwd: string): Promise<Result<boolean>> {
-    const source = await this.source(git, repoId, cwd);
-    if (!source.ok) return source;
-    if (source.value.remote === null) return ok(false);
-    return this.recount(git, repoId, cwd, source.value.remote.name);
+  async recountPublisher(
+    git: GitExec, repoId: string, cwd: string, remotes?: readonly RemoteConfig[]
+  ): Promise<Result<boolean>> {
+    const config = remotes === undefined ? await readRemoteConfig(git, cwd) : ok(remotes);
+    if (!config.ok) return config;
+    const publisher = this.store.publisherOf(repoId, config.value.map((remote) => remote.name));
+    if (publisher === null) return ok(false);
+    return this.recount(git, repoId, cwd, publisher);
   }
 
   /** Every source's own value for one name. Runs no network command. */
