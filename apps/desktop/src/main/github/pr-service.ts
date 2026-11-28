@@ -20,6 +20,20 @@ const TIP_FALLBACK_LIMIT = 50;
 
 export type PrRefreshTrigger = "scheduled" | "user";
 
+type BranchRefreshOptions = {
+  branches?: string[];
+  trigger?: PrRefreshTrigger;
+  force?: boolean;
+};
+
+type BranchRefresh = Promise<Map<string, PrSummary | null>>;
+
+type BranchRefreshQueue = {
+  waiting: Map<string, BranchRefresh>;
+  tail?: BranchRefresh;
+  running?: BranchRefresh;
+};
+
 /**
  * Which question failed, not merely which repository.
  *
@@ -118,13 +132,9 @@ export class PrService {
   private readonly resolveForge: typeof resolveForge;
   private readonly now: () => number;
   private writeGeneration = 0;
-  // A bulk lookup and a focused branch lookup may overlap for the same repo.
-  // They must share one request: otherwise an older bulk response can land
-  // after the focused response and overwrite its newer PR state.
-  private readonly pendingRepoRefreshes = new Map<
-    string,
-    Promise<Map<string, PrSummary | null>>
-  >();
+  // Branch batches run in order. Only the running batch blocks PR-number
+  // refreshes, so a queued batch can safely wait for an active number refresh.
+  private readonly branchRefreshQueues = new Map<string, BranchRefreshQueue>();
   private readonly pendingCommitRefreshes = new Map<
     string,
     Promise<Map<string, PrSummary | null>>
@@ -148,8 +158,7 @@ export class PrService {
    * failure, but do remember that you tried.
    *
    * Keyed by repository so `forget` is one delete, and within it by scope
-   * because a whole-repo sweep and a one-branch hover are different questions —
-   * see `BranchFailureScope`.
+   * because a whole-repo sweep and a one-branch hover are different questions.
    */
   private readonly lastFailedAt = new Map<string, Map<FailureScope, number>>();
   /**
@@ -405,7 +414,7 @@ export class PrService {
     }
 
     const pending: Promise<unknown>[] = [];
-    const pendingRepo = this.pendingRepoRefreshes.get(repoId);
+    const pendingRepo = this.branchRefreshQueues.get(repoId)?.running;
     const pendingCommits = this.pendingCommitRefreshes.get(repoId);
     const pendingNumbers = this.pendingPrNumberRefreshes.get(repoId);
     if (pendingRepo !== undefined) pending.push(pendingRepo);
@@ -571,74 +580,112 @@ export class PrService {
   /** Returns the branches whose PR state changed (empty = nothing to publish). */
   async refreshRepo(
     repoId: string,
-    opts: {
-      branches?: string[];
-      trigger?: PrRefreshTrigger;
-      force?: boolean;
-    } = {}
+    opts: BranchRefreshOptions = {}
   ): Promise<Map<string, PrSummary | null>> {
-    return await this.refreshRepoAtGeneration(
-      repoId,
-      opts,
-      this.writeGeneration
-    );
-  }
+    if (opts.branches?.length === 0 || this.branchRefreshThrottled(repoId, opts)) {
+      return new Map();
+    }
 
-  private async refreshRepoAtGeneration(
-    repoId: string,
-    opts: {
-      branches?: string[];
-      trigger?: PrRefreshTrigger;
-      force?: boolean;
-    },
-    generation: number
-  ): Promise<Map<string, PrSummary | null>> {
-    if (!this.isCurrent(generation)) return new Map();
-    // Ahead of `branchesToCheck`, which spawns `git for-each-ref`: a throttled
-    // refresh must cost no subprocess either. Every caller queued behind an
-    // in-flight refresh recurses back through here when it settles, so this is
-    // also where they see a mark the refresh they waited on just wrote.
-    const scope = branchFailureScope(opts);
-    if (
-      opts.force !== true &&
-      this.failedWithin(repoId, scope, this.failureTtlMs(scope, opts.trigger))
-    ) {
-      return new Map();
-    }
-    const toCheck = await this.branchesToCheck(repoId, opts.branches);
-    if (toCheck.branches.length === 0 || !this.isCurrent(generation)) {
-      return new Map();
-    }
-    const pendingStatus = this.pendingPrNumberRefreshes.get(repoId);
-    if (pendingStatus !== undefined) {
-      await pendingStatus;
-      if (!this.isCurrent(generation)) return new Map();
-      return await this.refreshRepoAtGeneration(repoId, opts, generation);
-    }
-    const pending = this.pendingRepoRefreshes.get(repoId);
+    const generation = this.writeGeneration;
+    const branches = opts.branches === undefined ? undefined : [...new Set(opts.branches)];
+    // The scope is a set. Keep the first caller's ordering for tip fallback.
+    const key = JSON.stringify([
+      generation,
+      opts.trigger ?? "scheduled",
+      opts.force === true,
+      branches === undefined ? null : [...branches].sort()
+    ]);
+    const queue: BranchRefreshQueue = this.branchRefreshQueues.get(repoId) ?? { waiting: new Map() };
+    const pending = queue.waiting.get(key);
     if (pending !== undefined) {
       await pending;
-      if (!this.isCurrent(generation)) return new Map();
-      return await this.refreshRepoAtGeneration(repoId, opts, generation);
+      // Only the caller that ran the batch publishes its delta.
+      return new Map();
     }
 
-    const refresh = this.refreshBranches(repoId, toCheck, opts, generation);
-    this.pendingRepoRefreshes.set(repoId, refresh);
+    const refresh = this.refreshQueuedBranches(
+      repoId,
+      branches === undefined ? { ...opts } : { ...opts, branches },
+      generation,
+      queue,
+      key
+    );
+    queue.waiting.set(key, refresh);
+    queue.tail = refresh;
+    this.branchRefreshQueues.set(repoId, queue);
     try {
       return await refresh;
     } finally {
-      this.pendingRepoRefreshes.delete(repoId);
+      if (queue.waiting.get(key) === refresh) queue.waiting.delete(key);
+      if (queue.tail === refresh) this.branchRefreshQueues.delete(repoId);
     }
+  }
+
+  private async refreshQueuedBranches(
+    repoId: string,
+    opts: BranchRefreshOptions,
+    generation: number,
+    queue: BranchRefreshQueue,
+    key: string
+  ): Promise<Map<string, PrSummary | null>> {
+    const previous = queue.tail;
+    let waited = previous !== undefined;
+    // Yield even on an idle repo, so equivalent requests can join before the
+    // ref snapshot. A failed batch must still release the next branch scope.
+    await previous?.catch(() => undefined);
+    while (this.isCurrent(generation)) {
+      const pendingStatus = this.pendingPrNumberRefreshes.get(repoId);
+      if (pendingStatus === undefined) break;
+      waited = true;
+      await pendingStatus;
+    }
+    // A request arriving after discovery starts may know about new local
+    // refs or request a new forced observation. Let it join the next batch.
+    queue.waiting.delete(key);
+    if (!this.isCurrent(generation) || this.branchRefreshThrottled(repoId, opts)) {
+      return new Map();
+    }
+    // If all requested branches are fresh after waiting, filtering out any
+    // absent refs cannot make the remaining branches stale.
+    const { branches } = opts;
+    if (
+      waited &&
+      opts.force !== true &&
+      branches !== undefined &&
+      this.isFresh(repoId, branches, this.refreshTtlMs(repoId, branches, opts))
+    ) {
+      return new Map();
+    }
+
+    const refresh = this.discoverAndRefreshBranches(repoId, opts, generation);
+    queue.running = refresh;
+    try {
+      return await refresh;
+    } finally {
+      delete queue.running;
+    }
+  }
+
+  private branchRefreshThrottled(repoId: string, opts: BranchRefreshOptions): boolean {
+    const scope = branchFailureScope(opts);
+    return opts.force !== true &&
+      this.failedWithin(repoId, scope, this.failureTtlMs(scope, opts.trigger));
+  }
+
+  private async discoverAndRefreshBranches(
+    repoId: string,
+    opts: BranchRefreshOptions,
+    generation: number
+  ): Promise<Map<string, PrSummary | null>> {
+    const toCheck = await this.branchesToCheck(repoId, opts.branches);
+    if (toCheck.branches.length === 0 || !this.isCurrent(generation)) return new Map();
+    return await this.refreshBranches(repoId, toCheck, opts, generation);
   }
 
   private async refreshBranches(
     repoId: string,
     { branches, refs }: BranchesToCheck,
-    opts: {
-      branches?: string[];
-      trigger?: PrRefreshTrigger;
-      force?: boolean;
-    },
+    opts: BranchRefreshOptions,
     generation: number
   ): Promise<Map<string, PrSummary | null>> {
     const empty = new Map<string, PrSummary | null>();
