@@ -1,5 +1,11 @@
 # Changelog
 
+## v0.67.0 - 2026-11-27
+
+- Bulk pull - Pull Recent and Pull All can now sync upstream changes to enabled writable forks, using the fork selections configured for each repository.
+- Refresh performance - Combined overlapping Lineage graph and branch pull request refreshes, and reduced repeated work during bulk sync and independent repository updates.
+- Branch search - Kept branch search in sync with worktree refreshes and updated only the branch index entries that changed.
+
 ## v0.66.0 - 2026-11-26
 
 - AI and Agent Access - Removed the built-in AI features and provider settings. External agents can still connect through the MCP server when local-agent access is enabled.
