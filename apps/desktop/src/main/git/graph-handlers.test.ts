@@ -93,6 +93,8 @@ const DETAILED_PR = {
 
 let db: ReturnType<typeof openDatabase>;
 let bus: CommandBus;
+let invalidateLanes: (repoId: string) => void;
+let otherProfileCheckout: { path: string; id: string; oldTip: string; newTip: string };
 let repoId: string;
 let repoPath: string;
 /** worktree id per branch, for addressing `graph:log` / `graph:lanes`. */
@@ -110,18 +112,18 @@ function insertPr(branch: string, row: Record<string, unknown>): void {
 
 async function lanes(
   branch: string,
-  req: { scope?: "active" | "all"; force?: boolean; limit?: number } = {}
+  req: { scope?: "active" | "all"; force?: boolean; limit?: number; webContentsId?: number } = {}
 ): Promise<LaneGraph> {
   const worktreeId = worktreeIds.get(branch);
   if (worktreeId === undefined) throw new Error(`no worktree for ${branch}`);
   const res = await bus.dispatch("graph:lanes", {
     worktreeId,
     scope: req.scope ?? "active",
-    // The lane cache is module-level and outlives each test, so every call
-    // that is not itself about caching recomputes.
+    // The handler outlives each test, so every call that is not itself about
+    // caching recomputes.
     force: req.force ?? true,
     ...(req.limit === undefined ? {} : { limit: req.limit })
-  });
+  }, req.webContentsId === undefined ? {} : { webContentsId: req.webContentsId });
   if (!res.ok) throw new Error(`graph:lanes failed: ${res.error.message}`);
   return res.value;
 }
@@ -165,8 +167,21 @@ beforeAll(async () => {
   repoId = indexed.value.id;
   for (const wt of indexed.value.worktrees) worktreeIds.set(wt.branch, wt.id);
 
+  const otherPath = join(root, "other-profile");
+  initRepo(otherPath);
+  const oldTip = commit(otherPath, "other-old");
+  const newTip = commit(otherPath, "other-new");
+  const otherProfile = new ProfileService(db).create({
+    name: "Other profile",
+    email: "other@example.test",
+    roots: [otherPath]
+  });
+  const other = await indexer.indexRepoAt(otherProfile.id, otherPath);
+  if (!other.ok) throw new Error(other.error.message);
+  otherProfileCheckout = { path: otherPath, id: other.value.worktrees[0]!.id, oldTip, newTip };
+
   bus = new CommandBus();
-  registerGraphHandlers(bus, db, new WorktreeStateService(db, systemGit));
+  invalidateLanes = registerGraphHandlers(bus, db, new WorktreeStateService(db, systemGit));
 });
 
 afterEach(() => {
@@ -437,6 +452,75 @@ describe("graph:lanes caching", () => {
 
     expect(all.shownBranches).toContain("shipped");
   });
+
+  it.each(["before", "after"] as const)(
+    "reads the current tag when a new window opens %s the old build finishes",
+    async (reopen) => {
+      const tagName = "v8.1.2";
+      const other = otherProfileCheckout;
+      const setTag = (path: string, target: string) => {
+        execFileSync("git", ["-C", path, "tag", "-f", tagName, target], { stdio: "ignore" });
+      };
+      const currentTag = (path: string) =>
+        execFileSync("git", ["-C", path, "rev-parse", `refs/tags/${tagName}`], { encoding: "utf8" }).trim();
+      const tagIn = (graph: LaneGraph) =>
+        Object.entries(graph.tags ?? {}).find(([, tag]) => tag.name === tagName)?.[0];
+
+      setTag(repoPath, mainTip);
+      setTag(other.path, other.oldTip);
+      const otherLanes = async (force: boolean) => {
+        const reply = await bus.dispatch("graph:lanes", { worktreeId: other.id, scope: "active", force });
+        if (!reply.ok) throw new Error(reply.error.message);
+        return reply.value;
+      };
+      expect(tagIn(await otherLanes(true))).toBe(other.oldTip);
+      setTag(other.path, other.newTip);
+
+      for (const scope of ["active", "all"] as const) {
+        expect(tagIn(await lanes("main", { scope, webContentsId: 101 }))).toBe(mainTip);
+      }
+
+      // The trunk walk runs after the tag scan. Hold that old window's read
+      // while the tag moves and main announces the change. There is no
+      // trailing force from the closed renderer.
+      let release!: () => void;
+      let reached!: () => void;
+      const atGate = new Promise<void>((resolve) => { reached = resolve; });
+      gitGate.held = new Promise<void>((resolve) => { release = resolve; });
+      gitGate.match = (args) => {
+        const hit = args[0] === "log" && args[1] === "--topo-order";
+        if (hit) reached();
+        return hit;
+      };
+      const oldWindow = lanes("main", { webContentsId: 101 });
+      try {
+        await atGate;
+        setTag(repoPath, noprTip);
+        invalidateLanes(repoId);
+        if (reopen === "after") {
+          release();
+          expect(tagIn(await oldWindow)).toBe(mainTip);
+        }
+        for (const scope of ["active", "all"] as const) {
+          const graph = await lanes("main", { scope, force: false, webContentsId: 202 });
+          expect(tagIn(graph)).toBe(currentTag(repoPath));
+        }
+        release();
+        expect(tagIn(await oldWindow)).toBe(mainTip);
+        expect(tagIn(await lanes("main", { force: false, webContentsId: 202 }))).toBe(currentTag(repoPath));
+        // A different profile's lane cache is independent of this event.
+        expect(tagIn(await otherLanes(false))).toBe(other.oldTip);
+      } finally {
+        release();
+        await oldWindow;
+        gitGate.held = null;
+        gitGate.match = null;
+        for (const path of [repoPath, other.path]) {
+          execFileSync("git", ["-C", path, "tag", "-d", tagName], { stdio: "ignore" });
+        }
+      }
+    }
+  );
 
   it("re-resolves HEAD per worktree even on a cache hit", async () => {
     // The lane set is repo-level, but the HEAD dot is not: switching the

@@ -2,7 +2,6 @@
 
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
-import fc from "fast-check";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   ok,
@@ -241,17 +240,13 @@ describe("RepoRefsModal Tags tab — published tags", () => {
     expect(rowOf(`release-${tags.length - 1}`)).toBeDefined();
   }
 
-  it("keeps the focused row beyond the server page limit during a failed check and recovery", async () => {
-    await checkLoadedPages(TAG_PAGE_MAX / TAG_PAGE_SIZE + 1);
-  });
-
-  it("retains the loaded prefix across checks at any generated page depth", async () => {
-    await fc.assert(fc.asyncProperty(fc.integer({ min: 2, max: 6 }), checkLoadedPages).afterEach(async () => {
-      await act(async () => root.unmount());
-      root = createRoot(container);
-      answer = page();
-    }), { numRuns: 8 });
-  });
+  // Cover the entire depth range and the first depth beyond the server limit.
+  // Each DOM replay gets its own timeout and fixture teardown.
+  const pageDepths = [...new Set([2, 3, 4, 5, 6, TAG_PAGE_MAX / TAG_PAGE_SIZE + 1])];
+  it.each(pageDepths)(
+    "retains the loaded prefix and focus at %i pages during a failed check and recovery",
+    checkLoadedPages
+  );
 
   it.each(["Check", "Restore"])("%s refreshes the open tag details once", async (action) => {
     const name = "v1.2.3";

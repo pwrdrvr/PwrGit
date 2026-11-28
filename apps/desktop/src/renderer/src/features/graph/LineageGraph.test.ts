@@ -2,34 +2,9 @@ import type { Commit } from "@pwrgit/shared";
 import { describe, expect, it } from "vitest";
 import {
   authorInterest,
-  consumeBranchPrInvalidation,
   personGraphStats,
   personStatsKey
 } from "./LineageGraph";
-
-describe("active lane PR invalidation", () => {
-  it("defers an invalidation observed in all scope until active is loaded", () => {
-    expect(consumeBranchPrInvalidation("all", 1, 0)).toEqual({
-      force: false,
-      consumedGeneration: 0
-    });
-    expect(consumeBranchPrInvalidation("active", 1, 0)).toEqual({
-      force: true,
-      consumedGeneration: 1
-    });
-  });
-
-  it("consumes an active invalidation exactly once", () => {
-    expect(consumeBranchPrInvalidation("active", 2, 1)).toEqual({
-      force: true,
-      consumedGeneration: 2
-    });
-    expect(consumeBranchPrInvalidation("active", 2, 2)).toEqual({
-      force: false,
-      consumedGeneration: 2
-    });
-  });
-});
 
 const commit = (over: Partial<Commit> & Pick<Commit, "hash">): Commit => ({
   shortHash: over.hash.slice(0, 7),

@@ -1486,7 +1486,9 @@ if (!gotSingleInstanceLock) {
         }
       }
     );
-    registerGraphHandlers(bus, db, stateService);
+    const invalidateGraphLanes = registerGraphHandlers(bus, db, stateService);
+    observeEvent("graph:changed", ({ repoId }) => invalidateGraphLanes(repoId));
+    observeEvent("pr:changed", ({ repoId }) => invalidateGraphLanes(repoId));
     registerChangesHandlers(bus, db, refresher, worktreeOperations);
     registerRepositorySetupHandlers(bus, db, worktreeOperations, () => forgeHosts.overrides());
     registerOperationHandlers(bus, db, refresher, worktreeOperations);
