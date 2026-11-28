@@ -112,7 +112,10 @@ describe("CloneService with recent history only", () => {
     expect(fixtureGit(clone, "branch", "--show-current")).toBe("main");
     // Content: the checkout is the source's tip, byte for byte.
     expect(fixtureGit(clone, "rev-parse", "HEAD^{tree}")).toBe(fixtureGit(source, "rev-parse", "main^{tree}"));
-    expect(readFileSync(join(clone, "file.txt"), "utf8")).toBe("12\n");
+    // The committed blob, not the working file: Windows' default
+    // core.autocrlf checks the file out with CRLF.
+    expect(fixtureGit(clone, "show", "HEAD:file.txt")).toBe("12");
+    expect(readFileSync(join(clone, "file.txt"), "utf8").replace(/\r\n/g, "\n")).toBe("12\n");
     // Every tag arrives too, each with its own latest commits: `old` (c4) is
     // present although main's last two commits do not reach it.
     expect(fixtureGit(clone, "tag", "--list").split("\n").sort()).toEqual(["old", "v2"]);

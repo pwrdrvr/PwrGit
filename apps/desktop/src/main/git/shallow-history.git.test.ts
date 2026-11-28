@@ -121,7 +121,9 @@ describe("deepenHistory", () => {
     );
     expect(graftedCommits(clone)).toEqual(graftedCommits(twin));
     expect(readFileSync(join(clone, "file.txt"), "utf8")).toBe(before);
-    expect(before).toBe("12\n");
+    // The committed blob, not the working file: Windows' default
+    // core.autocrlf checks the file out with CRLF.
+    expect(fixtureGit(clone, "show", "HEAD:file.txt")).toBe("12");
     expect(fixtureGit(clone, "status", "--porcelain")).toBe("");
     const state = await readShallowState(git, clone, "origin/main");
     if (!state.ok || state.value === null) throw new Error("expected shallow state");
