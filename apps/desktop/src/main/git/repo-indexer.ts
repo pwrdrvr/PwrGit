@@ -222,6 +222,7 @@ function trackingFromWorktreeState(
 }
 
 type IndexedBranches = {
+  sequence: number;
   branches: BranchRef[];
   remoteNames: string[];
 };
@@ -234,21 +235,6 @@ type DerivedBranchValues = [
   remoteName?: string
 ];
 type StoredDerivedBranch = [id: string, name: string, fullName: string, remoteName?: string];
-
-async function listIndexedBranches(
-  git: GitExec,
-  cwd: string
-): Promise<Result<IndexedBranches>> {
-  // Parse remote-tracking refs and index them against the same list of names.
-  const remotes = listRemoteNames(git, cwd);
-  const [branches, remoteNames] = await Promise.all([
-    listBranches(git, cwd, remotes),
-    remotes
-  ]);
-  if (!branches.ok) return branches;
-  if (!remoteNames.ok) return remoteNames;
-  return ok({ branches: branches.value, remoteNames: remoteNames.value });
-}
 
 export type RepoIndexerOptions = {
   yieldToEventLoop?: () => Promise<void>;
@@ -308,6 +294,8 @@ type ChangeRequestMatch = {
 export class RepoIndexer {
   private readonly repoDeletedListeners = new Set<(repoId: string) => void>();
   private readonly branchIndexTurns = new Map<string, Promise<void>>();
+  private readonly branchIndexSequences = new Map<string, number>();
+  private branchListingSequence = 0;
   private readonly yieldToEventLoop: () => Promise<void>;
   private readonly branchWriteChunkSize: number;
   private readonly discoveryYieldEvery: number;
@@ -347,6 +335,7 @@ export class RepoIndexer {
   }
 
   private repoDeleted(repoId: string): void {
+    this.branchIndexSequences.delete(repoId);
     for (const listener of this.repoDeletedListeners) listener(repoId);
   }
 
@@ -405,7 +394,7 @@ export class RepoIndexer {
     await mapLimit([...found], GIT_CONCURRENCY, async (dir) => {
       const [listed, listedBranches] = await Promise.all([
         listWorktrees(this.git, dir),
-        listIndexedBranches(this.git, dir)
+        this.listIndexedBranches(dir)
       ]);
       if (!listed.ok) unread.add(dir);
       if (!listed.ok || listed.value.length === 0) return;
@@ -446,12 +435,7 @@ export class RepoIndexer {
       })();
       seenRepoIds.push(repoId);
       if (indexedBranches !== null) {
-        await this.syncBranchIndexChunked(
-          repoId,
-          indexedBranches.branches,
-          indexedBranches.remoteNames,
-          signal
-        );
+        await this.syncBranchIndexChunked(repoId, indexedBranches, signal);
       } else {
         // Record the attempt so one temporarily unreadable repo does not turn
         // the one-time migration repair into an every-launch full rescan. The
@@ -536,7 +520,7 @@ export class RepoIndexer {
   ): Promise<Result<Repo>> {
     const [listed, listedBranches] = await Promise.all([
       listWorktrees(this.git, path),
-      listIndexedBranches(this.git, path)
+      this.listIndexedBranches(path)
     ]);
     if (!listed.ok) return listed;
     const primary = listed.value[0];
@@ -565,11 +549,7 @@ export class RepoIndexer {
     });
     run();
     if (listedBranches.ok) {
-      await this.syncBranchIndexChunked(
-        repoId,
-        listedBranches.value.branches,
-        listedBranches.value.remoteNames
-      );
+      await this.syncBranchIndexChunked(repoId, listedBranches.value);
     }
 
     const repo = this.getRepo(repoId);
@@ -635,13 +615,9 @@ export class RepoIndexer {
     if (repo === undefined) {
       return err({ kind: "repo", code: "not_found", message: "repo not found" });
     }
-    const listed = await listIndexedBranches(this.git, repo.path);
+    const listed = await this.listIndexedBranches(repo.path);
     if (!listed.ok) return listed;
-    await this.syncBranchIndexChunked(
-      repoId,
-      listed.value.branches,
-      listed.value.remoteNames
-    );
+    await this.syncBranchIndexChunked(repoId, listed.value);
     return ok(undefined);
   }
 
@@ -684,7 +660,7 @@ export class RepoIndexer {
       await mapLimit(batch, HYDRATION_GIT_CONCURRENCY, async (repo) => {
         inspected.push({
           repoId: repo.id,
-          result: await listIndexedBranches(this.git, repo.path)
+          result: await this.listIndexedBranches(repo.path)
         });
       });
       for (const item of inspected) {
@@ -693,11 +669,7 @@ export class RepoIndexer {
           this.scheduleRemoteBranchHydrationRetry(item.repoId);
           continue;
         }
-        await this.syncBranchIndexChunked(
-          item.repoId,
-          item.result.value.branches,
-          item.result.value.remoteNames
-        );
+        await this.syncBranchIndexChunked(item.repoId, item.result.value);
         refreshed += 1;
       }
       await this.yieldToEventLoop();
@@ -859,7 +831,7 @@ export class RepoIndexer {
       listWorktrees(this.git, repo.path),
       options.refreshBranches === false
         ? Promise.resolve(null)
-        : listIndexedBranches(this.git, repo.path)
+        : this.listIndexedBranches(repo.path)
     ]);
     if (!listed.ok) return listed;
     const primary = listed.value[0];
@@ -909,7 +881,7 @@ export class RepoIndexer {
         releasedBranches.push(...batch.filter((branch) => existing.has(`refs/heads/${branch}`)));
       }
     }
-    this.db.transaction(() => {
+    const updateWorktrees = this.db.transaction(() => {
       this.syncWorktrees(repoId, worktrees);
       const insertReleased = this.db.prepare(`
         INSERT INTO local_branches (id, repo_id, name, full_name)
@@ -925,13 +897,11 @@ export class RepoIndexer {
         WHERE repo_id = ? AND name IN (
           SELECT branch FROM worktrees WHERE repo_id = ?
         )`).run(repoId, repoId);
-    })();
+    });
+    // Keep these local branch writes from invalidating a delta between chunks.
+    await this.withBranchIndexTurn(repoId, updateWorktrees);
     if (listedBranches?.ok) {
-      await this.syncBranchIndexChunked(
-        repoId,
-        listedBranches.value.branches,
-        listedBranches.value.remoteNames
-      );
+      await this.syncBranchIndexChunked(repoId, listedBranches.value);
     }
 
     const refreshed = this.getRepo(repoId);
@@ -1722,6 +1692,19 @@ export class RepoIndexer {
       .run(repoId, ...seen);
   }
 
+  private async listIndexedBranches(cwd: string): Promise<Result<IndexedBranches>> {
+    const sequence = ++this.branchListingSequence;
+    // Parse remote-tracking refs and index them against the same list of names.
+    const remotes = listRemoteNames(this.git, cwd);
+    const [branches, remoteNames] = await Promise.all([
+      listBranches(this.git, cwd, remotes),
+      remotes
+    ]);
+    if (!branches.ok) return branches;
+    if (!remoteNames.ok) return remoteNames;
+    return ok({ sequence, branches: branches.value, remoteNames: remoteNames.value });
+  }
+
   /**
    * Refresh both derived branch tables for one repo from a single ref listing:
    * remote-only branches (0019) and local branches no worktree has checked out
@@ -1730,23 +1713,33 @@ export class RepoIndexer {
    */
   private async syncBranchIndexChunked(
     repoId: string,
-    branches: BranchRef[],
-    remoteNames: string[],
+    { sequence, branches, remoteNames }: IndexedBranches,
     signal?: AbortSignal
   ): Promise<void> {
     signal?.throwIfAborted();
-    // A newer listing must compare against the rows left by the earlier
-    // reconciliation, including its stale deletes. Only SQLite work takes
-    // a turn here, so Git listings and other repositories can still overlap.
-    const previous = this.branchIndexTurns.get(repoId) ?? Promise.resolve();
-    const turn = previous.then(async () => {
+    await this.withBranchIndexTurn(repoId, async () => {
       signal?.throwIfAborted();
+      // Git listings can return out of order. Once a newer listing has begun
+      // writing, an older one must leave its rows alone even if it arrives late
+      // or the newer listing is cancelled partway through.
+      if (sequence < (this.branchIndexSequences.get(repoId) ?? 0)) return;
+      this.branchIndexSequences.set(repoId, sequence);
       await this.syncRemoteBranchRows(repoId, branches, remoteNames, signal);
       signal?.throwIfAborted();
       await this.syncLocalBranchRows(repoId, branches, signal);
       signal?.throwIfAborted();
       this.markRemoteBranchesIndexed(repoId);
     });
+  }
+
+  private async withBranchIndexTurn(
+    repoId: string,
+    reconcile: () => void | Promise<void>
+  ): Promise<void> {
+    // Compare against the rows left by the previous turn, including its deletes.
+    // Git listings and writes for other repositories can still overlap.
+    const previous = this.branchIndexTurns.get(repoId) ?? Promise.resolve();
+    const turn = previous.then(reconcile);
     const tail = turn.catch(() => undefined);
     this.branchIndexTurns.set(repoId, tail);
     try {
@@ -1767,12 +1760,7 @@ export class RepoIndexer {
     const localNames = new Set(
       branches.filter((branch) => !branch.isRemote).map((branch) => branch.name)
     );
-    const rows: {
-      id: string;
-      name: string;
-      fullName: string;
-      remoteName: string;
-    }[] = [];
+    const rows: DerivedBranchValues[] = [];
     const remotePrefixes = remoteNames
       .slice()
       .sort((left, right) => right.length - left.length)
@@ -1788,21 +1776,13 @@ export class RepoIndexer {
       if (name === "") continue;
       if (localNames.has(name)) continue;
       const fullName = `refs/remotes/${branch.name}`;
-      rows.push({
-        id: `${repoId}:${fullName}`,
-        name,
-        fullName,
-        remoteName
-      });
+      rows.push([`${repoId}:${fullName}`, repoId, name, fullName, remoteName]);
     }
 
     await this.replaceDerivedBranchRows(
       "remote_branches",
       repoId,
-      rows.map((row) => ({
-        id: row.id,
-        args: [row.id, repoId, row.name, row.fullName, row.remoteName]
-      })),
+      rows,
       `INSERT INTO remote_branches (id, repo_id, name, full_name, remote_name)
        VALUES (?, ?, ?, ?, ?)
        ON CONFLICT(id) DO UPDATE SET
@@ -1844,13 +1824,13 @@ export class RepoIndexer {
           .all(repoId) as { branch: string }[]
       ).map((row) => row.branch)
     );
-    const rows: { id: string; name: string; fullName: string }[] = [];
+    const rows: DerivedBranchValues[] = [];
     for (const branch of branches) {
       if (branch.isRemote) continue;
       if (branch.name === "") continue;
       if (checkedOut.has(branch.name)) continue;
       const fullName = `refs/heads/${branch.name}`;
-      rows.push({ id: `${repoId}:${fullName}`, name: branch.name, fullName });
+      rows.push([`${repoId}:${fullName}`, repoId, branch.name, fullName]);
     }
 
     // The listing is the whole truth about which branches exist, so a pin on a
@@ -1875,10 +1855,7 @@ export class RepoIndexer {
     await this.replaceDerivedBranchRows(
       "local_branches",
       repoId,
-      rows.map((row) => ({
-        id: row.id,
-        args: [row.id, repoId, row.name, row.fullName]
-      })),
+      rows,
       `INSERT INTO local_branches (id, repo_id, name, full_name)
        VALUES (?, ?, ?, ?)
        ON CONFLICT(id) DO UPDATE SET
@@ -1893,8 +1870,8 @@ export class RepoIndexer {
   }
 
   /**
-   * Make one repo's rows in a derived branch table exactly `rows`: chunked
-   * upserts, then chunked deletes of whatever the listing no longer contains
+   * Reconcile a derived branch table with one repo's listing: chunked inserts
+   * and metadata updates, then deletes of whatever the listing no longer contains
    * (a deleted branch, a removed remote, a branch that just gained a
    * worktree). Yielding between chunks keeps a repo with thousands of refs
    * from blocking IPC; each chunk is its own transaction, so the FTS triggers
@@ -1903,57 +1880,46 @@ export class RepoIndexer {
   private async replaceDerivedBranchRows(
     table: "remote_branches" | "local_branches",
     repoId: string,
-    rows: { id: string; args: DerivedBranchValues }[],
+    rows: DerivedBranchValues[],
     upsertSql: string,
     signal?: AbortSignal
   ): Promise<void> {
     signal?.throwIfAborted();
-    // Check the indexed count before materializing any branch metadata.
-    // A different count goes straight to the chunked reconciliation.
-    const count = this.db
-      .prepare<[string], number>(`SELECT count(*) FROM ${table} WHERE repo_id = ?`)
-      .pluck()
-      .get(repoId);
-    if (count === rows.length) {
-      if (count === 0) return;
-      const current = this.db
-        .prepare<[string], StoredDerivedBranch>(
-          `SELECT id, name, full_name${table === "remote_branches" ? ", remote_name" : ""}
-           FROM ${table} WHERE repo_id = ?`
-        )
-        .raw()
-        .all(repoId);
-      const byId = new Map(current.map((row) => [row[0], row]));
-      const matches = rows.every(({ id, args: [, , name, fullName, remoteName] }) => {
-        const row = byId.get(id);
-        if (row === undefined) return false;
-        const [, storedName, storedFullName, storedRemoteName] = row;
-        return storedName === name && storedFullName === fullName &&
-          storedRemoteName === remoteName && byId.delete(id);
-      });
-      if (matches && byId.size === 0) return;
+    const current = this.db
+      .prepare<[string], StoredDerivedBranch>(
+        `SELECT id, name, full_name${table === "remote_branches" ? ", remote_name" : ""}
+         FROM ${table} WHERE repo_id = ?`
+      )
+      .raw()
+      .all(repoId);
+    const byId = new Map(current.map((row) => [row[0], row]));
+    const changed: DerivedBranchValues[] = [];
+    for (const args of rows) {
+      const [id, , name, fullName, remoteName] = args;
+      const stored = byId.get(id);
+      byId.delete(id);
+      if (stored === undefined || stored[1] !== name ||
+          stored[2] !== fullName || stored[3] !== remoteName) {
+        changed.push(args);
+      }
     }
-    const upsert = this.db.prepare(upsertSql);
-    for (
-      let offset = 0;
-      offset < rows.length;
-      offset += this.branchWriteChunkSize
-    ) {
-      signal?.throwIfAborted();
-      const chunk = rows.slice(offset, offset + this.branchWriteChunkSize);
-      this.db.transaction(() => {
-        for (const row of chunk) upsert.run(...row.args);
-      })();
-      await this.yieldToEventLoop();
+    const stale = [...byId.keys()];
+    if (changed.length > 0) {
+      const upsert = this.db.prepare(upsertSql);
+      for (
+        let offset = 0;
+        offset < changed.length;
+        offset += this.branchWriteChunkSize
+      ) {
+        signal?.throwIfAborted();
+        const chunk = changed.slice(offset, offset + this.branchWriteChunkSize);
+        this.db.transaction(() => {
+          for (const args of chunk) upsert.run(...args);
+        })();
+        await this.yieldToEventLoop();
+      }
     }
 
-    signal?.throwIfAborted();
-    const wanted = new Set(rows.map((row) => row.id));
-    const stale = (
-      this.db
-        .prepare(`SELECT id FROM ${table} WHERE repo_id = ?`)
-        .all(repoId) as { id: string }[]
-    ).filter((row) => !wanted.has(row.id));
     for (
       let offset = 0;
       offset < stale.length;
@@ -1968,7 +1934,7 @@ export class RepoIndexer {
             `DELETE FROM ${table}
              WHERE repo_id = ? AND id IN (${placeholders})`
           )
-          .run(repoId, ...chunk.map((row) => row.id));
+          .run(repoId, ...chunk);
       })();
       await this.yieldToEventLoop();
     }
