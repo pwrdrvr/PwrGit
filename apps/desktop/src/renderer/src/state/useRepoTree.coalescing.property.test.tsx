@@ -2,7 +2,7 @@
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import fc from "fast-check";
-import { ok, type Repo, type Result } from "@pwrgit/shared";
+import { claimWorktreeOwnership, ok, type Repo, type Result } from "@pwrgit/shared";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
@@ -53,6 +53,33 @@ const makeRepo = (index: number, behind = 0): Repo => ({
   ]
 });
 
+// Targeted lists arbitrate within the answer in main. The renderer then needs
+// the same arbitration over the answer spliced into its current display order.
+function referenceMerge(current: Repo[], asked: string[], fresh: Repo[]): Repo[] {
+  return claimWorktreeOwnership(current.flatMap((repo) => {
+    if (!asked.includes(repo.id)) return [repo];
+    const replacement = fresh.find((next) => next.id === repo.id);
+    return replacement === undefined ? [] : [replacement];
+  }));
+}
+
+type Change = { profileId: string; repoIds?: string[] };
+
+function mockList(list: (request: Change) => Repo[] | Promise<Repo[]>) {
+  const listeners = new Map<string, (payload: unknown) => void>();
+  mocks.subscribe.mockImplementation((channel: string, listener: (payload: unknown) => void) => {
+    listeners.set(channel, listener);
+    return () => listeners.delete(channel);
+  });
+  mocks.dispatch.mockImplementation(async (name: string, request: Change) =>
+    name === "repo:list" ? ok(await list(request)) : ok(null)
+  );
+  return {
+    changed: (change: Change) => listeners.get("repo:changed")!(change),
+    removed: (worktreeId: string) => listeners.get("worktree:removed")!({ worktreeId })
+  };
+}
+
 let container: HTMLDivElement;
 let root: Root;
 
@@ -70,6 +97,163 @@ afterEach(() => {
 });
 
 describe("useRepoTree targeted coalescing and reference stability properties", () => {
+  it("checks no paths or ids on a stable sibling when one repo is refreshed", async () => {
+    const sibling = makeRepo(1);
+    const { id, path } = sibling.worktrees[0]!;
+    const idRead = vi.fn(() => id);
+    const pathRead = vi.fn(() => path);
+    Object.defineProperties(sibling.worktrees[0]!, {
+      id: { get: idRead },
+      path: { get: pathRead }
+    });
+    const fresh = makeRepo(0);
+    const { changed } = mockList(({ repoIds }) =>
+      repoIds === undefined ? [makeRepo(0), sibling] : [fresh]
+    );
+    let tree!: UseRepoTree;
+    function Probe() {
+      tree = useRepoTree("personal");
+      return null;
+    }
+
+    await act(async () => root.render(<Probe />));
+    idRead.mockClear();
+    pathRead.mockClear();
+    // A hidden repo has no row in either list even if its id is in the event.
+    await act(async () => changed({ profileId: "personal", repoIds: ["repo-0", "hidden"] }));
+
+    expect(pathRead).not.toHaveBeenCalled();
+    expect(idRead).not.toHaveBeenCalled();
+    expect(tree.repos).toHaveLength(2);
+    expect(tree.repos[0]).toBe(fresh);
+    expect(tree.repos[1]).toBe(sibling);
+  });
+
+  it("matches full ownership arbitration across mixed full and targeted snapshots", () => {
+    const repoId = fc.nat(5);
+    // The stored worktree id comes from the checkout path. Different repos
+    // can claim that checkout in a legacy database or across two responses.
+    const worktreePath = fc.nat(8);
+    const snapshot = fc.uniqueArray(
+      fc.record({ index: repoId, paths: fc.array(worktreePath, { maxLength: 6 }) }),
+      { selector: ({ index }) => index, minLength: 1, maxLength: 6 }
+    );
+    const refresh = fc.record({
+      snapshot,
+      asked: fc.option(fc.uniqueArray(repoId), { nil: undefined })
+    });
+    fc.assert(fc.property(fc.array(refresh, { minLength: 1, maxLength: 12 }), (steps) => {
+      let current: Repo[] = [];
+      let expected: Repo[] = [];
+      for (const { snapshot, asked } of steps) {
+        const visible = snapshot.map(({ index, paths }) => {
+          const repo = makeRepo(index);
+          return {
+            ...repo,
+            worktrees: paths.map((path) => ({
+              ...repo.worktrees[0]!,
+              id: `worktree-${path}`,
+              path: `/sandbox/repo-${path}`,
+              isPrimary: path === index
+            }))
+          };
+        });
+        if (asked === undefined) {
+          current = expected = claimWorktreeOwnership(visible);
+        } else {
+          const ids = asked.map((index) => `repo-${index}`);
+          const fresh = claimWorktreeOwnership(visible.filter((repo) => ids.includes(repo.id)));
+          expected = referenceMerge(expected, ids, fresh);
+          current = mergeChangedRepos(current, ids, fresh);
+        }
+        expect(current).toEqual(expected);
+      }
+    }));
+  });
+
+  it("arbitrates against incremental removals and drops superseded responses", async () => {
+    vi.useFakeTimers();
+    const pending: { request: Change; resolve: (repos: Repo[]) => void }[] = [];
+    const { changed, removed } = mockList((request) => new Promise<Repo[]>((resolve) => {
+      pending.push({ request, resolve });
+    }));
+    function replyTo(request: Change, repos: Repo[]) {
+      const reply = pending.shift();
+      expect(reply?.request).toEqual(request);
+      return act(async () => reply!.resolve(repos));
+    }
+    let tree!: UseRepoTree;
+    function Probe({ profileId }: { profileId: string }) {
+      tree = useRepoTree(profileId);
+      return null;
+    }
+    const profileId = "personal";
+    const full = { profileId };
+    const first = { profileId, repoIds: ["repo-0"] };
+    const second = { profileId, repoIds: ["repo-1"] };
+    const aliasRepo = makeRepo(0);
+    const primaryRepo = makeRepo(1);
+    const primary = primaryRepo.worktrees[0]!;
+    const withAlias = {
+      ...aliasRepo,
+      worktrees: [...aliasRepo.worktrees, { ...primary, repoId: aliasRepo.id }]
+    };
+    await act(async () => root.render(<Probe profileId={profileId} />));
+    await replyTo(full, [aliasRepo, primaryRepo]);
+
+    // A removal publishes while the first answer is in flight. The second
+    // targeted read waits and can give the worktree back to its true primary.
+    act(() => {
+      changed(first);
+      removed(primary.id);
+      changed(second);
+    });
+    expect(pending).toHaveLength(1);
+    let expected = referenceMerge([aliasRepo, { ...primaryRepo, worktrees: [] }], first.repoIds, [withAlias]);
+    await replyTo(first, [withAlias]);
+    expect(tree.repos).toEqual(expected);
+    expected = referenceMerge(expected, second.repoIds, [primaryRepo]);
+    await replyTo(second, [primaryRepo]);
+    expect(tree.repos).toEqual(expected);
+    expect(tree.repos[1]).toBe(primaryRepo);
+
+    act(() => {
+      vi.advanceTimersByTime(TARGETED_BURST_COALESCE_MS);
+      changed(first);
+      changed(second);
+      changed(full);
+    });
+    expect(pending).toHaveLength(2);
+    await replyTo(first, []);
+    expect(tree.repos).toEqual(expected);
+    const newFull = [primaryRepo, makeRepo(2), aliasRepo];
+    await replyTo(full, newFull);
+    expect(tree.repos).toEqual(newFull);
+    expect(pending).toHaveLength(0);
+
+    // A targeted read started after a full read can apply to the full list
+    // if its answer arrives second. Ownership uses that latest list order.
+    act(() => {
+      changed(full);
+      changed(first);
+    });
+    await replyTo(full, [aliasRepo, primaryRepo]);
+    await replyTo(first, [withAlias]);
+    expect(tree.repos).toEqual(referenceMerge([aliasRepo, primaryRepo], first.repoIds, [withAlias]));
+
+    act(() => vi.advanceTimersByTime(TARGETED_BURST_COALESCE_MS));
+    act(() => changed(first));
+    expect(pending).toHaveLength(1);
+    await act(async () => root.render(<Probe profileId="other" />));
+    const stale = pending.shift()!;
+    expect(stale.request).toEqual(first);
+    const other = [{ ...makeRepo(3), profileId: "other" }];
+    await replyTo({ profileId: "other" }, other);
+    await act(async () => stale.resolve([withAlias]));
+    expect(tree.repos).toEqual(other);
+    expect(pending).toHaveLength(0);
+  });
+
   it("mergeChangedRepos preserves every unasked sibling reference while replacing asked repos", () => {
     fc.assert(
       fc.property(
