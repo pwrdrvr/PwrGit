@@ -7,6 +7,7 @@ import {
   writeFileSync
 } from "node:fs";
 import { dirname } from "node:path";
+import { pathToFileURL } from "node:url";
 import {
   FORGE_KINDS,
   forgeCloneUrls,
@@ -187,6 +188,7 @@ class E2EForgeRepoProvider implements ForgeRepoProvider {
       onStderr: (chunk: string) => void;
       env: Record<string, string>;
       signal?: AbortSignal;
+      gitOptions?: readonly string[];
     }
   ): Promise<void> {
     this.record("clone", { nameWithOwner, destination });
@@ -213,7 +215,17 @@ class E2EForgeRepoProvider implements ForgeRepoProvider {
     }
 
     const cloned = await this.git(
-      ["clone", "--progress", "--", repository.remotePath, destination],
+      [
+        "clone",
+        "--progress",
+        ...(options.gitOptions ?? []),
+        "--",
+        // As a real CLI's transport: Git ignores --depth for a plain path.
+        options.gitOptions === undefined || options.gitOptions.length === 0
+          ? repository.remotePath
+          : pathToFileURL(repository.remotePath).href,
+        destination
+      ],
       dirname(destination),
       {
         onStderr: options.onStderr,

@@ -261,3 +261,52 @@ describe("GraphRow moved tags", () => {
     await done();
   });
 });
+
+describe("GraphRow shallow boundary", () => {
+  const render = (shallowBoundary: boolean | undefined) =>
+    renderToStaticMarkup(
+      <GraphRow
+        vm={{
+          commit: { ...commit, parents: [] },
+          row: { lane: 0, top: [], bottom: [] },
+          refs: [],
+          remoteRefs: [],
+          isHead: false,
+          isHeadOnly: false,
+          isMine: false,
+          defaultBranch: "main",
+          ...(shallowBoundary === undefined ? {} : { shallowBoundary })
+        }}
+        laneCount={1}
+        hoverIntent={{
+          arm: () => undefined,
+          cancel: () => undefined,
+          immediate: () => undefined,
+          cardClosed: () => undefined,
+          claimCard: () => undefined
+        }}
+        now={new Date("2026-08-06T12:01:00.000Z").getTime()}
+        selected={false}
+        focused={false}
+        contextOpen={false}
+        flashing={false}
+        onOpen={() => undefined}
+        onShowContext={() => undefined}
+        onHideContext={() => undefined}
+        onFocusContext={() => false}
+        onOpenContextMenu={() => undefined}
+      />
+    );
+
+  it("marks a boundary commit as a history cut, with the reason for assistive tech", () => {
+    const markup = render(true);
+    expect(markup).toContain("commit-tag--shallow");
+    expect(markup).toContain("history cut");
+    expect(markup).toContain("weren’t downloaded");
+  });
+
+  it("draws nothing extra on a parentless commit that is not a boundary (a real root)", () => {
+    expect(render(undefined)).not.toContain("commit-tag--shallow");
+    expect(render(false)).not.toContain("commit-tag--shallow");
+  });
+});

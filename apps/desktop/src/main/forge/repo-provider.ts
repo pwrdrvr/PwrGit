@@ -46,7 +46,9 @@ export type ForgeRepoProvider = {
   /** Create a fork, or return the caller's existing one. Resolves to the fork
    *  as the forge reports it after creation. */
   fork(input: ForkInput): Promise<CloneRepository>;
-  /** Clone through the CLI itself, so its credential helper is used. */
+  /** Clone through the CLI itself, so its credential helper is used.
+   *  `gitOptions` go to `git clone` after `--`; only a product whose
+   *  `cliCloneTakesGitOptions` is true is ever sent any. */
   cloneWithCli(
     nameWithOwner: string,
     destination: string,
@@ -54,6 +56,7 @@ export type ForgeRepoProvider = {
       onStderr: (chunk: string) => void;
       env: Record<string, string>;
       signal?: AbortSignal;
+      gitOptions?: readonly string[];
     }
   ): Promise<void>;
   isAuthError(cause: unknown): boolean;

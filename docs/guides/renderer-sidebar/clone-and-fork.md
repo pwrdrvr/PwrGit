@@ -36,6 +36,13 @@ the slug. Lineage sources:
 
 Design: `design/Upstream When Cloning a Fork - UX Review.dc.html`.
 
+"Recent history only" sits under Clone with, off by default, drawn at open
+and never forge-dependent, with the commit count inline so turning it on keeps
+the row's height. `clone-history.ts` decides it: while on, it either sends a
+valid `depth` or blocks Clone with the reason in the row (a bad count, your
+fork, the GitCafe CLI). It never quietly becomes a full clone. Design:
+`design/Shallow Clones - UX Review.dc.html`.
+
 **Nothing below the source may move after the pick.** The forge answers
 0.6–2s later, with focus already in Check out to; late rows moved focus, Clone
 with and the footer ~100px. Draw every forge-dependent row in the pick's frame

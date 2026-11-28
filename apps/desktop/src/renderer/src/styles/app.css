@@ -4332,7 +4332,8 @@ a.forge-chip:focus-visible {
   flex-direction: column;
   gap: 6px;
 }
-.fork-option {
+.fork-option,
+.clone-history {
   display: flex;
   align-items: flex-start;
   gap: 9px;
@@ -4342,30 +4343,36 @@ a.forge-chip:focus-visible {
   background: var(--bg-panel);
   cursor: pointer;
 }
-.fork-option.is-on {
+.fork-option.is-on,
+.clone-history.is-on {
   border-color: var(--accent-border);
   background: var(--accent-tint);
 }
-.fork-option input {
+.fork-option input,
+.clone-history input[type="checkbox"] {
   flex: 0 0 auto;
   margin: 1px 0 0;
   accent-color: var(--accent);
 }
-.fork-option > span {
+.fork-option > span,
+.clone-history > span {
   flex: 1;
   min-width: 0;
   display: flex;
   flex-direction: column;
   gap: 3px;
 }
-.fork-option strong {
+.fork-option strong,
+.clone-history strong {
   color: var(--text-secondary);
   font: 600 11px/1.25 var(--font-sans);
 }
-.fork-option.is-on strong {
+.fork-option.is-on strong,
+.clone-history.is-on strong {
   color: var(--text-primary);
 }
-.fork-option small {
+.fork-option small,
+.clone-history small {
   color: var(--text-muted);
   font: 500 10px/1.35 var(--font-sans);
 }
@@ -4381,6 +4388,31 @@ a.forge-chip:focus-visible {
    named the parent. A colour change only: the slug replaces it in place. */
 .fork-option__target.is-pending {
   color: var(--text-subtle);
+}
+
+/* Clone's "Recent history only" row: a fork-option with the commit count
+   inline, so turning it on never changes the row's height. */
+.clone-history.is-disabled {
+  cursor: default;
+  opacity: 0.72;
+}
+.clone-history input.clone-history__depth {
+  width: 64px;
+  height: 18px;
+  margin: 0 2px;
+  padding: 0 6px;
+  border: 1px solid var(--border-default);
+  border-radius: 5px;
+  background: var(--bg-input);
+  color: var(--text-primary);
+  font: 500 11px/1 var(--font-mono);
+  vertical-align: baseline;
+}
+.clone-history input.clone-history__depth[aria-invalid="true"] {
+  border-color: var(--danger-border);
+}
+.clone-history small.clone-history__error {
+  color: var(--danger-text);
 }
 
 /* Shown only when the source is itself a fork — see needsUpstreamChoice. */
@@ -10617,6 +10649,11 @@ button.commit-byline:focus-visible {
   background: var(--accent);
   color: var(--accent-on);
 }
+/* A shallow boundary: Git has none of this commit's parents. */
+.commit-tag--shallow {
+  background: var(--warn-soft);
+  color: var(--status-warning);
+}
 
 /* Multi-lane graph rows — the lane gutter is an SVG whose width scales with the
    number of active lanes; commit body reuses the .commit-* classes above. */
@@ -11056,6 +11093,7 @@ button.ref-chip:focus-visible {
 .ref-chips .stack-position,
 .commit-meta > .commit-tag--old-parent,
 .commit-meta > .commit-tag--merge,
+.commit-meta > .commit-tag--shallow,
 .commit-meta > .commit-tag--head {
   white-space: nowrap;
 }
@@ -11156,6 +11194,51 @@ button.ref-chip:focus-visible {
   font: 600 11.5px/1 var(--font-sans);
   cursor: pointer;
   padding: 0;
+}
+
+/* Where a shallow repository's downloaded history ends, and the way to get
+   more. Design: Shallow Clones - UX Review, turn 2. */
+.graph-shallow-note {
+  margin-top: 10px;
+  padding: 10px 14px;
+  border: 1px dashed var(--border-default);
+  border-radius: var(--radius-md);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  font: 500 11.5px/1.45 var(--font-sans);
+  color: var(--text-muted);
+}
+.graph-shallow-note strong {
+  color: var(--text-secondary);
+}
+.graph-shallow-note code {
+  font-family: var(--font-mono);
+  font-size: 0.94em;
+}
+.graph-shallow-note__actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+.graph-shallow-note__actions button {
+  height: 24px;
+  padding: 0 10px;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border-default);
+  background: var(--bg-panel-elevated);
+  color: var(--text-primary);
+  font: 600 11px/1 var(--font-sans);
+  cursor: pointer;
+}
+.graph-shallow-note__actions button:disabled {
+  cursor: default;
+  opacity: 0.6;
+}
+.graph-shallow-note__actions button:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 1px;
 }
 
 /* ---- Commit selection action bar ---- */

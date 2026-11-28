@@ -9,6 +9,7 @@ import {
   type PwrGitError,
   type RemoteActivityPhase,
   type CloneRepository,
+  type DeepenHistoryResult,
   type ForkStatus,
   type ForkSyncPush,
   type ForkSyncTarget,
@@ -24,6 +25,7 @@ import { logMain } from "../logs";
 import type { DB } from "../persistence/db";
 import { execGit, sanitizeGitLogDetail, type GitExec } from "./dugite";
 import { addForkParentRemote } from "./fork-remotes";
+import { deepenHistory, readShallowBoundaries } from "./shallow-history";
 import { checkRemoteTips, ensureForkParentRemote } from "./auto-remote-check";
 import {
   addRemote,
@@ -798,6 +800,69 @@ export function registerRemoteHandlers(
     refresher.refreshRepoWorktrees(req.repoId);
     tagChecks.afterSync(req.repoId);
     return ok(null);
+  });
+
+  // Older history for a shallow repository. Asked for by a button, never by
+  // browsing; tracked like any fetch so it shows progress and can be stopped.
+  // A stop leaves Git's own state: a deepen that did not finish moved nothing.
+  bus.register("remote:deepenHistory", async (req) => {
+    const repo = repoOf(req.repoId);
+    if (repo === null) return err({ ...notFound, message: "repo not found" });
+    let cwd = repo.path;
+    let worktreeId: string | null = null;
+    let branch: string | null = null;
+    if (req.worktreeId !== undefined) {
+      const live = worktreeOf(req.worktreeId);
+      if (!live.ok) return live;
+      if (live.value.repoId !== req.repoId) {
+        return err({ ...notFound, message: "worktree not found in that repository" });
+      }
+      cwd = live.value.path;
+      worktreeId = req.worktreeId;
+      branch = live.value.branch;
+    }
+    const startedAt = Date.now();
+    const result = await tracked(
+      {
+        kind: "fetch",
+        profileId: repo.profileId,
+        repoId: req.repoId,
+        repoName: repo.name,
+        worktreeId,
+        branch
+      },
+      "fetch",
+      async (git, activity): Promise<Result<DeepenHistoryResult>> => {
+        const boundaries = await readShallowBoundaries(git, cwd);
+        if (!boundaries.ok) return boundaries;
+        // Already complete (another window, a terminal): nothing to ask for,
+        // and `--unshallow` on a complete repository is an error in Git.
+        if (boundaries.value === null) {
+          return ok({ remote: req.remote, shallow: false, fetched: false });
+        }
+        const deepened = await deepenHistory(git, cwd, req.remote, req.mode);
+        if (!deepened.ok) return deepened;
+        activity.setPhase("refresh");
+        await refreshRemoteBranches(req.repoId, "fetch");
+        return ok({ remote: req.remote, shallow: deepened.value.shallow, fetched: true });
+      }
+    );
+    if (!result.ok) {
+      return err(
+        result.error.code === "shallow_unsupported" ? result.error : classifyAuthFailure(result.error)
+      );
+    }
+    if (result.value.fetched) {
+      logMain(
+        "info",
+        "remote",
+        `fetched older history (${req.mode.kind}) from ${req.remote} for ${repo.path} (${seconds(startedAt)})`
+      );
+      // Deepening moves no ref, so the lane cache's ref stamp cannot see it.
+      emitEvent("graph:changed", { repoId: req.repoId });
+      refresher.refreshRepoWorktrees(req.repoId);
+    }
+    return result;
   });
 
   bus.register("remote:add", async (req) => {

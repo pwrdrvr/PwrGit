@@ -400,12 +400,13 @@ export class GitLabRepoProvider implements ForgeRepoProvider {
       onStderr: (chunk: string) => void;
       env: Record<string, string>;
       signal?: AbortSignal;
+      gitOptions?: readonly string[];
     }
   ): Promise<void> {
     // `glab repo clone` has no `--hostname`; GITLAB_HOST is the documented
     // way to point it at a self-managed instance, and targetHost routes it.
     await this.runCli(
-      ["repo", "clone", nameWithOwner, destination, "--", "--progress"],
+      ["repo", "clone", nameWithOwner, destination, "--", "--progress", ...(options.gitOptions ?? [])],
       {
         timeoutMs: 10 * 60_000,
         onStderr: options.onStderr,

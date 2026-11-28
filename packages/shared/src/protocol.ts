@@ -12,6 +12,7 @@ import type { StackAction, StackApplied, StackConflict, StackPlanPreview, StackS
 // graph, and rebase entries.
 
 import type { HotCpuProfileCapturedEvent } from "./hot-cpu-profile";
+import type { DeepenHistoryMode, DeepenHistoryResult } from "./shallow-history";
 import { DEFAULT_HOT_CPU_RULES, type HotCpuCaptureRules, type HotCpuRuleOverride } from "./hot-cpu-rules";
 import type { StartupCpuProfileCapturedEvent } from "./startup-cpu-profile";
 import type { ForgeHostMap } from "./forge-remote";
@@ -1289,6 +1290,11 @@ export interface Commands {
        *  when the clone starts, and clone into it. `parentPath` is ignored.
        *  A failed or cancelled clone takes the folder back out. */
       newRoot?: NewRootChoice;
+      /** Recent history only: this many commits of every branch
+       *  (`--depth N --no-single-branch`). Absent clones full history. Main
+       *  refuses anything but a whole number from 1 to `MAX_HISTORY_DEPTH`, and
+       *  a source that cannot honour it, rather than cloning everything. */
+      depth?: number;
     };
     res: ClonedRepo;
   };
@@ -2015,6 +2021,18 @@ export interface Commands {
   "remote:fetchRepo": {
     req: { repoId: string; remote?: string };
     res: null;
+  };
+  /**
+   * Fetch older history into a shallow repository, from the remote its
+   * History named (`ShallowHistory.remote`; main refuses one that is not
+   * configured): `--deepen=N` or `--unshallow`.
+   * A tracked fetch activity, so it shows progress and can be stopped. Keeps
+   * the configured refspec: a single-branch clone stays single-branch. A
+   * complete repository answers `fetched: false` without a network call.
+   */
+  "remote:deepenHistory": {
+    req: { repoId: string; worktreeId?: string; remote: string; mode: DeepenHistoryMode };
+    res: DeepenHistoryResult;
   };
   /**
    * Quiet, bounded check of the selected branch's tracked and fork-source

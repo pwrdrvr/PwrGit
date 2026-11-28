@@ -1,6 +1,7 @@
 import { existsSync, realpathSync, statSync } from "node:fs";
 import { rm } from "node:fs/promises";
 import { homedir } from "node:os";
+import { pathToFileURL } from "node:url";
 import {
   basename,
   dirname,
@@ -20,7 +21,10 @@ import {
   forgeSaasHost,
   isSafeForgeHostname,
   isSafeProjectPath,
+  isShallowUnsupportedError,
   ok,
+  parseHistoryDepth,
+  HISTORY_DEPTH_HINT,
   type CloneCatalog,
   type CloneDestination,
   type CloneProgress,
@@ -46,6 +50,7 @@ import type {
 import type { ForgeStatusService } from "../forge/status";
 import { requireExit0, type GitExec } from "./dugite";
 import { keepForkOriginal } from "./fork-remotes";
+import { shallowUnsupportedError } from "./shallow-history";
 import type { RepoIndexer } from "./repo-indexer";
 
 /** How many repositories one search asks the forge for. A search result the
@@ -311,6 +316,26 @@ const CLONE_PHASES: Record<string, CloneProgress["phase"]> = {
   "Filtering content": "checking_out"
 };
 const CLONE_ENV = { LC_ALL: "C", LANG: "C" } as const;
+
+/**
+ * The `git clone` options for recent history only, or none for full history.
+ *
+ * `--no-single-branch` is not optional: `--depth` alone implies
+ * `--single-branch`, which fetches only the default branch AND rewrites
+ * `remote.origin.fetch` to name it, so every other branch would be missing
+ * from PwrGit — today and after every later fetch. With it, every branch and
+ * every tag arrives with its own newest N commits, and the refspec stays the
+ * default. (A repository with many old tags downloads history near each.)
+ * Re-validated here because `ForkService` reaches `runClone` directly.
+ */
+export function cloneHistoryArgs(depth: number | undefined): Result<string[]> {
+  if (depth === undefined) return ok([]);
+  const commits = typeof depth === "number" ? parseHistoryDepth(depth) : null;
+  if (commits === null) {
+    return err({ kind: "validation", code: "invalid_history_depth", message: HISTORY_DEPTH_HINT });
+  }
+  return ok(["--depth", String(commits), "--no-single-branch"]);
+}
 
 /** Parse one carriage-return-delimited progress update written by Git. */
 export function parseCloneProgressLine(line: string): CloneProgress | null {
@@ -717,6 +742,8 @@ export class CloneService {
       hostname?: string;
       /** A fork's parent or network root, kept as a remote beside `origin`. */
       upstream?: string | null;
+      /** Recent history only: commits per branch. Absent clones everything. */
+      depth?: number;
     },
     onProgress: (progress: CloneProgress) => void = () => undefined,
     signal?: AbortSignal
@@ -727,6 +754,20 @@ export class CloneService {
         kind: "profile",
         code: "not_found",
         message: `No profile "${input.profileId}"`
+      });
+    }
+    // Before anything touches the disk or a forge: a count Git would reject,
+    // or one the renderer garbled, is the user's to fix — never a reason to
+    // clone the whole history instead.
+    // A number, as the contract says: `parseHistoryDepth` also reads what a
+    // user typed, and main must not accept a renderer's string for one.
+    const depth =
+      typeof input.depth === "number" ? parseHistoryDepth(input.depth) : null;
+    if (input.depth !== undefined && depth === null) {
+      return err({
+        kind: "validation",
+        code: "invalid_history_depth",
+        message: HISTORY_DEPTH_HINT
       });
     }
     const local =
@@ -806,7 +847,8 @@ export class CloneService {
         hostname,
         nameWithOwner,
         protocol: input.protocol,
-        ...(local?.ok === true ? { localPath: local.value.localPath } : {})
+        ...(local?.ok === true ? { localPath: local.value.localPath } : {}),
+        ...(depth === null ? {} : { depth })
       },
       destination,
       parentPath,
@@ -920,6 +962,8 @@ export class CloneService {
       nameWithOwner: string;
       protocol: CloneProtocol;
       localPath?: string;
+      /** Recent history only: `--depth N --no-single-branch`. */
+      depth?: number;
     },
     destination: string,
     workingDirectory: string,
@@ -927,9 +971,25 @@ export class CloneService {
     signal?: AbortSignal
   ): Promise<Result<true>> {
     const readProgress = createCloneProgressParser(onProgress);
+    const history = cloneHistoryArgs(source.depth);
+    if (!history.ok) return history;
+    const shallowRefused = (stderr: string): Result<true> | null =>
+      source.depth !== undefined && isShallowUnsupportedError(stderr)
+        ? err(
+            shallowUnsupportedError(
+              source.localPath === undefined ? `The server for ${source.nameWithOwner}` : source.localPath,
+              "Clear \u201cRecent history only\u201d to clone the full history."
+            )
+          )
+        : null;
     if (source.localPath !== undefined) {
+      // Git ignores --depth for a plain path ("use file:// instead"): it
+      // hard-links the objects rather than running a transfer. The file://
+      // URL runs the real transport, so the depth is honoured.
+      const from =
+        source.depth === undefined ? source.localPath : pathToFileURL(source.localPath).href;
       const cloned = await this.git(
-        ["clone", "--progress", "--", source.localPath, destination],
+        ["clone", "--progress", ...history.value, "--", from, destination],
         workingDirectory,
         {
           onStderr: readProgress,
@@ -938,6 +998,8 @@ export class CloneService {
         }
       );
       if (!cloned.ok) return cloned;
+      const refused = cloned.value.exitCode === 0 ? null : shallowRefused(cloned.value.stderr);
+      if (refused !== null) return refused;
       const checked = requireExit0(
         { ...cloned.value, stderr: sanitizeCloneStderr(cloned.value.stderr) },
         ["clone"]
@@ -958,6 +1020,14 @@ export class CloneService {
           message: unsupportedHostMessage("clone from")
         });
       }
+      const product = forgeProductOrAssumed(source.host);
+      if (source.depth !== undefined && !product.cliCloneTakesGitOptions) {
+        return err({
+          kind: "validation",
+          code: "shallow_clone_unsupported",
+          message: `The ${product.label} CLI can't make a recent-history-only clone. Choose SSH or HTTPS, or clone the full history.`
+        });
+      }
       // Only this branch spawns a CLI, so only this branch asks. SSH and HTTPS
       // are plain git against a URL: the per-host switch governs whether
       // PwrGit may talk to the FORGE, and refusing an ordinary `git clone`
@@ -972,12 +1042,17 @@ export class CloneService {
         await provider.cloneWithCli(source.nameWithOwner, destination, {
           onStderr: readProgress,
           env: CLONE_ENV,
-          ...(signal === undefined ? {} : { signal })
+          ...(signal === undefined ? {} : { signal }),
+          ...(history.value.length === 0 ? {} : { gitOptions: history.value })
         });
       } catch (cause) {
         if (operationWasCanceled(signal)) {
           return err(cancellationError(signal, "Clone canceled."));
         }
+        const refused = shallowRefused(
+          `${(cause as { stderr?: unknown }).stderr ?? ""}\n${cause instanceof Error ? cause.message : ""}`
+        );
+        if (refused !== null) return refused;
         if (provider.isAuthError(cause)) {
           return err({
             kind: "remote",
@@ -997,7 +1072,7 @@ export class CloneService {
     const urls = forgeCloneUrls(source.hostname, source.nameWithOwner);
     const remote = source.protocol === "ssh" ? urls.sshUrl : urls.httpsUrl;
     const cloned = await this.git(
-      ["clone", "--progress", "--", remote, destination],
+      ["clone", "--progress", ...history.value, "--", remote, destination],
       workingDirectory,
       {
         onStderr: readProgress,
@@ -1006,6 +1081,8 @@ export class CloneService {
       }
     );
     if (!cloned.ok) return cloned;
+    const refused = cloned.value.exitCode === 0 ? null : shallowRefused(cloned.value.stderr);
+    if (refused !== null) return refused;
     const checked = requireExit0(
       { ...cloned.value, stderr: sanitizeCloneStderr(cloned.value.stderr) },
       ["clone"]

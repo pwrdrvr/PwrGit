@@ -1,0 +1,254 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Shallow Clones - UX Review</title>
+    <script src="./support.js"></script>
+  </head>
+  <body>
+    <x-dc>
+      <helmet data-dc-atomics>
+        <meta name="design_doc_mode" content="canvas" />
+        <link href="https://fonts.googleapis.com/css2?family=Geist:wght@400..700&amp;family=Geist+Mono:wght@400..700&amp;display=swap" rel="stylesheet" />
+        <style>
+          /* PwrGit tokens.css, LIGHT block. */
+          :root {
+            --app: #ffffff; --side: #f7f4ef; --panel: #fdfcfa; --elev: #ffffff;
+            --hov: #f4f0e8; --line: rgba(0,0,0,.08); --line2: rgba(0,0,0,.12);
+            --t1: #1a1612; --t2: #524a40; --t3: #736c64;
+            --acc: #b74c00; --accb: #994c00; --accon: #ffffff;
+            --asoft: rgba(183,76,0,.12); --atint: rgba(183,76,0,.08); --abord: rgba(183,76,0,.42);
+            --warn: #805200; --ok: #2e7d3c; --bad: #a8472a;
+            --sans: "Geist", "SF Pro Text", system-ui, sans-serif;
+            --mono: "Geist Mono", "SF Mono", Consolas, monospace;
+          }
+          *, *::before, *::after { box-sizing: border-box; }
+          html, body { margin: 0; background: #efe9df; }
+          body { font-family: var(--sans); color: var(--t1); -webkit-font-smoothing: antialiased; }
+          code { font: 500 10.5px/1.4 var(--mono); color: var(--t1); background: rgba(0,0,0,.05); padding: 0 3px; border-radius: 3px; }
+
+          .dv-turn { padding: 40px 44px 32px; border-bottom: 1px solid var(--line); }
+          .dv-thd { display: flex; align-items: baseline; gap: 10px; margin: 0 0 6px; }
+          .dv-tid { font: 600 10px var(--mono); padding: 3px 7px; background: var(--t1); color: #fff; border-radius: 4px; }
+          .dv-tname { margin: 0; font: 600 14px/1.2 var(--sans); color: var(--t1); }
+          .dv-sub { margin: 0 0 22px; font: 400 12px/1.55 var(--sans); color: var(--t2); max-width: 860px; }
+          .dv-opts { display: flex; flex-wrap: wrap; gap: 28px; align-items: flex-start; }
+          .dv-opt { flex: none; display: flex; flex-direction: column; gap: 9px; }
+          .dv-oid { font: 600 10.5px var(--mono); padding: 3px 7px; background: rgba(0,0,0,.07); color: var(--t1); border-radius: 5px; }
+          .dv-oid.pick { background: var(--acc); color: var(--accon); }
+          .dv-olabel { display: flex; align-items: baseline; gap: 8px; font: 400 11.5px/1.35 var(--sans); color: var(--t2); max-width: 640px; }
+          .note { margin: 0; max-width: 360px; font: 400 11px/1.5 var(--sans); color: var(--t2); }
+          .note + .note { margin-top: 8px; }
+
+          table.cmp { border-collapse: collapse; width: 980px; background: var(--elev); border: 1px solid var(--line2); border-radius: 10px; overflow: hidden; font: 400 11px/1.45 var(--sans); }
+          table.cmp th, table.cmp td { text-align: left; vertical-align: top; padding: 8px 10px; border-bottom: 1px solid var(--line); }
+          table.cmp th { font: 650 10.5px var(--sans); color: var(--t2); background: var(--panel); }
+          table.cmp td:first-child { font-weight: 650; color: var(--t1); width: 170px; }
+
+          .dlg { width: 560px; border: 1px solid var(--line2); border-radius: 14px; background: var(--elev); box-shadow: 0 18px 50px rgba(40,26,10,.14); overflow: hidden; }
+          .dh { display: flex; align-items: center; gap: 12px; padding: 14px 18px; border-bottom: 1px solid var(--line); }
+          .dh strong { font: 650 14px/1.2 var(--sans); }
+          .db { padding: 14px 18px; display: flex; flex-direction: column; gap: 14px; }
+          .lbl { font: 700 10px/1 var(--sans); letter-spacing: .04em; text-transform: uppercase; color: var(--t2); margin-bottom: 7px; }
+          .protos { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; }
+          .proto { height: 45px; padding: 0 10px; border: 1px solid var(--line2); border-radius: 8px; display: flex; flex-direction: column; justify-content: center; gap: 4px; background: var(--elev); font: inherit; text-align: left; }
+          .proto strong { font: 600 11px/1 var(--sans); color: var(--t2); }
+          .proto small { font: 500 10px/1 var(--mono); color: var(--t3); }
+          .proto.on { border-color: var(--abord); background: var(--atint); }
+          .proto.on strong { color: var(--t1); }
+          .opt { display: flex; gap: 9px; align-items: flex-start; padding: 9px 11px; border: 1px solid var(--line); border-radius: 8px; }
+          .opt.on { border-color: var(--abord); background: var(--atint); }
+          .opt input[type=checkbox] { margin: 1px 0 0; accent-color: var(--acc); }
+          .opt > span { display: flex; flex-direction: column; gap: 3px; flex: 1; }
+          .opt strong { font: 600 11px/1.25 var(--sans); color: var(--t1); }
+          .opt small { font: 500 10px/1.4 var(--sans); color: var(--t3); }
+          .depth { width: 64px; height: 20px; margin: 0 4px; padding: 0 6px; border: 1px solid var(--line2); border-radius: 5px; font: 500 11px var(--mono); }
+          .err { color: var(--bad); }
+          .dest { height: 30px; border: 1px solid var(--line2); border-radius: 7px; padding: 0 10px; display: flex; align-items: center; font: 400 11.5px var(--mono); color: var(--t2); }
+          .df { display: flex; justify-content: flex-end; gap: 8px; padding: 12px 18px; border-top: 1px solid var(--line); }
+          .btn { height: 28px; padding: 0 12px; border-radius: 7px; border: 1px solid var(--line2); background: var(--elev); font: 600 11.5px var(--sans); color: var(--t1); }
+          .btn.pri { background: var(--acc); color: var(--accon); border-color: var(--acc); }
+          .btn.sm { height: 22px; padding: 0 9px; font-size: 11px; }
+          .btn[disabled] { opacity: .55; }
+
+          .graph { width: 620px; border: 1px solid var(--line2); border-radius: 12px; background: var(--app); overflow: hidden; }
+          .row { display: grid; grid-template-columns: 44px minmax(0, 1fr); align-items: center; height: 34px; border-bottom: 1px solid var(--line); }
+          .lane { position: relative; height: 34px; }
+          .lane::before { content: ""; position: absolute; left: 21px; top: 0; bottom: 0; width: 2px; background: #3a7bd5; }
+          .lane.end::before { bottom: 50%; }
+          .lane .dot { position: absolute; left: 16px; top: 12px; width: 12px; height: 12px; border-radius: 50%; background: #fff; border: 2px solid #3a7bd5; }
+          .lane.end .cut { position: absolute; left: 14px; top: 23px; width: 16px; height: 0; border-top: 2px dashed var(--t3); }
+          .body { display: flex; align-items: center; gap: 8px; padding-right: 12px; min-width: 0; }
+          .sha { font: 500 10.5px var(--mono); color: var(--t3); }
+          .subj { font: 500 12px var(--sans); color: var(--t1); flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+          .chip { display: inline-flex; align-items: center; height: 17px; padding: 0 6px; border-radius: 999px; font: 600 9.5px/1 var(--sans); white-space: nowrap; }
+          .chip.ref { background: rgba(58,123,213,.12); color: #2a5ea8; }
+          .chip.cut { background: rgba(128,82,0,.12); color: var(--warn); }
+          .when { font: 400 10.5px var(--sans); color: var(--t3); }
+          .gnote { padding: 10px 14px; background: var(--panel); font: 400 11.5px/1.5 var(--sans); color: var(--t2); display: flex; flex-direction: column; gap: 8px; }
+          .gnote .acts { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+          .gnote .muted { color: var(--t3); }
+          .tip { width: 300px; padding: 9px 11px; border-radius: 8px; background: #26211b; color: #f4efe7; font: 400 11px/1.45 var(--sans); }
+          .toast { width: 340px; padding: 11px 13px; border-radius: 10px; background: var(--elev); border: 1px solid var(--line2); box-shadow: 0 10px 30px rgba(40,26,10,.12); font: 400 11.5px/1.45 var(--sans); color: var(--t2); }
+          .toast strong { display: block; color: var(--t1); font: 650 12px var(--sans); margin-bottom: 3px; }
+          .toast.bad strong { color: var(--bad); }
+          .act { width: 340px; padding: 10px 12px; border-radius: 10px; background: var(--elev); border: 1px solid var(--line2); font: 400 11px/1.4 var(--sans); color: var(--t2); display: flex; flex-direction: column; gap: 6px; }
+          .bar { height: 4px; border-radius: 2px; background: var(--line); overflow: hidden; }
+          .bar > i { display: block; width: 46%; height: 100%; background: var(--acc); }
+        </style>
+      </helmet>
+
+      <!-- 0 · Brief -->
+      <section class="dv-turn">
+        <div class="dv-thd"><span class="dv-tid">0</span><h2 class="dv-tname">Brief: limited-history (shallow) clones</h2></div>
+        <p class="dv-sub">
+          A shallow clone downloads only the newest commits of each branch instead of the project's whole history. It saves
+          download time and object-database space on long-lived repositories; it does <b>not</b> make the checked-out files any smaller.
+          The cost: history, blame and file history stop at the boundary, a merge or rebase whose common ancestor is older than the
+          boundary cannot find it, and a later deepen does not fetch tags on the older commits it brings. Before this round PwrGit always cloned full history and
+          showed a shallow repository (made elsewhere) as if its oldest downloaded commit were the project's first.
+          Goals: an opt-in at clone time, a truthful boundary in History, and one explicit, cancellable way to fetch more. Full history stays the default.
+        </p>
+        <table class="cmp">
+          <tr><th>What it is</th><th>What it limits</th><th>What it saves</th><th>In PwrGit</th></tr>
+          <tr><td>Shallow clone (<code>--depth N</code>)</td><td>How many commits back each branch's history goes</td><td>Download and <code>.git</code> size for old history</td><td>New: “Recent history only” at clone; boundary + Fetch more in History</td></tr>
+          <tr><td>Single-branch clone</td><td>Which branches are downloaded at all</td><td>Other branches' commits</td><td>Not offered. Shallow clones use <code>--no-single-branch</code> so every branch stays visible; a single-branch clone made elsewhere is named as such</td></tr>
+          <tr><td>Partial clone (<code>--filter=blob:none</code>)</td><td>File contents, fetched on demand later</td><td>Blob bytes until needed</td><td>Not offered (needs the server online for later reads)</td></tr>
+          <tr><td>Sparse checkout</td><td>Which folders are written to disk</td><td>Working-tree files</td><td>Not offered</td></tr>
+          <tr><td>Copy-on-write worktrees (PwrGit's Git)</td><td>Nothing: files are shared, not omitted</td><td>Disk for identical files across worktrees</td><td>Unchanged, and independent of shallow: worktrees of a shallow repository share its boundary</td></tr>
+        </table>
+      </section>
+
+      <!-- 1 · Clone dialog -->
+      <section class="dv-turn">
+        <div class="dv-thd"><span class="dv-tid">1</span><h2 class="dv-tname">Clone dialog: one opt-in row, not a bag of flags</h2></div>
+        <p class="dv-sub">
+          Placed under “Clone with”, styled as the existing <code>upstream</code> option row. It is drawn at open and never depends on the
+          forge, so it cannot move anything after the pick. The commit count is inline in the row, so turning it on does not change the
+          row's height. Depth is a whole number 1–100,000; anything else disables Clone with the reason in the row.
+        </p>
+        <div class="dv-opts">
+          <div class="dv-opt">
+            <div class="dv-olabel"><span class="dv-oid pick">1a</span> Chosen: off by default (full history)</div>
+            <div class="dlg">
+              <div class="dh"><strong>Clone a repository</strong></div>
+              <div class="db">
+                <div><div class="lbl">Clone with</div>
+                  <div class="protos">
+                    <button class="proto on" type="button"><strong>SSH</strong><small>git@github.com</small></button>
+                    <button class="proto" type="button"><strong>HTTPS</strong><small>https://github.com</small></button>
+                    <button class="proto" type="button"><strong>GitHub CLI</strong><small>gh repo clone</small></button>
+                  </div>
+                </div>
+                <label class="opt"><input type="checkbox" /><span><strong>Recent history only</strong><small>Download only the latest commits of each branch and tag instead of the whole history. Faster and smaller for long-lived projects; you can fetch older history later.</small></span></label>
+                <div><div class="lbl">Check out to</div><div class="dest">~/src/acme</div></div>
+              </div>
+              <div class="df"><button class="btn" type="button">Cancel</button><button class="btn pri" type="button">Clone repository</button></div>
+            </div>
+          </div>
+          <div class="dv-opt">
+            <div class="dv-olabel"><span class="dv-oid">1b</span> On: the count appears inline, with what it costs</div>
+            <div class="dlg">
+              <div class="db">
+                <label class="opt on"><input type="checkbox" checked /><span><strong>Recent history only — last <input class="depth" value="50" aria-label="Commits per branch" /> commits per branch</strong><small>Older commits aren't downloaded. History and blame stop at the boundary, and a merge or rebase on an older base may need more history first. Fetch more any time from History.</small></span></label>
+              </div>
+            </div>
+            <p class="note">Main runs <code>git clone --depth 50 --no-single-branch</code>. Without <code>--no-single-branch</code> Git would fetch only the default branch and rewrite the fetch refspec, and every other branch would silently disappear from PwrGit. With it, every branch and every tag arrives with its own newest N commits, so a project with many old tags still downloads history near each one.</p>
+          </div>
+          <div class="dv-opt">
+            <div class="dv-olabel"><span class="dv-oid">1c</span> Invalid count</div>
+            <div class="dlg">
+              <div class="db">
+                <label class="opt on"><input type="checkbox" checked /><span><strong>Recent history only — last <input class="depth" value="0" aria-label="Commits per branch" /> commits per branch</strong><small class="err">Enter a whole number of commits from 1 to 100,000.</small></span></label>
+              </div>
+            </div>
+            <p class="note">Main validates again: the renderer is not the boundary.</p>
+          </div>
+          <div class="dv-opt">
+            <div class="dv-olabel"><span class="dv-oid">1d</span> Sources that change the meaning</div>
+            <p class="note"><b>Local path.</b> Git ignores <code>--depth</code> for a plain path (it hard-links objects instead), so PwrGit clones from the path's <code>file://</code> URL. The row says so: “Copies through Git's file:// transport, so objects are not hard-linked.”</p>
+            <p class="note"><b>GitHub / GitLab CLI.</b> Passed to Git after <code>--</code>. <b>GitCafe CLI</b> cannot pass Git options: with that card chosen the row is disabled with “Not available with the GitCafe CLI. Choose SSH or HTTPS.” Nothing silently falls back to a full download.</p>
+            <p class="note"><b>Server refuses.</b> A server without shallow support (e.g. dumb HTTP) fails the clone; the error says the server can't make a limited-history clone and to clear the box for a full clone. No automatic retry as full.</p>
+            <p class="note"><b>Fork… / Clone from your fork.</b> Not in this round; that path keeps full history.</p>
+          </div>
+        </div>
+      </section>
+
+      <!-- 2 · History boundary -->
+      <section class="dv-turn">
+        <div class="dv-thd"><span class="dv-tid">2</span><h2 class="dv-tname">History: show where downloaded history ends</h2></div>
+        <p class="dv-sub">
+          Git pretends a shallow boundary commit is a root. PwrGit marks it instead: the lane ends in a dashed cut, the row carries a
+          <b>history cut</b> chip, and a note under the graph offers the one fix. Read cost: one <code>rev-parse</code> and the
+          <code>shallow</code> file per load; no network and nothing deepened while browsing.
+        </p>
+        <div class="dv-opts">
+          <div class="dv-opt">
+            <div class="dv-olabel"><span class="dv-oid pick">2a</span> Boundary row + note</div>
+            <div class="graph">
+              <div class="row"><div class="lane"><span class="dot"></span></div><div class="body"><span class="sha">82a1ae2</span><span class="subj">Bump parser to 4.2</span><span class="chip ref">main</span><span class="when">2h</span></div></div>
+              <div class="row"><div class="lane"><span class="dot"></span></div><div class="body"><span class="sha">5f10c3e</span><span class="subj">Handle empty config files</span><span class="when">1d</span></div></div>
+              <div class="row"><div class="lane end"><span class="dot"></span><span class="cut"></span></div><div class="body"><span class="sha">05ce2cc</span><span class="subj">Split loader into modules</span><span class="chip cut">history cut</span><span class="when">3d</span></div></div>
+              <div class="gnote">
+                <div><b>Limited history.</b> This repository was cloned with recent history only; commits older than the marked ones weren't downloaded.</div>
+                <div class="acts"><button class="btn sm" type="button">Fetch 100 older commits</button><button class="btn sm" type="button">Fetch full history</button><span class="muted">from origin</span></div>
+              </div>
+            </div>
+          </div>
+          <div class="dv-opt">
+            <div class="dv-olabel"><span class="dv-oid">2b</span> Chip tooltip</div>
+            <div class="tip">History cut — this repository has no older commits than this one. Its parents weren't downloaded (shallow clone). Fetch older commits from the note under History.</div>
+            <p class="note">The chip is shown only for boundary commits that are drawn. A boundary is a fact read from <code>.git/shallow</code>, never inferred from a parentless commit.</p>
+          </div>
+          <div class="dv-opt">
+            <div class="dv-olabel"><span class="dv-oid">2c</span> Only one branch is fetched (made elsewhere)</div>
+            <div class="graph">
+              <div class="gnote">
+                <div><b>Limited history.</b> Commits older than the marked ones weren't downloaded. This clone also fetches only <code>main</code> from origin, so other branches aren't in PwrGit.</div>
+                <div class="acts"><button class="btn sm" type="button">Fetch 100 older commits</button><button class="btn sm" type="button">Fetch full history</button></div>
+              </div>
+            </div>
+            <p class="note">Deepening keeps the configured fetch refspec. PwrGit never widens it on its own; it only says what is missing.</p>
+          </div>
+          <div class="dv-opt">
+            <div class="dv-olabel"><span class="dv-oid">2d</span> No remote</div>
+            <div class="graph"><div class="gnote"><div><b>Limited history.</b> Commits older than the marked ones weren't downloaded, and this repository has no remote to fetch them from.</div></div></div>
+          </div>
+        </div>
+      </section>
+
+      <!-- 3 · Fetching more -->
+      <section class="dv-turn">
+        <div class="dv-thd"><span class="dv-tid">3</span><h2 class="dv-tname">Fetching more: an ordinary remote activity</h2></div>
+        <p class="dv-sub">
+          Both buttons run one tracked fetch (<code>git fetch --progress --deepen=100 origin</code> or <code>--unshallow</code>), so the
+          activity popover shows progress and Stop like any fetch. The buttons disable while it runs. Nothing deepens on its own: browsing History never fetches.
+        </p>
+        <div class="dv-opts">
+          <div class="dv-opt">
+            <div class="dv-olabel"><span class="dv-oid">3a</span> Running</div>
+            <div class="act"><b style="color:var(--t1)">Fetching older history · acme/api</b><div class="bar"><i></i></div><span>Receiving objects 46% (2,310/5,020) · 3.1 MiB</span><div><button class="btn sm" type="button">Stop</button></div></div>
+          </div>
+          <div class="dv-opt">
+            <div class="dv-olabel"><span class="dv-oid">3b</span> The full-history button says what it costs</div>
+            <div class="tip">Download every older commit of each fetched branch from origin. Can be a large download; afterwards history, blame and merges work without limits.</div>
+            <p class="note">No extra confirmation step: the press is explicit, the activity can be stopped, and a stopped fetch leaves history as it was.</p></div>
+          </div>
+          <div class="dv-opt">
+            <div class="dv-olabel"><span class="dv-oid">3c</span> Outcomes</div>
+            <div class="toast"><strong>Fetched older history</strong>acme/api now has full history.</div>
+            <div class="toast"><strong>Fetched older history</strong>acme/api still has limited history: 100 more commits per boundary.</div>
+            <div class="toast bad"><strong>Couldn't fetch older history</strong>origin can't serve limited-history fetches (the server doesn't support shallow clients). Nothing was changed.</div>
+            <div class="toast"><strong>Stopped</strong>Stopped at your request. History is as it was.</div>
+          </div>
+        </div>
+      </section>
+    </x-dc>
+    <script type="text/x-dc" data-dc-script data-props='{}'>
+      class Component extends DCLogic {
+        renderVals() { return {}; }
+      }
+    </script>
+  </body>
+</html>

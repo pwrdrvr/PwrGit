@@ -1,4 +1,5 @@
 import type { PrMergeQueue } from "./merge-queue";
+import type { ShallowHistory } from "./shallow-history";
 // Domain types shared across processes. Modeled on the design prototype's
 // data shapes (design/PwrGit.dc.html): profiles own repos, repos own
 // worktrees, worktrees carry dirty/ahead/behind counts.
@@ -2686,6 +2687,9 @@ export type LaneGraph = {
   matchedBranches: number;
   /** Branches the "active" filter hid (merged/inactive) — for the reveal hint. */
   hiddenBranches: number;
+  /** Present only when the repository is shallow: where downloaded history
+   *  ends. Read per request from `.git/shallow`, never cached with the lanes. */
+  shallow?: ShallowHistory;
 };
 
 export type RebaseStep = {
