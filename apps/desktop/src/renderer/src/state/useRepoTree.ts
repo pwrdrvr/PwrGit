@@ -33,6 +33,28 @@ function reuseUnchangedRepos(current: Repo[], next: Repo[]): Repo[] {
  *  after idle still runs immediately (0 ms added latency). */
 export const TARGETED_BURST_COALESCE_MS = 200;
 
+// IPC and local updates replace worktree arrays whenever their membership
+// changes. Cache just the ids, with the same lifetime as each array.
+const worktreeIdsByArray = new WeakMap<Repo["worktrees"], ReadonlySet<string>>();
+
+function worktreeIds(worktrees: Repo["worktrees"]): ReadonlySet<string> {
+  const cached = worktreeIdsByArray.get(worktrees);
+  if (cached !== undefined) return cached;
+  const ids = new Set<string>();
+  for (const worktree of worktrees) ids.add(worktree.id);
+  worktreeIdsByArray.set(worktrees, ids);
+  return ids;
+}
+
+function overlaps(left: ReadonlySet<string>, right: ReadonlySet<string>): boolean {
+  const smaller = left.size <= right.size ? left : right;
+  const larger = smaller === left ? right : left;
+  for (const id of smaller) {
+    if (larger.has(id)) return true;
+  }
+  return false;
+}
+
 /**
  * Swap re-read repositories into the tree by id. Every other repository keeps
  * its object, so nothing keyed on it (memoized rows, each expanded repo's
@@ -40,8 +62,10 @@ export const TARGETED_BURST_COALESCE_MS = 200;
  * even when worktree counters match, because a fetch can update refs without
  * changing row columns and expanded `RepoRefsSections` keys on `repo`. A named
  * repository missing from the answer is gone or hidden, so it leaves.
- * Ownership runs over the merged list, as main runs it over a full one
- * (`repo-ownership.ts`), so a fossil duplicate stays single.
+ * The current tree is already deduplicated by the full list or the previous
+ * merge. Only replacements can introduce an overlap. Use full arbitration
+ * when there is a duplicate so true-primary and list-order precedence agree
+ * with `repo-ownership.ts`.
  */
 export function mergeChangedRepos(
   current: Repo[],
@@ -51,14 +75,29 @@ export function mergeChangedRepos(
   const byId = new Map(fresh.map((repo) => [repo.id, repo]));
   const named = new Set(asked);
   const merged: Repo[] = [];
+  const incoming = new Set<string>();
+  let duplicate = false;
   for (const repo of current) {
-    if (!named.has(repo.id)) merged.push(repo);
-    else {
-      const next = byId.get(repo.id);
-      if (next !== undefined) merged.push(next);
+    if (!named.has(repo.id)) {
+      merged.push(repo);
+      continue;
+    }
+    const next = byId.get(repo.id);
+    if (next === undefined) continue;
+    merged.push(next);
+    const ids = worktreeIds(next.worktrees);
+    if (ids.size !== next.worktrees.length) duplicate = true;
+    for (const id of ids) {
+      if (incoming.has(id)) duplicate = true;
+      incoming.add(id);
     }
   }
-  return claimWorktreeOwnership(merged);
+  if (!duplicate && incoming.size > 0) {
+    duplicate = merged.some((repo) =>
+      !named.has(repo.id) && overlaps(incoming, worktreeIds(repo.worktrees))
+    );
+  }
+  return duplicate ? claimWorktreeOwnership(merged) : merged;
 }
 
 export type RemoveWorktreesOptions = {
@@ -217,7 +256,11 @@ export function useRepoTree(activeProfileId: string | null): UseRepoTree {
     const r = await dispatch("repo:list", { profileId: activeProfileId });
     if (!mountedRef.current || request !== requestRef.current) return;
     if (r.ok) {
-      commitRepos((current) => reuseUnchangedRepos(current, r.value));
+      commitRepos((current) => {
+        const next = reuseUnchangedRepos(current, r.value);
+        for (const repo of next) worktreeIds(repo.worktrees);
+        return next;
+      });
       commitLoadState(READY_READ_STATE);
       const asked = identityAskedRef.current;
       if (asked === null) {
