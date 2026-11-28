@@ -339,6 +339,154 @@ it.each(["during", "after"])("keeps the newer inventory when an older listing re
   }
 });
 
+it.each(["scan", "worktree refresh", "manual index"])(
+  "reconciles released and checked-out branches when a %s carries a stale listing",
+  async (operation) => {
+    const switched = "oracle-stale-snapshot-switch";
+    const deleted = "oracle-stale-snapshot-delete";
+    const db = openDatabase(":memory:");
+    const olderRead = deferred();
+    const releaseOlder = deferred();
+    let holdNextListing = false;
+    let pending: Promise<unknown> | undefined;
+    try {
+      const profiles = new ProfileService(db);
+      const profile = profiles.create({
+        name: "Mine", email: "mine@example.test", roots: [checkout]
+      });
+      const theirs = profiles.create({
+        name: "Theirs", email: "theirs@example.test", roots: [upstream]
+      });
+      const releaseProbes: string[][] = [];
+      const systemGit = createSystemGit({ env: gitEnv });
+      const indexer = new RepoIndexer(db, async (args, cwd, options) => {
+        if (args[0] === "for-each-ref" && args[2] === "--") releaseProbes.push(args.slice(3));
+        const hold = holdNextListing && args[0] === "for-each-ref";
+        if (hold) holdNextListing = false;
+        const result = await systemGit(args, cwd, options);
+        if (hold) {
+          olderRead.resolve();
+          await releaseOlder.promise;
+        }
+        return result;
+      });
+      writeFixtureRefs(checkout, [switched, deleted].map((name) => `create refs/heads/${name} HEAD`));
+      await indexer.rescanProfile(theirs);
+      const [repo] = await indexer.rescanProfile(profile);
+      if (repo === undefined) throw new Error("fixture checkout was not indexed");
+
+      git(checkout, ["switch", "--quiet", switched]);
+      holdNextListing = true;
+      const older = operation === "scan"
+        ? indexer.rescanProfile(profile)
+        : operation === "worktree refresh"
+          ? indexer.refreshRepoWorktrees(repo.id)
+          : indexer.indexRepoAt(profile.id, checkout);
+      pending = older;
+      await olderRead.promise;
+
+      writeFixtureRefs(checkout, [`delete refs/heads/${deleted}`]);
+      expect((await indexer.refreshRepoRemoteBranches(repo.id)).ok).toBe(true);
+      releaseOlder.resolve();
+      const result = await older;
+      if ("ok" in result) expect(result.ok).toBe(true);
+
+      const refs = readRefs(checkout, "refs/heads/").map((ref) => ref.slice("refs/heads/".length));
+      const checkedOut = git(checkout, ["symbolic-ref", "--short", "HEAD"]);
+      for (const name of ["main", switched, deleted]) {
+        const kinds = indexer.searchAll(name, { profileId: profile.id, allProfiles: false })
+          .filter((hit) => hit.name === name && (hit.kind === "worktree" || hit.kind === "local_branch"))
+          .map(({ kind }) => kind);
+        expect(kinds, name).toEqual(refs.includes(name)
+          ? [name === checkedOut ? "worktree" : "local_branch"]
+          : []);
+      }
+      expect(releaseProbes).toEqual([["refs/heads/main"]]);
+      expect(indexer.searchAll("main", { profileId: theirs.id, allProfiles: false }))
+        .toEqual([expect.objectContaining({ profileId: theirs.id, kind: "worktree", name: "main" })]);
+    } finally {
+      releaseOlder.resolve();
+      await Promise.allSettled([pending]);
+      db.close();
+      git(checkout, ["switch", "--quiet", "main"]);
+      writeFixtureRefs(checkout, [switched, deleted].map((name) => `delete refs/heads/${name}`));
+    }
+  }
+);
+
+it("does not restore a deleted released ref after waiting for a chunked refresh", async () => {
+  const switched = "oracle-released-switch";
+  const remote = "refs/remotes/origin/oracle-released-chunk";
+  const main = "refs/heads/main";
+  const db = openDatabase(":memory:");
+  const indexPaused = deferred();
+  const releaseIndex = deferred();
+  const worktreeRead = deferred();
+  const pending: Promise<unknown>[] = [];
+  let pauseIndex = false;
+  let watchWorktree = false;
+  let releasedProbe: Promise<unknown> | undefined;
+  try {
+    const profile = new ProfileService(db).create({
+      name: "Mine", email: "mine@example.test", roots: [checkout]
+    });
+    const systemGit = createSystemGit({ env: gitEnv });
+    const indexer = new RepoIndexer(db, (args, cwd, options) => {
+      const result = systemGit(args, cwd, options);
+      if (watchWorktree && args[0] === "worktree" && args[1] === "list") {
+        return result.then((output) => {
+          worktreeRead.resolve();
+          return output;
+        });
+      }
+      if (args[0] === "for-each-ref" && args.at(-1) === main) releasedProbe = result;
+      return result;
+    }, {
+      branchWriteChunkSize: 1,
+      yieldToEventLoop: async () => {
+        if (!pauseIndex) return;
+        pauseIndex = false;
+        indexPaused.resolve();
+        await releaseIndex.promise;
+      }
+    });
+    const [repo] = await indexer.rescanProfile(profile);
+    if (repo === undefined) throw new Error("fixture checkout was not indexed");
+    git(checkout, ["switch", "--quiet", "-c", switched]);
+    writeFixtureRefs(checkout, [`delete ${main}`, `create ${remote} HEAD`]);
+
+    pauseIndex = true;
+    const index = indexer.refreshRepoRemoteBranches(repo.id);
+    pending.push(index);
+    await indexPaused.promise;
+
+    // The running refresh observed main's deletion. Recreate it only while a
+    // lightweight refresh can issue a probe outside the held write turn.
+    writeFixtureRefs(checkout, [`create ${main} HEAD`]);
+    watchWorktree = true;
+    const worktrees = indexer.refreshRepoWorktrees(repo.id, { refreshBranches: false });
+    pending.push(worktrees);
+    await worktreeRead.promise;
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    await releasedProbe;
+    writeFixtureRefs(checkout, [`delete ${main}`]);
+    releaseIndex.resolve();
+    expect((await index).ok).toBe(true);
+    expect((await worktrees).ok).toBe(true);
+
+    expect(readRefs(checkout, "refs/heads/")).not.toContain(main);
+    expect(indexer.searchAll("main", { profileId: profile.id, allProfiles: false })
+      .filter(({ kind, name }) => kind === "local_branch" && name === "main")).toEqual([]);
+  } finally {
+    releaseIndex.resolve();
+    await Promise.allSettled(pending);
+    db.close();
+    writeFixtureRefs(checkout, [`update ${main} HEAD`, `delete ${remote}`]);
+    git(checkout, ["switch", "--quiet", "main"]);
+    writeFixtureRefs(checkout, [`delete refs/heads/${switched}`]);
+  }
+});
+
 it("keeps one search hit for a branch checked out during a chunked refresh", async () => {
   const first = "oracle-a-first";
   const switched = "oracle-z-switched";
@@ -348,6 +496,7 @@ it("keeps one search hit for a branch checked out during a chunked refresh", asy
   const worktreeRead = deferred();
   const pending: Promise<unknown>[] = [];
   let pauseIndex = false;
+  let watchWorktree = false;
   try {
     const profile = new ProfileService(db).create({
       name: "Mine", email: "mine@example.test", roots: [checkout]
@@ -355,7 +504,7 @@ it("keeps one search hit for a branch checked out during a chunked refresh", asy
     const systemGit = createSystemGit({ env: gitEnv });
     const indexer = new RepoIndexer(db, async (args, cwd, options) => {
       const result = await systemGit(args, cwd, options);
-      if (args[0] === "for-each-ref" && args.at(-1) === "refs/heads/main") {
+      if (watchWorktree && args[0] === "worktree" && args[1] === "list") {
         worktreeRead.resolve();
       }
       return result;
@@ -377,10 +526,11 @@ it("keeps one search hit for a branch checked out during a chunked refresh", asy
     pending.push(index);
     await indexPaused.promise;
     git(checkout, ["switch", "--quiet", switched]);
+    watchWorktree = true;
     const worktrees = indexer.refreshRepoWorktrees(repo.id, { refreshBranches: false });
     pending.push(worktrees);
     await worktreeRead.promise;
-    // Allow the lightweight refresh to reach its write before releasing the delta.
+    // Let the lightweight refresh queue for the turn before releasing the delta.
     await new Promise<void>((resolve) => setImmediate(resolve));
     releaseIndex.resolve();
     expect((await index).ok).toBe(true);

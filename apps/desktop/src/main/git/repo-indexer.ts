@@ -423,20 +423,13 @@ export class RepoIndexer {
     const seenRepoIds: string[] = [];
     for (const { path, worktrees, indexedBranches } of canonical.values()) {
       signal?.throwIfAborted();
-      const repoId = this.db.transaction(() => {
-        const repoId = this.upsertRepoRow(
-          profile.id,
-          basename(path),
-          path,
-          "scan"
-        );
-        this.syncWorktrees(repoId, worktrees);
-        return repoId;
-      })();
+      const repoId = hashId(path);
+      await this.syncWorktreeIndex(repoId, path, worktrees, indexedBranches, {
+        signal,
+        saveRepo: () => this.upsertRepoRow(repoId, profile.id, basename(path), path, "scan")
+      });
       seenRepoIds.push(repoId);
-      if (indexedBranches !== null) {
-        await this.syncBranchIndexChunked(repoId, indexedBranches, signal);
-      } else {
+      if (indexedBranches === null) {
         // Record the attempt so one temporarily unreadable repo does not turn
         // the one-time migration repair into an every-launch full rescan. The
         // daily scan (or an explicit refresh) retries it normally.
@@ -538,19 +531,10 @@ export class RepoIndexer {
       .map((w, i) => worktreeShape(w, i === 0));
 
     const repoId = hashId(primary.path);
-    const run = this.db.transaction(() => {
-      this.upsertRepoRow(
-        profileId,
-        basename(primary.path),
-        primary.path,
-        "manual"
-      );
-      this.syncWorktrees(repoId, worktrees);
-    });
-    run();
-    if (listedBranches.ok) {
-      await this.syncBranchIndexChunked(repoId, listedBranches.value);
-    }
+    await this.syncWorktreeIndex(
+      repoId, primary.path, worktrees, listedBranches.ok ? listedBranches.value : null,
+      { saveRepo: () => this.upsertRepoRow(repoId, profileId, basename(primary.path), primary.path, "manual") }
+    );
 
     const repo = this.getRepo(repoId);
     return repo === null
@@ -858,51 +842,12 @@ export class RepoIndexer {
     )
       .filter((w) => !w.bare)
       .map((w, i) => worktreeShape(w, i === 0));
-    const releasedBranches: string[] = [];
-    if (options.refreshBranches === false) {
-      const checkedOut = new Set(worktrees.map((wt) => wt.branch));
-      const released = [...new Set(repo.worktrees.map((wt) => wt.branch))]
-        .filter((branch) => branch !== "" && !checkedOut.has(branch));
-      // The old worktree row was the only search entry for these branches.
-      // Verify just the released refs: an external rename/delete must not
-      // become a phantom local branch. Bound argv size without scanning refs.
-      for (let offset = 0; offset < released.length; offset += BRANCH_WRITE_CHUNK_SIZE) {
-        const batch = released.slice(offset, offset + BRANCH_WRITE_CHUNK_SIZE);
-        const args = [
-          "for-each-ref", "--format=%(refname)", "--",
-          ...batch.map((branch) => `refs/heads/${branch}`)
-        ];
-        const raw = await this.git(args, repo.path);
-        if (!raw.ok) return raw;
-        const checked = requireExit0(raw.value, args);
-        if (!checked.ok) return checked;
-        const existing = new Set(checked.value.stdout.trim().split(/\r?\n/));
-        // for-each-ref patterns also match descendants; accept exact refs only.
-        releasedBranches.push(...batch.filter((branch) => existing.has(`refs/heads/${branch}`)));
-      }
-    }
-    const updateWorktrees = this.db.transaction(() => {
-      this.syncWorktrees(repoId, worktrees);
-      const insertReleased = this.db.prepare(`
-        INSERT INTO local_branches (id, repo_id, name, full_name)
-        VALUES (?, ?, ?, ?) ON CONFLICT(id) DO NOTHING
-      `);
-      for (const branch of releasedBranches) {
-        const fullName = `refs/heads/${branch}`;
-        insertReleased.run(`${repoId}:${fullName}`, repoId, branch, fullName);
-      }
-      // A lightweight visible-hit refresh need not enumerate refs, but must
-      // remove obsolete "no checkout" rows for the branches it just discovered.
-      this.db.prepare(`DELETE FROM local_branches
-        WHERE repo_id = ? AND name IN (
-          SELECT branch FROM worktrees WHERE repo_id = ?
-        )`).run(repoId, repoId);
-    });
-    // Keep these local branch writes from invalidating a delta between chunks.
-    await this.withBranchIndexTurn(repoId, updateWorktrees);
-    if (listedBranches?.ok) {
-      await this.syncBranchIndexChunked(repoId, listedBranches.value);
-    }
+    const worktreeIndex = await this.syncWorktreeIndex(
+      repoId, repo.path, worktrees,
+      listedBranches?.ok ? listedBranches.value : null,
+      { refreshReleased: options.refreshBranches === false }
+    );
+    if (!worktreeIndex.ok) return worktreeIndex;
 
     const refreshed = this.getRepo(repoId);
     if (refreshed === null) {
@@ -1620,12 +1565,12 @@ export class RepoIndexer {
   }
 
   private upsertRepoRow(
+    id: string,
     profileId: string,
     name: string,
     path: string,
     source: "scan" | "manual"
-  ): string {
-    const id = hashId(path);
+  ): void {
     // Assigning even the same name fires SQLite's UPDATE OF name triggers,
     // which rewrite the search entries for every branch in the repository.
     const seen = this.db
@@ -1634,7 +1579,7 @@ export class RepoIndexer {
          WHERE id = ? AND profile_id = ? AND name = ?`
       )
       .run(source, id, profileId, name);
-    if (seen.changes > 0) return id;
+    if (seen.changes > 0) return;
 
     this.db
       .prepare(
@@ -1647,7 +1592,6 @@ export class RepoIndexer {
            last_seen_at = datetime('now')`
       )
       .run(id, profileId, name, path, source);
-    return id;
   }
 
   private syncWorktrees(repoId: string, worktrees: Worktree[]): void {
@@ -1705,45 +1649,132 @@ export class RepoIndexer {
     return ok({ sequence, branches: branches.value, remoteNames: remoteNames.value });
   }
 
+  private async syncWorktreeIndex(
+    repoId: string,
+    path: string,
+    worktrees: Worktree[],
+    listing: IndexedBranches | null,
+    options: {
+      signal?: AbortSignal | undefined;
+      saveRepo?: () => void;
+      refreshReleased?: boolean;
+    } = {}
+  ): Promise<Result<void>> {
+    const { signal, saveRepo, refreshReleased } = options;
+    return this.withBranchIndexTurn(repoId, async () => {
+      signal?.throwIfAborted();
+      const stale = listing !== null && this.isStaleBranchListing(repoId, listing);
+      let releasedBranches: string[] = [];
+      if (refreshReleased || stale) {
+        // An older listing cannot be replayed, but changing checkouts still
+        // changes which local refs need their own search row. Verify releases
+        // after taking the turn so a queued refresh cannot undo a ref deletion.
+        const released = await this.listReleasedBranches(repoId, path, worktrees, signal);
+        signal?.throwIfAborted();
+        if (released.ok) releasedBranches = released.value;
+        else if (refreshReleased) return released;
+      }
+      this.db.transaction(() => {
+        saveRepo?.();
+        this.syncWorktrees(repoId, worktrees);
+        if (releasedBranches.length > 0) {
+          const insertReleased = this.db.prepare(`
+            INSERT INTO local_branches (id, repo_id, name, full_name)
+            VALUES (?, ?, ?, ?) ON CONFLICT(id) DO NOTHING
+          `);
+          for (const branch of releasedBranches) {
+            const fullName = `refs/heads/${branch}`;
+            insertReleased.run(`${repoId}:${fullName}`, repoId, branch, fullName);
+          }
+        }
+        this.db.prepare(`DELETE FROM local_branches
+          WHERE repo_id = ? AND name IN (
+            SELECT branch FROM worktrees WHERE repo_id = ?
+          )`).run(repoId, repoId);
+      })();
+      if (listing !== null && !stale) await this.reconcileBranchIndex(repoId, listing, signal);
+      return ok(undefined);
+    });
+  }
+
+  private async listReleasedBranches(
+    repoId: string,
+    path: string,
+    worktrees: Worktree[],
+    signal?: AbortSignal
+  ): Promise<Result<string[]>> {
+    const checkedOut = new Set(worktrees.map((wt) => wt.branch));
+    const released = this.db
+      .prepare<[string], string>(
+        "SELECT DISTINCT branch FROM worktrees WHERE repo_id = ? AND branch <> ''"
+      )
+      .pluck()
+      .all(repoId)
+      .filter((branch) => !checkedOut.has(branch));
+    const verified: string[] = [];
+    // Bound argv size and verify only the refs that lost their checkout.
+    for (let offset = 0; offset < released.length; offset += BRANCH_WRITE_CHUNK_SIZE) {
+      const batch = released.slice(offset, offset + BRANCH_WRITE_CHUNK_SIZE);
+      const args = [
+        "for-each-ref", "--format=%(refname)", "--",
+        ...batch.map((branch) => `refs/heads/${branch}`)
+      ];
+      const raw = await this.git(args, path, signal === undefined ? undefined : { signal });
+      if (!raw.ok) return raw;
+      const checked = requireExit0(raw.value, args);
+      if (!checked.ok) return checked;
+      const existing = new Set(checked.value.stdout.trim().split(/\r?\n/));
+      // for-each-ref patterns also match descendants; accept exact refs only.
+      verified.push(...batch.filter((branch) => existing.has(`refs/heads/${branch}`)));
+    }
+    return ok(verified);
+  }
+
+  private isStaleBranchListing(repoId: string, listing: IndexedBranches): boolean {
+    return listing.sequence < (this.branchIndexSequences.get(repoId) ?? 0);
+  }
+
+  private async syncBranchIndexChunked(repoId: string, listing: IndexedBranches): Promise<void> {
+    await this.withBranchIndexTurn(repoId, async () => {
+      if (this.isStaleBranchListing(repoId, listing)) return;
+      await this.reconcileBranchIndex(repoId, listing);
+    });
+  }
+
   /**
    * Refresh both derived branch tables for one repo from a single ref listing:
    * remote-only branches (0019) and local branches no worktree has checked out
    * (0022). Chunked writes keep the main process responsive on repos with
    * thousands of refs; the shared completion marker covers both tables.
    */
-  private async syncBranchIndexChunked(
+  private async reconcileBranchIndex(
     repoId: string,
     { sequence, branches, remoteNames }: IndexedBranches,
     signal?: AbortSignal
   ): Promise<void> {
     signal?.throwIfAborted();
-    await this.withBranchIndexTurn(repoId, async () => {
-      signal?.throwIfAborted();
-      // Git listings can return out of order. Once a newer listing has begun
-      // writing, an older one must leave its rows alone even if it arrives late
-      // or the newer listing is cancelled partway through.
-      if (sequence < (this.branchIndexSequences.get(repoId) ?? 0)) return;
-      this.branchIndexSequences.set(repoId, sequence);
-      await this.syncRemoteBranchRows(repoId, branches, remoteNames, signal);
-      signal?.throwIfAborted();
-      await this.syncLocalBranchRows(repoId, branches, signal);
-      signal?.throwIfAborted();
-      this.markRemoteBranchesIndexed(repoId);
-    });
+    // Record this listing before its first chunk so older listings stay
+    // stale if it is cancelled partway through.
+    this.branchIndexSequences.set(repoId, sequence);
+    await this.syncRemoteBranchRows(repoId, branches, remoteNames, signal);
+    signal?.throwIfAborted();
+    await this.syncLocalBranchRows(repoId, branches, signal);
+    signal?.throwIfAborted();
+    this.markRemoteBranchesIndexed(repoId);
   }
 
-  private async withBranchIndexTurn(
+  private async withBranchIndexTurn<T>(
     repoId: string,
-    reconcile: () => void | Promise<void>
-  ): Promise<void> {
+    reconcile: () => Promise<T>
+  ): Promise<T> {
     // Compare against the rows left by the previous turn, including its deletes.
     // Git listings and writes for other repositories can still overlap.
     const previous = this.branchIndexTurns.get(repoId) ?? Promise.resolve();
     const turn = previous.then(reconcile);
-    const tail = turn.catch(() => undefined);
+    const tail = turn.then(() => undefined, () => undefined);
     this.branchIndexTurns.set(repoId, tail);
     try {
-      await turn;
+      return await turn;
     } finally {
       if (this.branchIndexTurns.get(repoId) === tail) {
         this.branchIndexTurns.delete(repoId);
