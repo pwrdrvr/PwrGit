@@ -224,7 +224,10 @@ Follow the current [Homebrew Cask Cookbook](https://docs.brew.sh/Cask-Cookbook)
 and [livecheck guidance](https://docs.brew.sh/Brew-Livecheck). `:github_latest`
 is appropriate here because PwrGit packages promoted Latest release assets.
 Tap CI must style/audit online, install, verify signatures/Gatekeeper and uninstall
-on Intel and Apple Silicon. On later updates test
+on Intel and Apple Silicon. The `pwrgit` command wrapper must execute Git from
+the app's installed path so Git can locate its bundled helpers. Keep the
+wrapper and its capability check in the tap and in the generated cask so
+older Homebrew clients can still install the app. On later updates test
 `brew upgrade --cask --greedy pwrdrvr/tap/pwrgit` from the previous version on a
 disposable machine. `--greedy` exercises an `auto_updates true` cask. Close the app
 before replacement; verify retained settings and repositories afterward. Ordinary
